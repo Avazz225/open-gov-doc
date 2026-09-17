@@ -187,13 +187,18 @@ None — Storage Service continues to neither publish nor consume events.
 
 Registers itself with the registry on startup (`libs/dms-registry-client`: register, periodic heartbeat, deregister on shutdown) - the basis for the API Gateway's routing (`docs/services/gateway-service.md`). Opt-in via `DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS`; without both values, the service runs unchanged without discovery. Self-registration happens **after** the storage device swap guard — a refused start therefore does not register the service at all (no "healthy=false" registry entry, simply no entry).
 
-## Sensors (Concept 10.1)
+## Sensors (Concept 10.1, Phase 40 Session 4)
 
-None yet — follows in Phase 11.
+One custom gauge, `storage.replication.backlog` (group `reliability`) — the sum, across all configured targets, of `repository.count_pending_copies_by_backend`'s `pending`/`failed` counts (the same query `GET /guard-status` already uses). **Deliberately updated by `GET /metrics` itself on every scrape, not a periodic background loop** like every other sensor-using service's samplers — this service has ZERO in-process background tasks (ADR 0004: "explicit endpoint instead of implicit background task"), and a new `asyncio.create_task` sampler loop would have been the first one ever, cutting against that ADR's own reasoning even though read-only. Pull-on-scrape instead matches ADR 0004's philosophy exactly: `/metrics` is itself an explicit, externally-triggered call (the monitoring scraper hitting it on its own schedule), the same idiom as the external CronJob hitting `POST /replication/process-pending` on its own schedule (see "Redundancy & Fixity" above).
 
 ## Tests
 
-- `uv run pytest services/storage-service/tests` (**152 tests since Phase 40 Session 1** — +16 over
+- `uv run pytest services/storage-service/tests` (**154 tests since Phase 40 Session 4** — +2 over
+  the previous 152: `test_metrics_endpoint_exposes_replication_backlog_sensor` (presence in `/metrics`)
+  and `test_metrics_endpoint_reports_the_live_replication_backlog` (before/after delta across a real
+  upload that creates exactly one new `pending` copy row, gauge activation forced via `monkeypatch` -
+  this service's DB isn't truncated between tests, so only a delta is reliable, not an absolute
+  value). Before that, 152 tests since Phase 40 Session 1 — +16 over
   the previous 136: decommissioning (`test_api.py` — rejects decommissioning the only regular target,
   removes `object_copy` rows on decommission [the exact incident reproduction below], rejects
   decommissioning a target holding an object's only confirmed copy, reactivation reseeds pending

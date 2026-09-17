@@ -9,13 +9,19 @@ from datetime import UTC, datetime
 import httpx
 from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from dms_metrics_client import (
+    SensorConfigClient,
+    bootstrap_http_sensors,
+    metrics_payload,
+    run_gauge_sampler_loop,
+)
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ValidationError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from federation_hub_service import repository
+from federation_hub_service import metrics, repository
 from federation_hub_service.crypto_utils import sign_body
 from federation_hub_service.models import Base, Handover, Installation
 from federation_hub_service.schemas import (
@@ -90,8 +96,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
         await conn.execute(
             text(
-                "ALTER TABLE federation.handover "
-                "ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ"
+                "ALTER TABLE federation.handover ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ"
             )
         )
         # Post-Roadmap Phase 21 Session 2 (ADR 0085): certificate layer on top
@@ -104,8 +109,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
         await conn.execute(
             text(
-                "ALTER TABLE federation.installation "
-                "ADD COLUMN IF NOT EXISTS certificate_pem TEXT"
+                "ALTER TABLE federation.installation ADD COLUMN IF NOT EXISTS certificate_pem TEXT"
             )
         )
         await conn.execute(
@@ -180,12 +184,40 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
     )
 
+    # Sensor concept (10.1, Phase 40 Session 4) - this service's first
+    # sensors at all (`sensor_config_proxy`/`sensor_registry`/
+    # `forward_retry_cache_gauge`/`result_retry_cache_gauge` are module-
+    # level names, built by `bootstrap_http_sensors`/`metrics.
+    # build_sensor_registry` right after `app = FastAPI(...)`). A fresh
+    # `SensorConfigClient` per startup, bound into the module-level proxy
+    # (`SensorConfigProxy`'s docstring: its httpx client can't outlive the
+    # event loop it was first used on) - same pattern as every other
+    # sensor-using service.
+    app.state.sensor_config_client = SensorConfigClient(settings.monitoring_service_base_url)
+    await app.state.sensor_config_client.start()
+    sensor_config_proxy.bind(app.state.sensor_config_client)
+    app.state.sensor_registry = sensor_registry
+    samplers = metrics.build_samplers(
+        forward_retry_cache_gauge,
+        result_retry_cache_gauge,
+        app.state.pending_handover_payloads,
+        app.state.pending_handover_result_payloads,
+    )
+    sensor_sampler_task = asyncio.create_task(
+        run_gauge_sampler_loop(samplers, interval_seconds=settings.sensor_sample_interval_seconds)
+    )
+
     startup_end = time.time()
     millis = round((startup_end - startup_start) * 1000, 3)
     logger.info("Startup completed in %s ms.", millis, exc_info=True)
 
     yield
 
+    sensor_sampler_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await sensor_sampler_task
+    sensor_config_proxy.unbind()
+    await app.state.sensor_config_client.stop()
     retry_poll_task.cancel()
     with suppress(asyncio.CancelledError):
         await retry_poll_task
@@ -194,6 +226,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title=settings.service_name, lifespan=lifespan)
+
+# Sensor concept (10.1, Phase 40 Session 4): must run at module level,
+# right after `app` is constructed - see `bootstrap_http_sensors`'s
+# docstring for why this can't move into `lifespan` (FastAPI forbids
+# adding middleware once the app has started).
+sensor_config_proxy, sensor_registry, _http_requests_sensor, _http_duration_sensor = (
+    bootstrap_http_sensors(app, settings.service_name)
+)
+forward_retry_cache_gauge, result_retry_cache_gauge = metrics.build_sensor_registry(sensor_registry)
 
 # Admin UI access (Phase 40 Session 3, see `settings.cors_allowed_origins`
 # docstring) - this service is called directly by a browser (admin-ui),
@@ -220,6 +261,12 @@ async def get_session() -> AsyncIterator[AsyncSession]:
 @app.get("/healthz")
 def healthz() -> dict:
     return {"status": "ok", "service": settings.service_name}
+
+
+@app.get("/metrics")
+def get_metrics() -> Response:
+    body, content_type = metrics_payload(app.state.sensor_registry)
+    return Response(content=body, media_type=content_type)
 
 
 @app.get("/public-key", response_model=PublicKeyOut)

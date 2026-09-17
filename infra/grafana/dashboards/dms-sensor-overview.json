@@ -1,7 +1,7 @@
 {
   "uid": "dms-sensor-overview",
   "title": "DMS – Sensor-Übersicht (10.1)",
-  "description": "Default-Dashboard-Vorlage (Konzept 10.1: \"exportierbare Dashboard-Vorlagen ... Startpunkt, keine Pflichtnutzung\"). Deckt die aktuellen Piloten-Sensoren ab (registry-service/document-service, P11-S1) sowie den Scrape-Proxy des monitoring-service selbst. Weitere Sensoren aus künftigen Services erscheinen erst hier, sobald sie über monitoring-service gescraped werden - kein Vollretrofit in dieser Ausbaustufe.",
+  "description": "Default-Dashboard-Vorlage (Konzept 10.1: \"exportierbare Dashboard-Vorlagen ... Startpunkt, keine Pflichtnutzung\"). Deckt die urspruenglichen Piloten-Sensoren ab (registry-service/document-service, P11-S1) sowie den Scrape-Proxy des monitoring-service selbst, seit Phase 40 Session 4 zusaetzlich die gezielten Sensoren aus federation-hub-service/storage-service/plugin-orchestration-service. Weitere Sensoren aus künftigen Services erscheinen erst hier, sobald sie über monitoring-service gescraped werden - kein Vollretrofit in dieser Ausbaustufe.",
   "tags": ["dms", "monitoring", "10.1"],
   "timezone": "browser",
   "schemaVersion": 39,
@@ -129,6 +129,83 @@
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "up{job=\"monitoring-service\"}",
           "legendFormat": "up"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Handover-Retry-Cache Hinweg (federation_hub.retry_cache.forward_pending)",
+      "type": "timeseries",
+      "description": "Phase 40 Session 4 - Tiefe des flüchtigen Prozessspeicher-Caches für noch nicht zugestellte Handover-Payloads (ADR 0081), direkt gegen das in ADR 0147 benannte Speicherdruck-Risiko.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 22 },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(federation_hub_retry_cache_forward_pending)",
+          "legendFormat": "zwischengespeicherte Payloads (Hinweg)"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Handover-Retry-Cache Rückweg (federation_hub.retry_cache.result_pending)",
+      "type": "timeseries",
+      "description": "Phase 40 Session 4 - Tiefe des flüchtigen Prozessspeicher-Caches für noch nicht zugestellte Ergebnis-Payloads (Rückweg, Phase 40 Session 3).",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 22 },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(federation_hub_retry_cache_result_pending)",
+          "legendFormat": "zwischengespeicherte Payloads (Rückweg)"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Replikations-Rückstand (storage.replication.backlog)",
+      "type": "timeseries",
+      "description": "Phase 40 Session 4 - Anzahl object_copy-Zeilen mit Status 'pending'/'failed' über alle konfigurierten Ziele hinweg. Pull-on-scrape (ADR 0004), kein periodischer Sampler.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 30 },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(storage_replication_backlog)",
+          "legendFormat": "Rückstand"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "title": "Knoten-CPU-Auslastung (plugin_orchestration.node.cpu_usage_percent)",
+      "type": "timeseries",
+      "description": "Phase 40 Session 4 - Migration der bereits per psutil gesampelten Werte auf echte Sensoren, additiv zum weiterhin von placement.py gelesenen cluster_node.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 30 },
+      "fieldConfig": { "defaults": { "unit": "percent", "max": 100, "min": 0 } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "plugin_orchestration_node_cpu_usage_percent",
+          "legendFormat": "CPU-Auslastung"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "title": "Verfügbarer RAM (plugin_orchestration.node.available_ram_mb)",
+      "type": "timeseries",
+      "description": "Phase 40 Session 4 - siehe Panel 11, gleiche Stichprobe.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 38 },
+      "fieldConfig": { "defaults": { "unit": "decmbytes" } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "plugin_orchestration_node_available_ram_mb",
+          "legendFormat": "verfügbarer RAM"
         }
       ]
     }

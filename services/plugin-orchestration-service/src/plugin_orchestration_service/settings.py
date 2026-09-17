@@ -13,11 +13,14 @@ class Settings(BaseServiceSettings):
 
     orchestration_permission: str = "admin.orchestration"
 
-    # Eigene, bewusst minimale Ressourcen-Stichprobe (3.8, P10-S0-Befund: die
-    # vollwertige Sensor-Infrastruktur aus 10.1 existiert erst Phase 11).
+    # Eigene, bewusst minimale Ressourcen-Stichprobe (3.8, P10-S0-Befund).
     # Sampelt periodisch per `psutil` ausschliesslich den eigenen Host - in
     # der real existierenden Docker-Compose-Umgebung gibt es ohnehin nur
-    # diesen einen Knoten.
+    # diesen einen Knoten. Bleibt bestehen, auch nachdem Phase 40 Session 4
+    # dieselben Werte zusaetzlich ueber echte Sensoren (10.1, `metrics.py`)
+    # exponiert - `ClusterNode` (siehe unten) wird direkt von
+    # `placement.py`s Scheduling gelesen, ein reiner Sensor-Gauge kann das
+    # nicht ersetzen (kein Rueckgabewert, nur extern per `/metrics` lesbar).
     resource_sample_interval_seconds: float = 30.0
 
     # Ab wann gilt ein `PluginResourceReport` als veraltet und zaehlt weder

@@ -48,3 +48,14 @@ class Settings(BaseServiceSettings):
     # server-to-server so far). Same convention/defaults as
     # `gateway_service.settings.Settings.cors_allowed_origins`.
     cors_allowed_origins: list[str] = ["http://localhost:3000", "http://localhost:3001"]
+
+    # Sensor concept (Phase 40 Session 4, 10.1) - the first custom sensors
+    # this service has ever had (it had none at all before this session,
+    # not even the generic HTTP ones - `dms-metrics-client` was not a
+    # dependency yet). No `sensors=...` passed to `maybe_start_registration`
+    # since this service isn't registered with `registry-service` at all
+    # (see this class's own docstring) - the sensor specs therefore aren't
+    # discoverable via the registry's catalog, only via a direct `/metrics`
+    # scrape, same limitation any non-registered target would have.
+    monitoring_service_base_url: str = "http://localhost:8026"
+    sensor_sample_interval_seconds: float = 15.0

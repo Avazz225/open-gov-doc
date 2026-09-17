@@ -54,9 +54,12 @@ class PluginResourceReport(Base):
 
 
 class ClusterNode(Base):
-    """Ressourcen-Stichprobe eines Knotens (3.8: "eigener Mechanismus", da
-    die vollwertige Sensor-Infrastruktur aus 10.1 erst Phase 11 existiert,
-    siehe P10-S0-Befund). Der eigene Host (`node_id = NODE_ID_SELF`) wird
+    """Ressourcen-Stichprobe eines Knotens (3.8: "eigener Mechanismus",
+    siehe P10-S0-Befund - dieser eigene Mechanismus bleibt auch seit
+    Phase 40 Session 4 bestehen, siehe `sampler.py`s Docstring: `placement.py`s
+    Scheduling braucht eine direkt lesbare DB-Zeile, kein Sensor-Gauge
+    kann das ersetzen, die neuen Sensoren aus 10.1 sind additiv). Der
+    eigene Host (`node_id = NODE_ID_SELF`) wird
     periodisch per `psutil` aktualisiert (siehe `sampler.py`); weitere Knoten
     koennen sich seit P10-S2 ueber `POST /nodes/{node_id}` selbst melden
     (kein echter zweiter Host in der real existierenden Docker-Compose-

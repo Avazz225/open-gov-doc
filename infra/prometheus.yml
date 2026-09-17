@@ -18,6 +18,17 @@ scrape_configs:
     static_configs:
       - targets: ["monitoring-service:8000"]
 
+  # Federation Hub (Phase 40 Session 4) - deliberately NOT registered with
+  # registry-service (see docs/services/federation-hub-service.md), so
+  # monitoring-service's registry-driven scrape-proxy can never discover
+  # it - its two new sensors (retry-cache depth, ADR 0081/0147) would
+  # otherwise never reach Prometheus/Grafana at all. A second, separate
+  # static target, same idiom as `cadvisor` below (also not registry-
+  # discovered).
+  - job_name: federation-hub-service
+    static_configs:
+      - targets: ["federation-hub-service:8000"]
+
   - job_name: cadvisor
     static_configs:
       - targets: ["cadvisor:8080"]

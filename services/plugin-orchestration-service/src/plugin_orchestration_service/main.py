@@ -8,18 +8,13 @@ from datetime import UTC, datetime
 from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
-from dms_metrics_client import (
-    SensorConfigClient,
-    bootstrap_http_sensors,
-    http_sensor_declarations,
-    metrics_payload,
-)
+from dms_metrics_client import SensorConfigClient, bootstrap_http_sensors, metrics_payload
 from dms_registry_client import maybe_start_registration
 from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from plugin_orchestration_service import placement, sampler
+from plugin_orchestration_service import metrics, placement, sampler
 from plugin_orchestration_service.clients import (
     AuthServiceClient,
     PermissionServiceClient,
@@ -143,14 +138,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await event_bus.connect()
     app.state.event_bus = event_bus
 
-    sampler_task = asyncio.create_task(sampler.sampler_loop(app.state.session_factory, settings))
+    sampler_task = asyncio.create_task(
+        sampler.sampler_loop(
+            app.state.session_factory,
+            settings,
+            cpu_usage_gauge=cpu_usage_gauge,
+            available_ram_gauge=available_ram_gauge,
+        )
+    )
 
     registration = await maybe_start_registration(
         registry_service_base_url=settings.registry_service_base_url,
         self_address=settings.self_address,
         service_type=settings.service_name,
         version="0.1.0",
-        sensors=http_sensor_declarations(),
+        sensors=metrics.sensor_declarations(),
     )
 
     startup_end = time.time()
@@ -182,6 +184,7 @@ app = FastAPI(title=settings.service_name, lifespan=lifespan)
 sensor_config_proxy, sensor_registry, _http_requests_sensor, _http_duration_sensor = (
     bootstrap_http_sensors(app, settings.service_name)
 )
+cpu_usage_gauge, available_ram_gauge = metrics.build_sensor_registry(sensor_registry)
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:

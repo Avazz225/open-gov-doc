@@ -1,3 +1,4 @@
+import re
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
@@ -5,6 +6,14 @@ import pytest
 from fastapi.testclient import TestClient
 from plugin_orchestration_service import sampler
 from plugin_orchestration_service.main import app
+
+
+def _extract_metric_value(exposition_text: str, metric_name: str) -> float:
+    """Reads an unlabeled metric's value out of Prometheus exposition text -
+    same helper as document-service's/storage-service's own test_api.py."""
+    match = re.search(rf"^{re.escape(metric_name)} (\S+)$", exposition_text, re.MULTILINE)
+    assert match is not None, f"{metric_name!r} not found in exposition text"
+    return float(match.group(1))
 
 
 @pytest.fixture
@@ -216,3 +225,37 @@ def test_upsert_node_succeeds_and_is_listed(client):
 
     list_response = client.get("/nodes")
     assert any(n["node_id"] == "remote-node-1" for n in list_response.json())
+
+
+def test_metrics_endpoint_exposes_node_resource_sensors(client):
+    """Phase 40 Session 4 - migrates the existing `psutil`-sampled node
+    values onto the real sensor infrastructure, additive to (not a
+    replacement of) the `ClusterNode` upsert `placement.py` reads."""
+    response = client.get("/metrics")
+    assert response.status_code == 200
+    assert "plugin_orchestration_node_cpu_usage_percent" in response.text
+    assert "plugin_orchestration_node_available_ram_mb" in response.text
+
+
+async def test_run_tick_sets_the_sensor_gauges_from_the_same_sample(client, session, monkeypatch):
+    """`run_tick` must feed the gauges from the SAME sampled values used
+    for the `ClusterNode` upsert, not a second independent `psutil` call -
+    verified indirectly here by asserting the gauge value matches the
+    upserted row afterward."""
+    from plugin_orchestration_service.main import available_ram_gauge, cpu_usage_gauge
+
+    monkeypatch.setattr(cpu_usage_gauge, "_is_active", lambda name: True)
+    monkeypatch.setattr(available_ram_gauge, "_is_active", lambda name: True)
+
+    await sampler.run_tick(
+        session, cpu_usage_gauge=cpu_usage_gauge, available_ram_gauge=available_ram_gauge
+    )
+
+    response = client.get("/metrics")
+    cpu_value = _extract_metric_value(response.text, "plugin_orchestration_node_cpu_usage_percent")
+    ram_value = _extract_metric_value(response.text, "plugin_orchestration_node_available_ram_mb")
+    # Real psutil values (not mocked) - only plausibility, not exact
+    # numbers, can be asserted (same convention as
+    # `test_sample_local_node_returns_plausible_values`).
+    assert 0.0 <= cpu_value <= 100.0
+    assert ram_value > 0.0

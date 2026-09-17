@@ -912,6 +912,14 @@ def test_get_handover_unknown_returns_404(client):
     assert client.get("/handovers/does-not-exist").status_code == 404
 
 
+def test_metrics_endpoint_exposes_retry_cache_sensors(client):
+    """Phase 40 Session 4 - this service's first sensors at all."""
+    response = client.get("/metrics")
+    assert response.status_code == 200
+    assert "federation_hub_retry_cache_forward_pending" in response.text
+    assert "federation_hub_retry_cache_result_pending" in response.text
+
+
 def test_sign_body_signature_is_verifiable_helper_smoke():
     """Reiner Sanity-Check der Krypto-Hilfsfunktion selbst, unabhängig vom
     HTTP-Rundlauf oben."""

@@ -1,4 +1,5 @@
 import hashlib
+import re
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -13,6 +14,15 @@ from storage_service.settings import BackendTargetConfig
 # `_grant_storage_permission`-Fixture berechtigt) - kein Cross-File-Import
 # von Test-Konstanten, gleiche Projektkonvention wie andernorts.
 STORAGE_ADMIN_PRINCIPAL_ID = "storage-service-tests"
+
+
+def _extract_metric_value(exposition_text: str, metric_name: str) -> float:
+    """Reads an unlabeled metric's value out of Prometheus exposition text -
+    `metric_name value` on its own line, no `{...}` label suffix. Same
+    helper as document-service's own test_api.py."""
+    match = re.search(rf"^{re.escape(metric_name)} (\S+)$", exposition_text, re.MULTILINE)
+    assert match is not None, f"{metric_name!r} not found in exposition text"
+    return float(match.group(1))
 
 
 @pytest.fixture
@@ -750,3 +760,42 @@ def test_live_copies_dehydration_preserves_archive_copy(archive_client):
 def test_live_copies_dehydration_returns_404_for_unknown_key(archive_client):
     response = archive_client.delete(f"/objects/{_key()}/live-copies")
     assert response.status_code == 404
+
+
+def test_metrics_endpoint_exposes_replication_backlog_sensor(client):
+    """Phase 40 Session 4 - this service's first custom sensor."""
+    response = client.get("/metrics")
+    assert response.status_code == 200
+    assert "storage_replication_backlog" in response.text
+
+
+def test_metrics_endpoint_reports_the_live_replication_backlog(
+    client, second_target_client, monkeypatch
+):
+    """Pull-on-scrape, not a periodic background loop (see `metrics.py`'s
+    module docstring for why) - a before/after delta across a real
+    upload that creates exactly one new `pending` copy row (`second`,
+    `primary_async` default), same before/after idiom document-service's
+    own deactivated-sensor test uses (this service's DB isn't truncated
+    between tests, so only a delta is reliable, not an absolute value)."""
+    from storage_service.main import replication_backlog_gauge
+
+    monkeypatch.setattr(replication_backlog_gauge, "_is_active", lambda name: True)
+
+    before = _extract_metric_value(
+        second_target_client.get("/metrics").text, "storage_replication_backlog"
+    )
+
+    key = _key()
+    upload = second_target_client.put(f"/objects/{key}", content=b"payload")
+    assert upload.status_code == 201
+    copies = {
+        c["backend_id"]: c["status"]
+        for c in second_target_client.get(f"/objects/{key}/copies").json()
+    }
+    assert copies == {"local": "ok", "second": "pending"}
+
+    after = _extract_metric_value(
+        second_target_client.get("/metrics").text, "storage_replication_backlog"
+    )
+    assert after == before + 1.0

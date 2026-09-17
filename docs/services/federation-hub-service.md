@@ -76,13 +76,42 @@ Both fixes are pure sequencing/protocol changes with no effect on the actual med
 
 Two callers: `workflow-service` (`federation_client.py`) — registers itself on its own startup (opt-in via `DMS_FEDERATION_HUB_BASE_URL`), uses it to trigger federated BPMN steps (`taskType=federated`/`federated_return`) (see `docs/services/workflow-service.md` "Federation" for the other side of the protocol); since **P15-S4** additionally `auth-service` (its own, independent second registration for the optional federated contact search, 2.5 — see `docs/services/auth-service.md` "Contacts" and [ADR 0054](../adr/0054-kontakte-directory-independent-second-federation-identity-per-installation.md)). Confirmed live: `Installation` is indeed a generic address book entry that can be registered independently by any service — two rows for the same physical installation (distinguished only by the display-name suffix `" (Contacts)"`) work without any code change to this service. `auth-service` also does NOT use `POST /handovers` — the federated contact search calls peer installations directly (no hub relay); the hub there serves solely for address/key discovery via the already ungated, readable `GET /installations`.
 
-## Sensors (Concept 10.1)
+## Sensors (Concept 10.1, Phase 40 Session 4)
 
-None yet — monitoring/sensor concept follows in Phase 11 (like every other service).
+This service's first sensors at all — it had none before this session, not even the generic HTTP
+ones (`dms-metrics-client` was not even a dependency yet). Two custom gauges (group `capacity`),
+directly against ADR 0147's memory-pressure risk for the two in-process retry payload caches
+(ADR 0081/Phase 40 Session 3):
+
+- `federation_hub.retry_cache.forward_pending` — live `len(app.state.pending_handover_payloads)`.
+- `federation_hub.retry_cache.result_pending` — live `len(app.state.pending_handover_result_payloads)`.
+
+Both are periodic-push gauges (`run_gauge_sampler_loop`, `settings.sensor_sample_interval_seconds`,
+default 15s), same idiom as document-service/registry-service — unlike storage-service's pull-on-
+scrape gauge, there is no ADR-0004-style tension here (this service already runs one background
+poll loop, `_handover_retry_poll_loop`, so a second `asyncio.create_task` for the sampler is not a
+qualitative change). Deliberately does NOT also expose the DB's `pending_retry`/`result_pending_
+retry` row counts as a separate pair of sensors — those can diverge from the cache size after a
+restart (documented limitation, see "Retry & Backoff" above), but four sensors for two caches would
+exceed this session's own "two concrete sensors, not a blanket retrofit" scope; the cache size is
+what actually drives the memory-pressure risk this session is about.
+
+**Scrape-path wrinkle**: since this service isn't registered with `registry-service` at all (see
+the intro above), `monitoring-service`'s registry-driven scrape-proxy can never discover it, and its
+sensors would therefore never reach Prometheus/Grafana via the usual path even with the sensors
+themselves correctly declared. `infra/prometheus.yml` therefore scrapes this service directly as a
+second, separate static target (`job_name: federation-hub-service`), the same idiom already used for
+`cadvisor` (also not registry-discovered) — bypassing `monitoring-service`'s aggregation entirely
+for this one service.
 
 ## Tests
 
-`uv run pytest services/federation-hub-service/tests` (**65 tests since Phase 40 Session 3**, +10
+`uv run pytest services/federation-hub-service/tests` (**69 tests since Phase 40 Session 4**, +4
+over the previous 65: new `test_metrics.py` (sensor declarations include both retry-cache gauges
+plus the generic HTTP ones; `build_samplers`'s compute functions report the live cache sizes
+correctly and reflect a later change to the dict on the next read - unit-tested directly against a
+fresh `SensorRegistry`, not through the app's shared one) plus one `test_api.py` presence check on
+`/metrics`. Before that, 65 tests since Phase 40 Session 3, +10
 over the previous 55: return-path retry (`test_api.py` — `result_pending_retry` on an unreachable
 origin, `result_delivery_failed` after exhausting attempts, `POST .../retry` reattempts a
 `result_delivery_failed` handover, `409` without a cached result payload, `409` for any status other
@@ -104,6 +133,6 @@ the hub CA is self-signed and stable across repeated calls, registration issues 
 - ~~No mTLS/no real installation identity~~ — **partially resolved in Post-Roadmap Phase 21 Session 2** ([ADR 0085](../adr/0085-federation-hub-certificate-layer-not-transport-mtls.md)): a real X.509 certificate layer (own small hub CA, issued installation certificates) was added, see "Certificate Layer" above. **Deliberately still no real transport mTLS** — ADR 0039's reasoning (no service in this project terminates TLS itself) still applies unchanged; real transport TLS/mTLS remains an operator deployment decision (Concept 10.3).
 - ~~**Synchronous delivery without retry/queue**~~ — **resolved in Post-Roadmap Phase 20 Session 5** ([ADR 0081](../adr/0081-federation-hub-handover-retry-backoff-pending-retry.md)) **for the forward-delivery leg, and in Phase 40 Session 3 for the separate return-path leg** (`POST /handovers/{id}/result`'s hub→origin-installation delivery, previously fully synchronous with no retry at all — see "Retry & Backoff" above): both legs now get automatic retry with full-jitter backoff up to `max_handover_delivery_attempts`, after which `delivery_failed`/`result_delivery_failed` + manual restart via the same `POST .../retry`. **Remaining, deliberately documented limitation on BOTH legs**: the payload needed to replay delivery lives only in the hub's process memory (never in the DB, see "Retry & Backoff" above) — a restart of the hub during an open retry window irretrievably loses it, and the affected handover then goes directly to the terminal failure status for that leg. ~~Still open: admin UI visibility/control for this (P20-S7).~~ — **closed in Phase 40 Session 3**, see "Admin UI Visibility" above.
 - **No cleanup of old `handover` metadata rows** — grows unbounded, similar pattern to `registry-service`'s never-cleaned-up inactive instances.
-- **No sensor/monitoring connection** (follows in Phase 11) — see `IMPLEMENTATION_PLAN.md` P40-S4 for two concrete sensors planned for this service specifically (retry-cache depth/pending count, directly relevant to the memory-pressure bullet below, now covering TWO caches instead of one).
+- ~~**No sensor/monitoring connection** (follows in Phase 11)~~ — **closed in Phase 40 Session 4**, see "Sensors" above (retry-cache depth/pending count for both caches, directly relevant to the memory-pressure bullet below).
 - **Binary payload transport (e.g. a full XDOMEA/XJustiz package instead of small BPMN task data) is untested at scale** — scoped in Post-Roadmap Phase 37 Session 1 ([ADR 0147](../adr/0147-cross-installation-xdomea-handoff-scoping.md)): `encrypted_payload` already accepts an arbitrary-size opaque string with no schema change needed, but the in-memory `pending_handover_payloads` retry cache (see "Retry & Backoff" above) was designed around small payloads — several large, concurrently in-flight/retrying handovers is a real, currently unresolved memory-pressure question for a future build session, not something this scoping session could evaluate without a concrete payload-size target. **Phase 40 Session 3 note**: the return-path retry built this session added a SECOND such cache (`pending_handover_result_payloads`, for `encrypted_result`) - the same unresolved question now applies to both together, not just one.
 - **`GET /handovers`/`POST .../retry` remain ungated** (Phase 40 Session 3) — consistent with this service's existing convention (`GET /installations` is likewise deliberately ungated, 7.4: address-book metadata, not content), but worth naming explicitly now that a mutating action (`retry`) is admin-UI-reachable: anyone who can reach this service's network address can trigger a retry or list handover metadata. Not addressed here — this service has no admin-token model at all yet (see "Admin UI Visibility" above), and adding one was out of scope for this session's plan item.

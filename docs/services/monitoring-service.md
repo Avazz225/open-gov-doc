@@ -40,12 +40,30 @@ Consumed by `audit-service` (`monitoring.>`).
 
 ## Pilot sensors (no full retrofit, P11-S0 finding)
 
-Only `registry-service` and `document-service` currently declare sensors:
+Beyond the original two pilots (`registry-service`/`document-service`), three more services gained
+targeted, high-value custom sensors in Phase 40 Session 4 — still deliberately NOT a blanket
+retrofit across all ~25 services, just the concrete cases that came up:
 
 - `registry.instances.active_total` (gauge, `capacity`, `cheap`)
 - `registry.service.heartbeat.miss` (gauge, `reliability`, `cheap` — Concept 10.1 example name)
 - `document.upload.duration` (histogram, `performance`, `expensive` — Concept 10.1 example name)
 - `document.count.active_total` (gauge, `capacity`, `cheap`)
+- `federation_hub.retry_cache.forward_pending`/`.result_pending` (gauges, `capacity`, `cheap`,
+  Phase 40 Session 3/4) — live depth of the two in-process handover-retry payload caches, directly
+  against ADR 0147's memory-pressure risk. This service is not registered with `registry-service`
+  (see `docs/services/federation-hub-service.md`), so `monitoring-service`'s own registry-driven
+  scrape-proxy can never discover it — `infra/prometheus.yml` therefore scrapes it directly as a
+  second, separate static target instead (same idiom as `cadvisor`), bypassing this service's
+  aggregation entirely for these two sensors.
+- `storage.replication.backlog` (gauge, `reliability`, `cheap`, Phase 40 Session 4) — sum of
+  `object_copy` rows in `pending`/`failed` across all configured targets. **Updated pull-on-scrape**
+  (computed fresh inside `GET /metrics` itself), not via the periodic-push idiom every other sensor
+  here uses — `storage-service` deliberately has no in-process background loops at all (ADR 0004),
+  see `docs/services/storage-service.md` "Sensors" for the full rationale.
+- `plugin_orchestration.node.cpu_usage_percent`/`.available_ram_mb` (gauges, `capacity`, `cheap`,
+  Phase 40 Session 4) — migrates that service's existing `psutil`-sampled node data onto this
+  infrastructure, additive to (not a replacement of) the `cluster_node` DB row `placement.py`'s
+  scheduling algorithm still reads directly (a `GuardedGauge` has no getter).
 
 Further services get their sensors only once actually needed, in later sessions (`libs/dms-metrics-client` is already in place for this, see `docs/operations/monitoring.md`).
 

@@ -2,7 +2,82 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P40-S3 (`federation-hub-service` reliability — third session of Phase 40,
+**Last completed:** P40-S4 (targeted sensor retrofit — fourth and final session of Phase 40,
+"Operational Reliability"). Research ahead of implementation surfaced one genuine architectural
+decision (storage-service, presented to the user) and two premises that needed correcting before
+writing anything:
+
+- **federation-hub-service** turned out to have NO sensors at all, not even the generic HTTP ones
+  (`dms-metrics-client` wasn't even a dependency) — this session built the full pilot wiring from
+  scratch (pyproject dependency, settings, module-level `bootstrap_http_sensors`, `/metrics` route,
+  lifespan client bind/unbind + sampler task), not just an incremental custom-gauge addition.
+- **storage-service**: reusing the existing `count_pending_copies_by_backend` query was
+  straightforward, but updating the gauge raised a real tension — every other sensor-using service
+  updates gauges via a periodic `asyncio` background loop, but storage-service deliberately has ZERO
+  in-process background tasks (ADR 0004, "explicit endpoint instead of implicit background task"),
+  and a new loop would have been the first one ever, cutting against that ADR's own reasoning even
+  though read-only. **Presented to the user as a two-way choice, the user chose "query fresh on every
+  `/metrics` scrape"** — no new loop at all, matching ADR 0004's own philosophy (an explicit,
+  externally-triggered call) rather than the periodic-push convention every other service uses.
+- **plugin-orchestration-service**: the plan's literal "migrate off `psutil` onto sensor
+  infrastructure" framing turned out unachievable as worded — `placement.py`'s scheduling algorithm
+  reads `ClusterNode` (the `psutil`-sampled table) directly as a queryable DB row, and a
+  `GuardedGauge` has no getter (write-only from the service's own perspective), so it could never
+  replace that role. Built additively instead: two new gauges fed from the SAME sampled values
+  `sampler.run_tick` already computes for the `ClusterNode` upsert (no second, independent `psutil`
+  call), corrected the now-outdated "transitional until Phase 11" comments in `settings.py`/
+  `sampler.py`/`models.py` accordingly.
+
+1. **`federation_hub.retry_cache.forward_pending`/`.result_pending`** (gauges) — live depth of the
+   two in-process handover-retry payload caches (ADR 0081/Phase 40 Session 3), directly against
+   ADR 0147's memory-pressure risk. Periodic-push (`run_gauge_sampler_loop`, 15s default) — no
+   ADR-0004-style tension here, this service already runs one background poll loop
+   (`_handover_retry_poll_loop`). **Scrape-path wrinkle found and fixed**: since this service isn't
+   registered with `registry-service` at all, `monitoring-service`'s registry-driven scrape-proxy can
+   never discover it — its sensors would never have reached Prometheus/Grafana even correctly
+   declared. Added a second, separate static Prometheus scrape target
+   (`infra/prometheus.yml`, `job_name: federation-hub-service`), same idiom as the existing `cadvisor`
+   target (also not registry-discovered) — live-verified via Prometheus's own `/api/v1/targets`
+   (`health: up`) and a direct PromQL query.
+2. **`storage.replication.backlog`** (gauge) — sum of `object_copy` rows in `pending`/`failed` across
+   all configured targets, computed fresh inside `GET /metrics` itself per the user's decision above.
+3. **`plugin_orchestration.node.cpu_usage_percent`/`.available_ram_mb`** (gauges) — additive migration
+   of the existing `psutil` snapshot onto real sensors, as described above.
+
+No new ADR (per this phase's own Definition of Done — pure completion/hardening); the storage-service
+decision and the two premise corrections are recorded in `docs/services/storage-service.md`/
+`docs/services/plugin-orchestration-service.md`/`docs/services/federation-hub-service.md` instead.
+`docs/services/monitoring-service.md`'s "Pilot sensors" section and the Grafana dashboard
+(`infra/grafana/dashboards/dms-sensor-overview.json`, +5 panels) were both extended to cover all
+three services, going beyond the bare minimum since the whole point of these sensors is operator
+visibility - leaving them undashboarded would have been an incomplete deliverable.
+
+**Tests**: federation-hub-service 69 passed (+4: new `test_metrics.py` unit-testing `build_samplers`'
+compute functions directly against a fresh `SensorRegistry`, plus one `/metrics` presence check).
+storage-service 154 passed (+2: `/metrics` presence check, a before/after delta test across a real
+upload proving the pull-on-scrape gauge tracks the live backlog correctly). plugin-orchestration-
+service 45 passed (+2: `/metrics` presence check, a tick-then-scrape test with gauges forced active
+via `monkeypatch` asserting plausible real `psutil` values). `ruff check`/`ruff format` clean
+throughout (the one already-known, unrelated pre-existing nit in federation-hub-service's own
+`test_repository.py` left untouched). **Live-verified** against the fully rebuilt, restarted real
+stack, all three services simultaneously: each `/metrics` endpoint correctly exposes its new
+sensor(s) with real, plausible values (cross-checked storage-service's `0.0` backlog directly against
+a real `GET /guard-status` showing `pending_copies: 0` on both real targets); Prometheus restarted to
+pick up the new scrape config and confirmed `federation-hub-service`'s target `health: up` via its own
+`/api/v1/targets` API; direct PromQL queries against the real running Prometheus confirmed all three
+new metric families are genuinely queryable (`federation_hub_retry_cache_forward_pending` via the new
+direct scrape target, `storage_replication_backlog`/`plugin_orchestration_node_cpu_usage_percent` via
+monitoring-service's registry-driven aggregation, confirming both scrape paths work correctly for
+their respective services); Grafana restarted and its declaratively-provisioned dashboard confirmed
+to carry all 12 panels (7 original + 5 new) via its own API.
+
+**This was Phase 40's last planned session** — `graphify update .` now runs, per the standing "only at
+phase-end" rule.
+
+**Next session:** not yet planned — Phase 40 (Operational Reliability) is complete. See
+`IMPLEMENTATION_PLAN.md` for the phase index and whatever comes next.
+
+Immediately before P40-S4: **P40-S3** (`federation-hub-service` reliability — third session of Phase 40,
 "Operational Reliability"). Research ahead of implementation found item 1's own premise stale:
 API-key rotation/revocation was already fully built in ADR 0039 (`POST /installations/{id}/rotate-
 key`/`.../revoke`) — the plan's wording restated a literal "Open Points" line in the service's own
@@ -61,10 +136,10 @@ the mocked-transport test suite already covers that path precisely, and the live
 the parts that couldn't otherwise be verified: real CORS, real collection-endpoint data at scale, and
 the real browser round trip.)
 
-**Next session:** **P40-S4** (targeted sensor retrofit — `federation-hub-service`'s retry-cache depth/
-pending count, now doubly relevant with two caches instead of one; `storage-service`'s replication
-backlog; migrating `plugin-orchestration-service` off its `psutil` snapshot). See
-`IMPLEMENTATION_PLAN.md` "Phase 40" for the full session breakdown.
+At the time this was written, next was **P40-S4** (targeted sensor retrofit — `federation-hub-
+service`'s retry-cache depth/pending count, now doubly relevant with two caches instead of one;
+`storage-service`'s replication backlog; migrating `plugin-orchestration-service` off its `psutil`
+snapshot) — **done now, see "Last completed" at the top of this file** (Phase 40 is complete).
 
 Immediately before P40-S3: **P40-S2** (unbounded concurrency fan-out to `document-service` — second session of
 Phase 40, "Operational Reliability"). **Closed as a no-op, confirmed moot, exactly as the plan's own note

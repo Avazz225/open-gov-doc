@@ -11,12 +11,14 @@ dependencies = [
     "dms-common",
     "dms-db-base",
     "dms-retry",
+    "dms-metrics-client",
 ]
 
 [tool.uv.sources]
 dms-common = { workspace = true }
 dms-db-base = { workspace = true }
 dms-retry = { workspace = true }
+dms-metrics-client = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

@@ -7,19 +7,14 @@ from datetime import datetime
 
 from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
-from dms_metrics_client import (
-    SensorConfigClient,
-    bootstrap_http_sensors,
-    http_sensor_declarations,
-    metrics_payload,
-)
+from dms_metrics_client import SensorConfigClient, bootstrap_http_sensors, metrics_payload
 from dms_permission_client import PermissionServiceClient
 from dms_registry_client import maybe_start_registration
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from storage_service import identity_guard, replication, repository, retention_guard
+from storage_service import identity_guard, metrics, replication, repository, retention_guard
 from storage_service.backends import (
     AzureBlobBackend,
     ObjectNotFoundError,
@@ -230,7 +225,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         self_address=settings.self_address,
         service_type=settings.service_name,
         version="0.1.0",
-        sensors=http_sensor_declarations(),
+        sensors=metrics.sensor_declarations(),
     )
 
     startup_end = time.time()
@@ -256,6 +251,7 @@ app = FastAPI(title=settings.service_name, lifespan=lifespan)
 sensor_config_proxy, sensor_registry, _http_requests_sensor, _http_duration_sensor = (
     bootstrap_http_sensors(app, settings.service_name)
 )
+replication_backlog_gauge = metrics.build_sensor_registry(sensor_registry)
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:
@@ -290,7 +286,16 @@ def healthz() -> dict:
 
 
 @app.get("/metrics")
-def get_metrics() -> Response:
+async def get_metrics(session: AsyncSession = Depends(get_session)) -> Response:
+    """Pull-on-scrape, not the periodic-push idiom every other sensor-
+    using service uses (see `metrics.py`'s module docstring for why) -
+    queries the replication backlog fresh on every call, right before
+    serializing. Excluded from the generic HTTP request/duration sensors
+    already (`dms_metrics_client`'s own `_EXCLUDED_PATHS`), so this
+    doesn't inflate those counters."""
+    if replication_backlog_gauge.is_active():
+        pending_counts = await repository.count_pending_copies_by_backend(session)
+        replication_backlog_gauge.set(float(sum(pending_counts.values())))
     body, content_type = metrics_payload(app.state.sensor_registry)
     return Response(content=body, media_type=content_type)
 
