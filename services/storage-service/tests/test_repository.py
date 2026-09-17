@@ -320,3 +320,92 @@ async def test_upsert_target_override_creates_and_updates(session):
 
     overrides = await repository.list_target_overrides(session)
     assert [o.target_id for o in overrides] == ["test-target"]
+
+
+async def test_upsert_target_override_decommissioned_defaults_to_false(session):
+    """Decommissioning (Phase 40 Session 1) - `decommissioned` defaults to
+    `False` for callers that don't pass it (existing behavior, no schema
+    break), and round-trips explicitly when set."""
+    created = await repository.upsert_target_override(
+        session, "test-target", object_lock_mode=None, role=None
+    )
+    assert created.decommissioned is False
+
+    updated = await repository.upsert_target_override(
+        session, "test-target", object_lock_mode=None, role=None, decommissioned=True
+    )
+    assert updated.decommissioned is True
+
+
+async def test_count_sole_ok_copies_for_backend_finds_only_exclusive_copies(session):
+    """Decommissioning safety net (Phase 40 Session 1): an object with an
+    `ok` copy on BOTH targets does not count (redundant elsewhere), one
+    with its only `ok` copy on the target in question does, a `pending`/
+    `failed` copy elsewhere never counts as a live redundant copy."""
+    key_redundant = _key()
+    key_exclusive = _key()
+    key_pending_elsewhere = _key()
+    for key in (key_redundant, key_exclusive, key_pending_elsewhere):
+        await _make_metadata(session, key)
+    await repository.record_copy(session, key_redundant, "target-a", status="ok", checksum="x")
+    await repository.record_copy(session, key_redundant, "target-b", status="ok", checksum="x")
+    await repository.record_copy(session, key_exclusive, "target-a", status="ok", checksum="x")
+    await repository.record_copy(
+        session, key_pending_elsewhere, "target-a", status="ok", checksum="x"
+    )
+    await repository.record_copy(session, key_pending_elsewhere, "target-b", status="pending")
+
+    assert await repository.count_sole_ok_copies_for_backend(session, "target-a") == 2
+    assert await repository.count_sole_ok_copies_for_backend(session, "target-b") == 0
+
+
+async def test_remove_copies_for_backend_deletes_only_that_backends_rows(session):
+    key = _key()
+    await _make_metadata(session, key)
+    await repository.record_copy(session, key, "target-a", status="ok", checksum="x")
+    await repository.record_copy(session, key, "target-b", status="pending")
+
+    removed = await repository.remove_copies_for_backend(session, "target-a")
+
+    assert removed == 1
+    assert await repository.get_copy(session, key, "target-a") is None
+    assert (await repository.get_copy(session, key, "target-b")).status == "pending"
+
+
+async def test_remove_copies_for_backend_returns_zero_when_none_exist(session):
+    assert await repository.remove_copies_for_backend(session, "nonexistent-target") == 0
+
+
+async def test_list_unverified_objects_orders_never_verified_first(session):
+    """Bulk fixity queue (3.6, Phase 40 Session 1) - `next_verify_at IS
+    NULL` (never verified) counts as most overdue, same NULL convention
+    as `ObjectCopy.next_retry_at`; otherwise oldest `next_verify_at`
+    first."""
+    key_never = _key()
+    key_recently = _key()
+    key_long_ago = _key()
+    await _make_metadata(session, key_never)
+    await _make_metadata(session, key_recently)
+    await _make_metadata(session, key_long_ago)
+    now = datetime.now(UTC)
+    await repository.set_next_verify_at(session, key_recently, now + timedelta(hours=1))
+    await repository.set_next_verify_at(session, key_long_ago, now - timedelta(hours=1))
+
+    ordered = await repository.list_unverified_objects(session, limit=100)
+    ordered_keys = [
+        m.object_key for m in ordered if m.object_key in (key_never, key_recently, key_long_ago)
+    ]
+
+    assert ordered_keys == [key_never, key_long_ago, key_recently]
+
+
+async def test_list_unverified_objects_respects_limit(session):
+    for _ in range(3):
+        await _make_metadata(session, _key())
+    assert len(await repository.list_unverified_objects(session, limit=2)) == 2
+
+
+async def test_set_next_verify_at_is_a_noop_for_unknown_key(session):
+    """Must not raise if the object was deleted between selection and
+    rescheduling (a realistic race for a long-running bulk sweep)."""
+    await repository.set_next_verify_at(session, "does-not-exist", datetime.now(UTC))

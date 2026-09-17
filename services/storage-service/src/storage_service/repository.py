@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from storage_service.models import (
@@ -204,6 +204,69 @@ async def seed_pending_copies_for_new_target(session: AsyncSession, backend_id: 
     return count
 
 
+async def count_sole_ok_copies_for_backend(session: AsyncSession, backend_id: str) -> int:
+    """Decommissioning safety net (Phase 40 Session 1): counts objects
+    whose ONLY `ok` copy is on `backend_id`. Unlike a plain orphaned-row
+    cleanup, removing these copy rows would make the underlying data
+    permanently unreachable, not merely tidy up a stale reference -
+    `put_target_config` refuses to decommission a target with a nonzero
+    count here until the affected objects have been replicated
+    elsewhere."""
+    sole_ok_object_keys = (
+        select(ObjectCopy.object_key)
+        .where(ObjectCopy.status == "ok")
+        .group_by(ObjectCopy.object_key)
+        .having(func.count() == 1)
+    )
+    result = await session.execute(
+        select(func.count())
+        .select_from(ObjectCopy)
+        .where(
+            ObjectCopy.backend_id == backend_id,
+            ObjectCopy.status == "ok",
+            ObjectCopy.object_key.in_(sole_ok_object_keys),
+        )
+    )
+    return result.scalar_one()
+
+
+async def remove_copies_for_backend(session: AsyncSession, backend_id: str) -> int:
+    """Decommissioning cleanup (Phase 40 Session 1): deletes every
+    `object_copy` row for a target being removed from the live target
+    set. This is the exact gap that produced 30,410 permanently orphaned
+    rows in a real incident (docs/services/storage-service.md): adding a
+    target seeds `pending` rows for it (`seed_pending_copies_for_new_target`
+    below), but nothing ever cleaned them up again once the target was
+    later removed. Callers must have already confirmed via
+    `count_sole_ok_copies_for_backend` that no object's only live copy
+    lives on this backend. Returns the number of deleted rows (for
+    logging)."""
+    result = await session.execute(delete(ObjectCopy).where(ObjectCopy.backend_id == backend_id))
+    await session.flush()
+    return result.rowcount or 0
+
+
+async def list_unverified_objects(session: AsyncSession, *, limit: int) -> list[ObjectMetadata]:
+    """Bulk fixity queue (3.6 "regular fixity check", Phase 40 Session 1 -
+    the shape ADR 0101's Consequences section already recommended):
+    objects verified longest ago first. `next_verify_at IS NULL` (never
+    verified) always counts as most overdue, same NULL convention as
+    `ObjectCopy.next_retry_at`."""
+    result = await session.execute(
+        select(ObjectMetadata).order_by(ObjectMetadata.next_verify_at.nulls_first()).limit(limit)
+    )
+    return list(result.scalars().all())
+
+
+async def set_next_verify_at(
+    session: AsyncSession, object_key: str, next_verify_at: datetime
+) -> None:
+    metadata = await session.get(ObjectMetadata, object_key)
+    if metadata is not None:
+        metadata.next_verify_at = next_verify_at
+        await session.flush()
+
+
 async def count_pending_copies_by_backend(session: AsyncSession) -> dict[str, int]:
     """Count of not-yet-successfully-replicated copies per target
     (`pending`/`failed`) - basis for the admin-UI status block (3.6
@@ -340,7 +403,12 @@ async def list_target_overrides(session: AsyncSession) -> list[TargetOverride]:
 
 
 async def upsert_target_override(
-    session: AsyncSession, target_id: str, *, object_lock_mode: str | None, role: str | None
+    session: AsyncSession,
+    target_id: str,
+    *,
+    object_lock_mode: str | None,
+    role: str | None,
+    decommissioned: bool = False,
 ) -> TargetOverride:
     override = await session.get(TargetOverride, target_id)
     if override is None:
@@ -348,6 +416,7 @@ async def upsert_target_override(
         session.add(override)
     override.object_lock_mode = object_lock_mode
     override.role = role
+    override.decommissioned = decommissioned
     override.updated_at = datetime.now(UTC)
     await session.flush()
     return override

@@ -2,8 +2,92 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P39-S4 (document/case RBAC polish — fourth and final session of Phase 39, "RBAC
-completion"). Research ahead of implementation found item 1's own framing overstated: documents already
+**Last completed:** P40-S1 (storage-target decommissioning + related gaps — first session of Phase 40,
+"Operational Reliability"). Research ahead of implementation confirmed all three plan items accurately:
+none were stale — item 3 (bulk fixity endpoint) was even unusually well pre-scoped already, since
+ADR 0101's own "Consequences" section had already specified almost exactly the shape to build.
+
+1. **Storage-target decommissioning** — `PUT /guard-status/{target_id}/config` gains a third field,
+   `decommissioned` (`TargetOverride`/`BackendTargetConfig`, same live-reload plumbing as `role`/
+   `object_lock_mode`). Setting it excludes the target from `resolve_targets()`/`resolve_archive_targets()`
+   and deletes every `object_copy` row for that `backend_id` (`repository.remove_copies_for_backend`) —
+   the exact cleanup step that was missing before this session and produced 30,410 permanently orphaned
+   rows in this installation's own real incident (P24-S1, `docs/services/storage-service.md`). Two
+   safety nets, both new: `422` if the target holds an object's only confirmed (`ok`) copy
+   (`count_sole_ok_copies_for_backend` — decommissioning would make that data unreachable, not just
+   orphan a row), and `422` if it would leave zero regular targets (extended from the existing
+   `role="archive"` check to also cover `decommissioned=true`). Un-decommissioning treats the target
+   like a newly added one again (`seed_pending_copies_for_new_target`, the same P5c-S2 rebalancing),
+   symmetrical "re-enters service" handling.
+2. **`quorum_count` re-validated on a `role`/`decommissioned` toggle** — closes a real, previously
+   documented gap (`docs/services/storage-service.md` Open Points): `PUT /guard-status/{id}/config` only
+   checked "at least one regular target remains," never whether the change would make an
+   already-configured `quorum_count` (`PUT /operational-config`) unsatisfiable. Now shares the identical
+   `1 <= quorum_count <= len(would_be_targets)` check `PUT /operational-config` already had.
+3. **Bulk fixity sweep** — `POST /object-verify/process-pending?limit=N` (`ObjectMetadata.next_verify_at`,
+   `NULL` = never verified = most overdue, same convention as `ObjectCopy.next_retry_at`) picks the `N`
+   objects verified longest ago, reuses `GET .../all`'s existing `verify_all_copies` per object, and
+   reschedules at a fixed interval (`Settings.fixity_verify_interval_seconds`, default 24h — env-only,
+   a scheduling knob like the CronJob's own `schedule`, not a live-editable application parameter). No
+   retry/backoff semantics (unlike the replication retry queue) — a mismatch is simply picked up again
+   at the next scheduled sweep. New second `CronJob` in `infra/k8s/dms/templates/storage-cronjob.yaml`
+   (`storageCronJob.verification`, previously a deliberately unwired placeholder since ADR 0101 — now
+   wired for real, once daily by default).
+
+No new ADR needed (per this phase's own Definition of Done — pure completion/hardening of already-
+established patterns) — appended a short update note to [ADR 0101](docs/adr/0101-storage-cronjob-single-job-no-bulk-verify.md)
+instead, pointing at what it recommended and is now built; its original decision (one CronJob, no bulk
+endpoint, given what existed then) was correct at the time and is not reversed, just fulfilled.
+
+**A real-scale finding from live verification, worth flagging**: this installation's own `storage-service`
+turned out to hold **well over 20,000** `object_metadata` rows (two consecutive `POST .../process-pending?limit=10000`
+calls each returned `checked: 10000`, all `ok`, zero mismatches — a reassuring integrity result in its own
+right, but also a concrete scale data point). At the new CronJob's default `limit=200`/once-daily
+cadence, a full fixity cycle across this installation's real data would take **~100+ days** — worth a
+future session raising the default (or the schedule frequency) once a target cycle time is decided;
+flagged here rather than guessed at, since the DoD didn't call for picking that number, only wiring the
+mechanism.
+
+**Also found, out of scope, not fixed here**: browser live-verification surfaced that this installation's
+`permission-service` `role_assignments` for at least one real account (`users-admin`) exist under BOTH the
+username string AND the numeric internal id as `principal_id` for the same role (`id=1864` vs `id=1865`,
+both `role_id=2195`) — only the numeric-id form is actually live (the frontend's `getEffectivePermissions`
+call uses `me.sub`, a small integer, not the username). The username-keyed rows are dead data from some
+earlier session's inconsistent convention, not a bug in this session's own code — noted here rather than
+silently fixed, since cleaning up historical role-assignment data was not part of this session's scope.
+
+**Tests**: storage-service 152 passed (+16: decommissioning — rejects the only regular target, removes
+`object_copy` rows on a real decommission [the exact incident reproduction], rejects decommissioning a
+target holding an object's only confirmed copy, reactivation reseeds pending copies, plus repository unit
+tests for the two new query helpers; quorum re-validation on a `role`/`decommissioned` toggle; the bulk
+fixity sweep — verifies-and-reschedules, a mismatch still reschedules, never-verified-first ordering, plus
+repository unit tests and one API-level smoke test). New `second_target_client` fixture (`test_api.py`)
+mutates `settings.targets` itself (not just `app.state`, unlike `archive_client`/`governance_client`) —
+necessary because the sole configured test target ("local") can never be decommissioned by itself.
+`ruff check`/`ruff format` clean. admin-ui: vitest 244 passed (+3: decommission checkbox — confirms then
+decommissions, confirmation-dismissed leaves it untouched, reactivation asks no confirmation), `tsc`/
+`eslint` clean. Helm chart: `helm lint`/`helm template` clean, both CronJobs render correctly.
+**Live-verified** against the fully rebuilt, restarted real stack: `PUT /guard-status/local/config` with
+`decommissioned=true` correctly `422`s (this installation's real deployment has exactly one regular
+target); a REAL archive-role target holding a real, previously-uploaded archive copy correctly `422`s
+decommissioning with the sole-confirmed-copy message (found 10 real pre-existing objects meeting that
+condition at real scale — the safety net's exact intended job); `POST /object-verify/process-pending`
+verified real content end-to-end (see the scale finding above). Real headless-browser (Playwright) session
+against the rebuilt `admin-ui` container: the new decommissioned checkbox renders, a click round-trips to
+the real, gated API, and both German error messages (zero-target / sole-copy) render correctly in the UI
+— required discovering and correcting the out-of-scope `principal_id` issue above along the way, since the
+test account's existing (dead) role-assignment silently didn't apply. Test object and both temporary
+role-assignments used for verification were cleaned up afterward; the one real archive-copy test object
+was left in place (no archive-copy delete endpoint exists, matching this project's established
+residual-test-data convention for resources with no delete path).
+
+**Next session:** **P40-S2** — re-verify whether it's still needed at all (see the note already left in
+`IMPLEMENTATION_PLAN.md`: P39-S4 already eliminated the unbounded-fan-out this session was meant to fix
+for both `query-service`/`reporting-service`, likely making it a no-op) before starting it. See
+`IMPLEMENTATION_PLAN.md` "Phase 40" for the full session breakdown.
+
+Immediately before P40-S1: **P39-S4** (document/case RBAC polish — fourth and final session of Phase 39,
+"RBAC completion"). Research ahead of implementation found item 1's own framing overstated: documents already
 checked their containing folder's real resource node (materially finer than what cases had before ADR
 0144, which had no substructure at all), so there was no urgent driver for full per-document RBAC —
 presented to the user as a build-vs-skip decision, **the user chose to build it fully**, matching cases'
@@ -344,16 +428,17 @@ permission grant (with the independent legal-hold button staying disabled throug
 (the full-alignment decision qualifies as non-trivial per `CONTRIBUTING.md`, overriding Phase 38's own
 "only P38-S4 needs one" text, which predates this session's scope growing past a narrow bugfix).
 
-**Next session:** **P40-S1** (Phase 40, Operational Reliability — storage-target decommissioning + related
-gaps: a mechanism to cleanly remove a storage target from the target set, since this has already caused
-30,410 orphaned rows in a real incident; `quorum_count` re-validated on a target-role change instead of
-silently allowing an unfulfillable combination; a bulk fixity-verify cronjob complementing the existing
-single-object check). This is the first session of Phase 40. **Note for P40-S2** (unbounded fan-out to
-document-service, planned to be fixed with bounded concurrency or a lower default limit): P39-S4 already
-eliminated the underlying fan-out entirely for both `query-service` and `reporting-service` (a document's
-own resource_id is now checked directly, no more `document_client.get_document()` folder-resolution call
-at all) — re-verify whether this plan item is still needed before starting it, it may already be moot.
-See `IMPLEMENTATION_PLAN.md` "Phase 40" for the full session breakdown.
+At the time this was written, next was **P40-S1** (Phase 40, Operational Reliability — storage-target
+decommissioning + related gaps: a mechanism to cleanly remove a storage target from the target set, since
+this has already caused 30,410 orphaned rows in a real incident; `quorum_count` re-validated on a
+target-role change instead of silently allowing an unfulfillable combination; a bulk fixity-verify cronjob
+complementing the existing single-object check) — **done now, see "Last completed" at the top of this
+file.** **Note for P40-S2** (unbounded fan-out to document-service, planned to be fixed with bounded
+concurrency or a lower default limit): P39-S4 already eliminated the underlying fan-out entirely for both
+`query-service` and `reporting-service` (a document's own resource_id is now checked directly, no more
+`document_client.get_document()` folder-resolution call at all) — still needs re-verifying whether this
+plan item is needed at all before starting it, it may already be moot. See `IMPLEMENTATION_PLAN.md`
+"Phase 40" for the full session breakdown.
 
 Immediately before P38-S3: **P38-S2** (ungated/weakly-gated endpoints, round 1 — second session of the
 Phase 38+ gap-closure plan). Closed four findings: `audit-service`'s `GET /events`/`.../verify` (new

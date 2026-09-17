@@ -44,6 +44,14 @@ class BackendTargetConfig(BaseModel):
     # explicitly. `None` (default) = normal replication target,
     # unchanged existing behavior.
     role: Literal["archive"] | None = None
+    # Decommissioning (Phase 40 Session 1) - live-editable via
+    # PUT /guard-status/{id}/config (TargetOverride), same pattern as
+    # role/object_lock_mode above. Excludes the target from
+    # resolve_targets()/resolve_archive_targets() without removing it
+    # from the target set itself (env-var-only, ADR 0091) - a
+    # decommissioned target's backend connection remains available so its
+    # existing object_copy rows can be cleaned up.
+    decommissioned: bool = False
 
     @model_validator(mode="after")
     def _check_required_fields_for_type(self) -> "BackendTargetConfig":
@@ -106,3 +114,12 @@ class Settings(BaseServiceSettings):
     # {id}/config`/`operational-config` previously had NO permission check
     # at all.
     permission_service_base_url: str = "http://localhost:8004"
+
+    # Bulk fixity sweep (3.6 "regular fixity check", Phase 40 Session 1) -
+    # minimum time between two automatic re-verifications of the same
+    # object via POST /object-verify/process-pending. Env-only rather than
+    # OperationalConfig (like the CronJob's own `schedule`, this is a
+    # scheduling/infra knob, not an application parameter with compliance
+    # consequences) - no retry/backoff semantics needed here (ADR-0082
+    # sense), just "don't re-check more often than this".
+    fixity_verify_interval_seconds: int = 86400

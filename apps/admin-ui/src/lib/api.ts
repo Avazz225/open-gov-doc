@@ -1021,6 +1021,9 @@ export interface GuardStatusEntry {
   // `updateTargetConfig()` since Post-Roadmap Phase 22 Session 7 (ADR 0092).
   object_lock_mode: "governance" | null;
   role: "archive" | null;
+  // Decommissioning (Phase 40 Session 1) - excludes the target from
+  // replication, then cleans up its object_copy rows.
+  decommissioned: boolean;
 }
 
 export async function getGuardStatus(token: string): Promise<GuardStatusEntry[]> {
@@ -1046,7 +1049,11 @@ export async function reidentifyTarget(token: string, targetId: string): Promise
 export async function updateTargetConfig(
   token: string,
   targetId: string,
-  params: { objectLockMode: "governance" | null; role: "archive" | null }
+  params: {
+    objectLockMode: "governance" | null;
+    role: "archive" | null;
+    decommissioned?: boolean;
+  }
 ): Promise<GuardStatusEntry> {
   const response = await request(
     "storage-service",
@@ -1054,7 +1061,11 @@ export async function updateTargetConfig(
     {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ object_lock_mode: params.objectLockMode, role: params.role }),
+      body: JSON.stringify({
+        object_lock_mode: params.objectLockMode,
+        role: params.role,
+        decommissioned: params.decommissioned ?? false,
+      }),
     },
     token
   );

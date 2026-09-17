@@ -7,12 +7,15 @@ storage-service deliberately runs WITHOUT its own in-process scheduler for this 
 is the external carrier announced since post-roadmap Phase 20 Session 6
 (see PROGRESS.md P20-S6).
 
-Only ONE CronJob, no second one for object fixity verification — see
-the values.yaml storageCronJob block comment as well as ADR 0101: the real
-verification endpoint `GET /object-verify/{key:path}/all` needs a
-concrete object `key` (verifies all TARGETS of one object, not all
-objects in the store) and therefore can't be called blindly on a periodic basis,
-without inventing a new storage-service endpoint.
+Originally only ONE CronJob here, no second one for object fixity
+verification — see ADR 0101: the endpoint that existed at the time
+(`GET /object-verify/{key:path}/all`) needed a concrete object `key`
+(verified all TARGETS of one object, not all objects in the store) and
+therefore couldn't be called blindly on a periodic basis. Phase 40
+Session 1 built the bulk endpoint ADR 0101's own "Consequences" section
+recommended (`POST /object-verify/process-pending`) — the second
+CronJob below now exists for exactly that endpoint, gated by its own
+`storageCronJob.verification.enabled` (see values.yaml).
 
 Lightweight curl image instead of the full storage-service image (see
 the values.yaml storageCronJob.image comment) — the container does nothing
@@ -65,6 +68,66 @@ spec:
                   value: {{ include "dms.storageServiceBaseUrl" . | quote }}
                 - name: LIMIT
                   value: {{ .Values.storageCronJob.replication.limit | quote }}
+                - name: PRINCIPAL
+                  value: {{ .Values.storageCronJob.principalHeader | quote }}
+              resources:
+                requests:
+                  memory: {{ .Values.storageCronJob.resources.memory.requests | quote }}
+                  cpu: {{ .Values.storageCronJob.resources.cpu.requests | quote }}
+                limits:
+                  memory: {{ .Values.storageCronJob.resources.memory.limits | quote }}
+                  cpu: {{ .Values.storageCronJob.resources.cpu.limits | quote }}
+{{- end }}
+{{- if .Values.storageCronJob.verification.enabled }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "dms.fullname" . }}-storage-verification
+  labels:
+    {{- include "dms.labels" . | nindent 4 }}
+    app.kubernetes.io/component: storage-verification-cronjob
+spec:
+  schedule: {{ .Values.storageCronJob.verification.schedule | quote }}
+  # Same rationale as the replication CronJob above - the bulk sweep
+  # itself is idempotent (next_verify_at reschedules regardless), but two
+  # concurrent runs would unnecessarily compete for the same objects.
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: {{ .Values.storageCronJob.verification.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.storageCronJob.verification.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      # A fixity sweep re-reads/re-hashes content on every configured
+      # target for each selected object - allow more headroom than the
+      # lightweight replication retry above before hard-aborting a hung
+      # run.
+      activeDeadlineSeconds: {{ .Values.storageCronJob.verification.activeDeadlineSeconds }}
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            {{- include "dms.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: storage-verification-cronjob
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: trigger-verification
+              image: {{ printf "%s%s:%s" .Values.global.image.registry .Values.storageCronJob.image.repository .Values.storageCronJob.image.tag | quote }}
+              imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+              command:
+                - sh
+                - -c
+                - |
+                  set -eu
+                  curl -sS -f --connect-timeout 5 --max-time 300 --retry 2 --retry-delay 3 \
+                    -X POST \
+                    -H "X-DMS-Principal: ${PRINCIPAL}" \
+                    "${STORAGE_BASE_URL}/object-verify/process-pending?limit=${LIMIT}"
+              env:
+                - name: STORAGE_BASE_URL
+                  value: {{ include "dms.storageServiceBaseUrl" . | quote }}
+                - name: LIMIT
+                  value: {{ .Values.storageCronJob.verification.limit | quote }}
                 - name: PRINCIPAL
                   value: {{ .Values.storageCronJob.principalHeader | quote }}
               resources:

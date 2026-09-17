@@ -234,6 +234,42 @@ async def verify_all_copies(
     return results
 
 
+async def verify_pending(
+    session: AsyncSession,
+    *,
+    backends: dict[str, StorageBackend],
+    limit: int = 100,
+    interval_seconds: int,
+) -> dict:
+    """Bulk fixity sweep (3.6 "regular fixity check", Phase 40 Session 1 -
+    the shape ADR 0101's Consequences section already recommended once a
+    real periodic mechanism existed). Picks the objects verified longest
+    ago (never-verified counts as most overdue), runs `verify_all_copies`
+    per object, and reschedules `next_verify_at` at a fixed interval.
+    Unlike `process_pending`, there is no retry/backoff semantics here
+    (ADR-0082 sense) - a mismatch is already recorded on `object_copy` by
+    `verify_all_copies` itself and simply re-checked at the next scheduled
+    sweep, not retried sooner."""
+    now = datetime.now(UTC)
+    checked = ok = mismatches = 0
+    for metadata in await repository.list_unverified_objects(session, limit=limit):
+        checked += 1
+        results = await verify_all_copies(
+            session,
+            backends=backends,
+            key=metadata.object_key,
+            expected_checksum=metadata.checksum_sha256,
+        )
+        if any(result["ok"] is False for result in results):
+            mismatches += 1
+        else:
+            ok += 1
+        await repository.set_next_verify_at(
+            session, metadata.object_key, now + timedelta(seconds=interval_seconds)
+        )
+    return {"checked": checked, "ok": ok, "mismatches": mismatches}
+
+
 def _next_retry_at(attempts: int) -> datetime:
     """Full-jitter backoff (`libs/dms-retry`, since Post-Roadmap Phase 20
     Session 6, ADR 0082) - same formula as in the other four resilience

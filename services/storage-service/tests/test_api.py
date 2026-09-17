@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from storage_service.backends.local_backend import LocalFilesystemBackend
-from storage_service.main import app
+from storage_service.main import app, settings
 from storage_service.settings import BackendTargetConfig
 
 # Muss mit conftest.py::STORAGE_ADMIN_PRINCIPAL_ID übereinstimmen (dort per
@@ -65,6 +65,39 @@ def archive_client(client, tmp_path):
     yield client
     app.state.backends = original_backends
     app.state.archive_targets = original_archive_targets
+
+
+@pytest.fixture
+def second_target_client(client, tmp_path):
+    """Decommissioning (Phase 40 Session 1) needs a real SECOND target -
+    the sole test target ("local") can never be decommissioned by itself
+    (would violate the "at least one regular target" check, same as
+    `role="archive"`, see `test_put_target_config_rejects_leaving_zero_
+    regular_targets`). Unlike `archive_client`'s pure `app.state`
+    mutation, `PUT /guard-status/{id}/config` also checks `target_id`
+    against `settings.targets` (the 404 gate in `put_target_config`), so
+    this fixture mutates that too - otherwise every `PUT .../second/
+    config` call in the tests below would 404 before ever reaching the
+    decommission logic under test."""
+    original_settings_targets = settings.targets
+    original_backends = app.state.backends
+    original_targets = app.state.targets
+    original_target_configs = app.state.target_configs
+    second_path = tmp_path / "second"
+    second_config = BackendTargetConfig(id="second", type="local", base_path=str(second_path))
+    settings.targets = [*original_settings_targets, second_config]
+    app.state.backends = {**original_backends, "second": LocalFilesystemBackend(str(second_path))}
+    app.state.targets = [*original_targets, "second"]
+    app.state.target_configs = [*original_target_configs, second_config]
+    yield client
+    client.put(
+        "/guard-status/second/config",
+        json={"object_lock_mode": None, "role": None, "decommissioned": False},
+    )
+    settings.targets = original_settings_targets
+    app.state.backends = original_backends
+    app.state.targets = original_targets
+    app.state.target_configs = original_target_configs
 
 
 def test_healthz(client):
@@ -438,6 +471,162 @@ def test_put_target_config_takes_effect_without_restart(target_override_client):
 
     delete_response = target_override_client.delete(f"/objects/{key}")
     assert delete_response.status_code == 403
+
+
+# --- Dekommissionierung (Phase 40 Session 1) -------------------------------
+
+
+def test_put_target_config_rejects_decommissioning_the_only_regular_target(
+    target_override_client,
+):
+    """Dieselbe Prüfung wie bisher nur für `role="archive"`
+    (`test_put_target_config_rejects_leaving_zero_regular_targets`), jetzt
+    auch für `decommissioned=true`: nur "local" ist im Testaufbau
+    konfiguriert."""
+    response = target_override_client.put(
+        "/guard-status/local/config",
+        json={"object_lock_mode": None, "role": None, "decommissioned": True},
+    )
+    assert response.status_code == 422
+
+
+def test_decommissioning_a_target_removes_its_pending_copy_rows(second_target_client):
+    """Reproduziert den realen Vorfall genau (docs/services/storage-
+    service.md, 30.410 verwaiste Zeilen): ein Upload mit zwei Zielen
+    erzeugt eine `pending`-Kopie-Zeile für das sekundäre Ziel
+    (`primary_async`, Standard) - Dekommissionierung muss diese jetzt
+    entfernen statt sie dauerhaft verwaist zurückzulassen."""
+    key = _key()
+    upload = second_target_client.put(f"/objects/{key}", content=b"payload")
+    assert upload.status_code == 201
+    copies_before = {
+        c["backend_id"]: c["status"]
+        for c in second_target_client.get(f"/objects/{key}/copies").json()
+    }
+    assert copies_before == {"local": "ok", "second": "pending"}
+
+    response = second_target_client.put(
+        "/guard-status/second/config",
+        json={"object_lock_mode": None, "role": None, "decommissioned": True},
+    )
+    assert response.status_code == 200
+    assert response.json()["decommissioned"] is True
+
+    copies_after = second_target_client.get(f"/objects/{key}/copies").json()
+    assert all(c["backend_id"] != "second" for c in copies_after)
+
+
+def test_decommissioning_rejects_when_target_holds_the_only_confirmed_copy(
+    second_target_client,
+):
+    """Sicherheitsnetz über die reine Zeilen-Bereinigung hinaus: ein Ziel,
+    das die EINZIGE bestätigte Kopie eines Objekts trägt, darf nicht
+    dekommissioniert werden - das würde die Daten unerreichbar machen,
+    nicht nur eine verwaiste Zeile hinterlassen."""
+    key = _key()
+    original_targets = app.state.targets
+    app.state.targets = ["second"]
+    try:
+        upload = second_target_client.put(f"/objects/{key}", content=b"payload")
+        assert upload.status_code == 201
+    finally:
+        app.state.targets = original_targets
+    copies = {
+        c["backend_id"]: c["status"]
+        for c in second_target_client.get(f"/objects/{key}/copies").json()
+    }
+    assert copies == {"second": "ok"}
+
+    response = second_target_client.put(
+        "/guard-status/second/config",
+        json={"object_lock_mode": None, "role": None, "decommissioned": True},
+    )
+    assert response.status_code == 422
+    assert "bestätigte Kopie" in response.json()["detail"]
+
+    # Aufräumen: `object_copy` wird zwischen den Tests dieser Datei nicht
+    # getruncatet (kein Truncate-Fixture, siehe `operational_config_client`s
+    # Docstring) - ohne diesen Löschvorgang bliebe eine Zeile mit
+    # backend_id="second"/status="ok" dauerhaft in der DB stehen und würde
+    # JEDEN späteren Test, der "second" erneut verwendet, fälschlich auf
+    # `count_sole_ok_copies_for_backend`/einen `KeyError` in
+    # `verify_all_copies` (Ziel längst wieder abgebaut) treffen lassen -
+    # tatsächlich als Regression entdeckt, als genau das passierte.
+    # `app.state.targets` ist an dieser Stelle bereits auf `original_targets`
+    # zurückgesetzt (["local", "second"]) - `delete_from_all` räumt die
+    # Kopie-Zeile unabhängig davon ab, auf welchem der beiden Ziele sie
+    # tatsächlich existiert.
+    delete_response = second_target_client.delete(f"/objects/{key}")
+    assert delete_response.status_code == 204
+
+
+def test_role_toggle_rejects_when_it_would_break_an_already_set_quorum(
+    second_target_client, operational_config_client
+):
+    """Bisher offene Lücke (`docs/services/storage-service.md` Open
+    Points): `PUT .../config` prüfte einen `role`-Wechsel nie gegen den
+    bereits über `PUT /operational-config` gesetzten `quorum_count` - nur
+    die "mindestens ein reguläres Ziel"-Prüfung existierte. Zwei Ziele,
+    `quorum_count=2` ist damit erfüllbar; `role="archive"` auf "second"
+    ließe nur noch ein reguläres Ziel übrig."""
+    operational_config_client.put(
+        "/operational-config",
+        json={"write_strategy": "quorum", "quorum_count": 2, "max_replication_attempts": 5},
+    )
+
+    response = second_target_client.put(
+        "/guard-status/second/config",
+        json={"object_lock_mode": None, "role": "archive", "decommissioned": False},
+    )
+    assert response.status_code == 422
+    assert "quorum_count" in response.json()["detail"]
+
+
+def test_reactivating_a_decommissioned_target_reseeds_pending_copies(second_target_client):
+    """Symmetrisch zur Bereinigung bei Dekommissionierung: ein reaktiviertes
+    Ziel hat für während seiner Abschaltung entstandene Objekte keine
+    Kopie - wird wie ein neu hinzugefügtes Ziel behandelt (P5c-S2s
+    Rebalancing)."""
+    key = _key()
+    upload = second_target_client.put(f"/objects/{key}", content=b"payload")
+    assert upload.status_code == 201
+
+    decommission = second_target_client.put(
+        "/guard-status/second/config",
+        json={"object_lock_mode": None, "role": None, "decommissioned": True},
+    )
+    assert decommission.status_code == 200
+
+    reactivate = second_target_client.put(
+        "/guard-status/second/config",
+        json={"object_lock_mode": None, "role": None, "decommissioned": False},
+    )
+    assert reactivate.status_code == 200
+    assert reactivate.json()["decommissioned"] is False
+
+    copies_after = {
+        c["backend_id"]: c["status"]
+        for c in second_target_client.get(f"/objects/{key}/copies").json()
+    }
+    assert copies_after["second"] == "pending"
+
+
+# --- Bulk-Fixity-Sweep (3.6 "regelmäßige Fixity-Prüfung", Phase 40 Session 1)
+
+
+def test_bulk_verify_process_pending_checks_a_never_verified_object(client):
+    key = _key()
+    upload = client.put(f"/objects/{key}", content=b"payload")
+    assert upload.status_code == 201
+
+    response = client.post("/object-verify/process-pending", params={"limit": 1000})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["checked"] >= 1
+    assert body["ok"] >= 1
+    copies = client.get(f"/objects/{key}/copies").json()
+    assert copies[0]["status"] == "ok"
 
 
 def test_guard_status_shows_verified_identity_after_startup(client):

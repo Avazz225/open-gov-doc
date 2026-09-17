@@ -180,6 +180,7 @@ describe("StorageGuard", () => {
           pending_copies: 0,
           object_lock_mode: null,
           role: null,
+          decommissioned: false,
         },
       ])
       .mockResolvedValueOnce([
@@ -190,6 +191,7 @@ describe("StorageGuard", () => {
           pending_copies: 0,
           object_lock_mode: "governance",
           role: null,
+          decommissioned: false,
         },
       ]);
     updateTargetConfigMock.mockResolvedValue({});
@@ -204,6 +206,7 @@ describe("StorageGuard", () => {
       expect(updateTargetConfigMock).toHaveBeenCalledWith("token-123", "local", {
         objectLockMode: "governance",
         role: null,
+        decommissioned: false,
       })
     );
     await waitFor(() => expect(getGuardStatusMock).toHaveBeenCalledTimes(2));
@@ -223,6 +226,7 @@ describe("StorageGuard", () => {
           pending_copies: 0,
           object_lock_mode: null,
           role: null,
+          decommissioned: false,
         },
       ])
       .mockResolvedValueOnce([
@@ -233,6 +237,7 @@ describe("StorageGuard", () => {
           pending_copies: 0,
           object_lock_mode: null,
           role: "archive",
+          decommissioned: false,
         },
       ]);
     updateTargetConfigMock.mockResolvedValue({});
@@ -247,8 +252,130 @@ describe("StorageGuard", () => {
       expect(updateTargetConfigMock).toHaveBeenCalledWith("token-123", "archive", {
         objectLockMode: null,
         role: "archive",
+        decommissioned: false,
       })
     );
+  });
+
+  it("decommissions a target after confirmation and reloads", async () => {
+    getGuardConfigMock.mockResolvedValue({
+      allow_degraded_start: false,
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+    getGuardStatusMock
+      .mockResolvedValueOnce([
+        {
+          target_id: "second",
+          device_id: "abc123",
+          verified_at: "2026-01-01T00:00:00Z",
+          pending_copies: 0,
+          object_lock_mode: null,
+          role: null,
+          decommissioned: false,
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          target_id: "second",
+          device_id: "abc123",
+          verified_at: "2026-01-01T00:00:00Z",
+          pending_copies: 0,
+          object_lock_mode: null,
+          role: null,
+          decommissioned: true,
+        },
+      ]);
+    updateTargetConfigMock.mockResolvedValue({});
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    renderStorageGuard();
+    await screen.findByText("second");
+    const row = screen.getByText("second").closest("tr")!;
+
+    fireEvent.click(within(row).getByLabelText("decommissioned=true"));
+
+    await waitFor(() =>
+      expect(updateTargetConfigMock).toHaveBeenCalledWith("token-123", "second", {
+        objectLockMode: null,
+        role: null,
+        decommissioned: true,
+      })
+    );
+    await waitFor(() => expect(getGuardStatusMock).toHaveBeenCalledTimes(2));
+  });
+
+  it("does not decommission a target when the confirmation is dismissed", async () => {
+    getGuardConfigMock.mockResolvedValue({
+      allow_degraded_start: false,
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+    getGuardStatusMock.mockResolvedValue([
+      {
+        target_id: "second",
+        device_id: "abc123",
+        verified_at: "2026-01-01T00:00:00Z",
+        pending_copies: 0,
+        object_lock_mode: null,
+        role: null,
+        decommissioned: false,
+      },
+    ]);
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    renderStorageGuard();
+    await screen.findByText("second");
+    const row = screen.getByText("second").closest("tr")!;
+
+    fireEvent.click(within(row).getByLabelText("decommissioned=true"));
+
+    expect(updateTargetConfigMock).not.toHaveBeenCalled();
+  });
+
+  it("reactivates a decommissioned target without asking for confirmation", async () => {
+    getGuardConfigMock.mockResolvedValue({
+      allow_degraded_start: false,
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+    getGuardStatusMock
+      .mockResolvedValueOnce([
+        {
+          target_id: "second",
+          device_id: "abc123",
+          verified_at: "2026-01-01T00:00:00Z",
+          pending_copies: 0,
+          object_lock_mode: null,
+          role: null,
+          decommissioned: true,
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          target_id: "second",
+          device_id: "abc123",
+          verified_at: "2026-01-01T00:00:00Z",
+          pending_copies: 3,
+          object_lock_mode: null,
+          role: null,
+          decommissioned: false,
+        },
+      ]);
+    updateTargetConfigMock.mockResolvedValue({});
+    const confirmSpy = vi.spyOn(window, "confirm");
+
+    renderStorageGuard();
+    await screen.findByText("second");
+    const row = screen.getByText("second").closest("tr")!;
+
+    fireEvent.click(within(row).getByLabelText("decommissioned=true"));
+
+    await waitFor(() =>
+      expect(updateTargetConfigMock).toHaveBeenCalledWith("token-123", "second", {
+        objectLockMode: null,
+        role: null,
+        decommissioned: false,
+      })
+    );
+    expect(confirmSpy).not.toHaveBeenCalled();
   });
 
   it("shows an error when saving target config fails", async () => {
@@ -264,6 +391,7 @@ describe("StorageGuard", () => {
         pending_copies: 0,
         object_lock_mode: null,
         role: null,
+        decommissioned: false,
       },
     ]);
     const { ApiError } = await import("@/lib/api");

@@ -16,6 +16,7 @@
 | `GET` | `/objects/{key:path}/copies` | Copy status per configured target (`pending`/`ok`/`failed`/`failed_permanent`) |
 | `GET` | `/object-verify/{key:path}` | Fixity check of the primary target: re-read the checksum, compare against the reference value |
 | `GET` | `/object-verify/{key:path}/all` | Fixity check across **all** configured targets, updates `object_copy` |
+| `POST` | `/object-verify/process-pending?limit=100` | Bulk fixity sweep (3.6 "regular fixity check", since **Phase 40 Session 1**, the shape [ADR 0101](../adr/0101-storage-cronjob-single-job-no-bulk-verify.md)'s Consequences section already recommended): re-verifies the `limit` objects verified longest ago (`ObjectMetadata.next_verify_at`, `NULL` = never verified = most overdue), rescheduling each at a fixed interval (`Settings.fixity_verify_interval_seconds`, default 24h) - no retry/backoff semantics (unlike the replication retry queue), a mismatch is simply picked up again at the next scheduled sweep |
 | `GET` | `/storage/usage` | Aggregated storage consumption per backend (`{backend, object_count, total_size_bytes}[]`, `GROUP BY backend` over `object_metadata`, since P7-S2b) — only consumer so far: the storage-consumption report of `reporting-service` (see `docs/services/reporting-service.md`), a live query rather than an own read model |
 | `POST` | `/replication/process-pending` | Process the retry queue - replicates pending copies, intended for periodic external invocation |
 | `GET` | `/guard-config` | Current guard configuration (`allow_degraded_start`) — creates the default row on first call (P5b-S6) |
@@ -24,7 +25,7 @@
 | `PUT` | `/operational-config` | Updates the operational parameters — takes effect **without a restart**, `422` if `write_strategy=quorum` with the chosen `quorum_count` cannot be satisfied against the (structurally still fixed) number of targets |
 | `GET` | `/guard-status` | Per configured target: last confirmed device ID, timestamp, number of not-yet-replicated copies (Admin UI status block) |
 | `POST` | `/guard-status/{target_id}/reidentify` | Accepts an intended storage device swap at runtime (no restart needed), P5c-S2 |
-| `PUT` | `/guard-status/{target_id}/config` | Live-edit target metadata (`object_lock_mode`, `role`, since **Post-Roadmap Phase 22 Session 7**, [ADR 0092](../adr/0092-storage-target-metadata-editable.md)) — `404` on an unknown target, `422` if the change would leave no regular target left. Takes effect without a restart |
+| `PUT` | `/guard-status/{target_id}/config` | Live-edit target metadata (`object_lock_mode`, `role`, since **Post-Roadmap Phase 22 Session 7**, [ADR 0092](../adr/0092-storage-target-metadata-editable.md); `decommissioned`, since **Phase 40 Session 1**) — `404` on an unknown target, `422` if the change would leave no regular target left, would make the already-configured `quorum_count` unsatisfiable, or (decommissioning only) would strand an object's only confirmed copy on this target. Takes effect without a restart |
 | `PUT` | `/objects/{key:path}/archive-copy` | Writes **only** to the configured archive targets (`role="archive"`, 5.6, since P7-S3) — `503` without a configured archive target |
 | `GET` | `/objects/{key:path}/archive-copy` | Reads exclusively from archive targets (retrieval, since P7-S3) — independent of the live state of the same key |
 | `GET` | `/objects/{key:path}/archive-copy/verify` | Fixity check of the archive copy, filtered to archive targets (since P7-S3) |
@@ -43,10 +44,10 @@ All three are independently tested: `LocalFilesystemBackend` against a real file
 
 ## Data Model
 
-- `object_metadata`: `object_key` (PK), `backend` (target `id` of the primary target at the time of creation/last overwrite — since P5b-S6 a target `id`, no longer a backend *type*, see below), `checksum_sha256`, `size_bytes`, `content_type`, `created_at`, `updated_at`.
+- `object_metadata`: `object_key` (PK), `backend` (target `id` of the primary target at the time of creation/last overwrite — since P5b-S6 a target `id`, no longer a backend *type*, see below), `checksum_sha256`, `size_bytes`, `content_type`, `created_at`, `updated_at`, `next_verify_at` (nullable, since **Phase 40 Session 1** — bulk fixity queue, see "Redundancy & Fixity" below).
 - `object_copy`: `object_key` + `backend_id` (composite PK, FK to `object_metadata`), `status` (`pending`/`ok`/`failed`/`failed_permanent`), `checksum_sha256`, `attempts`, `last_error`, `next_retry_at` (nullable, since **Post-Roadmap Phase 20 Session 6**, [ADR 0082](../adr/0082-storage-service-replication-jitter-retrofit.md) — full-jitter backoff, see below), `retention_until` (date, nullable, since P7-S1 — see "Object Lock/WORM" below), `created_at`, `updated_at` — one row per configured target and object.
 - `backend_identity` (new, P5b-S6): `target_id` (PK), `device_id`, `verified_at` — last confirmed device ID per configured target, stored independently of the target itself (see "Storage Device Swap Guard" below).
-- `target_override` (Post-Roadmap Phase 22 Session 7, [ADR 0092](../adr/0092-storage-target-metadata-editable.md)): `target_id` (PK), `object_lock_mode`, `role`, `updated_at` — sparse (only targets with an actually set override have a row), see "Target Metadata" below.
+- `target_override` (Post-Roadmap Phase 22 Session 7, [ADR 0092](../adr/0092-storage-target-metadata-editable.md)): `target_id` (PK), `object_lock_mode`, `role`, `decommissioned` (bool, default `false`, since **Phase 40 Session 1**), `updated_at` — sparse (only targets with an actually set override have a row), see "Target Metadata" below.
 - `guard_config` (new, P5b-S6): a single row with fixed `id=1`, `allow_degraded_start`, `updated_at` — same pattern as `ocr_config` (ocr-service, [ADR 0016](../adr/0016-ocr-configurability-compose-profile-and-live-settings.md)).
 
 ## Target Set: Any Number of Backend Instances (3.6, since P5b-S6)
@@ -83,6 +84,7 @@ number of targets, `422` on infeasibility. Admin UI: `/storage-operational-confi
 - **Write strategies**: `quorum` (synchronous, success only once `quorum_count` targets have confirmed; on failure to reach that, already-successful partial copies are rolled back best-effort) or `primary_async` (the default for general operation: only the primary target is synchronous, further targets stay `pending` and are caught up via `POST /replication/process-pending` — a retry queue with `max_replication_attempts`, after which `failed_permanent` + an error log serves as an alerting substitute). **Since Post-Roadmap Phase 22 Session 6** ([ADR 0091](../adr/0091-connector-operational-config-live-editable.md)): `write_strategy`/`quorum_count`/`max_replication_attempts` are live-editable via `GET`/`PUT /operational-config` (`Settings.write_strategy` etc. now only supply the seed value of the first row) — see "Operational Parameters" below. **Since Post-Roadmap Phase 20 Session 6** ([ADR 0082](../adr/0082-storage-service-replication-jitter-retrofit.md)): a failure additionally sets a `next_retry_at` via full-jitter backoff (`libs/dms-retry`, the same formula as the four other resilience sessions of this phase) — `list_pending_copies` only picks up a `failed` row again once this wait time has elapsed, instead of unconditionally retrying it on every `process-pending` call.
 - **Read fallback**: `GET /objects/{key}` reads from the first copy with status `ok` in target priority order (primary target first).
 - **Fixity check per copy**: `GET /object-verify/{key}/all` re-reads the checksum from every backend and compares it against the reference value stored in `object_metadata` — detects bit rot/tampering independently per target, updates `object_copy.status`.
+- **Bulk fixity sweep** (concept 3.6 "regular fixity check across all copies", **Phase 40 Session 1** — the shape [ADR 0101](../adr/0101-storage-cronjob-single-job-no-bulk-verify.md)'s Consequences section already recommended): `POST /object-verify/process-pending?limit=N` picks the `N` objects verified longest ago (`ObjectMetadata.next_verify_at`, `NULL` counts as most overdue, same convention as `ObjectCopy.next_retry_at`), runs `GET .../all`'s same `verify_all_copies` per object, and reschedules `next_verify_at` at a fixed interval (`Settings.fixity_verify_interval_seconds`, default 24h, env-only like the CronJob's own `schedule` — a scheduling knob, not an application parameter). No retry/backoff semantics (unlike the replication retry queue) — a mismatch is recorded on `object_copy` exactly as `GET .../all` already does, and simply re-checked at the next scheduled sweep, not retried sooner. External carrier: `infra/k8s/dms/templates/storage-cronjob.yaml`'s second `CronJob` (`storageCronJob.verification.enabled`, now wired — previously a deliberately unwired placeholder, see ADR 0101).
 - The orchestrating logic (`replication.py`) is backend-agnostic (works with `dict[str, StorageBackend]` + a `list[str]` target priority) and testable independently of the FastAPI app singleton configuration.
 
 ## Storage Device Swap Guard (3.6, since P5b-S6, [ADR 0017](../adr/0017-storage-device-identity-guard.md))
@@ -101,26 +103,56 @@ Protects against an accidentally swapped/reset storage device that would otherwi
 
 ## Target Metadata Live-Editable (Post-Roadmap Phase 22 Session 7, [ADR 0092](../adr/0092-storage-target-metadata-editable.md))
 
-`PUT /guard-status/{target_id}/config` makes `object_lock_mode`/`role` per already-configured target
-live-editable — deliberately ONLY these two metadata fields, NOT the target set itself (credentials/
+`PUT /guard-status/{target_id}/config` makes `object_lock_mode`/`role`/`decommissioned` per already-configured target
+live-editable — deliberately ONLY these metadata fields, NOT the target set itself (credentials/
 `id`/`type`/`base_path` remain env-var-only, the same rationale as for `OperationalConfig`, ADR 0091:
 new targets need real infrastructure, not a pure configuration value). `404` on an unknown
-`target_id`. `422` if the change would leave NO regular (non-archived) target remaining — without
-this check, a `role="archive"` override on the last regular target could crash every subsequent upload
+`target_id`. `422` if the change would leave NO regular (non-archived, non-decommissioned) target
+remaining — without this check, a `role="archive"` override (or, since Phase 40 Session 1,
+`decommissioned=true`) on the last regular target could crash every subsequent upload
 with an `IndexError` (`upload_object` uses `app.state.targets[0]` as the
-primary target).
+primary target). `422` also since Phase 40 Session 1 if the change would make an already-configured
+`quorum_count` (`PUT /operational-config`) unsatisfiable against the smaller resulting target count —
+previously UNCHECKED for a plain `role` toggle too, a real, documented gap this session closed for
+both `role` and `decommissioned` via the same shared check.
 
 `_compute_target_state()` (`main.py`) merges `Settings.targets` with all `target_override` rows
 (sparse, only overridden targets have a row) into an effective target list — called at
 startup AND on every `PUT`, with the result immediately written back into `app.state.target_configs`/`.targets`/
 `.archive_targets`/`.lock_target_ids`. Unlike `OperationalConfig` (P22-S6, read freshly from the DB on
 every affected request), it is deliberately NOT re-read from the DB on every individual
-read access here — `object_lock_mode`/`role` are needed in too many places in the code
+read access here — `object_lock_mode`/`role`/`decommissioned` are needed in too many places in the code
 (upload/archive routing, retention guard, lock-status displays), and a `PUT`-time refresh
 of `app.state` achieves the same live-reload result with a much smaller diff. **Known limitation**:
 with multiple horizontally scaled replicas, a replica without its own `PUT`/restart does not see the
 change — uncritical for this project's current single-replica reality. Admin UI: `/storage-guard/`
-(two new checkbox columns replacing the previous purely read-only "Object Lock" column).
+(three checkbox columns: Object Lock, archival role, decommissioned).
+
+### Decommissioning (Phase 40 Session 1)
+
+Closes a real, previously experienced gap (see "Open Points" below, and the incident this session's
+own regression test reproduces): a target could be added (`role`/rebalancing, P5c-S2 seeds `pending`
+`object_copy` rows for it) but never cleanly removed again — the rows for a target dropped from
+`DMS_TARGETS` simply stayed in the database forever, referencing a `backend_id` no configured backend
+would ever serve again (30,410 such rows in this installation's own dev database, cleaned up manually
+via SQL, per `PROGRESS.md` P24-S1).
+
+`decommissioned=true` on `PUT /guard-status/{target_id}/config`:
+
+1. Excludes the target from `resolve_targets()`/`resolve_archive_targets()` — no new writes, same
+   mechanism as `role="archive"`, but the target's backend connection stays in `app.state.backends`
+   (needed for the cleanup step and for a later `GET`/read against still-referenced old data).
+2. `422` (before anything is persisted) if the target currently holds the ONLY confirmed (`ok`) copy
+   of any object (`repository.count_sole_ok_copies_for_backend`) — decommissioning it would make that
+   object's data permanently unreachable, not merely orphan a database row. The admin must replicate
+   the affected objects elsewhere first.
+3. Once the checks pass, every `object_copy` row for this `backend_id` is deleted
+   (`repository.remove_copies_for_backend`) — the cleanup step that was missing before this session.
+
+Un-decommissioning (`decommissioned: false` on a previously decommissioned target) treats the target
+like a newly added one again (`repository.seed_pending_copies_for_new_target`, the same P5c-S2
+rebalancing a brand-new target already gets) — symmetrical "re-enters service" handling, since it has
+no copies at all for objects that existed while it was decommissioned.
 
 ## Archive Target Role (5.6, since P7-S3)
 
@@ -161,7 +193,22 @@ None yet — follows in Phase 11.
 
 ## Tests
 
-- `uv run pytest services/storage-service/tests` (**136 tests since Post-Roadmap Phase 38 Session 3**
+- `uv run pytest services/storage-service/tests` (**152 tests since Phase 40 Session 1** — +16 over
+  the previous 136: decommissioning (`test_api.py` — rejects decommissioning the only regular target,
+  removes `object_copy` rows on decommission [the exact incident reproduction below], rejects
+  decommissioning a target holding an object's only confirmed copy, reactivation reseeds pending
+  copies; `test_repository.py` — `count_sole_ok_copies_for_backend`, `remove_copies_for_backend`,
+  `upsert_target_override`'s new `decommissioned` field); `quorum_count` re-validation on a `role`/
+  `decommissioned` toggle (`test_api.py`, closes the gap this session's own Open Points bullet had
+  named); the bulk fixity sweep (`test_replication.py` — `verify_pending` verifies-and-reschedules, a
+  mismatch still reschedules [no retry/backoff here], a never-verified object is picked up before a
+  recently-verified one; `test_repository.py` — `list_unverified_objects`'s NULL-first ordering and
+  `limit`, `set_next_verify_at`; `test_api.py` — one coarse API-level smoke test). New fixture
+  `second_target_client` (`test_api.py`) mutates `settings.targets` itself, not just `app.state` (unlike
+  `archive_client`/`governance_client`) — needed because `PUT /guard-status/{id}/config`'s `404` check
+  reads `settings.targets`, and the sole configured test target ("local") can never be decommissioned by
+  itself (would violate the "at least one regular target" check). Before that, 136 tests since
+  Post-Roadmap Phase 38 Session 3
   — +2 over the previous 134: `test_api.py` gained a default `X-DMS-Principal` header on its `client`
   fixture plus a 401/403 pair for `PUT /guard-config`, the service's first-ever RBAC coverage — before
   that, 134 tests since Post-Roadmap Phase 24 Session 1
@@ -197,12 +244,12 @@ None yet — follows in Phase 11.
 
 - **Configuration per object type/folder instead of service-wide** — the concept allows overrides of the write strategy per object type/folder; the connection between the Object-Type/Folder Service and Storage Service needed for this is currently missing.
 - **`/replication/process-pending` has been automatically run periodically since P26-S4** — `infra/k8s/dms/templates/storage-cronjob.yaml` (see [ADR 0101](../adr/0101-storage-cronjob-single-job-no-bulk-verify.md)) calls the endpoint every 15 minutes (configurable, `storageCronJob.replication.schedule`) via a k8s `CronJob` whenever operated through this Helm chart (no equivalent for `docker-compose.yml` dev operation — there the endpoint remains manual/on-demand). After a degraded start or a `reidentify` call, `pending_copies > 0` therefore resolves itself by no later than the next CronJob run, instead of "hanging" indefinitely.
-- **`/object-verify/{key:path}/all` remains a purely on-demand endpoint without automatic periodic execution** — unlike the replication retry queue, this endpoint ALWAYS only verifies a single object passed via the path parameter (all *targets* of that one object, not all objects in the store); `storage-service` has no endpoint that lists object keys or supplies a batch of not-yet-verified objects (no fixity counterpart to `list_pending_copies`/`process_pending`). A P26-S4 CronJob for this was therefore deliberately NOT built (see [ADR 0101](../adr/0101-storage-cronjob-single-job-no-bulk-verify.md) for the rationale and a design proposal for a future bulk-verify endpoint analogous to the retry queue).
-- **No removal of a target from the target set** — a once-configured target currently cannot be cleanly "decommissioned" (the associated `object_copy` rows would be left orphaned); only *adding* was addressed in P5c-S2. **During this session's live verification (P24-S1), this was cleaned up manually via SQL for exactly this reason** (30,410 `pending` rows seeded for all already-existing objects by the rebalancing when the test target was added) — a concrete, practically experienced instance of this already-documented gap.
+- ~~**`/object-verify/{key:path}/all` remains a purely on-demand endpoint without automatic periodic execution**~~ — **closed in Phase 40 Session 1**: `POST /object-verify/process-pending?limit=N` now exists (the shape ADR 0101's own "Consequences" section recommended), and `infra/k8s/dms/templates/storage-cronjob.yaml`'s second `CronJob` (`storageCronJob.verification`, previously a deliberately unwired placeholder) now calls it once daily by default.
+- ~~**No removal of a target from the target set**~~ — **closed in Phase 40 Session 1**: `decommissioned=true` on `PUT /guard-status/{target_id}/config` now excludes a target from replication and cleans up its `object_copy` rows (blocked with `422` if the target holds an object's only confirmed copy), see "Target Metadata Live-Editable" → "Decommissioning" above. This bullet previously read: "a once-configured target currently cannot be cleanly 'decommissioned' (the associated `object_copy` rows would be left orphaned); only *adding* was addressed in P5c-S2. During this session's live verification (P24-S1), this was cleaned up manually via SQL for exactly this reason (30,410 `pending` rows seeded for all already-existing objects by the rebalancing when the test target was added)" — the exact incident this session's own regression test now reproduces and proves fixed.
 - **`local` backend without real WORM** (only an application-layer guard, see ADR 0030) — anyone needing tamper-proof WORM on local storage must use an S3-compatible target with `object_lock_mode=governance`.
 - **`azure` backend without real WORM** (Post-Roadmap Phase 24 Session 1, only an application-layer guard, see "Object Lock/WORM" above) — Azure Immutable Blob Storage would be technically possible but was deliberately not implemented, since Azurite (the reference test environment) does not support it; anyone needing real WORM must continue to use a `type="s3"` target with `object_lock_mode=governance`.
 - **Azurite emulator version drift**: the pinned `azurite` image (`3.30.0`) does not necessarily know the `x-ms-version` sent by whichever `azure-storage-blob` SDK version is current — caught via the Azurite CLI flag `--skipApiVersionCheck` (see `infra/docker-compose.yml`); on an SDK version jump with actually incompatible (not merely unknown) request fields, this flag would no longer help and Azurite would need to be updated.
 - **`replication.py`'s `process_pending` propagates `retention_until` to `record_copy`, but not `lock_until` to the backend `write()` call on caught-up replication** — relevant only once caught-up replication is regularly used for governance targets (documented in ADR 0030).
 - **No automatic bucket upgrade** for buckets already in production use without Object Lock (see ADR 0030) — only newly created buckets receive `ObjectLockEnabledForBucket=True`.
 - **`PUT /guard-status/{id}/config`'s live reload (Post-Roadmap Phase 22 Session 7, ADR 0092) affects only its own process instance** — with multiple horizontally scaled `storage-service` replicas, a replica without its own `PUT` call/restart does not see the change (no shared cache/pub-sub invalidation). Uncritical for the current single-replica deployment reality.
-- **`PUT /guard-status/{id}/config` does NOT validate whether a `role` change makes the `quorum_count` already set via `PUT /operational-config` unsatisfiable** (ADR 0092) — only the "at least one regular target remains" check is implemented, not the finer quorum consistency check.
+- ~~**`PUT /guard-status/{id}/config` does NOT validate whether a `role` change makes the `quorum_count` already set via `PUT /operational-config` unsatisfiable**~~ — **closed in Phase 40 Session 1**: the same `1 <= quorum_count <= len(would_be_targets)` check `PUT /operational-config` already had (ADR 0091) is now also applied here, for both a `role` toggle and `decommissioned`.

@@ -46,16 +46,24 @@ def resolve_targets(targets: list[BackendTargetConfig]) -> list[str]:
     depending on context, callers pass either the structural env-var list
     (`settings.targets`, e.g. when building the backend instances) or the
     list merged live with `TargetOverride` rows (`main.py._compute_target_state`,
-    for `role`-dependent routing)."""
-    return [target.id for target in targets if target.role != "archive"]
+    for `role`-dependent routing). Since Phase 40 Session 1, also excludes
+    `decommissioned` targets - a decommissioned target is neither a
+    regular nor an archive write target, but its backend connection stays
+    available (see `build_backends`, unaffected by this filter)."""
+    return [
+        target.id for target in targets if target.role != "archive" and not target.decommissioned
+    ]
 
 
 def resolve_archive_targets(targets: list[BackendTargetConfig]) -> list[str]:
     """List of configured archive target `id`s (5.6, since P7-S3) - these
     receive content exclusively via the `.../archive-copy` endpoints, not
     via the regular upload replication. Since Post-Roadmap Phase 22
-    Session 7, also switched to a passed-in list, see `resolve_targets`."""
-    return [target.id for target in targets if target.role == "archive"]
+    Session 7, also switched to a passed-in list, see `resolve_targets`.
+    Since Phase 40 Session 1, also excludes `decommissioned` targets."""
+    return [
+        target.id for target in targets if target.role == "archive" and not target.decommissioned
+    ]
 
 
 def build_backends(settings: Settings) -> dict[str, StorageBackend]:

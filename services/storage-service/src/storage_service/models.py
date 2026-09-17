@@ -26,6 +26,11 @@ class ObjectMetadata(Base):
     content_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # Bulk fixity queue (3.6 "regular fixity check", Phase 40 Session 1,
+    # the shape ADR 0101's Consequences already recommended): NULL means
+    # never verified (counts as most overdue), same convention as
+    # ObjectCopy.next_retry_at below.
+    next_verify_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class ObjectCopy(Base):
@@ -140,4 +145,10 @@ class TargetOverride(Base):
     target_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     object_lock_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
     role: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Decommissioning (Phase 40 Session 1) - excludes the target from
+    # resolve_targets()/resolve_archive_targets() (no new writes) without
+    # removing it from Settings.targets/app.state.backends (its backend
+    # connection stays available for the accompanying object_copy cleanup,
+    # see repository.remove_copies_for_backend).
+    decommissioned: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

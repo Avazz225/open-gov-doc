@@ -1,5 +1,13 @@
 # 0101 — Storage CronJob: only ONE CronJob (replication), no second one for fixity verification
 
+**Update (Phase 40 Session 1):** the bulk endpoint and second CronJob this ADR's own "Consequences"
+section recommended have now been built — `POST /object-verify/process-pending?limit=N`
+(`services/storage-service/src/storage_service/main.py`/`replication.py`) and a second `CronJob` in
+`infra/k8s/dms/templates/storage-cronjob.yaml` (`storageCronJob.verification`, no longer an unwired
+placeholder). The decision below — ONE CronJob, no bulk endpoint, at the time this ADR was written —
+was correct for what existed then; it is not reversed, just fulfilled. See
+`docs/services/storage-service.md` ("Redundancy & Fixity", "Open Points") for the current state.
+
 **Status:** accepted (P26-S4, see `IMPLEMENTATION_PLAN.md`)
 **Context:** Concept 3.6, affects `infra/k8s/dms/` (Phase 26, continuation of [ADR 0099](0099-helm-single-chart-values-driven-service-map.md)/[ADR 0100](0100-helm-secrets-existing-secret-pattern.md)), fulfills the external carrier for `storage-service`'s on-demand endpoints announced in [ADR 0004](0004-storage-redundancy-scope.md) and PROGRESS.md P20-S6.
 

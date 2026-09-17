@@ -19,7 +19,10 @@ import { useAuth } from "@/lib/auth-context";
 // (object lock mode, archival role) per already-configured target, takes
 // effect without a restart. Plus: guard status (device ID per target,
 // pending re-replication) and the admin override that allows a degraded
-// start on the next restart.
+// start on the next restart. Decommissioning (Phase 40 Session 1) - a
+// confirmation dialog only on the way IN (checking the box), since that
+// direction deletes object_copy rows; unchecking it (reactivation) just
+// re-seeds pending copies, nothing destructive.
 export function StorageGuard() {
   const { accessToken } = useAuth();
   const { t } = useI18n();
@@ -83,6 +86,7 @@ export function StorageGuard() {
       await updateTargetConfig(accessToken, entry.target_id, {
         objectLockMode: entry.object_lock_mode === "governance" ? null : "governance",
         role: entry.role,
+        decommissioned: entry.decommissioned,
       });
       await reload();
     } catch (err) {
@@ -100,6 +104,32 @@ export function StorageGuard() {
       await updateTargetConfig(accessToken, entry.target_id, {
         objectLockMode: entry.object_lock_mode,
         role: entry.role === "archive" ? null : "archive",
+        decommissioned: entry.decommissioned,
+      });
+      await reload();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t("storageGuard.targetConfigError"));
+    } finally {
+      setUpdatingTarget(null);
+    }
+  }
+
+  async function handleToggleDecommissioned(entry: GuardStatusEntry) {
+    if (!accessToken) return;
+    const nextValue = !entry.decommissioned;
+    if (
+      nextValue &&
+      !window.confirm(t("storageGuard.confirmDecommission", { targetId: entry.target_id }))
+    ) {
+      return;
+    }
+    setError(null);
+    setUpdatingTarget(entry.target_id);
+    try {
+      await updateTargetConfig(accessToken, entry.target_id, {
+        objectLockMode: entry.object_lock_mode,
+        role: entry.role,
+        decommissioned: nextValue,
       });
       await reload();
     } catch (err) {
@@ -144,6 +174,7 @@ export function StorageGuard() {
                 <th>{t("storageGuard.pendingCopies")}</th>
                 <th>{t("storageGuard.objectLockMode")}</th>
                 <th>{t("storageGuard.archiveRole")}</th>
+                <th>{t("storageGuard.decommissioned")}</th>
                 <th />
               </tr>
             </thead>
@@ -180,6 +211,17 @@ export function StorageGuard() {
                         onChange={() => handleToggleArchiveRole(entry)}
                       />
                       {t("storageGuard.archiveRoleLabel")}
+                    </label>
+                  </td>
+                  <td>
+                    <label className="checkbox-label">
+                      <input
+                        type="checkbox"
+                        checked={entry.decommissioned}
+                        disabled={updatingTarget !== null}
+                        onChange={() => handleToggleDecommissioned(entry)}
+                      />
+                      {t("storageGuard.decommissionedLabel")}
                     </label>
                   </td>
                   <td>

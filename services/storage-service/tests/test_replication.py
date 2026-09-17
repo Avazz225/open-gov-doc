@@ -401,6 +401,77 @@ async def test_process_pending_without_ok_source_is_reported_failed(session):
     assert copy_b.attempts == 1
 
 
+# --- Bulk-Fixity-Sweep (3.6 "regelmäßige Fixity-Prüfung", Phase 40 Session 1,
+# die von ADR 0101s "Consequences" bereits empfohlene Form) -----------------
+
+
+async def test_verify_pending_verifies_and_reschedules(session, backend_a):
+    key = _key()
+    data = b"hello"
+    checksum = hashlib.sha256(data).hexdigest()
+    await _make_metadata(session, key, checksum)
+    await backend_a.write(key, data)
+    await repository.record_copy(session, key, "a", status="ok", checksum=checksum)
+
+    before = datetime.now(UTC)
+    result = await replication.verify_pending(
+        session, backends={"a": backend_a}, limit=100, interval_seconds=3600
+    )
+
+    assert result["checked"] == 1
+    assert result["ok"] == 1
+    assert result["mismatches"] == 0
+    metadata = await repository.get_metadata(session, key)
+    assert metadata.next_verify_at is not None
+    assert metadata.next_verify_at > before + timedelta(minutes=59)
+
+
+async def test_verify_pending_counts_a_mismatch_and_still_reschedules(session, backend_a):
+    """A detected mismatch must not leave the object stuck retrying every
+    sweep forever (no retry/backoff semantics here, unlike
+    `process_pending` - see the docstring) - it is rescheduled exactly
+    like a clean verification, just counted separately."""
+    key = _key()
+    data = b"hello"
+    checksum = hashlib.sha256(data).hexdigest()
+    await _make_metadata(session, key, checksum)
+    await backend_a.write(key, b"corrupted")
+    await repository.record_copy(session, key, "a", status="ok", checksum=checksum)
+
+    result = await replication.verify_pending(
+        session, backends={"a": backend_a}, limit=100, interval_seconds=3600
+    )
+
+    assert result["checked"] == 1
+    assert result["ok"] == 0
+    assert result["mismatches"] == 1
+    metadata = await repository.get_metadata(session, key)
+    assert metadata.next_verify_at is not None
+
+
+async def test_verify_pending_never_checked_object_is_picked_up_before_a_recently_verified_one(
+    session, backend_a
+):
+    key_never = _key()
+    key_recent = _key()
+    checksum = hashlib.sha256(b"hello").hexdigest()
+    for key in (key_never, key_recent):
+        await _make_metadata(session, key, checksum)
+        await backend_a.write(key, b"hello")
+        await repository.record_copy(session, key, "a", status="ok", checksum=checksum)
+    await repository.set_next_verify_at(session, key_recent, datetime.now(UTC) + timedelta(hours=1))
+
+    result = await replication.verify_pending(
+        session, backends={"a": backend_a}, limit=1, interval_seconds=3600
+    )
+
+    assert result["checked"] == 1
+    metadata_never = await repository.get_metadata(session, key_never)
+    metadata_recent = await repository.get_metadata(session, key_recent)
+    assert metadata_never.next_verify_at is not None
+    assert metadata_recent.next_verify_at < metadata_never.next_verify_at
+
+
 # --- Aussonderung (5.6, seit P7-S3) ----------------------------------------
 
 

@@ -52,6 +52,16 @@ class ReplicationRunResult(BaseModel):
     permanently_failed: int
 
 
+class BulkVerifyResult(BaseModel):
+    """Bulk fixity sweep result (3.6 "regular fixity check", Phase 40
+    Session 1) - `POST /object-verify/process-pending`'s counterpart to
+    `ReplicationRunResult`."""
+
+    checked: int
+    ok: int
+    mismatches: int
+
+
 class GuardConfigIn(BaseModel):
     allow_degraded_start: bool = False
 
@@ -94,11 +104,18 @@ class GuardStatusEntry(BaseModel):
     # remains pure deployment configuration.
     object_lock_mode: str | None = None
     role: str | None = None
+    # Decommissioning (Phase 40 Session 1).
+    decommissioned: bool = False
 
 
 class TargetConfigIn(BaseModel):
     """Post-Roadmap Phase 22 Session 7 (ADR 0092) - the same literal values
-    as `BackendTargetConfig.object_lock_mode`/`.role` (`settings.py`)."""
+    as `BackendTargetConfig.object_lock_mode`/`.role` (`settings.py`).
+    `decommissioned` added in Phase 40 Session 1 - excludes the target
+    from `resolve_targets()`/`resolve_archive_targets()` and triggers
+    cleanup of its `object_copy` rows (see `PUT /guard-status/{id}/config`
+    in `main.py`)."""
 
     object_lock_mode: Literal["governance"] | None = None
     role: Literal["archive"] | None = None
+    decommissioned: bool = False

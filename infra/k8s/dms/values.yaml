@@ -1489,24 +1489,18 @@ storageService:
 # deferred to this session). See ADR 0101 for the full
 # rationale/derivation of this entire block.
 #
-# IMPORTANT — a deviation from the session briefing: there is deliberately only ONE
-# functional CronJob here (replication), not two. The second endpoint
-# assumed in the briefing (`GET /object-verify/{key:path}/all`,
-# services/storage-service/src/storage_service/main.py line 523) verifies,
-# according to the real code (and docs/services/storage-service.md), all configured
-# TARGETS **of a single object `key` passed as a path parameter** —
-# NOT "all objects in the store". storage-service currently has no endpoint
-# that lists object keys or delivers a batch of not-yet-verified
-# objects (no fixity counterpart to `list_pending_copies`/
-# `POST /replication/process-pending`) — a periodic "verify everything"
-# CronJob called blindly from outside therefore can't be built against the
-# ACTUAL API without inventing a new storage-service endpoint
-# (out of scope for a pure Helm chart session). `verification`
-# below therefore deliberately remains an UNWIRED placeholder (no template
-# reads it) for a future storage-service session that builds a real
-# bulk-verify endpoint (see ADR 0101 "Consequences" for a
-# design proposal, analogous to the full-jitter backoff retry queue from
-# ADR 0082).
+# At P26-S4, this deliberately shipped with only ONE functional CronJob
+# (replication) — the endpoint that existed at the time
+# (`GET /object-verify/{key:path}/all`) verified all configured TARGETS
+# of a single, already-known object `key`, not "all objects in the
+# store", so a periodic sweep couldn't be built against it without a new
+# storage-service endpoint (see ADR 0101 for the full rationale).
+#
+# Phase 40 Session 1 built exactly the bulk endpoint ADR 0101's own
+# "Consequences" section recommended (`POST /object-verify/process-
+# pending?limit=N`, analogous to the replication retry queue) —
+# `verification` below is therefore now a real, wired second CronJob,
+# not a placeholder.
 # ---------------------------------------------------------------------------
 storageCronJob:
   enabled: true
@@ -1557,6 +1551,26 @@ storageCronJob:
     successfulJobsHistoryLimit: 3
     failedJobsHistoryLimit: 3
   verification:
-    # See the explanation in the block comment above — deliberately no template behind it,
-    # a purely documented placeholder for a later session.
-    enabled: false
+    enabled: true
+    # Once daily by default - a fixity re-check is far more expensive per
+    # object than a replication retry (re-reads/re-hashes real content on
+    # every target), and full-jitter isn't needed here (no retry/backoff
+    # semantics, see `replication.verify_pending`'s docstring) - a fixed
+    # off-peak-ish offset from the replication job's `*/15 * * * *` is
+    # enough to avoid the two jobs' curl containers starting at the exact
+    # same minute.
+    schedule: "17 3 * * *"
+    # See POST /object-verify/process-pending?limit=N (storage_service/
+    # main.py) - matches storage_service.settings.
+    # fixity_verify_interval_seconds's daily-default cadence: at 200
+    # objects/day, a store with e.g. 50k objects is fully re-verified
+    # roughly every 250 days. Raise this (or the schedule frequency) for
+    # a smaller store that should cycle through faster.
+    limit: 200
+    # A fixity sweep re-reads/re-hashes content on every configured
+    # target for each selected object - more expensive per unit of work
+    # than a replication retry, hence more headroom than the
+    # replication job's 180s above.
+    activeDeadlineSeconds: 300
+    successfulJobsHistoryLimit: 3
+    failedJobsHistoryLimit: 3

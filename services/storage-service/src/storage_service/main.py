@@ -30,6 +30,7 @@ from storage_service.backends import (
 )
 from storage_service.models import Base, TargetOverride
 from storage_service.schemas import (
+    BulkVerifyResult,
     FixityEntry,
     GuardConfigIn,
     GuardConfigOut,
@@ -70,6 +71,11 @@ def _compute_target_state(
                     else target.object_lock_mode
                 ),
                 "role": overrides[target.id].role if target.id in overrides else target.role,
+                "decommissioned": (
+                    overrides[target.id].decommissioned
+                    if target.id in overrides
+                    else target.decommissioned
+                ),
             }
         )
         for target in targets
@@ -167,6 +173,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await conn.execute(
             text(
                 "ALTER TABLE storage.object_copy ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ"
+            )
+        )
+        # Decommissioning (Phase 40 Session 1) - same ad-hoc migration
+        # pattern.
+        await conn.execute(
+            text(
+                "ALTER TABLE storage.target_override "
+                "ADD COLUMN IF NOT EXISTS decommissioned BOOLEAN NOT NULL DEFAULT FALSE"
+            )
+        )
+        # Bulk fixity sweep (3.6 "regular fixity check", Phase 40 Session 1,
+        # the shape ADR 0101's Consequences already recommended).
+        await conn.execute(
+            text(
+                "ALTER TABLE storage.object_metadata "
+                "ADD COLUMN IF NOT EXISTS next_verify_at TIMESTAMPTZ"
             )
         )
     app.state.engine = engine
@@ -611,6 +633,31 @@ async def replication_process_pending(
     return result
 
 
+@app.post("/object-verify/process-pending", response_model=BulkVerifyResult)
+async def verify_pending_objects(
+    limit: int = 100, session: AsyncSession = Depends(get_session)
+) -> BulkVerifyResult:
+    """Bulk fixity sweep (3.6 "regular fixity check across all copies",
+    Phase 40 Session 1) - the endpoint ADR 0101's Consequences section
+    already recommended once a real periodic mechanism existed. Unlike
+    `GET /object-verify/{key:path}/all` (verifies all TARGETS of one
+    already-known object), this picks the `limit` objects verified
+    longest ago (never-verified counts as most overdue) and re-verifies
+    each of them - mirroring `POST /replication/process-pending`'s shape
+    exactly: an explicit endpoint instead of an in-process background
+    task (ADR 0004), intended for periodic invocation by an external
+    scheduler. Deliberately ungated, same rationale as
+    `/replication/process-pending` (see ADR 0101)."""
+    result = await replication.verify_pending(
+        session,
+        backends=app.state.backends,
+        limit=limit,
+        interval_seconds=settings.fixity_verify_interval_seconds,
+    )
+    await session.commit()
+    return result
+
+
 @app.get("/operational-config", response_model=OperationalConfigOut)
 async def get_operational_config(
     session: AsyncSession = Depends(get_session),
@@ -726,6 +773,7 @@ async def reidentify_target(
         pending_copies=pending_counts.get(target_id, 0),
         object_lock_mode=configs[target_id].object_lock_mode if target_id in configs else None,
         role=configs[target_id].role if target_id in configs else None,
+        decommissioned=configs[target_id].decommissioned if target_id in configs else False,
     )
 
 
@@ -734,7 +782,13 @@ async def get_guard_status(session: AsyncSession = Depends(get_session)) -> list
     """Admin-UI status block (3.6 "visible as status in the admin UI",
     P5b-S6): last confirmed device ID per configured target plus the
     count of not-yet-replicated copies - a target with
-    `pending_copies > 0` after a degraded start is still in recovery."""
+    `pending_copies > 0` after a degraded start is still in recovery.
+    Iterates `app.state.target_configs` (every configured target,
+    unfiltered), NOT `app.state.targets` (Phase 40 Session 1 - the latter
+    already excluded `role="archive"` targets from this status view
+    before this session, and would now do the same for a decommissioned
+    one, making it impossible to discover and un-decommission a target
+    through this endpoint/the Admin UI)."""
     identities = {i.target_id: i for i in await repository.list_backend_identities(session)}
     pending_counts = await repository.count_pending_copies_by_backend(session)
     configs = {t.id: t for t in app.state.target_configs}
@@ -746,8 +800,9 @@ async def get_guard_status(session: AsyncSession = Depends(get_session)) -> list
             pending_copies=pending_counts.get(target_id, 0),
             object_lock_mode=configs[target_id].object_lock_mode if target_id in configs else None,
             role=configs[target_id].role if target_id in configs else None,
+            decommissioned=configs[target_id].decommissioned if target_id in configs else False,
         )
-        for target_id in app.state.targets
+        for target_id in configs
     ]
 
 
@@ -759,35 +814,105 @@ async def put_target_config(
     session: AsyncSession = Depends(get_session),
 ) -> GuardStatusEntry:
     """Edit target metadata live (Post-Roadmap Phase 22 Session 7,
-    ADR 0092) - ONLY `object_lock_mode`/`role` per already-configured
-    target ("only edit existing entries", same rule as P22-S6). `404` for
-    an unknown `target_id` (the target *list* itself remains env-var-only,
-    no new IDs via this endpoint). Writes the result immediately back to
-    `app.state` (`_compute_target_state`), so it takes effect on every
-    subsequent request without a restart. Gated by `admin.storage` since
-    Post-Roadmap Phase 38 Session 3, see `_require_storage_permission`."""
+    ADR 0092) - ONLY `object_lock_mode`/`role`/`decommissioned` per
+    already-configured target ("only edit existing entries", same rule as
+    P22-S6). `404` for an unknown `target_id` (the target *list* itself
+    remains env-var-only, no new IDs via this endpoint). Writes the
+    result immediately back to `app.state` (`_compute_target_state`), so
+    it takes effect on every subsequent request without a restart. Gated
+    by `admin.storage` since Post-Roadmap Phase 38 Session 3, see
+    `_require_storage_permission`.
+
+    `decommissioned` (Phase 40 Session 1): excludes the target from
+    `resolve_targets()`/`resolve_archive_targets()` - `422` under the same
+    three conditions a role toggle already had to guard against, now
+    shared by both: (a) no regular target would remain, (b) the
+    already-configured `quorum_count` (`PUT /operational-config`) would
+    become unsatisfiable against the smaller target count - previously
+    UNCHECKED for a role toggle too, a real, documented gap (see
+    `docs/services/storage-service.md` Open Points) - or (c), specific to
+    decommissioning, some object's only confirmed (`ok`) copy lives
+    exclusively on this target (`count_sole_ok_copies_for_backend`) -
+    removing it would make that object's data permanently unreachable,
+    not merely orphan a row. Once these checks pass, every existing
+    `object_copy` row for this target is deleted
+    (`remove_copies_for_backend`) - the exact cleanup step missing before
+    this session, which is what produced 30,410 permanently orphaned rows
+    in a real incident. Un-decommissioning (`decommissioned: false` on a
+    previously decommissioned target) re-seeds `pending` copies for it
+    (`seed_pending_copies_for_new_target`), the same rebalancing a newly
+    added target already gets (P5c-S2) - symmetrical treatment of
+    "target re-enters service"."""
     await _require_storage_permission(x_dms_principal)
     if target_id not in {t.id for t in settings.targets}:
         raise HTTPException(status_code=404, detail=f"Unbekanntes Ziel: {target_id!r}")
 
     existing_overrides = {o.target_id: o for o in await repository.list_target_overrides(session)}
+    was_decommissioned = (
+        existing_overrides[target_id].decommissioned if target_id in existing_overrides else False
+    )
     would_be_overrides = dict(existing_overrides)
     would_be_overrides[target_id] = TargetOverride(
-        target_id=target_id, object_lock_mode=body.object_lock_mode, role=body.role
+        target_id=target_id,
+        object_lock_mode=body.object_lock_mode,
+        role=body.role,
+        decommissioned=body.decommissioned,
     )
     _, would_be_targets, _, _ = _compute_target_state(settings.targets, would_be_overrides)
     if not would_be_targets:
         raise HTTPException(
             status_code=422,
             detail=(
-                f"role={body.role!r} für {target_id!r} würde kein reguläres Ziel mehr übrig "
-                "lassen (mindestens eines muss außerhalb role=archive bleiben)"
+                f"role={body.role!r}/decommissioned={body.decommissioned!r} für {target_id!r} "
+                "würde kein reguläres Ziel mehr übrig lassen (mindestens eines muss außerhalb "
+                "role=archive/decommissioned=true bleiben)"
             ),
         )
 
+    operational_config = await _get_operational_config(session)
+    if operational_config.write_strategy == "quorum" and not (
+        1 <= operational_config.quorum_count <= len(would_be_targets)
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Änderung für {target_id!r} würde quorum_count={operational_config.quorum_count} "
+                f"mit nur {len(would_be_targets)} verbleibenden regulären Ziel(en) nicht mehr "
+                "erfüllbar machen (siehe PUT /operational-config)"
+            ),
+        )
+
+    if body.decommissioned and not was_decommissioned:
+        sole_copies = await repository.count_sole_ok_copies_for_backend(session, target_id)
+        if sole_copies:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Ziel {target_id!r} kann nicht dekommissioniert werden: {sole_copies} "
+                    "Objekt(e) haben ausschließlich auf diesem Ziel eine bestätigte Kopie - "
+                    "zuerst auf ein anderes Ziel replizieren"
+                ),
+            )
+
     await repository.upsert_target_override(
-        session, target_id, object_lock_mode=body.object_lock_mode, role=body.role
+        session,
+        target_id,
+        object_lock_mode=body.object_lock_mode,
+        role=body.role,
+        decommissioned=body.decommissioned,
     )
+
+    if body.decommissioned and not was_decommissioned:
+        removed = await repository.remove_copies_for_backend(session, target_id)
+        logger.warning(
+            "Ziel %r dekommissioniert: %s object_copy-Zeile(n) entfernt", target_id, removed
+        )
+    elif was_decommissioned and not body.decommissioned:
+        seeded = await repository.seed_pending_copies_for_new_target(session, target_id)
+        logger.info(
+            "Ziel %r reaktiviert: %s Objekt(e) zur Nachreplikation vorgemerkt", target_id, seeded
+        )
+
     await session.commit()
 
     target_overrides = {o.target_id: o for o in await repository.list_target_overrides(session)}
@@ -808,4 +933,5 @@ async def put_target_config(
         pending_copies=pending_counts.get(target_id, 0),
         object_lock_mode=configs[target_id].object_lock_mode if target_id in configs else None,
         role=configs[target_id].role if target_id in configs else None,
+        decommissioned=configs[target_id].decommissioned if target_id in configs else False,
     )
