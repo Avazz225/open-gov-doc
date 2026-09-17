@@ -2,7 +2,29 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P40-S1 (storage-target decommissioning + related gaps — first session of Phase 40,
+**Last completed:** P40-S2 (unbounded concurrency fan-out to `document-service` — second session of
+Phase 40, "Operational Reliability"). **Closed as a no-op, confirmed moot, exactly as the plan's own note
+flagged.** Re-verified directly against the real current source before writing anything: neither
+`query_service/filtering.py` nor `reporting_service/filtering.py` calls `document-service` at all any
+more — both resolve a document/folder event's `resource_id` straight from the event's own `subject`
+(Post-Roadmap Phase 39 Session 4, ADR 0154), with no `DocumentClient`/`document_client` dependency left
+in either module and no `asyncio.gather` anywhere in either service. `query-service` still has a
+`document_client`, but only for the entirely unrelated single-document manipulation-mode feature
+(`manipulation.py`, one explicit `document_id` lookup per user action, not a fan-out over query results) —
+not the code path P36-S3 found and reproduced. `docs/services/reporting-service.md`'s Open Points already
+documents this exact finding since P39-S4 (struck bullet, "moot since Post-Roadmap Phase 39 Session 4");
+`query-service.md` never had a separate bullet for this (P36-S3's live verification reproduced the risk
+against `reporting-service` specifically), so there was nothing to strike there either. No code changed,
+no tests run (nothing to test), no Docker rebuild (nothing to rebuild), no ADR (no decision made, a
+confirmation). `IMPLEMENTATION_PLAN.md`'s P40-S2 row updated from "likely already moot, re-verify" to
+"confirmed moot, closed as no-op."
+
+**Next session:** **P40-S3** (`federation-hub-service` reliability — API key/certificate rotation without
+full de-/re-registration, return-path retry logic mirroring the existing outbound retry, admin UI
+visibility + manual restart for failed handovers). See `IMPLEMENTATION_PLAN.md` "Phase 40" for the full
+session breakdown.
+
+Immediately before P40-S2: **P40-S1** (storage-target decommissioning + related gaps — first session of Phase 40,
 "Operational Reliability"). Research ahead of implementation confirmed all three plan items accurately:
 none were stale — item 3 (bulk fixity endpoint) was even unusually well pre-scoped already, since
 ADR 0101's own "Consequences" section had already specified almost exactly the shape to build.
