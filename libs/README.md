@@ -12,3 +12,4 @@ Created in P0-S2:
 - `dms-registry-client/` — self-registration of a service with the registry including heartbeat (Concept 3.2a, since P4-S1)
 - `dms-permission-client/` — HTTP client against `permission-service` (RBAC checks, role assignment), consolidates the `PermissionServiceClient` class previously duplicated per service (Post-Roadmap Phase 19 Session 1)
 - `dms-retry/` — shared backoff/jitter math (Full Jitter, AWS standard formula) for retry poll loops, **no** shared poll-loop framework (Post-Roadmap Phase 20 Session 1)
+- `dms-ui/` — **not Python**: a plain shared CSS file (design tokens) consumed by all six frontend apps under `apps/` (Phase 48 Session 1, [ADR 0168](../docs/adr/0168-shared-design-tokens-and-scales.md)) — the one deliberate exception to ADR 0006's "no shared code between frontend apps" stance, everything else about each app stays independently duplicated

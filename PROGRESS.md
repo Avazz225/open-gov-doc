@@ -2,8 +2,70 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P47-S5 (`libreoffice-addin`: i18n from scratch — fifth and last session of
-Phase 47, "English i18n", **closes Phase 47**). No new ADR — the "follow the host, no in-app
+**Last completed:** P48-S1 (Extract the shared `--dms-*` convention into one real source, define new
+spacing/radius/shadow/typography scales, get explicit user sign-off — first session of Phase 48,
+"Design System Foundation"). New ADR: [0168](docs/adr/0168-shared-design-tokens-and-scales.md).
+
+**Audited every app's actual `globals.css` before writing anything down** (not assuming the drift
+the plan predicted): confirmed real gaps per app (`user-ui` alone has `--dms-accent-bg-strong`/
+`--dms-surface`/`--dms-surface-fg` but is missing `--dms-hover-bg`, which the other four
+theme-capable apps have; `office-addin` is missing several tokens and has **no `data-theme` blocks
+at all** — confirmed intentional, matches its documented "no manual switcher" precedent) and, more
+importantly, **a real, currently-live bug**: `user-ui`/`admin-ui`/`process-designer`'s high-contrast
+`--dms-accent-bg` is still `#ffff00` (identical to `--dms-accent`, yellow-on-yellow) — Post-Roadmap
+Phase 33 Session 1 (ADR 0135) already fixed this exact bug in `reviewer-ui`/`migration-console` but
+never touched the other three apps' own copies. Also surveyed every hardcoded `border-radius`/
+`box-shadow`/`font-size`/`gap`/`padding` value across all six apps' `globals.css` files to ground
+the new scales in what's actually there, not invented numbers.
+
+**New shared source**: `libs/dms-ui/tokens.css` — a plain CSS file, not an npm package, since this
+repo's six Next.js apps have no existing JS workspace tooling (no root `package.json`, no `pnpm-
+workspace.yaml`) to hook a real package into. Consumed via a single relative `@import` at the top of
+an app's own `globals.css`. **Verified this actually works before writing it into the ADR**: spiked
+the `@import` into `process-designer`'s `globals.css` (the smallest app), ran a real `next build`,
+confirmed the token appears in the compiled CSS output, then reverted the spike immediately — no net
+change to any app. The file's color section is the de-drifted superset of every app's individual
+token set, with the high-contrast `--dms-accent-bg` value corrected to `#000000` (matching ADR
+0135's already-fixed apps) — adopting this file in Phase 49 fixes the live bug in `user-ui`/
+`admin-ui`/`process-designer` as a side effect of the rollout, not a separately tracked fix.
+
+**New scales, grounded in the audited real values, not textbook defaults**: spacing
+(`--dms-space-1` through `-8`, a 4px grid matching where existing values already cluster), radius
+(`sm`/`md`/`lg`/`full`, matching the four shapes already visually in use despite six slightly
+different hardcoded values today), shadow (`sm`/`lg`, matching the two values already in active use,
+kept theme-invariant since elevation is barely used in this codebase at all), typography (font
+family — already identical everywhere, tokenizing removes six identical copies — plus five
+`font-size` steps matching the values already observed).
+
+**`office-addin`'s reduced theming is now an explicitly recorded exception** (this ADR), not
+something a future session might "notice" as inconsistent and try to force-unify.
+
+**No app was touched this session** (per the plan's own DoD: "before any app is touched") — only
+the shared token file, its README, `libs/README.md`, and the ADR. The one exception (the
+`process-designer` spike) was reverted before this session's diff was considered final.
+
+**Published a design-system preview Artifact** (a Design canvas, one interactive artboard) showing
+the full token set (13 color swatches with the live high-contrast bug fix visible), the new
+spacing/radius/shadow/typography scales, and five representative components (primary/secondary/
+danger buttons, three badge variants, an input, a card, a top-bar strip — all assembled from the
+same tokens, the button styling faithfully reused from `office-addin`'s own real `button.primary`
+pattern rather than invented) — with a working theme switcher (light/dark/high-contrast) so the user
+can directly toggle and compare, instead of three static screenshots. The artifact's own caption
+also surfaces one genuine open question this audit found but does not resolve: no app's real
+`button.primary` code is theme-aware today, so white on-accent text would be illegible against
+high-contrast's yellow accent — the preview computes the correct color for that one case, but real
+code does not yet.
+
+**This is the sign-off gate — do not proceed to Phase 49 without the user having reviewed the
+published artifact and explicitly approved it**, per the plan's own DoD for this session. Next
+session is not yet confirmed pending that review.
+
+`libs/dms-ui/README.md` (new), `libs/README.md` (updated to note this one non-Python exception).
+
+---
+
+Immediately before P48-S1: **P47-S5** (`libreoffice-addin`: i18n from scratch — fifth and last
+session of Phase 47, "English i18n", closed Phase 47). No new ADR — the "follow the host, no in-app
 switcher" decision was already recorded in [ADR 0167](docs/adr/0167-locale-switcher-pattern-and-office-addin-host-locale.md)
 during P47-S1; this session applies it to a genuinely different tech stack rather than making a new
 decision, matching the plan's own DoD ("no new ADR expected for S2-S5").

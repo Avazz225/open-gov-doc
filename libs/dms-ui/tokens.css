@@ -1,0 +1,173 @@
+/* dms-ui design tokens (concept 8, Phase 48 Session 1, ADR 0168) - the one
+   real shared CSS source across all six frontend apps, a deliberate,
+   narrow reversal of ADR 0006's "duplicate everything" stance for exactly
+   this layer. Everything else about each app (components, business logic,
+   build config) stays independently duplicated, unchanged.
+
+   Consumed via a plain relative `@import` at the top of each app's own
+   `globals.css` - no npm package, no workspace config, since this repo's
+   six Next.js apps have no existing JS monorepo tooling to hook a real
+   package into (see ADR 0168 "Rationale"). Verified against a real
+   `next build` before this decision was written down; no app's own
+   globals.css imports this yet - that happens app-by-app in Phase 49,
+   not in this session.
+
+   Color tokens themselves are unchanged from the pre-existing --dms-*
+   convention (ADR 0009) other than de-drifting: this file is the SUPERSET
+   of every app's individual token set (some apps were missing
+   --dms-hover-bg, others --dms-accent-bg-strong/--dms-surface/
+   --dms-surface-fg, office-addin was missing --dms-success-bg entirely -
+   all confirmed live via a cross-app diff before writing this file, see
+   ADR 0168), and the high-contrast --dms-accent-bg value here is the
+   CORRECT one (#000000, matching ADR 0135's fix in reviewer-ui/
+   migration-console) rather than the still-buggy #ffff00-on-#ffff00 value
+   user-ui/admin-ui/process-designer currently carry - adopting this file
+   in Phase 49 fixes that bug in those three apps as a side effect, not a
+   separate task.
+
+   New in this session: spacing/radius/shadow/typography scales (see
+   ADR 0168 "Rationale" for the real hardcoded values these are derived
+   from) - today's global.css files have colors as the only tokenized
+   layer; radius alone appears as 4px, 0.375rem, 0.25rem, 0.5rem, 5px, and
+   0.4rem across the six apps with no shared scale at all. */
+
+:root {
+  color-scheme: light dark;
+
+  /* Typography - the font stack itself was already consistent across all
+     six apps; tokenizing it here removes six identical copies without
+     changing anything visually. */
+  --dms-font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
+  --dms-font-family-mono: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  --dms-font-size-xs: 0.75rem;
+  --dms-font-size-sm: 0.85rem;
+  --dms-font-size-base: 1rem;
+  --dms-font-size-lg: 1.1rem;
+  --dms-font-size-xl: 1.5rem;
+
+  /* Spacing - a 4px base grid. The existing apps' hardcoded gap/padding
+     values already cluster near these steps (0.25/0.5/0.75/1/1.5rem
+     account for the large majority of observed values) - a handful of
+     off-grid outliers (0.15/0.3/0.35/0.4/0.6rem) exist today and are
+     expected to round to the nearest step during Phase 49's rollout, not
+     preserved as their own scale steps. */
+  --dms-space-1: 0.25rem;
+  --dms-space-2: 0.5rem;
+  --dms-space-3: 0.75rem;
+  --dms-space-4: 1rem;
+  --dms-space-6: 1.5rem;
+  --dms-space-8: 2rem;
+
+  /* Radius - matches the four shapes actually in use today (small
+     controls, buttons/cards, panels/modals, pills) instead of the six
+     slightly-different values currently scattered across apps for what
+     is visually the same handful of shapes. */
+  --dms-radius-sm: 0.25rem;
+  --dms-radius-md: 0.375rem;
+  --dms-radius-lg: 0.5rem;
+  --dms-radius-full: 999px;
+
+  /* Shadow - elevation is barely used today (two near-identical values
+     found across all six apps combined); kept theme-invariant rather than
+     inventing per-theme elevation this codebase has never needed. */
+  --dms-shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.2);
+  --dms-shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.3);
+
+  /* Color - light theme (default), the same values every app's own :root
+     already uses. */
+  --dms-bg: #ffffff;
+  --dms-fg: #1a1a1a;
+  --dms-border: rgba(128, 128, 128, 0.25);
+  --dms-hover-bg: rgba(128, 128, 128, 0.12);
+  --dms-accent: #2563eb;
+  --dms-accent-bg: rgba(37, 99, 235, 0.15);
+  --dms-accent-bg-strong: rgba(37, 99, 235, 0.5);
+  --dms-danger: #b91c1c;
+  --dms-danger-bg: #b91c1c33;
+  --dms-success: #16a34a;
+  --dms-success-bg: #16a34a33;
+  --dms-surface: canvas;
+  --dms-surface-fg: canvastext;
+}
+
+/* Only applies before JS sets `data-theme` (these are client-only SPAs,
+   no server-rendered theme) - identical role to every app's own existing
+   block. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --dms-bg: #16181c;
+    --dms-fg: #e8e8e8;
+    --dms-border: rgba(200, 200, 200, 0.2);
+    --dms-hover-bg: rgba(200, 200, 200, 0.15);
+    --dms-accent: #60a5fa;
+    --dms-accent-bg: rgba(96, 165, 250, 0.2);
+    --dms-accent-bg-strong: rgba(96, 165, 250, 0.5);
+    --dms-danger: #f87171;
+    --dms-danger-bg: #f8717133;
+    --dms-success: #4ade80;
+    --dms-success-bg: #4ade8033;
+  }
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --dms-bg: #ffffff;
+  --dms-fg: #1a1a1a;
+  --dms-border: rgba(128, 128, 128, 0.25);
+  --dms-hover-bg: rgba(128, 128, 128, 0.12);
+  --dms-accent: #2563eb;
+  --dms-accent-bg: rgba(37, 99, 235, 0.15);
+  --dms-accent-bg-strong: rgba(37, 99, 235, 0.5);
+  --dms-danger: #b91c1c;
+  --dms-danger-bg: #b91c1c33;
+  --dms-success: #16a34a;
+  --dms-success-bg: #16a34a33;
+  --dms-surface: #ffffff;
+  --dms-surface-fg: #1a1a1a;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --dms-bg: #16181c;
+  --dms-fg: #e8e8e8;
+  --dms-border: rgba(200, 200, 200, 0.2);
+  --dms-hover-bg: rgba(200, 200, 200, 0.15);
+  --dms-accent: #60a5fa;
+  --dms-accent-bg: rgba(96, 165, 250, 0.2);
+  --dms-accent-bg-strong: rgba(96, 165, 250, 0.5);
+  --dms-danger: #f87171;
+  --dms-danger-bg: #f8717133;
+  --dms-success: #4ade80;
+  --dms-success-bg: #4ade8033;
+  --dms-surface: #16181c;
+  --dms-surface-fg: #e8e8e8;
+}
+
+/* High contrast (WCAG-oriented): pure black/white, strong borders, no
+   transparent accent surfaces (poor legibility at high contrast).
+
+   --dms-accent-bg is #000000, NOT #ffff00 - see this file's own module
+   docstring above: three of the five theme-capable apps still carry the
+   unfixed #ffff00-on-#ffff00 value today (ADR 0135 only reached
+   reviewer-ui/migration-console at the time). Adopting this shared file in
+   Phase 49 fixes it everywhere as a side effect. */
+:root[data-theme="high-contrast"] {
+  color-scheme: dark;
+  --dms-bg: #000000;
+  --dms-fg: #ffffff;
+  --dms-border: #ffffff;
+  --dms-hover-bg: #333333;
+  --dms-accent: #ffff00;
+  --dms-accent-bg: #000000;
+  --dms-accent-bg-strong: #ffff00;
+  --dms-danger: #ff6b6b;
+  --dms-danger-bg: #000000;
+  --dms-success: #6bff6b;
+  --dms-success-bg: #000000;
+  --dms-surface: #000000;
+  --dms-surface-fg: #ffffff;
+}
