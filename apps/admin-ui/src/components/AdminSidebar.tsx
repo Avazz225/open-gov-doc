@@ -101,15 +101,23 @@ const GROUPS: NavGroup[] = [
         requiresCapability: "admin.retention",
       },
       { href: "/deletion-register/", labelKey: "nav.deletionRegister" },
-      { href: "/archival-transfers/", labelKey: "nav.archivalTransfers" },
+      {
+        href: "/archival-transfers/",
+        labelKey: "nav.archivalTransfers",
+        requiresCapability: "archival.read",
+      },
     ],
   },
   {
     id: "security",
     labelKey: "nav.groupSecurity",
     items: [
-      { href: "/superuser/", labelKey: "nav.superuser" },
-      { href: "/forensic-trace/", labelKey: "nav.forensicTrace" },
+      { href: "/superuser/", labelKey: "nav.superuser", requiresCapability: "breakglass.approve" },
+      {
+        href: "/forensic-trace/",
+        labelKey: "nav.forensicTrace",
+        requiresCapability: "reporting.forensic_trace",
+      },
       {
         href: "/audit-trace-settings/",
         labelKey: "nav.auditTraceSettings",
@@ -140,7 +148,7 @@ const GROUPS: NavGroup[] = [
   {
     id: "reports",
     labelKey: "nav.groupReports",
-    items: [{ href: "/reports/", labelKey: "nav.reports" }],
+    items: [{ href: "/reports/", labelKey: "nav.reports", requiresCapability: "reporting.read" }],
   },
   {
     id: "diagnostics",

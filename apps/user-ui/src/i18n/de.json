@@ -496,6 +496,7 @@
     "documentsHeading": "Dokumente",
     "documentsEmpty": "Diese Umlaufmappe enthält noch keine Dokumente.",
     "documentDeleted": "Dokument gelöscht",
+    "documentTitleUnavailable": "Dokumenttitel nicht verfügbar",
     "documentQuarantined": "unter Schriftgutquarantäne",
     "documentAddedAt": "hinzugefügt am {date}",
     "exportHeading": "Export für Behörden-/Justizübergabe",

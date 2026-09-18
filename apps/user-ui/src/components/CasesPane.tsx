@@ -455,6 +455,14 @@ function CaseDetail({
 
   const [activeCase, setActiveCase] = useState<Case | null>(null);
   const [documents, setDocuments] = useState<CaseDocumentReference[]>([]);
+  // Resolved titles per document_id (Phase 45 Session 5) - `null` means
+  // resolution failed (e.g. no longer reachable despite `document_deleted_
+  // at` not being set), `undefined` means "not resolved yet" (briefly
+  // falls back to the raw ID while `reload()`'s Promise.all is still in
+  // flight). Same batch-resolve idiom as `RecordsQuarantineOverviewPane`'s
+  // `Row.title`, just keyed by ID here since `documents` itself is still
+  // needed unchanged for its other per-row fields (added_at, quarantine).
+  const [documentTitles, setDocumentTitles] = useState<Record<string, string | null>>({});
   const [error, setError] = useState<string | null>(null);
 
   const [xdomeaExportOpen, setXdomeaExportOpen] = useState(false);
@@ -491,6 +499,20 @@ function CaseDetail({
       ]);
       setActiveCase(loadedCase);
       setDocuments(loadedDocuments);
+      const titles: Record<string, string | null> = {};
+      await Promise.all(
+        loadedDocuments
+          .filter((ref) => !ref.document_deleted_at)
+          .map(async (ref) => {
+            try {
+              const doc = await getDocument(token, ref.document_id);
+              titles[ref.document_id] = doc.title;
+            } catch {
+              titles[ref.document_id] = null;
+            }
+          })
+      );
+      setDocumentTitles(titles);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("cases.loadError"));
     }
@@ -657,13 +679,15 @@ function CaseDetail({
             <li className="entry-row" key={ref.document_id}>
               {ref.document_deleted_at ? (
                 <span className="entry-name">{t("cases.documentDeleted")}</span>
+              ) : documentTitles[ref.document_id] === null ? (
+                <span className="entry-name">{t("cases.documentTitleUnavailable")}</span>
               ) : (
                 <button
                   type="button"
                   className="entry-name"
                   onClick={() => handleOpenCaseDocument(ref)}
                 >
-                  {ref.document_id}
+                  {documentTitles[ref.document_id] ?? ref.document_id}
                 </button>
               )}
               <span className="entry-meta">

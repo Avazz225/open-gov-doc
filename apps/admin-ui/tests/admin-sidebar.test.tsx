@@ -36,8 +36,10 @@ describe("AdminSidebar", () => {
   beforeEach(() => {
     window.localStorage.clear();
     // Post-Roadmap Phase 38 Session 3: `admin.object_config` gates
-    // "Objekttypen" now too (previously ungated).
-    mockPermissions = ["admin.user_management", "admin.object_config"];
+    // "Objekttypen" now too (previously ungated). Phase 45 Session 5:
+    // `breakglass.approve` now gates "Superuser Break-Glass" too
+    // (previously ungated).
+    mockPermissions = ["admin.user_management", "admin.object_config", "breakglass.approve"];
   });
 
   it("shows both groups expanded by default with their nav items", () => {
@@ -89,6 +91,21 @@ describe("AdminSidebar", () => {
     renderSidebar();
 
     expect(screen.queryByText("Query-Konsole")).not.toBeInTheDocument();
+  });
+
+  it("hides superuser/archival-transfers/forensic-trace/reports entries without their respective capabilities (Phase 45 Session 5)", () => {
+    mockPermissions = [];
+
+    renderSidebar();
+
+    expect(screen.queryByText("Superuser Break-Glass")).not.toBeInTheDocument();
+    expect(screen.queryByText("Aussonderung & Archivierung")).not.toBeInTheDocument();
+    expect(screen.queryByText("Forensik-Trace")).not.toBeInTheDocument();
+    expect(screen.queryByText("Standardberichte")).not.toBeInTheDocument();
+    // "Löschregister" carries no `requiresCapability` at all (the backend
+    // itself has no permission check on this endpoint) - stays visible
+    // regardless of which capabilities are missing.
+    expect(screen.getByText("Löschregister")).toBeInTheDocument();
   });
 
   it("shows the query console entry with the admin.query_console capability", () => {

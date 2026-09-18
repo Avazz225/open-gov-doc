@@ -99,7 +99,7 @@ describe("CasesPane", () => {
     listCasesMock.mockReset().mockResolvedValue([CASE_A]);
     getCaseMock.mockReset().mockResolvedValue(CASE_A);
     listCaseDocumentsMock.mockReset().mockResolvedValue([DOCUMENT_REF]);
-    getDocumentMock.mockReset();
+    getDocumentMock.mockReset().mockResolvedValue({ id: "doc-1", title: "Rechnung" });
     exportCaseXdomeaMock.mockReset();
     exportCaseXjustizMock.mockReset();
     importXdomeaIntoCaseMock.mockReset();
@@ -126,7 +126,9 @@ describe("CasesPane", () => {
 
     await waitFor(() => expect(getCaseMock).toHaveBeenCalledWith("token-123", "case-1"));
     expect(await screen.findByRole("heading", { name: "Umlaufmappe A" })).toBeInTheDocument();
-    expect(screen.getByText("doc-1")).toBeInTheDocument();
+    // Phase 45 Session 5 - the row shows the resolved document title, not
+    // the raw document_id, once `getDocument` resolves.
+    expect(await screen.findByText("Rechnung")).toBeInTheDocument();
     expect(screen.getByText("Zurück zur Übersicht")).toBeInTheDocument();
   });
 
@@ -153,6 +155,20 @@ describe("CasesPane", () => {
 
     expect(await screen.findByText("Dokument gelöscht")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "doc-1" })).not.toBeInTheDocument();
+    // Phase 45 Session 5 - no title resolution attempted for an already
+    // known-deleted reference (document_deleted_at already covers it).
+    expect(getDocumentMock).not.toHaveBeenCalled();
+  });
+
+  it("shows a placeholder instead of a link when title resolution fails for a non-deleted reference", async () => {
+    getDocumentMock.mockRejectedValue(new Error("404"));
+    const user = userEvent.setup();
+    renderPane();
+
+    await user.click(await screen.findByText("Umlaufmappe A (2026-001)"));
+
+    expect(await screen.findByText("Dokumenttitel nicht verfügbar")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "doc-1" })).not.toBeInTheDocument();
   });
 
   it("shows a quarantine indicator for a document reference under active records quarantine", async () => {
@@ -167,12 +183,11 @@ describe("CasesPane", () => {
 
   it("opens a case document via onOpenDocument", async () => {
     const onOpenDocument = vi.fn();
-    getDocumentMock.mockResolvedValue({ id: "doc-1", title: "Rechnung" });
     const user = userEvent.setup();
     renderPane(onOpenDocument);
 
     await user.click(await screen.findByText("Umlaufmappe A (2026-001)"));
-    await user.click(await screen.findByText("doc-1"));
+    await user.click(await screen.findByText("Rechnung"));
 
     await waitFor(() => expect(getDocumentMock).toHaveBeenCalledWith("token-123", "doc-1"));
     expect(onOpenDocument).toHaveBeenCalledWith({ id: "doc-1", title: "Rechnung" });
