@@ -2,9 +2,80 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P49-S2 (`user-ui` — its own session, given size and component count — second
-session of Phase 49, "Visual Modernization Rollout"). No new ADR (execution of the already-approved
-ADR 0168 design, per the plan's own DoD).
+**Last completed:** P49-S3 (`admin-ui` — its own session, given size, component count, and the
+`InstallationProvider` structural wrinkle already handled once in P47-S4 — third and last session of
+Phase 49, "Visual Modernization Rollout"). No new ADR (execution of the already-approved ADR 0168
+design, per the plan's own DoD). **This closes Phase 49.**
+
+`globals.css`'s own `--dms-*` color-token declarations removed, replaced by
+`@import "../../../../libs/dms-ui/tokens.css";`. This app was one of the three (with `user-ui`/
+`process-designer`) still carrying the unfixed high-contrast `--dms-accent-bg: #ffff00` bug — fixed
+by adopting the shared file. The `.badge.ok`/`.badge.down` high-contrast border override stayed in
+`globals.css` (app-specific, unrelated to the accent-bg bug).
+
+**A second, more subtle high-contrast bug found and fixed live, hiding behind the first one — the
+same class already found in `user-ui` (Phase 49 Session 2)**: a pre-existing override,
+`:root[data-theme="high-contrast"] .sidebar-link-active { color: #000000; }`, forced the active
+sidebar nav link's text to black specifically to stay legible against this app's own then-yellow
+`--dms-accent-bg`. Once the shared file's corrected value (`#000000`, matching ADR 0135) is adopted,
+that same override would instead pair **black text on a now-black background** — a new illegible
+pairing occupying the exact spot the original bug used to. Found by inspection during the file read,
+before any live testing; removed with an explanatory NOTE comment left in place. Confirmed live via
+Playwright: logged in, navigated to a sidebar-linked page ("Nutzende & Rollen") so its `active` link
+state actually renders, switched through light/dark/high-contrast, and visually confirmed the active
+link's text is legible white-on-black in high contrast — matching how light/dark already worked, not
+the black-on-black the override would have produced if carried over unchanged.
+
+Component-level hardcoded spacing/radius/font-size values throughout the rest of `globals.css` were
+also switched to the new scale tokens where they matched a step or rounded cleanly; the
+`.sidebar-group-items li` margin (`0.15rem`) was deliberately left as a literal (too small to round
+without a visually significant change).
+
+**Live-verification note**: the verification script's first attempt assumed the theme `<select>` was
+always the last `<select>` on the page (the pattern that had worked for the smaller apps) — on
+`admin-ui`, the last `<select>` is actually the role-assignment form's role picker (polluted with
+hundreds of leftover test-role options from other test suites), not the theme switcher. Fixed by
+disambiguating selects by checking which one actually has a `high-contrast` `<option>`, rather than
+assuming a fixed position — the same "don't assume position, inspect content" lesson already applied
+elsewhere in this project when more than one selector control is present on a page.
+
+**New, unrelated finding surfaced during live verification (not part of this session's diff, not
+fixed here)**: `GET`/`PUT /api/auth-service/me/preferences` both return `500` — `auth-service` logs a
+`keycloak.exceptions.KeycloakGetError: 404: User not found` from `admin_users.py`'s
+`get_theme_preference`/`set_theme_preference`/`get_locale_preference`/`set_locale_preference`, which
+all call `KeycloakAdmin.get_user(user_id)` directly. Confirmed **pre-existing and cross-app** (the
+same error was already present in `gateway-service` logs from before this session's own testing
+started, i.e. it also affects other apps' preference round-trips, not something this session's CSS
+diff caused). Confirmed **non-blocking for the theme/locale switcher's visible behavior**: preference
+writes are fire-and-forget by design (ADR 0009) and the `localStorage` cache still applies the choice
+immediately client-side — the only casualty is durable cross-device persistence of the choice until
+this is fixed. Worth a dedicated session (likely fits the "security/correctness hardening" theme,
+alongside similar Phase 44 findings) to determine why the JWT's user id doesn't resolve against
+Keycloak's admin API for at least the `users-admin` account — not investigated further here, out of
+scope for a CSS/visual-modernization session.
+
+`252`/`253` tests passing (1 pre-existing, already-documented, confirmed-unrelated failure in
+`processing-failures.test.tsx`'s handover-retry test, from Phase 47 Session 4, about a missing
+ADR-0162 operator-key input — not part of this session's diff). `tsc --noEmit`/`eslint .`/`next build`
+clean, confirmed `var(--dms-radius-lg)`/`var(--dms-space-6)` present in the compiled CSS output.
+Dockerfile restructured to mirror the repo shape (same fix as every Phase 49 app), preserving both
+existing build args (`NEXT_PUBLIC_GATEWAY_BASE_URL`, `NEXT_PUBLIC_FEDERATION_HUB_BASE_URL`). Docker
+image rebuilt and redeployed, container confirmed started. Live-verified via Playwright across
+light/dark/high-contrast — no CSS regressions, the `.sidebar-link-active` fix specifically confirmed
+visually. Throwaway verification script and screenshots cleaned up afterward.
+
+`docs/services/admin-ui.md`: Theming section gained the ADR 0168 rollout note plus the
+`.sidebar-link-active` high-contrast finding, Build & delivery section gained the
+Dockerfile-restructuring note.
+
+**Next:** Phase 49 is closed. Phase 50 ("Remaining Lower-Priority Hardening") follows — not started,
+not requested yet.
+
+---
+
+Immediately before P49-S3: **P49-S2** (`user-ui` — its own session, given size and component count —
+second session of Phase 49, "Visual Modernization Rollout"). No new ADR (execution of the
+already-approved ADR 0168 design, per the plan's own DoD).
 
 `globals.css`'s own `--dms-*` color-token declarations removed, replaced by
 `@import "../../../../libs/dms-ui/tokens.css";`. This app was one of the three (with `admin-ui`/
@@ -42,10 +113,6 @@ confirmed visually.
 
 `docs/services/user-ui.md`: Theming section gained the ADR 0168 rollout note plus the
 dockview-tab-text finding, Build & delivery section gained the Dockerfile-restructuring note.
-
-**Next session:** P49-S3 — `admin-ui` (its own session, given size, component count, and the
-`InstallationProvider` structural wrinkle already handled once in P47-S4). This closes Phase 49 —
-Phase 50 (remaining lower-priority hardening) follows.
 
 ---
 
