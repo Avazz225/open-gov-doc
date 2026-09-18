@@ -2,10 +2,57 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P49-S1 (Apply the approved token/scale system to the four smallest apps —
-`process-designer`, `office-addin`, `reviewer-ui`, `migration-console` — first session of Phase 49,
-"Visual Modernization Rollout"). User explicitly approved the Phase 48 Session 1 preview artifact
-("ja, das passt so") before this session started. No new ADR (execution of the already-approved
+**Last completed:** P49-S2 (`user-ui` — its own session, given size and component count — second
+session of Phase 49, "Visual Modernization Rollout"). No new ADR (execution of the already-approved
+ADR 0168 design, per the plan's own DoD).
+
+`globals.css`'s own `--dms-*` color-token declarations removed, replaced by
+`@import "../../../../libs/dms-ui/tokens.css";`. This app was one of the three (with `admin-ui`/
+`process-designer`) still carrying the unfixed high-contrast `--dms-accent-bg: #ffff00` bug — fixed
+by adopting the shared file. App-specific pieces stayed in `globals.css`: the `dockview` library
+variable mappings (`--dv-*`, the only app using `dockview`), the `.badge`/`.icon-rail-active`
+high-contrast overrides.
+
+**A second, more subtle high-contrast bug found and fixed live, hiding behind the first one**: a
+pre-existing override, `:root[data-theme="high-contrast"] { --dv-activegroup-visiblepanel-tab-color:
+#000000; }`, forced the active `dockview` tab's text to black specifically to stay legible against
+this app's own then-yellow `--dms-accent-bg`. Once the shared file's corrected value (`#000000`,
+matching ADR 0135) is adopted, that same override would instead pair **black text on a now-black
+background** — a new illegible pairing occupying the exact spot the original bug used to. This was
+caught by reasoning through the CSS cascade before touching anything live, then confirmed via
+Playwright: opened the workspace (mounting `dockview`'s real tab bar via "Explorer"/"Vorschau"/
+"Metadaten" panels), switched to high contrast, and visually confirmed the tab bar text is legible
+white-on-black — matching how light/dark already worked, not the black-on-black the override would
+have produced if carried over unchanged. Removed rather than kept.
+
+**Also converted**: the `dockview` variable defaults themselves (`--dv-border-radius`,
+`--dv-dropdown-border-radius`, `--dv-tab-border-radius`, `--dv-floating-box-shadow`) from hardcoded
+`4px`/shadow literals to `var(--dms-radius-sm)`/`var(--dms-shadow-lg)` — both matched exactly, a
+clean, incidental consolidation found while going through the file. Component-level hardcoded
+spacing/radius/font-size values throughout the rest of `globals.css` (the largest single
+`globals.css` of all six apps, ~940 lines) were also switched to the new scale tokens where they
+matched a step or rounded cleanly; a handful of genuinely custom micro-values (e.g. `.badge`'s
+`0.1rem` vertical padding, `.search-result`'s `0.15rem` gap) were deliberately left as literals.
+
+`283`/`283` tests passing (unchanged — pure CSS session). `tsc --noEmit`/`eslint .`/`next build`
+clean. Dockerfile restructured to mirror the repo shape (same fix as every P49-S1 app). Docker image
+rebuilt and redeployed. Confirmed the new tokens appear in the compiled CSS output. Live-verified via
+Playwright across light/dark/high-contrast — no regressions, the dockview-tab-text fix specifically
+confirmed visually.
+
+`docs/services/user-ui.md`: Theming section gained the ADR 0168 rollout note plus the
+dockview-tab-text finding, Build & delivery section gained the Dockerfile-restructuring note.
+
+**Next session:** P49-S3 — `admin-ui` (its own session, given size, component count, and the
+`InstallationProvider` structural wrinkle already handled once in P47-S4). This closes Phase 49 —
+Phase 50 (remaining lower-priority hardening) follows.
+
+---
+
+Immediately before P49-S2: **P49-S1** (Apply the approved token/scale system to the four smallest
+apps — `process-designer`, `office-addin`, `reviewer-ui`, `migration-console` — first session of
+Phase 49, "Visual Modernization Rollout"). User explicitly approved the Phase 48 Session 1 preview
+artifact ("ja, das passt so") before this session started. No new ADR (execution of the already-approved
 ADR 0168 design, per the plan's own DoD).
 
 **Per app**: `globals.css`'s own `--dms-*` color-token declarations (the `:root`/`@media`/

@@ -1,31 +1,13 @@
-/* Cross-UI-Theming (8, P4-S6, siehe ADR 0009): CSS-Variablen statt fest
-   verdrahteter Farben, damit `data-theme` auf <html> (gesetzt von
-   `ThemeProvider`) Hell/Dunkel/Hoher-Kontrast umschalten kann, unabhängig
-   von der OS-Einstellung. `@media (prefers-color-scheme)` greift nur, bevor
-   JS das Attribut gesetzt hat (Server-los, rein clientseitig gerenderte SPA). */
-:root {
-  color-scheme: light dark;
-  font-family:
-    system-ui,
-    -apple-system,
-    "Segoe UI",
-    sans-serif;
+@import "../../../../libs/dms-ui/tokens.css";
 
-  --dms-bg: #ffffff;
-  --dms-fg: #1a1a1a;
-  --dms-border: rgba(128, 128, 128, 0.25);
-  --dms-accent: #2563eb;
-  --dms-accent-bg: rgba(37, 99, 235, 0.15);
-  --dms-accent-bg-strong: rgba(37, 99, 235, 0.5);
-  --dms-danger: #b91c1c;
-  --dms-danger-bg: #b91c1c33;
-  /* Accessibility pass (14.2, post-roadmap phase 31 session 8) - previously
-     missing here (only admin-ui/reviewer-ui/etc. defined these), leaving
-     `.badge.ok` (BulkEditModal.tsx) unstyled in this app. */
-  --dms-success: #16a34a;
-  --dms-success-bg: #16a34a33;
-  --dms-surface: canvas;
-  --dms-surface-fg: canvastext;
+/* Cross-UI-Theming (8, P4-S6, siehe ADR 0009): Farb-Tokens selbst leben seit
+   Phase 48 Session 1 (ADR 0168) in der geteilten libs/dms-ui/tokens.css -
+   dieser Block wendet nur noch den Font-Family-Token an und enthält die
+   App-spezifischen dockview-Variablenzuordnungen (nur diese App nutzt
+   dockview). Die Post-Roadmap Phase 31 Session 8 (14.2) `--dms-success`/
+   `--dms-success-bg`-Ergänzung ist jetzt Teil der geteilten Datei. */
+:root {
+  font-family: var(--dms-font-family);
 
   /* dockview-Theming (Konzept 8, P16-S1) - bewusst keines der mitgelieferten
      Preset-Themes (abyss/gh/mocha/...) verwendet, sondern die von dockview
@@ -59,7 +41,7 @@
   --dv-floating-titlebar-background-color: var(--dms-surface);
   --dv-floating-border: 1px solid var(--dms-border);
   --dv-floating-group-border: 1px solid var(--dms-border);
-  --dv-floating-box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  --dv-floating-box-shadow: var(--dms-shadow-lg);
   --dv-context-menu-background-color: var(--dms-surface);
   --dv-context-menu-color: var(--dms-surface-fg);
   --dv-scrollbar-background-color: var(--dms-border);
@@ -67,78 +49,17 @@
   --dv-paneview-header-border-color: var(--dms-border);
   --dv-smart-guides-color: var(--dms-accent);
   --dv-smart-guides-preview-color: var(--dms-accent-bg);
-  --dv-border-radius: 4px;
-  --dv-dropdown-border-radius: 4px;
-  --dv-tab-border-radius: 4px 4px 0 0;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --dms-bg: #16181c;
-    --dms-fg: #e8e8e8;
-    --dms-border: rgba(200, 200, 200, 0.2);
-    --dms-accent: #60a5fa;
-    --dms-accent-bg: rgba(96, 165, 250, 0.2);
-    --dms-accent-bg-strong: rgba(96, 165, 250, 0.5);
-    --dms-danger: #f87171;
-    --dms-danger-bg: #f8717133;
-    --dms-success: #4ade80;
-    --dms-success-bg: #4ade8033;
-  }
-}
-
-:root[data-theme="light"] {
-  color-scheme: light;
-  --dms-bg: #ffffff;
-  --dms-fg: #1a1a1a;
-  --dms-border: rgba(128, 128, 128, 0.25);
-  --dms-accent: #2563eb;
-  --dms-accent-bg: rgba(37, 99, 235, 0.15);
-  --dms-accent-bg-strong: rgba(37, 99, 235, 0.5);
-  --dms-danger: #b91c1c;
-  --dms-danger-bg: #b91c1c33;
-  --dms-success: #16a34a;
-  --dms-success-bg: #16a34a33;
-}
-
-:root[data-theme="dark"] {
-  color-scheme: dark;
-  --dms-bg: #16181c;
-  --dms-fg: #e8e8e8;
-  --dms-border: rgba(200, 200, 200, 0.2);
-  --dms-accent: #60a5fa;
-  --dms-accent-bg: rgba(96, 165, 250, 0.2);
-  --dms-accent-bg-strong: rgba(96, 165, 250, 0.5);
-  --dms-danger: #f87171;
-  --dms-danger-bg: #f8717133;
-  --dms-success: #4ade80;
-  --dms-success-bg: #4ade8033;
-}
-
-/* Hoher Kontrast (WCAG-orientiert): reines Schwarz/Weiß, kräftige Ränder,
-   keine transparenten Akzentflächen (schlecht lesbar bei hohem Kontrast). */
-:root[data-theme="high-contrast"] {
-  color-scheme: dark;
-  --dms-bg: #000000;
-  --dms-fg: #ffffff;
-  --dms-border: #ffffff;
-  --dms-accent: #ffff00;
-  --dms-accent-bg: #ffff00;
-  --dms-accent-bg-strong: #ffff00;
-  --dms-danger: #ff6b6b;
-  --dms-danger-bg: #000000;
-  --dms-success: #6bff6b;
-  --dms-success-bg: #000000;
-  --dms-surface: #000000;
-  --dms-surface-fg: #ffffff;
+  --dv-border-radius: var(--dms-radius-sm);
+  --dv-dropdown-border-radius: var(--dms-radius-sm);
+  --dv-tab-border-radius: var(--dms-radius-sm) var(--dms-radius-sm) 0 0;
 }
 
 /* Accessibility pass (14.2, post-roadmap phase 31 session 8): high contrast
-   flattens every `--dms-*-bg` token to the page background (see comment
-   above), so a badge's pill shape - its only remaining visual cue once the
-   fill disappears - needs an explicit border. Previously only `.badge.down`
-   had one; `.classified`/`.draft`/`.ok`/`.redacted` silently lost their
-   shape entirely in this theme. */
+   flattens every `--dms-*-bg` token to the page background, so a badge's
+   pill shape - its only remaining visual cue once the fill disappears -
+   needs an explicit border. Previously only `.badge.down` had one;
+   `.classified`/`.draft`/`.ok`/`.redacted` silently lost their shape
+   entirely in this theme. */
 :root[data-theme="high-contrast"] .badge {
   border: 1px solid currentColor;
 }
@@ -147,13 +68,20 @@
   color: #000000;
 }
 
-/* `--dms-accent-bg` ist im Hoher-Kontrast-Schema volles Gelb (s. o.) - Text
-   darauf muss schwarz statt der sonstigen hellen Vordergrundfarbe sein,
-   damit der aktive dockview-Tab lesbar bleibt (gleiches Prinzip wie bei
-   `.icon-rail-active` oben). */
-:root[data-theme="high-contrast"] {
-  --dv-activegroup-visiblepanel-tab-color: #000000;
-}
+/* NOTE (Phase 49 Session 2, ADR 0168): the old `--dv-activegroup-
+   visiblepanel-tab-color: #000000` override that used to sit here is
+   REMOVED, not merely moved. It compensated for this app's own
+   still-unfixed high-contrast `--dms-accent-bg` (`#ffff00`, identical to
+   `--dms-accent`) - once the shared `libs/dms-ui/tokens.css` is adopted
+   (accent-bg corrected to `#000000`, matching ADR 0135's already-fixed
+   apps), forcing this dockview tab-text variable to black would instead
+   pair BLACK text on a now-BLACK background, a new illegible pairing in
+   the exact same spot the original bug occupied. Left in place, this
+   would have been a second, more subtle bug hiding behind the first one -
+   found and removed live during this session, not simply carried over.
+   The active tab's text color reverts to its normal mapping
+   (`--dv-activegroup-visiblepanel-tab-color: var(--dms-surface-fg)`,
+   white-on-black in high contrast), same as light/dark already work. */
 
 body {
   margin: 0;
@@ -165,14 +93,14 @@ body {
 .page {
   max-width: 960px;
   margin: 0 auto;
-  padding: 1.5rem;
+  padding: var(--dms-space-6);
 }
 
 .top-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.75rem 1.5rem;
+  padding: var(--dms-space-3) var(--dms-space-6);
   border-bottom: 1px solid var(--dms-border);
 }
 
@@ -194,9 +122,9 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--dms-space-2);
   width: 3rem;
-  padding: 0.75rem 0;
+  padding: var(--dms-space-3) 0;
   border-right: 1px solid var(--dms-border);
   flex-shrink: 0;
 }
@@ -206,8 +134,8 @@ body {
   height: 2.25rem;
   border: none;
   background: none;
-  border-radius: 0.375rem;
-  font-size: 1.1rem;
+  border-radius: var(--dms-radius-md);
+  font-size: var(--dms-font-size-lg);
   cursor: pointer;
 }
 
@@ -228,13 +156,13 @@ body {
   position: absolute;
   left: 100%;
   bottom: 0;
-  margin-left: 0.5rem;
-  padding: 0.75rem;
+  margin-left: var(--dms-space-2);
+  padding: var(--dms-space-3);
   background: var(--dms-surface);
   color: var(--dms-surface-fg);
   border: 1px solid var(--dms-border);
-  border-radius: 0.375rem;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  border-radius: var(--dms-radius-md);
+  box-shadow: var(--dms-shadow-sm);
   /* dockviews eigenes Chrome (Tab-Leiste, Drag-Indikatoren) nutzt
      `z-index`-Werte bis 9999 (siehe node_modules/dockview-react/dist/styles/
      dockview.css) - alle App-eigenen Overlays müssen darüber liegen, sonst
@@ -249,12 +177,12 @@ body {
 .context-menu {
   position: fixed;
   min-width: 12rem;
-  padding: 0.25rem;
+  padding: var(--dms-space-1);
   background: var(--dms-surface);
   color: var(--dms-surface-fg);
   border: 1px solid var(--dms-border);
-  border-radius: 0.375rem;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  border-radius: var(--dms-radius-md);
+  box-shadow: var(--dms-shadow-sm);
   /* Siehe Kommentar bei `.icon-rail-popover` - muss über dockviews Chrome
      liegen (max. z-index 9999 dort). */
   z-index: 10001;
@@ -263,11 +191,11 @@ body {
 .context-menu-item {
   display: block;
   width: 100%;
-  padding: 0.5rem 0.75rem;
+  padding: var(--dms-space-2) var(--dms-space-3);
   text-align: left;
   background: none;
   border: none;
-  border-radius: 0.25rem;
+  border-radius: var(--dms-radius-sm);
   color: inherit;
   cursor: pointer;
 }
@@ -285,8 +213,8 @@ body {
 .theme-switcher {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  font-size: 0.9rem;
+  gap: var(--dms-space-1);
+  font-size: var(--dms-font-size-sm);
 }
 
 /* Dockbarer Arbeitsbereich (Konzept 8, P16-S1, `dockview-react`) - ersetzt
@@ -305,13 +233,13 @@ body {
 .dockable-document-area-toolbar {
   display: flex;
   justify-content: flex-end;
-  padding: 0.35rem 0.75rem;
+  padding: var(--dms-space-1) var(--dms-space-3);
   border-bottom: 1px solid var(--dms-border);
   flex-shrink: 0;
 }
 
 .dockable-document-area-toolbar button {
-  font-size: 0.85rem;
+  font-size: var(--dms-font-size-sm);
 }
 
 .dockable-document-area-host {
@@ -327,7 +255,7 @@ body {
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
-  padding: 1rem;
+  padding: var(--dms-space-4);
 }
 
 .explorer-pane,
@@ -345,7 +273,7 @@ body {
   min-height: 0;
   min-width: 0;
   overflow-y: auto;
-  padding: 1rem;
+  padding: var(--dms-space-4);
   /* Scrollbar stays persistently visible instead of the browser/OS-default
      "overlay scrollbar" (macOS/GTK: invisible except while actively
      scrolling) - without this, a field with clipped content looks
@@ -378,26 +306,26 @@ body {
 .search-form {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  margin-bottom: 1rem;
+  gap: var(--dms-space-2);
+  margin-bottom: var(--dms-space-4);
 }
 
 .search-object-type,
 .search-attr-exact {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  font-size: 0.9rem;
+  gap: var(--dms-space-1);
+  font-size: var(--dms-font-size-sm);
 }
 
 .search-attr-range {
   display: flex;
-  gap: 0.5rem;
+  gap: var(--dms-space-2);
   align-items: center;
   border: none;
   padding: 0;
   margin: 0;
-  font-size: 0.9rem;
+  font-size: var(--dms-font-size-sm);
 }
 
 .search-results {
@@ -415,7 +343,7 @@ body {
   background: none;
   border: none;
   border-bottom: 1px solid var(--dms-border);
-  padding: 0.5rem 0;
+  padding: var(--dms-space-2) 0;
   cursor: pointer;
   font: inherit;
   color: inherit;
@@ -426,12 +354,12 @@ body {
 }
 
 .search-result-folder {
-  font-size: 0.8rem;
+  font-size: var(--dms-font-size-xs);
   opacity: 0.7;
 }
 
 .search-result-snippet {
-  font-size: 0.85rem;
+  font-size: var(--dms-font-size-sm);
   opacity: 0.8;
 }
 
@@ -440,8 +368,8 @@ body {
 }
 
 .pane-heading {
-  font-size: 1rem;
-  margin: 0 0 0.75rem;
+  font-size: var(--dms-font-size-base);
+  margin: 0 0 var(--dms-space-3);
 }
 
 .preview-thumbnail {
@@ -460,7 +388,7 @@ body {
   height: 100%;
   min-height: 480px;
   border: 1px solid var(--dms-border);
-  border-radius: 0.25rem;
+  border-radius: var(--dms-radius-sm);
 }
 
 .preview-html-frame {
@@ -476,12 +404,12 @@ body {
   word-break: break-word;
   max-height: 100%;
   overflow-y: auto;
-  padding: 0.75rem;
+  padding: var(--dms-space-3);
   border: 1px solid var(--dms-border);
-  border-radius: 0.25rem;
+  border-radius: var(--dms-radius-sm);
   background: var(--dms-surface);
-  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
-  font-size: 0.85rem;
+  font-family: var(--dms-font-family-mono);
+  font-size: var(--dms-font-size-sm);
 }
 
 /* Text-Overlay für die Vorschau (P5-S3, Nutzerwunsch): Wort-Spans liegen
@@ -492,7 +420,7 @@ body {
   position: relative;
   display: inline-block;
   max-width: 100%;
-  margin-bottom: 0.75rem;
+  margin-bottom: var(--dms-space-3);
 }
 
 .ocr-text-layer {
@@ -513,8 +441,8 @@ body {
 
 .version-select {
   display: block;
-  margin-bottom: 0.5rem;
-  font-size: 0.9rem;
+  margin-bottom: var(--dms-space-2);
+  font-size: var(--dms-font-size-sm);
 }
 
 /* Sichtbarkeit von is_conflict/comment je Version (P23-S1, Konzept-Feld war
@@ -522,9 +450,9 @@ body {
    kein Diff-Viewer, nur ein Badge/Tooltip für die bereits geladenen Felder. */
 .badge {
   display: inline-block;
-  padding: 0.1rem 0.5rem;
-  border-radius: 999px;
-  font-size: 0.75rem;
+  padding: 0.1rem var(--dms-space-2);
+  border-radius: var(--dms-radius-full);
+  font-size: var(--dms-font-size-xs);
 }
 
 .badge.down {
@@ -580,8 +508,8 @@ body {
 .redaction-page-nav {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
-  margin-bottom: 0.6rem;
+  gap: var(--dms-space-3);
+  margin-bottom: var(--dms-space-3);
 }
 
 .redaction-page-canvas {
@@ -611,23 +539,23 @@ body {
 
 .redaction-region-list {
   list-style: none;
-  margin: 0.6rem 0;
+  margin: var(--dms-space-3) 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
+  gap: var(--dms-space-1);
 }
 
 .redaction-region-list li {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--dms-space-2);
 }
 
 .upload-draft-toggle {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: var(--dms-space-2);
   font-weight: normal;
 }
 
@@ -635,30 +563,30 @@ body {
 .classification-raise {
   display: flex;
   align-items: flex-end;
-  gap: 0.6rem;
-  margin-top: 0.4rem;
+  gap: var(--dms-space-3);
+  margin-top: var(--dms-space-2);
 }
 
 .draft-banner {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 0.4rem;
-  margin-bottom: 1rem;
-  padding: 0.6rem 0.8rem;
+  gap: var(--dms-space-2);
+  margin-bottom: var(--dms-space-4);
+  padding: var(--dms-space-3) var(--dms-space-3);
   border: 1px solid var(--dms-border);
-  border-radius: 0.4rem;
+  border-radius: var(--dms-radius-md);
 }
 
 .version-conflict-badge {
   display: inline-block;
-  margin-bottom: 0.5rem;
+  margin-bottom: var(--dms-space-2);
 }
 
 .version-comment {
   display: block;
-  margin-bottom: 0.5rem;
-  font-size: 0.8rem;
+  margin-bottom: var(--dms-space-2);
+  font-size: var(--dms-font-size-xs);
   opacity: 0.8;
   white-space: nowrap;
   overflow: hidden;
@@ -668,19 +596,19 @@ body {
 
 .ocr-review-hint {
   opacity: 0.8;
-  font-size: 0.85rem;
+  font-size: var(--dms-font-size-sm);
 }
 
 /* Separater Textextrakt für Bilddokumente mit OCR-Ergebnis (Nutzer-Feedback) -
    bewusst additiv neben dem bestehenden Wort-Overlay, keine Vermischung. */
 .ocr-text-extract {
-  margin-bottom: 0.75rem;
+  margin-bottom: var(--dms-space-3);
 }
 
 .ocr-text-extract summary {
   cursor: pointer;
-  font-size: 0.85rem;
-  margin-bottom: 0.5rem;
+  font-size: var(--dms-font-size-sm);
+  margin-bottom: var(--dms-space-2);
 }
 
 .splitter {
@@ -704,15 +632,15 @@ body {
 
 .explorer-toolbar {
   display: flex;
-  gap: 0.5rem;
-  margin-bottom: 0.75rem;
+  gap: var(--dms-space-2);
+  margin-bottom: var(--dms-space-3);
 }
 
 /* Baumansicht (2.2a/8, P5b-S4): nutzerseitig umschaltbare Alternative zur
    Listenansicht, siehe FolderTree.tsx. */
 .view-mode-toggle {
   display: flex;
-  gap: 0.25rem;
+  gap: var(--dms-space-1);
   margin-left: auto;
 }
 
@@ -722,7 +650,7 @@ body {
 }
 
 .folder-tree {
-  font-size: 0.9rem;
+  font-size: var(--dms-font-size-sm);
 }
 
 .tree-children {
@@ -734,8 +662,8 @@ body {
 .tree-row {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
-  padding: 0.2rem 0;
+  gap: var(--dms-space-1);
+  padding: var(--dms-space-1) 0;
 }
 
 /* Ordner-Verschieben per Drag & Drop (8, P23-S4) - siehe .entry-row-drag-over
@@ -783,13 +711,13 @@ body {
 .layout-grid {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: var(--dms-space-2);
 }
 
 .layout-grid-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
+  gap: var(--dms-space-3);
 }
 
 .layout-grid-field {
@@ -805,28 +733,28 @@ body {
 
 .inline-form {
   display: flex;
-  gap: 0.5rem;
-  margin-bottom: 0.75rem;
+  gap: var(--dms-space-2);
+  margin-bottom: var(--dms-space-3);
 }
 
 .metadata-panel form {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: var(--dms-space-3);
 }
 
 .metadata-panel label {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  font-size: 0.9rem;
+  gap: var(--dms-space-1);
+  font-size: var(--dms-font-size-sm);
 }
 
 .breadcrumbs {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.25rem;
-  margin-bottom: 1rem;
+  gap: var(--dms-space-1);
+  margin-bottom: var(--dms-space-4);
 }
 
 .breadcrumbs button {
@@ -852,7 +780,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.5rem 0;
+  padding: var(--dms-space-2) 0;
   border-bottom: 1px solid var(--dms-border);
 }
 
@@ -876,13 +804,13 @@ body {
 
 .actions {
   display: flex;
-  gap: 0.5rem;
+  gap: var(--dms-space-2);
 }
 
 .heading-with-favorite {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--dms-space-2);
 }
 
 /* Case-binder favorite star toggle (Phase 45 Session 2) - the first
@@ -895,9 +823,9 @@ body {
   background: none;
   border: none;
   cursor: pointer;
-  font-size: 1.1rem;
+  font-size: var(--dms-font-size-lg);
   line-height: 1;
-  padding: 0 0.25rem;
+  padding: 0 var(--dms-space-1);
   color: var(--dms-accent);
 }
 
@@ -906,7 +834,7 @@ body {
   margin: 4rem auto;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: var(--dms-space-3);
 }
 
 .error-text {
@@ -936,8 +864,8 @@ body {
 .modal-content {
   background: var(--dms-surface);
   color: var(--dms-surface-fg);
-  padding: 1.5rem;
-  border-radius: 0.5rem;
+  padding: var(--dms-space-6);
+  border-radius: var(--dms-radius-lg);
   max-width: 420px;
 }
 
@@ -946,18 +874,18 @@ body {
 .share-card {
   max-width: 420px;
   margin: 2rem auto;
-  padding: 1.5rem;
+  padding: var(--dms-space-6);
   border: 1px solid var(--dms-border);
-  border-radius: 0.5rem;
+  border-radius: var(--dms-radius-lg);
 }
 
 .share-download-button {
   display: inline-block;
-  margin-top: 0.75rem;
-  padding: 0.5rem 1rem;
+  margin-top: var(--dms-space-3);
+  padding: var(--dms-space-2) var(--dms-space-4);
   background: var(--dms-accent);
   color: var(--dms-bg);
-  border-radius: 0.375rem;
+  border-radius: var(--dms-radius-md);
   text-decoration: none;
 }
 
@@ -978,7 +906,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 0.5rem;
+  margin-bottom: var(--dms-space-2);
 }
 
 .modal-header .pane-heading {
@@ -988,7 +916,7 @@ body {
 .modal-close {
   background: none;
   border: none;
-  font-size: 1.5rem;
+  font-size: var(--dms-font-size-xl);
   line-height: 1;
   cursor: pointer;
   color: inherit;
@@ -1007,7 +935,7 @@ body {
 }
 
 .upload-selected-file {
-  font-size: 0.85rem;
+  font-size: var(--dms-font-size-sm);
   opacity: 0.8;
-  margin: 0.25rem 0;
+  margin: var(--dms-space-1) 0;
 }
