@@ -74,6 +74,22 @@ class Settings(BaseServiceSettings):
     # `gateway_service.settings.Settings.cors_allowed_origins`.
     cors_allowed_origins: list[str] = ["http://localhost:3000", "http://localhost:3001"]
 
+    # Maintenance-mode awareness for the retry poll loop (4.8, Post-Roadmap
+    # Phase 44 Session 3, ADR 0164). Deliberately OPTIONAL and unset by
+    # default (`None`) - unlike every other service this ADR's rollout
+    # touches, this service is NOT scoped to one installation (see this
+    # class's own docstring: "other installations' hubs/admins reach it
+    # directly too"), so there is no single, universally-correct
+    # `permission-service` to ask. A hub operator who runs this service
+    # for exactly ONE installation (this project's own dev stack, and a
+    # plausible shape for a small real deployment) may set this to that
+    # installation's `permission-service` so its own emergency lockdown
+    # also pauses this hub's retry activity - a hub genuinely serving
+    # multiple installations should leave this unset, since one
+    # installation's lockdown pausing delivery for every OTHER
+    # installation too would be a real regression, not a safety feature.
+    permission_service_base_url: str | None = None
+
     # Sensor concept (Phase 40 Session 4, 10.1) - the first custom sensors
     # this service has ever had (it had none at all before this session,
     # not even the generic HTTP ones - `dms-metrics-client` was not a

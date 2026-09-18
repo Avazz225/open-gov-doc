@@ -123,9 +123,16 @@ async def _run_due_schedules(session_factory) -> None:
 async def _report_schedule_poll_loop(session_factory) -> None:
     """Due-date poll for scheduled reports (5.4a) - same idiom as
     document-service's `_retention_poll_loop`/workflow-service's `_sla_poll_
-    loop`."""
+    loop`. Since Post-Roadmap Phase 44 Session 3 (4.8, ADR 0164): skips
+    the whole tick while maintenance mode is active - same rationale as
+    the other poll loops ADR 0152 named, applied here too - and, same
+    fix every other rollout site needed, the check itself lives inside
+    the existing `try`, not before it."""
     while True:
         try:
+            if await app.state.permission_client.is_maintenance_active():
+                await asyncio.sleep(settings.report_poll_interval_seconds)
+                continue
             await _run_due_schedules(session_factory)
         except Exception:
             logger.exception(

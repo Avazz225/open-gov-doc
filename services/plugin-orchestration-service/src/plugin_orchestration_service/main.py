@@ -315,7 +315,21 @@ async def create_placement(
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> PlacementDecision:
+    """Since Post-Roadmap Phase 44 Session 3 (4.8, ADR 0164): rejects new
+    placement decisions with `503` while maintenance mode is active - the
+    closest honest analog this service has to 4.8's "halt... plugin
+    instances", since this service is recommendation-only (no real
+    container automation exists, see docs/services/plugin-
+    orchestration-service.md) and therefore has no actual "instance" to
+    halt, only new placements to refuse authorizing - the same "reject
+    starting something new" shape `workflow-service` already applies to
+    new process instance starts."""
     await _require_orchestration_permission(x_dms_principal)
+    if await app.state.permission_client.is_maintenance_active():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Wartungsmodus aktiv - keine neuen Platzierungsentscheidungen",
+        )
 
     try:
         decision = await placement.decide_placement(

@@ -86,6 +86,19 @@ class PermissionServiceClient:
         response.raise_for_status()
         return permission in response.json()["permissions"]
 
+    async def is_maintenance_active(self) -> bool:
+        """Post-Roadmap Phase 44 Session 3 (ADR 0164) - extends this shared
+        client with the one method `workflow-service`'s own, still-local
+        `permission_client.py` already had (`GET /maintenance-mode`, no
+        caching, matching that low-call-frequency poll-loop precedent
+        exactly per ADR 0152's recommendation). Intended for Category B
+        callers (background poll loops with no inbound request to read
+        `X-DMS-Maintenance-Active` off) - a request-scoped caller should
+        prefer that header instead of an extra round trip."""
+        response = await self._client.get("/maintenance-mode")
+        response.raise_for_status()
+        return bool(response.json()["active"])
+
     async def create_resource_node(
         self, *, resource_id: str, parent_id: str | None, resource_type: str = "folder"
     ) -> None:

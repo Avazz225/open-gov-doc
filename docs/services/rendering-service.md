@@ -47,7 +47,8 @@ entire `process_version` rule cascade — otherwise already-successful rendition
 regenerated. Only after `max_rendering_attempts` (default 5) unsuccessful attempts does `status` switch to the
 true terminal status `failed_permanent`, at which point `POST /renditions/{id}/retry` allows an immediate manual
 restart (first resets `attempts`/`error_message`/`next_retry_at`, then performs a genuine new
-attempt).
+attempt). Since **Phase 44 Session 3** ([ADR 0164](../adr/0164-maintenance-mode-poll-loop-coverage.md)),
+`_rendition_retry_poll_loop` skips its whole tick while system-wide maintenance mode (4.8) is active.
 
 **Retroactive processing on first start**: since no `deliver_new` is set (unlike `permission-service`/`audit-service`), a fresh durable consumer catches up on the entire past event history on its very first start — documents uploaded before this session are thus retroactively fitted with renditions once the service runs for the first time. This is intended behavior (backfill), not a race condition.
 

@@ -195,6 +195,25 @@ async def test_create_resource_node_defaults_resource_type_to_folder():
     await _client(handler).create_resource_node(resource_id="folder-1", parent_id="root")
 
 
+async def test_is_maintenance_active_returns_true():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/maintenance-mode"
+        return httpx.Response(200, json={"active": True, "reason": "Verdacht"})
+
+    result = await _client(handler).is_maintenance_active()
+
+    assert result is True
+
+
+async def test_is_maintenance_active_returns_false():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"active": False})
+
+    result = await _client(handler).is_maintenance_active()
+
+    assert result is False
+
+
 async def test_close_closes_the_underlying_httpx_client():
     def handler(request: httpx.Request) -> httpx.Response:
         raise AssertionError("no request expected")

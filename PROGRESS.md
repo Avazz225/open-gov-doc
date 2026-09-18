@@ -2,9 +2,98 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P44-S2 (`folder-service`/`teamspace-service`: close the teamspace write-bypass +
-the `ResourceNode`-orphan gap — second session of Phase 44, "Security & Correctness Hardening"). Two
-independent gaps bundled in one session, same area (`folder-service`'s deletion paths):
+**Last completed:** P44-S3 (`permission-service`: maintenance-mode coverage + service-to-service
+write enforcement — third and last session of Phase 44, "Security & Correctness Hardening"). Two
+halves, both grounded in prior scoping: (a) ADR 0024 itself named "pause federation-hub operations"/
+"halt plugin instances" as unimplemented since neither service existed yet — both now do; (b) ADR
+0152 had already scoped (not built) a concrete recommendation for service-to-service write
+enforcement during a lockdown — this session builds it in full.
+
+**Extended `libs/dms-permission-client` with `is_maintenance_active()`** (`GET /maintenance-mode`, no
+caching, mirroring `workflow-service`'s own already-working local method almost verbatim). Rolled out
+to every Category B poll loop ADR 0152 identified, plus one more found during rollout: `archival-
+service`'s `_archival_poll_loop`, `folder-service`'s `_retention_poll_loop`, `document-service`'s
+`_retention_poll_loop`/`_lock_reminder_poll_loop`/**`_folder_export_poll_loop`** (this third one wasn't
+named by ADR 0152 — same Category B shape, found while rolling the fix out, fixed too), `mail-
+connector`'s `_poll_loop`, `ocr-service`'s `_ocr_retry_poll_loop`, `rendering-service`'s
+`_rendition_retry_poll_loop`, `reporting-service`'s `_report_schedule_poll_loop` — nine loops across
+seven services, each now skips its whole tick while maintenance mode is active.
+
+**Two genuinely new pieces, beyond the mechanical rollout**: `federation-hub-service` gets its
+first-ever `permission-service` dependency, but deliberately OPTIONAL (`Settings.
+permission_service_base_url: str | None = None`) — this service is shared, cross-installation
+infrastructure (ADR 0028/0039), not scoped to any one installation, so there's no single, universally-
+correct `permission-service` to ask; a hub operator running it for exactly one installation (this
+project's own dev stack) may opt in, a hub serving multiple installations should not. `plugin-
+orchestration-service` gets a `503` on `POST /placements` during a lockdown instead of a poll-loop
+fix — it has no poll loop and no real container automation (recommendation-only), so refusing to
+authorize a NEW placement decision is the closest honest analog to "halt instances" it can actually
+build. New [ADR 0164](docs/adr/0164-maintenance-mode-poll-loop-coverage.md) records both decisions.
+
+**Found and fixed a real bug of my own making mid-session**: the maintenance check was initially
+placed BEFORE each loop's existing exception-isolation `try` block, not inside it — unwrapped, a
+transient `permission-service` error (or, as it turned out, a cross-event-loop error surfacing from
+test infrastructure) would crash the whole background task outright instead of being caught like any
+other tick failure. Caught via genuinely flaky test-suite runs during this session's own verification
+(`mail-connector`'s poll loop crashing mid-suite), fixed by moving the check inside the existing `try`
+wherever one already wrapped the whole tick (`workflow-service`'s own `_sla_poll_loop` precedent, which
+I should have copied more literally the first time), or giving it its own fail-open try/except where no
+single enclosing `try` existed (`archival-service`'s three-phase loop, `mail-connector`'s per-mailbox
+loop, `federation-hub-service`'s two-leg loop) — same "fail open, don't take down what's working"
+principle ADR 0024 already established for the gateway's own maintenance check.
+
+**Also found and fixed two pre-existing, unrelated test flakes while diagnosing the above** (neither
+caused by this session — confirmed by inspecting the actual failing code paths, neither touches
+`permission_client`/maintenance mode at all): `reporting-service`'s `test_download_report_run_proxies_
+storage_client` was itself falling into the well-known "`app.state.session_factory` used directly from
+an async test, bound to `TestClient`'s own separate portal-thread event loop" trap this project's own
+`poll_env` fixture already documents elsewhere in the same file — fixed by using the existing `session`
+fixture instead, same one-line pattern. `mail-connector` has a WIDER, already-documented instance of
+the same trap-class (`app.state.virus_scan`, Post-Roadmap Phase 38 Session 4's own finding) that
+affects a non-deterministic subset of its tests calling `_ingest()` directly — re-confirmed here (four
+different tests observed failing across different runs, not just the two previously named), documented
+more precisely in `docs/services/mail-connector.md`, but NOT fixed (would need restructuring that
+service's `app.state` client lifecycle across its whole suite, out of scope for either session).
+
+**Final, clean test results** (after the fix): `libs/dms-permission-client` 16/16 (+2), `archival-
+service` 142/142, `document-service` 376/376, `mail-connector` — still intermittently flaky per above
+(pre-existing, unrelated, documented, not blocking), `ocr-service` 53/53 (+8 skipped, unchanged),
+`rendering-service` 101/101, `reporting-service` 68/68 (+0 net — one test fixed in place, no test
+added/removed), `plugin-orchestration-service` 46/46 (+1), `folder-service` 143/143 (unchanged, just
+re-verified), `federation-hub-service` 75/75 (+1), `permission-service` 181/181 (unchanged). `ruff
+check`/`ruff format` clean on every file this session touched (the standing, unrelated, pre-existing
+`test_repository.py` formatting issue in `federation-hub-service` remains untouched).
+
+Docker images rebuilt and redeployed for all nine touched services. **Live-verified end-to-end against
+the real running stack**: granted a throwaway test principal `admin.orchestration`+`system.not_shutdown.
+trigger`, triggered real maintenance mode via `POST /maintenance-mode/trigger`, confirmed `plugin-
+orchestration-service`'s `POST /placements` actually returns `503`, confirmed via `docker logs` that
+`federation-hub-service` is actually polling `GET http://permission-service:8000/maintenance-mode` at
+its configured interval (proving the new optional integration is correctly wired end-to-end in this dev
+stack, which now sets `DMS_PERMISSION_SERVICE_BASE_URL` for it) — then lifted maintenance mode again
+(a direct `UPDATE permission.system_maintenance_mode SET active=false...` via `docker exec psql`, since
+`POST /maintenance-mode/lift` correctly requires the currently active superuser, which this throwaway
+verification never activated) and deleted the throwaway role assignments, restoring the dev stack to
+its normal, unlocked state before ending the session.
+
+`docs/services/permission-service.md` updated: both stale Open Points bullets from ADR 0024/ADR 0152
+corrected in place with pointers to ADR 0164. One-line notes added to `archival-service.md`/`folder-
+service.md`/`document-service.md`/`mail-connector.md`/`ocr-service.md`/`rendering-service.md`/
+`reporting-service.md`/`federation-hub-service.md`/`plugin-orchestration-service.md` documenting the
+new maintenance-mode behavior at each poll loop/endpoint, plus test-count updates for the services that
+actually gained or fixed a test.
+
+**Next session:** **P44-S4** (small correctness fixes bundle: `virus-scan-service` uploader
+notification wiring, `workflow-service`'s `create_dmn_definition` advisory-lock race fix, `case-service`
+fully-automated-process status bug) — the fourth and last session of Phase 44. See
+`IMPLEMENTATION_PLAN.md` "Phase 44" for the full plan.
+
+---
+
+Immediately before P44-S3: **P44-S2** (`folder-service`/`teamspace-service`: close the teamspace
+write-bypass + the `ResourceNode`-orphan gap — second session of Phase 44, "Security & Correctness
+Hardening"). Two independent gaps bundled in one session, same area (`folder-service`'s deletion
+paths):
 
 **(a) The write-bypass**: `teamspace-member`'s broad `folder.write` let ANY teamspace member — not just
 a manager — delete/trash the entire teamspace by calling `folder-service` directly
@@ -78,10 +167,6 @@ ordinary teamspace member never got `folder.delete` via inheritance, matching th
 `folder.resource.deleted` event-table row, the API table's `PUT .../members/{id}` row, and both test
 counts. `docs/adr/0154-...md`'s own "not attempted here" note for the orphan-`ResourceNode` gap corrected
 in place with a pointer to ADR 0163.
-
-**Next session:** **P44-S3** (`permission-service`: maintenance-mode coverage for
-`federation-hub-service`/`plugin-orchestration-service` + the service-to-service write-enforcement
-build from ADR 0152) — see `IMPLEMENTATION_PLAN.md` "Phase 44" for the full plan.
 
 ---
 

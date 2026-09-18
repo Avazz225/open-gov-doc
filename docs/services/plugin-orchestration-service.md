@@ -46,7 +46,7 @@ Deliberate scope decisions from follow-up questions at session start, see `PROGR
 | `POST` | `/plugins/{plugin_type}/resource-usage` | Resource self-report of a running instance (`instance_id`/`cpu_cores`/`ram_mb`). Ungated, service-to-service. |
 | `GET` | `/nodes` | Sampled/declared nodes. Ungated. |
 | `POST` | `/nodes/{node_id}` | Capacity self-report of a (further) node (upsert, P10-S2). Requires `admin.orchestration` or an activated superuser. |
-| `POST` | `/placements` | Request a placement decision. `404` on unknown manifest, `409` on singleton conflict. Requires `admin.orchestration` or an activated superuser. |
+| `POST` | `/placements` | Request a placement decision. `404` on unknown manifest, `409` on singleton conflict, **`503` while system-wide maintenance mode is active** (Phase 44 Session 3, [ADR 0164](../adr/0164-maintenance-mode-poll-loop-coverage.md) — this service's closest honest analog to 4.8's "halt plugin instances", since it never actually starts/stops anything itself, see "Boundaries of This Build-Out Stage"). Requires `admin.orchestration` or an activated superuser. |
 | `GET` | `/placements` | Placement history (audit read model), optionally `?plugin_type=`. Ungated. |
 
 ## Data Model
@@ -71,7 +71,11 @@ Two gauges, `plugin_orchestration.node.cpu_usage_percent`/`.available_ram_mb` (g
 
 ## Tests
 
-`services/plugin-orchestration-service/tests/` — 45 tests since Phase 40 Session 4 (+2: `test_metrics_endpoint_exposes_node_resource_sensors` for the new `/metrics` sensor presence, `test_run_tick_sets_the_sensor_gauges_from_the_same_sample` forcing both gauges active via monkeypatch and asserting plausible real `psutil` values after a tick — same "before/after via Prometheus exposition text" convention as document-service/storage-service, never against the `Gauge` Python object directly). Before that, 43 tests: `test_placement.py` (manifest source/median fallback/default fallback, staleness, singleton conflict, multi-node first-fit, load-profile ranking, platform scheduler delegation/fallback, dependency status), `test_sampler.py` (`psutil` values, upsert idempotence), `test_api.py` (gate, manifest CRUD, resource usage, node upsert gate, placement including `409`, `GET /nodes`/`GET /placements`), `test_platform_scheduler_kubernetes.py` (P24-S4, `KubernetesSchedulerAdapter` against a mocked `kubernetes` client: fitting node, no capacity → `None`, multi-node tie-break, unschedulable/not-ready filtering, millicore/binary unit parsing, label-selector pass-through).
+`services/plugin-orchestration-service/tests/` — **46 tests since Phase 44 Session 3** (+1:
+`test_placement_rejected_during_maintenance_mode` — the `client` fixture's `permission_client`
+`AsyncMock` needed an explicit `is_maintenance_active.return_value = False` default added too, or
+every pre-existing placement test would have broken against the mock's default truthy return). Before
+that, 45 tests since Phase 40 Session 4 (+2: `test_metrics_endpoint_exposes_node_resource_sensors` for the new `/metrics` sensor presence, `test_run_tick_sets_the_sensor_gauges_from_the_same_sample` forcing both gauges active via monkeypatch and asserting plausible real `psutil` values after a tick — same "before/after via Prometheus exposition text" convention as document-service/storage-service, never against the `Gauge` Python object directly). Before that, 43 tests: `test_placement.py` (manifest source/median fallback/default fallback, staleness, singleton conflict, multi-node first-fit, load-profile ranking, platform scheduler delegation/fallback, dependency status), `test_sampler.py` (`psutil` values, upsert idempotence), `test_api.py` (gate, manifest CRUD, resource usage, node upsert gate, placement including `409`, `GET /nodes`/`GET /placements`), `test_platform_scheduler_kubernetes.py` (P24-S4, `KubernetesSchedulerAdapter` against a mocked `kubernetes` client: fitting node, no capacity → `None`, multi-node tie-break, unschedulable/not-ready filtering, millicore/binary unit parsing, label-selector pass-through).
 
 ## Open Points
 

@@ -230,8 +230,29 @@ async def _poll_loop(session_factory) -> None:
     mailbox in turn (`app.state.backends`, `dict[mailbox_id,
     MailboxBackend]`) - a failure fetching/ingesting one mailbox does not
     prevent the others from being polled in the same tick (each mailbox's
-    `try` is independent, not the whole loop's)."""
+    `try` is independent, not the whole loop's). Since Post-Roadmap Phase
+    44 Session 3 (4.8, ADR 0164): skips the whole tick while maintenance
+    mode is active - ADR 0152 named this loop explicitly as "a full
+    document-creation pipeline off a POP3 timer," exactly the kind of
+    write an emergency lockdown exists to stop, with zero gateway
+    involvement ever. This loop's `try` is per-mailbox, not a single
+    enclosing one - the check gets its own try/except instead, failing
+    OPEN (proceeds with the tick) on error, same principle the gateway's
+    own maintenance check already uses (ADR 0024). Unwrapped, a transient
+    `permission-service` error here was found to kill the whole task
+    outright during this session's own test run (surfaced as a
+    cross-event-loop `RuntimeError` in an unrelated test once the
+    now-dead background task's stale client got garbage-collected)."""
     while True:
+        try:
+            skip_tick = await app.state.permission_client.is_maintenance_active()
+        except Exception:
+            logger.exception("Wartungsmodus-Check fehlgeschlagen - Tick wird trotzdem ausgefuehrt.")
+            skip_tick = False
+        if skip_tick:
+            await asyncio.sleep(settings.poll_interval_seconds)
+            continue
+
         for mailbox_id, backend in app.state.backends.items():
             try:
                 messages = await backend.fetch_new_messages()

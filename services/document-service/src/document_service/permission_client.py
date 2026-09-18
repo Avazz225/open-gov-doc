@@ -67,6 +67,17 @@ class PermissionServiceClient:
         response.raise_for_status()
         return permission in response.json()["permissions"]
 
+    async def is_maintenance_active(self) -> bool:
+        """Post-Roadmap Phase 44 Session 3 (ADR 0164) - same method
+        `libs/dms-permission-client` gained this session and
+        `workflow-service`'s own local client already had; duplicated
+        here rather than migrating this service onto the shared library,
+        the same deliberate non-migration `create_resource_node` above
+        already explains (ADR 0154 "Consequences")."""
+        response = await self._client.get("/maintenance-mode")
+        response.raise_for_status()
+        return bool(response.json()["active"])
+
     async def create_resource_node(
         self, *, resource_id: str, parent_id: str | None, resource_type: str = "folder"
     ) -> None:

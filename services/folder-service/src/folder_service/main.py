@@ -145,9 +145,20 @@ async def _execute_or_defer_forced_deletion(session: AsyncSession, folder: Folde
 async def _retention_poll_loop(session_factory) -> None:
     """Retention/legal hold/forced deletion for folders (5.2/5.2a, since
     P7-S1b) - identical poll-loop idiom to `document_service.main.
-    _retention_poll_loop` (P7-S1, itself following ADR 0020)."""
+    _retention_poll_loop` (P7-S1, itself following ADR 0020). Since
+    Post-Roadmap Phase 44 Session 3 (4.8, ADR 0164): skips the whole tick
+    while maintenance mode is active - forced deletion is exactly the
+    kind of write an emergency lockdown exists to stop, and this loop has
+    zero gateway involvement (ADR 0152's "Category B"). The check itself
+    lives INSIDE the existing `try` (not before it, same precedent
+    `workflow-service`'s own `_sla_poll_loop` already established) -
+    unwrapped, a transient `permission-service` error would kill this
+    whole tick's exception isolation instead of just skipping gracefully."""
     while True:
         try:
+            if await app.state.permission_client.is_maintenance_active():
+                await asyncio.sleep(settings.retention_poll_interval_seconds)
+                continue
             async with session_factory() as session:
                 config = await repository.get_retention_config(session)
                 if config.reminder_lead_days is not None:

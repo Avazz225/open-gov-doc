@@ -297,19 +297,25 @@ def test_download_unknown_report_run_returns_404(client):
     assert response.status_code == 404
 
 
-async def test_download_report_run_proxies_storage_client(client):
+async def test_download_report_run_proxies_storage_client(client, session):
+    """`session` (own engine bound to THIS test's event loop), not
+    `app.state.session_factory` (bound to `TestClient`'s own internal
+    portal loop) - same "attached to a different loop" pitfall the
+    `poll_env` fixture below already documents, found here as a genuine,
+    pre-existing intermittent failure while running this session's own
+    (unrelated) test batch, fixed as a drive-by since it stood in the way
+    of a clean test run."""
     app.state.storage_client.download.return_value = b"csv,content"
 
-    async with app.state.session_factory() as session:
-        run = await repository.create_report_run(
-            session,
-            schedule_id=None,
-            report_type="storage_usage",
-            format="csv",
-            storage_object_key="reports/x/y.csv",
-            content_type="text/csv",
-        )
-        await session.commit()
+    run = await repository.create_report_run(
+        session,
+        schedule_id=None,
+        report_type="storage_usage",
+        format="csv",
+        storage_object_key="reports/x/y.csv",
+        content_type="text/csv",
+    )
+    await session.commit()
 
     response = client.get(f"/report-runs/{run.id}/download")
 

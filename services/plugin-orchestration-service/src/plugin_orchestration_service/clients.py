@@ -36,6 +36,15 @@ class PermissionServiceClient:
         response.raise_for_status()
         return permission in response.json()["permissions"]
 
+    async def is_maintenance_active(self) -> bool:
+        """Post-Roadmap Phase 44 Session 3 (4.8, ADR 0164) - same method
+        `libs/dms-permission-client` gained this session, duplicated
+        here for the same reason this service's own local client isn't
+        migrated onto the shared library elsewhere either."""
+        response = await self._client.get("/maintenance-mode")
+        response.raise_for_status()
+        return bool(response.json()["active"])
+
     async def close(self) -> None:
         await self._client.aclose()
 

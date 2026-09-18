@@ -878,11 +878,18 @@ services:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      # Post-Roadmap Phase 44 Session 3 (ADR 0164) - optional, and set here
+      # specifically because this dev stack IS the single-installation
+      # shape that setting is meant for (self-loopback, same convention
+      # already established for this service, see Settings' own docstring).
+      DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
     ports:
       - "${FEDERATION_HUB_SERVICE_PORT:-8018}:8000"
     depends_on:
       postgres:
         condition: service_healthy
+      permission-service:
+        condition: service_started
     networks:
       - dms-net
 

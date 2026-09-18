@@ -26,6 +26,7 @@ def client():
         app.state.auth_client.get_active_superuser.return_value = (False, None)
         app.state.permission_client = AsyncMock()
         app.state.permission_client.has_permission.return_value = True
+        app.state.permission_client.is_maintenance_active.return_value = False
         app.state.registry_client = AsyncMock()
         app.state.registry_client.has_healthy_instance.return_value = True
         yield c
@@ -121,6 +122,19 @@ def test_placement_requires_orchestration_permission(client):
         "/placements", json={"plugin_type": "cmis-connector"}, headers={"x-dms-principal": "alice"}
     )
     assert response.status_code == 403
+
+
+def test_placement_rejected_during_maintenance_mode(client):
+    """Post-Roadmap Phase 44 Session 3 (4.8, ADR 0164) - the closest
+    honest analog this recommendation-only service has to "halt plugin
+    instances": refuses to authorize a NEW placement decision while
+    maintenance mode is active, mirroring `workflow-service`'s own
+    identical rejection of new process-instance starts."""
+    app.state.permission_client.is_maintenance_active.return_value = True
+    response = client.post(
+        "/placements", json={"plugin_type": "cmis-connector"}, headers={"x-dms-principal": "alice"}
+    )
+    assert response.status_code == 503
 
 
 def test_placement_for_unknown_manifest_returns_404(client):

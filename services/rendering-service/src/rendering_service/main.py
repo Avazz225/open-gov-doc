@@ -82,9 +82,16 @@ async def _rendition_retry_poll_loop(session_factory) -> None:
     """Retries failed rendition creation (post-roadmap phase 20 session 4,
     ADR 0080) - the first attempt remains synchronous in the NATS handler,
     only the RETRY runs asynchronously in this dedicated poll loop. Same
-    idiom as notification-/ocr-service."""
+    idiom as notification-/ocr-service. Since Post-Roadmap Phase 44
+    Session 3 (4.8, ADR 0164): skips the whole tick while maintenance
+    mode is active, same reasoning as ocr-service's identical fix - and
+    the check itself lives inside the existing `try`, same isolation fix
+    ocr-service's version also needed."""
     while True:
         try:
+            if await app.state.permission_client.is_maintenance_active():
+                await asyncio.sleep(settings.rendering_retry_poll_interval_seconds)
+                continue
             await _run_retry_tick(session_factory)
         except Exception:
             logger.exception(

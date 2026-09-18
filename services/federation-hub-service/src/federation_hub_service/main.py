@@ -15,6 +15,7 @@ from dms_metrics_client import (
     metrics_payload,
     run_gauge_sampler_loop,
 )
+from dms_permission_client import PermissionServiceClient
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ValidationError
@@ -176,11 +177,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # `models.Handover`'s docstring and ADR 0147's memory-pressure note,
     # which now applies to both caches together).
     app.state.pending_handover_result_payloads = {}
+    app.state.permission_client = (
+        PermissionServiceClient(settings.permission_service_base_url)
+        if settings.permission_service_base_url
+        else None
+    )
     retry_poll_task = asyncio.create_task(
         _handover_retry_poll_loop(
             app.state.session_factory,
             app.state.pending_handover_payloads,
             app.state.pending_handover_result_payloads,
+            app.state.permission_client,
         )
     )
 
@@ -221,6 +228,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     retry_poll_task.cancel()
     with suppress(asyncio.CancelledError):
         await retry_poll_task
+    if app.state.permission_client is not None:
+        await app.state.permission_client.close()
     await app.state.http_client.aclose()
     await engine.dispose()
 
@@ -524,7 +533,10 @@ async def _run_result_retry_tick(session_factory, pending_result_payloads: dict[
 
 
 async def _handover_retry_poll_loop(
-    session_factory, pending_payloads: dict[str, dict], pending_result_payloads: dict[str, dict]
+    session_factory,
+    pending_payloads: dict[str, dict],
+    pending_result_payloads: dict[str, dict],
+    permission_client: PermissionServiceClient | None,
 ) -> None:
     """Retries failed initial handover deliveries (Post-Roadmap Phase 20
     Session 5, ADR 0081) - the first delivery attempt deliberately stays
@@ -533,8 +545,29 @@ async def _handover_retry_poll_loop(
     notification-service's `_notification_retry_poll_loop` (ADR 0079). Since
     Phase 40 Session 3, the same loop/interval also drives the return path's
     retry tick - one poll loop, two independent legs, rather than a second
-    `asyncio.create_task`/lifespan-managed loop for a symmetric concern."""
+    `asyncio.create_task`/lifespan-managed loop for a symmetric concern.
+
+    Since Post-Roadmap Phase 44 Session 3 (4.8, ADR 0164): skips the whole
+    tick (both legs) while `permission_client` is configured AND reports
+    maintenance mode active - see `Settings.permission_service_base_url`'s
+    own docstring for why this is optional/unset by default, unlike every
+    other Category B poll loop this ADR's rollout touches. The check gets
+    its own try/except, failing OPEN (proceeds with the tick) on error -
+    this loop has no single enclosing `try` (two independent legs, each
+    isolated on its own), and unwrapped, a transient `permission-service`
+    error would otherwise kill the whole background task outright."""
     while True:
+        if permission_client is not None:
+            try:
+                skip_tick = await permission_client.is_maintenance_active()
+            except Exception:
+                logger.exception(
+                    "Wartungsmodus-Check fehlgeschlagen - Tick wird trotzdem ausgefuehrt."
+                )
+                skip_tick = False
+            if skip_tick:
+                await asyncio.sleep(settings.handover_retry_poll_interval_seconds)
+                continue
         try:
             await _run_retry_tick(session_factory, pending_payloads)
         except Exception:

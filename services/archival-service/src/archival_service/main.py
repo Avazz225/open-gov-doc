@@ -56,8 +56,26 @@ async def _archival_poll_loop(session_factory) -> None:
     """Due-date poll for records disposal/dehydration (5.6) - the same
     idiom as document-service's `_retention_poll_loop`/reporting-service's
     `_report_schedule_poll_loop`: two independent phases per run, an error
-    in one phase does not abort the loop."""
+    in one phase does not abort the loop. Since Post-Roadmap Phase 44
+    Session 3 (4.8, ADR 0164): skips the whole tick while maintenance mode
+    is active - disposal/dehydration are exactly the kind of "scheduled
+    job" a lockdown is meant to pause, and this loop runs with zero
+    gateway involvement ever (ADR 0152's "Category B"). This loop has no
+    single enclosing `try` (three independent phases, each isolated on
+    its own) - the check gets its own try/except instead, failing OPEN
+    (proceeds with the tick) on error, same principle the gateway's own
+    maintenance check already uses (ADR 0024) rather than letting a
+    transient `permission-service` error silently skip every phase."""
     while True:
+        try:
+            skip_tick = await app.state.permission_client.is_maintenance_active()
+        except Exception:
+            logger.exception("Wartungsmodus-Check fehlgeschlagen - Tick wird trotzdem ausgefuehrt.")
+            skip_tick = False
+        if skip_tick:
+            await asyncio.sleep(settings.archival_poll_interval_seconds)
+            continue
+
         try:
             await pipeline.run_active_transfers_tick(
                 session_factory,

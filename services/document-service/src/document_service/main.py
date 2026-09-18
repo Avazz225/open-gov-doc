@@ -230,9 +230,21 @@ async def _retention_poll_loop(session_factory) -> None:
     second one: exactly the same "poll instead of a real BPMN process"
     rationale applies, and legal hold's own gating (`has_active_hold`)
     already lives as a filter inside the query helpers, not as a separate
-    loop, which the new phase mirrors (`list_expired_quarantine`)."""
+    loop, which the new phase mirrors (`list_expired_quarantine`). Since
+    Post-Roadmap Phase 44 Session 3 (4.8, ADR 0164): skips the whole tick
+    while maintenance mode is active - forced deletion/quarantine
+    auto-delete are exactly the kind of write an emergency lockdown
+    exists to stop, and this loop has zero gateway involvement (ADR
+    0152's "Category B"). The check itself lives INSIDE the existing
+    `try` (not before it, same precedent `workflow-service`'s own
+    `_sla_poll_loop` already established) - unwrapped, a transient
+    `permission-service` error would kill this tick's exception
+    isolation instead of just skipping gracefully like any other error."""
     while True:
         try:
+            if await app.state.permission_client.is_maintenance_active():
+                await asyncio.sleep(settings.retention_poll_interval_seconds)
+                continue
             async with session_factory() as session:
                 config = await repository.get_retention_config(session)
                 if config.reminder_lead_days is not None:
@@ -335,9 +347,16 @@ async def _lock_reminder_poll_loop(session_factory) -> None:
     0111) - the first notification hook this lock feature has ever had
     (ADR 0002 deliberately kept it otherwise minimal). Same
     error-isolation idiom as `_retention_poll_loop`: a single broken lock
-    row doesn't stop the loop for all others."""
+    row doesn't stop the loop for all others. Same maintenance-mode skip
+    since Phase 44 Session 3 (ADR 0164), for consistency with the other
+    poll loops in this module even though a reminder notification is
+    lower-stakes than a forced deletion. Same "check lives inside the
+    existing try" fix as `_retention_poll_loop` above."""
     while True:
         try:
+            if await app.state.permission_client.is_maintenance_active():
+                await asyncio.sleep(settings.lock_reminder_poll_interval_seconds)
+                continue
             async with session_factory() as session:
                 for lock in await repository.list_locks_due_for_reminder(
                     session, threshold_seconds=settings.lock_reminder_threshold_seconds
@@ -516,9 +535,17 @@ async def _run_folder_export_tick(
 async def _folder_export_poll_loop(session_factory) -> None:
     """Combined folder export (post-roadmap phase 28, ADR 0107) - same
     active-transfer poll loop idiom as archival-service's
-    `_archival_poll_loop`/rendering-service's `_rendition_retry_poll_loop`."""
+    `_archival_poll_loop`/rendering-service's `_rendition_retry_poll_loop`.
+    A fourth Category B loop in this service, beyond the two ADR 0152
+    itself enumerated - found while rolling out that ADR's recommendation
+    in Phase 44 Session 3 (ADR 0164), same maintenance-mode skip applied
+    here too for the same reason. Check lives inside the existing `try`,
+    same fix as the other two loops in this module."""
     while True:
         try:
+            if await app.state.permission_client.is_maintenance_active():
+                await asyncio.sleep(settings.folder_export_poll_interval_seconds)
+                continue
             await _run_folder_export_tick(
                 session_factory,
                 storage=app.state.storage,

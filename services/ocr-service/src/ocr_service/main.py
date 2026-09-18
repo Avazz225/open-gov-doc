@@ -61,9 +61,19 @@ async def _ocr_retry_poll_loop(session_factory) -> None:
     """Retries failed OCR processing (Post-Roadmap Phase 20 Session 4, ADR
     0080) - the first attempt stays synchronous in the NATS handler, only
     the RETRY runs asynchronously in this dedicated poll loop. Same idiom
-    as notification-service's `_notification_retry_poll_loop`."""
+    as notification-service's `_notification_retry_poll_loop`. Since
+    Post-Roadmap Phase 44 Session 3 (4.8, ADR 0164): skips the whole tick
+    while maintenance mode is active - a retry is exactly the kind of
+    write an emergency lockdown exists to stop, and this loop runs with
+    zero gateway involvement (ADR 0152's "Category B"). Check lives
+    inside the existing `try` (not before it) so a transient
+    `permission-service` error is isolated the same way any other tick
+    error already is, instead of killing the whole background task."""
     while True:
         try:
+            if await app.state.permission_client.is_maintenance_active():
+                await asyncio.sleep(settings.ocr_retry_poll_interval_seconds)
+                continue
             await _run_retry_tick(session_factory)
         except Exception:
             logger.exception(

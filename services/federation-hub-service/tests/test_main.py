@@ -1,7 +1,10 @@
+import asyncio
 import base64
 import json
 import uuid
+from contextlib import suppress
 from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -11,7 +14,13 @@ from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from federation_hub_service import repository
 from federation_hub_service.crypto_utils import sign_body
-from federation_hub_service.main import _run_result_retry_tick, _run_retry_tick, app, settings
+from federation_hub_service.main import (
+    _handover_retry_poll_loop,
+    _run_result_retry_tick,
+    _run_retry_tick,
+    app,
+    settings,
+)
 
 
 @pytest.fixture
@@ -132,6 +141,83 @@ async def test_run_retry_tick_redelivers_a_due_handover(client, session_factory)
         assert created["id"] not in app.state.pending_handover_payloads
     finally:
         settings.max_handover_delivery_attempts = original_max_attempts
+
+
+async def test_handover_retry_poll_loop_skips_tick_while_maintenance_active(
+    client, session_factory
+):
+    """Post-Roadmap Phase 44 Session 3 (4.8, ADR 0164) - proves the new
+    maintenance-mode guard actually prevents redelivery, not just that it
+    compiles: same due-handover setup as `test_run_retry_tick_redelivers_
+    a_due_handover` above, but driven through the real poll loop (not the
+    factored-out tick function directly) with a fake `permission_client`
+    reporting maintenance mode active. Runs the loop as a background task
+    for a couple of shortened intervals, then cancels it - the same
+    approach every OTHER Category B rollout site in this ADR's rollout
+    shares, but this is the only one of the ~9 with its own dedicated
+    live test, since it's also this service's first-ever `permission-
+    service` integration and the one non-trivial design decision (the
+    `permission_client` parameter being optional/`None`-able) in this
+    session's rollout."""
+    sender, sender_key = _register(client)
+    target, _ = _register(client, callback_base_url="http://unreachable.invalid")
+
+    def _raise(*_args, **_kwargs):
+        raise httpx.ConnectError("no route", request=httpx.Request("POST", "http://x"))
+
+    app.state.http_client = httpx.AsyncClient(transport=httpx.MockTransport(_raise))
+
+    original_max_attempts = settings.max_handover_delivery_attempts
+    original_interval = settings.handover_retry_poll_interval_seconds
+    settings.max_handover_delivery_attempts = 5
+    settings.handover_retry_poll_interval_seconds = 0.05
+    try:
+        payload = {
+            "handover_id": str(uuid.uuid4()),
+            "to_installation_id": target["id"],
+            "process_type": "test-process",
+            "encrypted_payload": base64.b64encode(b"opaque").decode(),
+        }
+        created = _signed_post(
+            client, "/handovers", payload, sender_key, installation_id=sender["id"]
+        ).json()
+        assert created["status"] == "pending_retry"
+
+        async with session_factory() as session:
+            handover = await repository.get_handover(session, created["id"])
+            handover.next_retry_at = datetime.now(UTC) - timedelta(seconds=1)
+            await session.commit()
+
+        stub, received = _make_stub_receiver()
+        app.state.http_client = httpx.AsyncClient(transport=httpx.ASGITransport(app=stub))
+
+        fake_permission_client = AsyncMock()
+        fake_permission_client.is_maintenance_active.return_value = True
+
+        loop_task = asyncio.create_task(
+            _handover_retry_poll_loop(
+                session_factory,
+                app.state.pending_handover_payloads,
+                app.state.pending_handover_result_payloads,
+                fake_permission_client,
+            )
+        )
+        try:
+            await asyncio.sleep(0.3)
+        finally:
+            loop_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await loop_task
+
+        fake_permission_client.is_maintenance_active.assert_awaited()
+        assert len(received) == 0
+        async with session_factory() as fresh_session:
+            fresh = await repository.get_handover(fresh_session, created["id"])
+            assert fresh.status == "pending_retry"
+        assert created["id"] in app.state.pending_handover_payloads
+    finally:
+        settings.max_handover_delivery_attempts = original_max_attempts
+        settings.handover_retry_poll_interval_seconds = original_interval
 
 
 async def test_run_retry_tick_skips_handovers_not_yet_due(client, session_factory):
