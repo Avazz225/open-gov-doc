@@ -719,6 +719,18 @@ services:
       # `workflow-service` below, a mutual `depends_on` would be a cycle.
       DMS_CASE_SERVICE_BASE_URL: http://case-service:8000
       DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
+      # DMS-to-DMS XDOMEA handoff (7.4/14.2, Post-Roadmap Phase 43 Session
+      # 1, ADR 0147/ADR 0159) - `xdomea_handoff_target_folder_id`/
+      # `xdomea_handoff_process_definition_id` stay unset here on purpose
+      # (opt-in receiving-side config, same convention as
+      # DMS_FEDERATION_PROCESS_TYPE_MAP above); an operator wanting to
+      # receive automated handoffs sets both explicitly. No `depends_on`
+      # for archival-service, same reasoning as `case_service_base_url`/
+      # `document_service_base_url` above: `archival-service` depends on
+      # `case-service`, which itself depends on `workflow-service` - a
+      # `depends_on: archival-service` here would be a genuine cycle, not
+      # just a redundant one.
+      DMS_ARCHIVAL_SERVICE_BASE_URL: http://archival-service:8000
     ports:
       - "${WORKFLOW_SERVICE_PORT:-8014}:8000"
     depends_on:

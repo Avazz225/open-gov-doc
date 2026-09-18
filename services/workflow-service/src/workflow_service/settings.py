@@ -104,3 +104,31 @@ class Settings(BaseServiceSettings):
     # `workflow-service`, a mutual `depends_on` would be a cycle.
     case_service_base_url: str = "http://localhost:8016"
     document_service_base_url: str = "http://localhost:8006"
+
+    # DMS-to-DMS XDOMEA handoff (7.4/14.2, Post-Roadmap Phase 43 Session 1,
+    # ADR 0147/ADR 0159): the sending side builds the export package via
+    # `archival-service`'s already-existing general-export endpoints (ADR
+    # 0127); the receiving side calls its already-existing general-import
+    # endpoint (ADR 0128) exactly as a human would, just synthesized here
+    # instead of through the UI - `archival_client.py`.
+    archival_service_base_url: str = "http://localhost:8021"
+    # Receiving-side configuration for the reserved `xdomea.case_handoff`
+    # process type - both `None` by default (feature disabled/rejects any
+    # such inbound with `422`) until an operator explicitly configures
+    # where imported packages land, same "stays empty until configured"
+    # convention as `federation_process_type_map`. Deliberately two plain
+    # settings, not a richer per-sender mapping - a single, installation-
+    # wide inbox for automated handoffs is the smallest sensible default;
+    # a future session could add per-installation routing if ever needed.
+    xdomea_handoff_target_folder_id: str | None = None
+    xdomea_handoff_process_definition_id: int | None = None
+
+    # ADR 0147's own flagged risk: a multi-document case export can
+    # plausibly be several megabytes before base64 inflation - the
+    # original 15s default (sized for small, JSON-shaped BPMN task data)
+    # is too tight for that, both for the outbound `POST /handovers` call
+    # (large request body) and this installation's own outbound HTTP
+    # client in general. Raised generously rather than finely tuned - a
+    # slow handoff completing late is much cheaper than a spuriously
+    # failed one.
+    federation_hub_request_timeout_seconds: float = 60.0

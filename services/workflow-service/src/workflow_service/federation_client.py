@@ -24,8 +24,14 @@ class FederationHubClient:
     base URL instead of registry discovery, see
     `settings.federation_hub_base_url`."""
 
-    def __init__(self, base_url: str) -> None:
-        self._client = httpx.AsyncClient(base_url=base_url, timeout=15.0)
+    def __init__(self, base_url: str, *, timeout: float = 15.0) -> None:
+        """`timeout` default kept at the original 15s for callers that
+        don't override it (e.g. registration/key rotation, small requests)
+        - `main.py` passes `settings.federation_hub_request_timeout_seconds`
+        for the actual installation client, since `create_handover`'s
+        request body can carry a large base64-encoded XDOMEA package
+        (Post-Roadmap Phase 43 Session 1, ADR 0147/ADR 0159)."""
+        self._client = httpx.AsyncClient(base_url=base_url, timeout=timeout)
 
     async def get_hub_public_key(self) -> str:
         response = await self._client.get("/public-key")

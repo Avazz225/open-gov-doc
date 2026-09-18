@@ -160,7 +160,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # callback URLs - swappable in tests (`app.state.http_client =
     # httpx.AsyncClient(transport=httpx.ASGITransport(app=stub))`), so that a
     # handover round trip can be tested without a real network.
-    app.state.http_client = httpx.AsyncClient(timeout=15.0)
+    app.state.http_client = httpx.AsyncClient(timeout=settings.hub_delivery_timeout_seconds)
 
     # Post-Roadmap Phase 20 Session 5 (ADR 0081): the end-to-end encrypted
     # payload is deliberately NEVER persisted in the `handover` table (see
@@ -579,6 +579,14 @@ async def create_handover(
         session, installation_id=x_installation_id, body=body, signature=x_installation_signature
     )
     payload = _parse_body(HandoverCreate, body)
+    if len(payload.encrypted_payload) > settings.max_handover_payload_chars:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"encrypted_payload zu groß ({len(payload.encrypted_payload)} Zeichen, "
+                f"Limit {settings.max_handover_payload_chars})"
+            ),
+        )
     to_installation = await session.get(Installation, payload.to_installation_id)
     if to_installation is None:
         raise HTTPException(
@@ -654,6 +662,14 @@ async def submit_handover_result(
         session, installation_id=x_installation_id, body=body, signature=x_installation_signature
     )
     payload = _parse_body(HandoverResultSubmit, body)
+    if len(payload.encrypted_result) > settings.max_handover_payload_chars:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"encrypted_result zu groß ({len(payload.encrypted_result)} Zeichen, "
+                f"Limit {settings.max_handover_payload_chars})"
+            ),
+        )
     try:
         handover = await repository.get_handover(session, handover_id)
     except repository.NotFoundError as exc:

@@ -2,8 +2,72 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P42-S4 (`rendering-service`: preserve PDF/UA tags on multi-document folder export —
-fourth and last session of Phase 42, "Remaining Functional Completion", [ADR
+**Last completed:** P43-S1 (DMS-to-DMS XDOMEA handoff, the actual build — first session of Phase 43,
+"Build/Scoping Sessions for Larger Topics", [ADR
+0159](docs/adr/0159-dms-to-dms-xdomea-handoff-implementation.md)). Already fully scoped by
+[ADR 0147](docs/adr/0147-cross-installation-xdomea-handoff-scoping.md)/P37-S1 — this session builds
+exactly what that scoping recommended: a reserved `taskType=federated` process type
+(`xdomea.case_handoff`) that automates the existing manual download/upload handoff (ADR 0126) between
+two installations of this DMS software.
+
+**Implementation**: sender side (`workflow-service`'s `_dispatch_outbound_federated_task`) builds an
+XDOMEA export package via a new `archival_client.py` (calling `archival-service`'s already-existing
+`POST /xdomea/export/cases/{id}`, ADR 0127, completely unchanged) and sends it base64-encoded instead of
+raw SpiffWorkflow task data. Receiver side (`POST /federation/inbound`, intercepting the reserved
+process type BEFORE the generic `federation_process_type_map` lookup) decodes the package and calls
+`archival-service`'s already-existing `POST /xdomea/import` (ADR 0128, also unchanged) via a synthesized
+multipart request. The sending installation's still-pending task completes via the **existing, completely
+unmodified** `send_result`/`POST /federation/inbound-result` mechanism — the receiving side sends the
+real import outcome back through the hub using the exact same call `_dispatch_federated_return_task`
+already uses for the generic case, needing zero changes to that endpoint. `FederationTask.
+process_instance_id` is now nullable (a reserved-type inbound row has no local `ProcessInstance`).
+Two mechanical timeout raises (15s → 60s on both installations' outbound HTTP clients) plus a new,
+configurable `max_handover_payload_chars` size ceiling (`413` before any target/version lookup) address
+ADR 0147's own flagged payload-size risk — a bounded, proportionate mitigation, not the full
+retry-storage redesign that risk could still eventually need.
+
+**A real, pre-existing `archival-service` bug found only by this session's own live verification**:
+`general_export.build_case_export_package` silently excludes an OPEN case's document references (the
+filter requires `snapshot_version_number`, which is only ever set once a case CLOSES) — contradicting
+ADR 0127's own stated "the case does NOT need to be closed first." Confirmed by reproducing it twice
+(open case → empty package, same case closed → correct package). Deliberately NOT fixed in this session
+(a transport-mechanics session is not the place to redesign export-eligibility semantics) — documented
+as a new Open Point in both `docs/services/archival-service.md` and `docs/services/workflow-service.md`
+for a future session.
+
+**Tests**: `workflow-service` 215 tests (previously 208, +7 — new `test_xdomea_handoff.py`: outbound
+dispatch guards against the real running `federation-hub-service` (package built from a boundary-patched
+`archival_client` instead of raw task data, clean skip when `case_id` is missing or export fails), the
+receiving side's import/confirmation logic called directly with a boundary-patched `archival_client`/
+`federation_client` (success sends a decryptable real-result confirmation, `422` for unconfigured/missing
+package, a failed import still confirms failure so the origin's task never hangs forever) — a full round
+trip through a real HTTP callback needs a real socket `TestClient` cannot provide, same limitation the
+generic case's own tests already document. `federation-hub-service` 73 tests (previously 69, +4 — new
+size-limit rejection/allow-at-limit tests for both handover endpoints). `ruff check`/`ruff format` clean
+throughout.
+
+**Live-verified** end to end against the rebuilt, restarted real stack, through the real gateway: a
+genuine self-loopback (an installation registered with, and handing off to, itself — this project's own
+established federation-verification pattern) moved a real closed case (created via case-service, one real
+document added as a reference, closed by completing its own BPMN task) through the real hub into a
+brand-new case on the "receiving" side — correctly named after the original case, `created_by=
+"federation-hub"`, the document's real byte content confirmed identical — with the original task/instance
+completing automatically via the reused confirmation mechanism, no manual intervention. This exact live
+pass is what surfaced the archival-service open-case-export bug above (first attempt against a still-open
+case silently produced zero documents). Test artifacts (documents, temporary `docker-compose.yml`
+env-var overrides used only for this verification) all cleaned up afterward; the created test folder/BPMN
+process definitions/cases have no delete endpoint and remain as harmless test data, same precedent as
+other non-deletable artifacts in this project.
+
+No `graphify update .` — not a phase end (Phase 43 has two more sessions planned, both scoping-only:
+P43-S2/S3). Next step: **P43-S2** (scoping only: teamspace group invitation — checking whether the old
+"waiting on AD/Keycloak group integration" blocker is actually stale, per the plan's own note that this
+integration has existed since P24-S2/ADR 0093).
+
+---
+
+Immediately before P43-S1: **P42-S4** (`rendering-service`: preserve PDF/UA tags on multi-document folder
+export — fourth and last session of Phase 42, "Remaining Functional Completion", [ADR
 0158](docs/adr/0158-multi-document-struct-tree-merge.md)). Unlike the other three P42 sessions, this one
 DOES get a new ADR — Phase 42's DoD text says none is "expected", not that one is barred, and this
 session's decision (attempt real cross-document structure-tree merging vs. a partial fix vs. reaffirming

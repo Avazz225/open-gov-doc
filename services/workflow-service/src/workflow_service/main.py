@@ -1,4 +1,6 @@
 import asyncio
+import base64
+import binascii
 import json
 import logging
 import time
@@ -37,6 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from workflow_service import consumer, federation_crypto, repository, spiff_adapter
 from workflow_service.approval_client import ApprovalClient
+from workflow_service.archival_client import ArchivalServiceClient
 from workflow_service.case_client import CaseServiceClient
 from workflow_service.document_client import DocumentServiceClient
 from workflow_service.federation_client import FederationHubClient
@@ -64,6 +67,7 @@ from workflow_service.schemas import (
     TaskClaimOut,
     TaskCompleteRequest,
     TaskReassignRequest,
+    XdomeaHandoffInboundResultOut,
 )
 from workflow_service.settings import Settings
 from workflow_service.signature_client import SignatureServiceClient
@@ -76,6 +80,12 @@ _SIGNATURE_LEVEL_RANK = {"ses": 0, "aes": 1, "qes": 2}
 _FEDERATION_IDENTITY_ID = 1
 _FEDERATION_CONFIG_ID = 1
 _FEDERATED_TASK_TYPES = ("federated", "federated_return")
+# Reserved `process_type` value (Post-Roadmap Phase 43 Session 1, ADR
+# 0147/ADR 0159): recognized by `federation_inbound` BEFORE it falls
+# through to the generic `federation_process_type_map` lookup, and by
+# `_dispatch_outbound_federated_task` as the trigger for building an
+# XDOMEA package instead of sending raw SpiffWorkflow task data.
+_XDOMEA_CASE_HANDOFF_PROCESS_TYPE = "xdomea.case_handoff"
 
 
 # Own, swappable synchronous client (instead of the free `httpx.post()`
@@ -287,7 +297,9 @@ async def _ensure_federation_identity(
     `federation_client.py`/`federation_crypto.py`)."""
     if not settings.federation_hub_base_url:
         return None
-    client = FederationHubClient(settings.federation_hub_base_url)
+    client = FederationHubClient(
+        settings.federation_hub_base_url, timeout=settings.federation_hub_request_timeout_seconds
+    )
     callback_base_url = f"{settings.installation_gateway_base_url}/api/workflow-service"
     async with session_factory() as session:
         config = await _get_or_seed_federation_config(session)
@@ -410,6 +422,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ADD COLUMN IF NOT EXISTS expiry_notified_at TIMESTAMPTZ"
             )
         )
+        # DMS-to-DMS XDOMEA handoff (Post-Roadmap Phase 43 Session 1, ADR
+        # 0147/ADR 0159): an inbound `FederationTask` row for the reserved
+        # `xdomea.case_handoff` process type never starts a local
+        # `ProcessInstance` (see `models.FederationTask`), so the
+        # previously-required FK must become nullable - same idempotent
+        # migration pattern as above (`DROP NOT NULL` is a no-op if the
+        # column is already nullable).
+        await conn.execute(
+            text(
+                "ALTER TABLE workflow.federation_task "
+                "ALTER COLUMN process_instance_id DROP NOT NULL"
+            )
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
     # Business calendar cache (P14-S5): `business_days()` reads it
@@ -424,6 +449,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.signature_client = SignatureServiceClient(settings.signature_service_base_url)
     app.state.case_client = CaseServiceClient(settings.case_service_base_url)
     app.state.document_client = DocumentServiceClient(settings.document_service_base_url)
+    app.state.archival_client = ArchivalServiceClient(settings.archival_service_base_url)
     app.state.federation_client = await _ensure_federation_identity(app.state.session_factory)
     app.state.license_client = LicenseStatusClient(
         settings.registry_service_base_url or "",
@@ -499,6 +525,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await app.state.signature_client.close()
     await app.state.case_client.close()
     await app.state.document_client.close()
+    await app.state.archival_client.close()
     await app.state.license_client.close()
     if app.state.federation_client is not None:
         await app.state.federation_client.close()
@@ -555,7 +582,18 @@ async def _dispatch_outbound_federated_task(
 ) -> None:
     """Automatic handover (7.4): a `taskType=federated` task is never
     completed by a human (see `_reject_manual_federated_completion`), but
-    handed over to the Federation Hub immediately once ready."""
+    handed over to the Federation Hub immediately once ready.
+
+    Post-Roadmap Phase 43 Session 1 (ADR 0147/ADR 0159): when
+    `targetProcessType` is the reserved `xdomea.case_handoff` value, the
+    payload sent is NOT raw SpiffWorkflow `task.data` (the generic case)
+    but a freshly built XDOMEA export package, base64-encoded under
+    `package_base64` - everything else about dispatch (handover creation,
+    `FederationTask` bookkeeping, no immediate task completion) is
+    unchanged; the original task only completes once the receiving side's
+    import confirmation arrives via the existing, unmodified
+    `/federation/inbound-result` path (see
+    `_handle_inbound_xdomea_handoff`)."""
     identity = await session.get(FederationIdentity, _FEDERATION_IDENTITY_ID)
     target_installation_id = task.extensions.get("targetInstallationId")
     target_process_type = task.extensions.get("targetProcessType")
@@ -575,8 +613,37 @@ async def _dispatch_outbound_federated_task(
         )
         return
 
+    if target_process_type == _XDOMEA_CASE_HANDOFF_PROCESS_TYPE:
+        case_id = task.data.get("case_id")
+        if not case_id:
+            logger.warning(
+                "xdomea_handoff_missing_case_id",
+                extra={"instance_id": instance_id, "task_id": task.id},
+            )
+            return
+        leser_name = (
+            task.extensions.get("leserName") or target.get("display_name") or target_installation_id
+        )
+        try:
+            package_bytes = await app.state.archival_client.export_case(
+                case_id, leser_name=leser_name
+            )
+        except httpx.HTTPError as exc:
+            logger.warning(
+                "xdomea_handoff_export_failed: %s",
+                exc,
+                extra={"instance_id": instance_id, "task_id": task.id, "case_id": case_id},
+            )
+            return
+        payload = {
+            "package_base64": base64.b64encode(package_bytes).decode("ascii"),
+            "case_id": case_id,
+        }
+    else:
+        payload = task.data
+
     encrypted_payload = federation_crypto.encrypt_for(
-        target["public_key_pem"].encode("utf-8"), task.data
+        target["public_key_pem"].encode("utf-8"), payload
     )
 
     # `handover_id` is deliberately generated here (not by the Hub), and our
@@ -1855,21 +1922,124 @@ async def _verify_hub_signature(
     return identity
 
 
+async def _handle_inbound_xdomea_handoff(
+    session: AsyncSession, payload: dict, identity: FederationIdentity
+) -> XdomeaHandoffInboundResultOut:
+    """Reserved-`process_type` branch of `federation_inbound` (Post-Roadmap
+    Phase 43 Session 1, ADR 0147/ADR 0159) - no local BPMN instance is
+    started at all; the package is imported automatically via
+    `archival-service`'s existing general-import endpoint instead, and the
+    outcome is sent back through the Hub to the ORIGINAL sending
+    installation using the exact same `send_result` mechanism
+    `_dispatch_federated_return_task` already uses for the generic case -
+    this is what lets the sending side's still-pending `federated` task
+    complete via the completely unmodified `/federation/inbound-result`
+    handler, without that handler needing to know anything special about
+    this process type."""
+    try:
+        decrypted_payload = federation_crypto.decrypt_with(
+            identity.private_key_pem, payload["encrypted_payload"]
+        )
+    except federation_crypto.DecryptionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    package_base64 = decrypted_payload.get("package_base64")
+    if not package_base64:
+        raise HTTPException(status_code=422, detail="package_base64 fehlt im Payload")
+    try:
+        zip_bytes = base64.b64decode(package_base64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=f"package_base64 ungültig: {exc}") from exc
+
+    if (
+        settings.xdomea_handoff_target_folder_id is None
+        or settings.xdomea_handoff_process_definition_id is None
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "xdomea_handoff_target_folder_id/xdomea_handoff_process_definition_id "
+                "sind auf dieser Installation nicht konfiguriert"
+            ),
+        )
+
+    try:
+        import_result = await app.state.archival_client.import_package(
+            zip_bytes,
+            folder_id=settings.xdomea_handoff_target_folder_id,
+            process_definition_id=settings.xdomea_handoff_process_definition_id,
+        )
+    except httpx.HTTPStatusError as exc:
+        result_dict: dict = {"status": "failed", "error": str(exc)}
+        outcome = "failed"
+    else:
+        result_dict = {"status": "imported", **import_result}
+        outcome = "completed"
+
+    await repository.create_federation_task(
+        session,
+        process_instance_id=None,
+        task_id=None,
+        handover_id=payload["handover_id"],
+        direction="inbound",
+        origin_installation_id=payload["from_installation_id"],
+        status="received",
+    )
+    await session.commit()
+
+    installations = await app.state.federation_client.list_installations()
+    origin = next((i for i in installations if i["id"] == payload["from_installation_id"]), None)
+    if origin is not None:
+        encrypted_result = federation_crypto.encrypt_for(
+            origin["public_key_pem"].encode("utf-8"), result_dict
+        )
+        try:
+            await app.state.federation_client.send_result(
+                installation_id=identity.installation_id,
+                private_key_pem=identity.private_key_pem,
+                handover_id=payload["handover_id"],
+                outcome=outcome,
+                encrypted_result=encrypted_result,
+            )
+        except httpx.HTTPError as exc:
+            logger.warning(
+                "xdomea_handoff_confirmation_send_failed: %s",
+                exc,
+                extra={"handover_id": payload["handover_id"]},
+            )
+    else:
+        logger.warning(
+            "xdomea_handoff_unknown_origin",
+            extra={"origin_installation_id": payload["from_installation_id"]},
+        )
+
+    if outcome == "failed":
+        raise HTTPException(status_code=502, detail=result_dict["error"])
+    return XdomeaHandoffInboundResultOut(**result_dict)
+
+
 @app.post(
-    "/federation/inbound", response_model=ProcessInstanceOut, status_code=status.HTTP_201_CREATED
+    "/federation/inbound",
+    response_model=ProcessInstanceOut | XdomeaHandoffInboundResultOut,
+    status_code=status.HTTP_201_CREATED,
 )
 async def federation_inbound(
     request: Request,
     x_dms_maintenance_active: str = Header(default="false"),
     session: AsyncSession = Depends(get_session),
-) -> ProcessInstanceOut:
+) -> ProcessInstanceOut | XdomeaHandoffInboundResultOut:
     """Receives a new handover mediated by the Federation Hub (7.4) - starts
     a new local instance of the process assigned via
     `settings.federation_process_type_map`. Deliberately public (no
     `X-DMS-Principal`, see `gateway-service`'s `public_routes`) -
     authentication instead happens via the `X-Federation-Hub-Signature`.
     Respects maintenance mode (4.8) like instance start/task completion -
-    a federated step is everyday processing, not an admin operation."""
+    a federated step is everyday processing, not an admin operation.
+
+    Post-Roadmap Phase 43 Session 1 (ADR 0147/ADR 0159): the reserved
+    `xdomea.case_handoff` process type is intercepted here, BEFORE the
+    generic `federation_process_type_map` lookup below - it never starts a
+    BPMN instance at all, see `_handle_inbound_xdomea_handoff`."""
     await _reject_during_maintenance(x_dms_maintenance_active)
     body = await request.body()
     identity = await _verify_hub_signature(
@@ -1877,6 +2047,8 @@ async def federation_inbound(
     )
     payload = json.loads(body)
     process_type = payload["process_type"]
+    if process_type == _XDOMEA_CASE_HANDOFF_PROCESS_TYPE:
+        return await _handle_inbound_xdomea_handoff(session, payload, identity)
     local_name = settings.federation_process_type_map.get(process_type)
     if local_name is None:
         raise HTTPException(

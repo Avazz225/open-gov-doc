@@ -35,6 +35,31 @@ class Settings(BaseServiceSettings):
     max_handover_delivery_attempts: int = 5
     handover_retry_poll_interval_seconds: float = 60.0
 
+    # DMS-to-DMS XDOMEA handoff (7.4/14.2, Post-Roadmap Phase 43 Session 1,
+    # ADR 0147/ADR 0159): the original 15s default assumed small, JSON-
+    # shaped BPMN task data - a multi-document case export can plausibly
+    # be several megabytes before base64 inflation, and the receiving
+    # installation now also does a synchronous archival-service import
+    # inside the same request this client waits on. Raised generously
+    # rather than finely tuned, same reasoning as the two installation-
+    # side client timeouts this mirrors (`workflow_service.settings.
+    # federation_hub_request_timeout_seconds`).
+    hub_delivery_timeout_seconds: float = 60.0
+
+    # A bounded, explicit ceiling rather than a full backpressure/external-
+    # storage redesign of `pending_handover_payloads`/
+    # `pending_handover_result_payloads` (ADR 0147's own flagged, NOT fully
+    # resolved memory-pressure risk: both dicts hold the full payload in
+    # this process's memory for the duration of any retry window). This
+    # does not solve unbounded concurrent memory use across many in-flight
+    # handovers, but it turns an unbounded per-handover worst case into an
+    # explicit, configurable, immediately-rejected one - a proportionate
+    # mitigation for this session, not the full storage-backend redesign a
+    # future session could still do (see ADR 0159 "Consequences"). ~100MB
+    # default: comfortably above ADR 0147's own "plausibly single-digit
+    # megabytes before base64 inflation" estimate.
+    max_handover_payload_chars: int = 100_000_000
+
     # Admin UI access (Phase 40 Session 3): federation-hub-service is
     # deliberately NOT registered with `registry-service` (see this
     # class's own docstring - it isn't an internal service of any one

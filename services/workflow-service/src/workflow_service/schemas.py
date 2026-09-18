@@ -175,6 +175,26 @@ class FederationConfigUpdate(BaseModel):
     min_compatible_peer_version: str
 
 
+class XdomeaHandoffInboundResultOut(BaseModel):
+    """Response shape for the reserved `xdomea.case_handoff` process type on
+    `POST /federation/inbound` (Post-Roadmap Phase 43 Session 1, ADR
+    0147/ADR 0159) - `status` plus every field of
+    `archival_service.schemas.XdomeaImportResultOut` unchanged, since this
+    is genuinely that same result, just relayed one hop further. `POST
+    /federation/inbound` returns either this or `ProcessInstanceOut`,
+    depending on whether `process_type` was the reserved value (no BPMN
+    instance is started for it) or a mapped one. Only ever constructed on
+    the success path - a failed import raises `HTTPException` instead."""
+
+    status: str
+    case_id: str | None
+    case_created: bool
+    vorgang_betreff: str | None
+    document_ids: list[str]
+    skipped_document_count: int
+    skipped_schriftstueck_count: int
+
+
 class BusinessCalendarOut(BaseModel):
     id: int
     name: str

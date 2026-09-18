@@ -725,7 +725,7 @@ async def advance_timers(session: AsyncSession) -> list[TimerAdvanceResult]:
 async def create_federation_task(
     session: AsyncSession,
     *,
-    process_instance_id: str,
+    process_instance_id: str | None,
     task_id: str | None,
     handover_id: str,
     direction: str,

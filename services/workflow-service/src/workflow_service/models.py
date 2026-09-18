@@ -250,7 +250,16 @@ class FederationTask(Base):
     receives it) - **except** for the self-loopback smoke test used in
     this session (an installation hands over to itself), where the same
     `handover_id` appears in the same database as both an `outbound` and
-    an `inbound` row."""
+    an `inbound` row.
+
+    ``process_instance_id`` is nullable since Post-Roadmap Phase 43 Session
+    1 (ADR 0147/ADR 0159): an inbound row for the reserved
+    `xdomea.case_handoff` process type never starts a local BPMN instance
+    at all (it triggers an automatic archival-service import instead, see
+    `main.py._handle_inbound_xdomea_handoff`) - there is genuinely no
+    `ProcessInstance` for such a row to reference. Every other row (the
+    entire pre-existing generic federation path) still always sets a real
+    one."""
 
     __tablename__ = "federation_task"
     __table_args__ = (
@@ -258,8 +267,8 @@ class FederationTask(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    process_instance_id: Mapped[str] = mapped_column(
-        ForeignKey("workflow.process_instance.id"), index=True
+    process_instance_id: Mapped[str | None] = mapped_column(
+        ForeignKey("workflow.process_instance.id"), index=True, nullable=True
     )
     task_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     handover_id: Mapped[str] = mapped_column(String(36), index=True)

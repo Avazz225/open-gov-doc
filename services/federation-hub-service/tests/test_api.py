@@ -943,3 +943,75 @@ def test_sign_body_signature_is_verifiable_helper_smoke():
         padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
         hashes.SHA256(),
     )
+
+
+def test_create_handover_rejects_oversized_payload(client):
+    """DMS-to-DMS XDOMEA handoff (7.4/14.2, Post-Roadmap Phase 43 Session 1,
+    ADR 0147/ADR 0159): a bounded, explicit ceiling on `encrypted_payload`,
+    checked before any target/version lookup - the real memory-pressure
+    risk this mitigates (`pending_handover_payloads`, ADR 0081) applies
+    regardless of whether the handover would otherwise have succeeded."""
+    sender, sender_key = register_installation(client)
+    hub_settings.max_handover_payload_chars = 100
+    try:
+        payload = {
+            "handover_id": str(uuid.uuid4()),
+            "to_installation_id": "does-not-matter-checked-first",
+            "process_type": "test-process",
+            "encrypted_payload": "x" * 101,
+        }
+        response = _signed_post(
+            client, "/handovers", payload, sender_key, installation_id=sender["id"]
+        )
+        assert response.status_code == 413
+    finally:
+        hub_settings.max_handover_payload_chars = 100_000_000
+
+
+def test_create_handover_allows_payload_at_the_limit(client):
+    sender, sender_key = register_installation(client)
+    target, _ = register_installation(client)
+    hub_settings.max_handover_payload_chars = 100
+    try:
+        payload = {
+            "handover_id": str(uuid.uuid4()),
+            "to_installation_id": target["id"],
+            "process_type": "test-process",
+            "encrypted_payload": "x" * 100,
+        }
+        response = _signed_post(
+            client, "/handovers", payload, sender_key, installation_id=sender["id"]
+        )
+        assert response.status_code == 201
+    finally:
+        hub_settings.max_handover_payload_chars = 100_000_000
+
+
+def test_submit_handover_result_rejects_oversized_payload(client):
+    sender, sender_key = register_installation(client)
+    target, target_key = register_installation(client)
+    handover_payload = {
+        "handover_id": str(uuid.uuid4()),
+        "to_installation_id": target["id"],
+        "process_type": "test-process",
+        "encrypted_payload": "opaque",
+    }
+    create_response = _signed_post(
+        client, "/handovers", handover_payload, sender_key, installation_id=sender["id"]
+    )
+    assert create_response.status_code == 201
+    handover_id = create_response.json()["id"]
+
+    hub_settings.max_handover_payload_chars = 100
+    try:
+        result_payload = {"outcome": "completed", "encrypted_result": "x" * 101}
+        response = _signed_post(
+            client,
+            f"/handovers/{handover_id}/result",
+            result_payload,
+            target_key,
+            installation_id=target["id"],
+        )
+        assert response.status_code == 413
+    finally:
+        hub_settings.max_handover_payload_chars = 100_000_000
