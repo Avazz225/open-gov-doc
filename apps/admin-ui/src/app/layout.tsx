@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import { I18nProvider } from "@/i18n";
 import de from "@/i18n/de.json";
 import { AuthProvider } from "@/lib/auth-context";
 import { InstallationProvider } from "@/lib/installation-context";
+import { LocaleProvider } from "@/lib/locale-context";
 import { ThemeProvider } from "@/lib/theme-context";
 import "./globals.css";
 
@@ -19,13 +19,13 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="de">
       <body>
-        <I18nProvider>
-          <InstallationProvider>
-            <AuthProvider>
+        <InstallationProvider>
+          <AuthProvider>
+            <LocaleProvider>
               <ThemeProvider>{children}</ThemeProvider>
-            </AuthProvider>
-          </InstallationProvider>
-        </I18nProvider>
+            </LocaleProvider>
+          </AuthProvider>
+        </InstallationProvider>
       </body>
     </html>
   );

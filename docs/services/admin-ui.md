@@ -273,6 +273,12 @@ The Admin UI can manage several fully independent DMS installations, without nee
 
 `src/lib/theme-context.tsx` (`ThemeProvider`/`useTheme()`) — identical pattern to the User UI (deliberately duplicated instead of shared, ADR 0006), toggleable via the `ThemeSwitcher` in the header. Stored across devices on the user account of the **active installation** (`GET/PUT /api/auth-service/me/preferences`, `accessToken` comes from the installation-bound `AuthProvider`, ADR 0008), see [ADR 0009](../adr/0009-cross-ui-theming-profile-persistence.md). The `localStorage` cache key (`dms.theme`) is deliberately **not** installation-specific — switching installations briefly still shows the last-cached theme choice, until the new installation's own preference has been loaded (see ADR 0009 "Consequences").
 
+## i18n: English Translation + Locale Switcher (Concept 8, Phase 47 Session 4, [ADR 0167](../adr/0167-locale-switcher-pattern-and-office-addin-host-locale.md))
+
+Own `src/i18n/en.json` — a full English translation of all 754 keys in `de.json` (the largest dictionary of all six apps), reusing the same established German→English glossary as `user-ui`'s own P47-S3 translation (`Umlaufmappe` → "case binder", `Aussonderung` → "records disposal", `Kennzeichen` → "file reference number"), programmatically verified against `de.json`'s flattened key set and every `{placeholder}` variable before touching any code (0 missing/extra, all placeholders matched). `I18nProvider`'s previously-static `locale` prop replaced by a new `LocaleProvider`/`useLocale()` (`lib/locale-context.tsx`) — the same hydration-safe pattern proven in `process-designer` (P47-S1). A new `LocaleSwitcher.tsx` mirrors `ThemeSwitcher.tsx` and is wired into `AdminShell.tsx`'s header, next to `InstallationSwitcher`/`ThemeSwitcher`.
+
+**Provider ordering differs from every other app this phase**: `admin-ui` uniquely has an `InstallationProvider` (ADR 0008, multi-installation) whose `activeInstallation` the installation-scoped `AuthProvider` itself depends on (`auth-context.tsx` imports `useInstallation`) — `InstallationProvider` must therefore stay the outermost provider, unlike the other apps' now-outermost `AuthProvider`. The new tree is `InstallationProvider > AuthProvider > LocaleProvider (renders I18nProvider internally) > ThemeProvider`, replacing the previous `I18nProvider > InstallationProvider > AuthProvider > ThemeProvider` — confirmed safe because `InstallationProvider` itself renders no UI and calls neither `useI18n()` nor `useAuth()`.
+
 ## Backend Integration
 
 Exclusively via the API gateway of the respective **active installation** (3.5, `/api/{service_type}/{path}`):
@@ -288,7 +294,7 @@ Exclusively via the API gateway of the respective **active installation** (3.5, 
 | Four-eyes settings (since **Post-Roadmap Phase 22 Session 3**) | `GET /api/permission-service/approval-config`, `PUT .../{action_type}` |
 | Object types | `GET/POST/PUT/DELETE /api/object-type-service/object-types`, `GET/PUT/DELETE .../object-types/{id}/layouts/{purpose}` (since P5b-S3) — since **P7-S3** additionally `default_archive_after_days`/`archive_encryption_enabled` in the create/update payload (5.6) |
 | Registry | `GET /api/registry-service/instances` |
-| Theme preference | `GET/PUT /api/auth-service/me/preferences` (since P4-S6) |
+| Theme and locale preference | `GET/PUT /api/auth-service/me/preferences` (since P4-S6, `locale` since Phase 47 Session 4) |
 | OCR settings | `GET/PUT /api/ocr-service/config` (since P5b-S5) |
 | Storage guard | `GET/PUT /api/storage-service/guard-config`, `GET /api/storage-service/guard-status` (since P5b-S6), `POST /api/storage-service/guard-status/{target_id}/reidentify` (since P5c-S2), `PUT /api/storage-service/guard-status/{target_id}/config` (since **Post-Roadmap Phase 22 Session 7**) |
 | Operational parameters (Storage, since **Post-Roadmap Phase 22 Session 6**) | `GET/PUT /api/storage-service/operational-config` |
@@ -333,7 +339,18 @@ Two-stage Docker image (`apps/admin-ui/Dockerfile`), identical to the User UI. `
 ## Tests
 
 - `npm run typecheck` / `npm run lint` / `npm run build`.
-- `npm test` (Vitest + Testing Library, **250 tests since Phase 45 Session 5** — +1: a new
+- `npm test` (Vitest + Testing Library, **253 tests since Phase 47 Session 4** — +3: a new
+  `locale-context.test.tsx` (default/cache-after-mount/persistence, mirroring `theme-context.test.tsx`'s
+  own structure, same `InstallationProvider > AuthProvider > LocaleProvider` wrapping order the
+  restructured `layout.tsx` now uses). **One pre-existing, unrelated failure found during this
+  session's own full-suite run, not caused by this session's diff and left unfixed as out of scope**:
+  `processing-failures.test.tsx`'s "retries a failed handover (result leg) and reloads" fails
+  consistently (also in isolation, confirming it isn't cross-file test pollution) — the test never
+  fills in the "Hub-Operator-Schlüssel" field ADR 0162 (Phase 44 Session 1) made required for a
+  handover retry, so the retry call never fires. Predates this session (this session touched no file
+  the test or `ProcessingFailuresView` depends on) and is unrelated to i18n; worth a dedicated fix in
+  a future session, not folded into this one.
+  Before that, **250 tests since Phase 45 Session 5** — +1: a new
   `admin-sidebar.test.tsx` case confirming the four newly-gated nav entries (superuser, archival
   transfers, forensic trace, reports) hide without their respective capabilities while the
   deliberately-still-ungated `/deletion-register/` entry stays visible; the existing "shows both

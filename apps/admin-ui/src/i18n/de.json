@@ -22,6 +22,9 @@
     "dark": "Dunkel",
     "highContrast": "Hoher Kontrast"
   },
+  "locale": {
+    "label": "Sprache"
+  },
   "login": {
     "heading": "OG Doc Admin",
     "username": "Benutzername",

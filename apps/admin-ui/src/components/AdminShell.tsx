@@ -6,6 +6,7 @@ import { useAuth } from "@/lib/auth-context";
 import { AdminSidebar } from "./AdminSidebar";
 import { InstallationSwitcher } from "./InstallationSwitcher";
 import { LicenseStatusBanner } from "./LicenseStatusBanner";
+import { LocaleSwitcher } from "./LocaleSwitcher";
 import { MaintenanceBanner } from "./MaintenanceBanner";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 
@@ -27,6 +28,7 @@ export function AdminShell({ title, children }: { title: string; children: React
         <h1>{title}</h1>
         <div className="top-bar-actions">
           <InstallationSwitcher />
+          <LocaleSwitcher />
           <ThemeSwitcher />
           {user && <span>{user.username} </span>}
           <button type="button" onClick={logout}>

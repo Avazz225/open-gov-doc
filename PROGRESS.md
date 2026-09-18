@@ -2,9 +2,67 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P47-S3 (`user-ui` English translation + switcher — third session of Phase 47,
-"English i18n", 574 keys, the larger of the two big apps). Same already-proven `LocaleProvider`
-pattern as P47-S1/S2, no new ADR expected per the plan's own DoD.
+**Last completed:** P47-S4 (`admin-ui` English translation + switcher — fourth session of Phase 47,
+"English i18n", 754 keys, the largest dictionary of all six apps). Same already-proven
+`LocaleProvider` pattern as P47-S1/S2/S3, no new ADR expected per the plan's own DoD.
+
+Own `src/i18n/en.json` — full English translation of all 754 keys in `de.json`, reusing `user-ui`'s
+own P47-S3 glossary for consistency ("Umlaufmappe" → "case binder", "Aussonderung" → "records
+disposal", "Kennzeichen" → "file reference number") plus new admin-specific terms kept literal where
+the German text itself already used an English/technical term ("Object Lock", "Governance-Mode",
+"Dry-Run", `naming_constraints`/`conditions` as literal JSON field names). Verified programmatically
+against `de.json` before touching any code — 0 missing/extra keys, all `{placeholder}` variables
+matched.
+
+**Real architectural wrinkle handled correctly, unlike the previous three sessions' straightforward
+copy**: `admin-ui` is the one app with an `InstallationProvider` (ADR 0008, multi-installation) whose
+`activeInstallation` the installation-scoped `AuthProvider` itself depends on (`auth-context.tsx`
+imports `useInstallation`) — meaning `InstallationProvider` must stay the OUTERMOST provider, unlike
+every other app this phase where `AuthProvider` itself became outermost. Checked
+`installation-context.tsx` first (confirmed it renders no UI and calls neither `useI18n()` nor
+`useAuth()`) before restructuring `layout.tsx` to `InstallationProvider > AuthProvider >
+LocaleProvider (renders I18nProvider internally) > ThemeProvider` — the correct adaptation of the
+now-familiar pattern to this app's one real structural difference, not a blind copy-paste.
+
+`I18nProvider`'s previously-static `locale` prop replaced by `LocaleProvider`/`useLocale()`
+(`lib/locale-context.tsx`, the same hydration-safe pattern as every prior Phase 47 session) and a new
+`LocaleSwitcher.tsx`, wired into `AdminShell.tsx`'s header next to `InstallationSwitcher`/
+`ThemeSwitcher`. New `locale-context.test.tsx` (3 tests, wrapped in the same `InstallationProvider >
+AuthProvider > LocaleProvider` order as `theme-context.test.tsx`'s own precedent, confirming the
+restructuring didn't just work by luck).
+
+**One pre-existing, unrelated test failure found during this session's own full-suite run**:
+`processing-failures.test.tsx`'s "retries a failed handover (result leg) and reloads" fails
+consistently, including when run in isolation (ruling out cross-file test pollution) — the test
+never fills in the "Hub-Operator-Schlüssel" field that ADR 0162 (Phase 44 Session 1) made required
+for a handover retry, so the retry call never fires. Confirmed unrelated to this session (touches no
+file this session's diff changed) and left unfixed as out of scope for a pure i18n session — flagged
+in `docs/services/admin-ui.md` for a future dedicated fix. `253`/`253` other tests passing (were
+`250`). `tsc --noEmit`/`eslint .`/`next build` clean. Docker image rebuilt/redeployed.
+**Live-verified via Playwright** (logged in as `users-admin`): both switchers render in the header,
+switching to English changes the sidebar navigation and page content immediately (confirmed at two
+depths: the full sidebar nav labels, and the "Users & roles" page's form/table labels), persists
+across a page reload via the `localStorage` cache (`users-admin` is a technical account and can't
+exercise the actual `/me/preferences` server round-trip — same pre-existing, unrelated limitation
+reconfirmed in every prior Phase 47 session). Screenshots checked visually, then deleted along with
+the throwaway `.mjs` scripts.
+
+`docs/services/admin-ui.md`: new `locale` field noted in the theme-preference endpoint row, a new
+"i18n: English Translation + Locale Switcher" section explaining the provider-ordering wrinkle, and a
+test-count update flagging the pre-existing handover-retry test failure.
+
+**Next session:** P47-S5 — `libreoffice-addin`: i18n from scratch (no dictionary/`t()`-equivalent
+exists at all today, ~75 hardcoded German string literals in Python/UNO dialogs) — builds the
+extraction mechanism first, then decides its own locale-switching strategy (likely follow-the-host,
+mirroring `office-addin`'s P47-S2 decision, but for a genuinely different tech stack with no existing
+precedent to copy). This **closes Phase 47** — `graphify update .` runs at that point, deferred until
+now across the whole phase.
+
+---
+
+Immediately before P47-S4: **P47-S3** (`user-ui` English translation + switcher — third session of
+Phase 47, "English i18n", 574 keys, the larger of the two big apps). Same already-proven
+`LocaleProvider` pattern as P47-S1/S2, no new ADR expected per the plan's own DoD.
 
 Own `src/i18n/en.json` — full English translation of all 574 keys in `de.json`, verified
 programmatically (not just by eye) with a small script comparing the flattened key sets of both
