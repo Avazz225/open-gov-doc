@@ -31,6 +31,31 @@ async def test_get_unknown_raises_not_found(session):
         await repository.get_ocr_result(session, "unknown:1")
 
 
+async def test_mark_reviewed_flips_status_back_to_ready(session):
+    document_id = f"doc-{uuid.uuid4().hex[:8]}"
+    result = await repository.upsert_ocr_result(
+        session,
+        document_id=document_id,
+        version_number=1,
+        status="needs_review",
+        engine="tesseract",
+        average_confidence=40.0,
+        full_text="unklar",
+        pages=[],
+        page_image_storage_key=None,
+        error_message=None,
+    )
+    await session.commit()
+
+    await repository.mark_reviewed(session, result, reviewed_by="alice")
+    await session.commit()
+
+    fetched = await repository.get_ocr_result(session, result.id)
+    assert fetched.status == "ready"
+    assert fetched.reviewed_by == "alice"
+    assert fetched.reviewed_at is not None
+
+
 async def test_upsert_overwrites_same_key(session):
     document_id = f"doc-{uuid.uuid4().hex[:8]}"
     await repository.upsert_ocr_result(

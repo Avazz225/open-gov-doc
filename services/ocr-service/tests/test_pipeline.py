@@ -10,6 +10,7 @@ from dms_db_base import build_engine, make_session_factory
 from ocr_service import pipeline, repository
 from ocr_service.document_client import DocumentServiceClient
 from ocr_service.storage_client import StorageClient
+from ocr_service.workflow_client import WorkflowServiceClient
 from PIL import Image
 from reportlab.pdfgen import canvas
 
@@ -18,6 +19,10 @@ DSN = os.environ.get(
     "postgresql+asyncpg://dms:dms_dev_only@localhost:5432/dms",
 )
 DOCUMENT_SERVICE_URL = os.environ.get("TEST_DOCUMENT_SERVICE_URL", "http://localhost:8006")
+WORKFLOW_SERVICE_URL = os.environ.get("TEST_WORKFLOW_SERVICE_URL", "http://localhost:8014")
+_RESOURCES_DIR = os.path.join(os.path.dirname(__file__), "..", "resources")
+with open(os.path.join(_RESOURCES_DIR, "ocr_review.bpmn"), encoding="utf-8") as _f:
+    _OCR_REVIEW_BPMN_XML = _f.read().replace("__SELF_BASE_URL__", "http://ocr-service:8000")
 STORAGE_SERVICE_URL = os.environ.get("TEST_STORAGE_SERVICE_URL", "http://localhost:8005")
 
 _TESSERACT_AVAILABLE = shutil.which("tesseract") is not None
@@ -82,6 +87,12 @@ def _scanned_pdf(text: str) -> bytes:
     return pdf_bytes
 
 
+def _list_instances_by_business_key(business_key: str) -> list[dict]:
+    response = httpx.get(f"{WORKFLOW_SERVICE_URL}/instances", params={"business_key": business_key})
+    response.raise_for_status()
+    return response.json()
+
+
 def _list_versions(document_id: str) -> list[dict]:
     response = httpx.get(
         f"{DOCUMENT_SERVICE_URL}/documents/{document_id}/versions",
@@ -117,7 +128,17 @@ async def _run_pipeline(
     session_factory = make_session_factory(engine)
     document_client = DocumentServiceClient(DOCUMENT_SERVICE_URL)
     storage = StorageClient(STORAGE_SERVICE_URL)
+    workflow_client = WorkflowServiceClient(WORKFLOW_SERVICE_URL)
     try:
+        # Same real-container-reuse reasoning as migration-service's own
+        # test conftest: the real, already-running ocr-service container's
+        # own lifespan has already bootstrapped `admin.object_config` for
+        # `system:ocr-service` and registered `ocr_review.bpmn` - this GET
+        # (via `ensure_process_definition`'s existence check) needs neither
+        # permission, only the later, here-unreachable POST path would.
+        definition_id = await workflow_client.ensure_process_definition(
+            name="ocr_review", bpmn_xml=_OCR_REVIEW_BPMN_XML
+        )
         return await pipeline.process_version(
             document_id,
             version_number,
@@ -126,10 +147,13 @@ async def _run_pipeline(
             storage=storage,
             publish_event=recorder,
             max_attempts=max_attempts,
+            workflow_client=workflow_client,
+            review_process_definition_id=definition_id,
         )
     finally:
         await document_client.close()
         await storage.close()
+        await workflow_client.close()
         await engine.dispose()
 
 
@@ -343,6 +367,32 @@ async def test_process_version_uses_tesseract_for_raster_image():
     # Ein leeres weißes Bild hat keine erkennbaren Wörter -> Konfidenz 0.0,
     # damit unterhalb der needs_review-Schwelle.
     assert result.status == "needs_review"
+
+
+@pytest.mark.skipif(
+    not _TESSERACT_AVAILABLE,
+    reason="tesseract-ocr nicht auf diesem Host installiert - Verifikation erfolgt "
+    "im echten Docker-Container",
+)
+async def test_process_version_starts_a_real_review_workflow_instance_when_needs_review():
+    """Phase 45 Session 3 - `needs_review` now also starts a real BPMN
+    instance (`ocr_review.bpmn`) instead of only setting the informational
+    flag. Verified against the real, already-running workflow-service
+    (`business_key` set to the OCR result ID)."""
+    document_id = _upload_document(
+        filename=f"scan-{uuid.uuid4().hex[:8]}.png",
+        content=_blank_image(),
+        content_type="image/png",
+    )
+    recorder = EventRecorder()
+
+    result = await _run_pipeline(document_id, 1, recorder)
+
+    assert result is not None
+    assert result.status == "needs_review"
+    instances = _list_instances_by_business_key(result.id)
+    assert len(instances) == 1
+    assert instances[0]["status"] == "running"
 
 
 @pytest.mark.skipif(

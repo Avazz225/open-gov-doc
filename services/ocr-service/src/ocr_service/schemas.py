@@ -34,8 +34,24 @@ class OcrResultOut(BaseModel):
     error_message: str | None
     attempts: int
     next_retry_at: datetime | None
+    reviewed_at: datetime | None
+    reviewed_by: str | None
     created_at: datetime
     updated_at: datetime
+
+
+class OcrResultReviewedIn(BaseModel):
+    """Body of the `POST /ocr-results/{id}/reviewed` connector-call callback
+    (Phase 45 Session 3) - `reviewed_by` is optional since it only arrives
+    if the reviewer typed it into `reviewer-ui`'s generic completion-data
+    textarea (`TaskList.tsx`'s `dataJson` field merges into the workflow
+    instance's process data, which is exactly the payload this endpoint
+    receives - no reviewer-ui change needed for this to work). Extra keys
+    (`document_id`/`ocr_result_id`/`average_confidence`, always present
+    from the instance's own `initial_data`) are accepted and ignored -
+    pydantic's default `extra="ignore"`."""
+
+    reviewed_by: str | None = None
 
 
 class OcrConfigIn(BaseModel):

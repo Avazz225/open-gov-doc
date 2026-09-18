@@ -635,6 +635,9 @@ services:
       # Sensor concept (10.1, full rollout) - same fail-open pattern as
       # document-service/registry-service.
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
+      # Real BPMN review task instead of the purely informational
+      # `needs_review` flag alone (Phase 45 Session 3).
+      DMS_WORKFLOW_SERVICE_BASE_URL: http://workflow-service:8000
     ports:
       - "${OCR_SERVICE_PORT:-8012}:8000"
     depends_on:
@@ -647,6 +650,8 @@ services:
       document-service:
         condition: service_started
       permission-service:
+        condition: service_started
+      workflow-service:
         condition: service_started
     networks:
       - dms-net

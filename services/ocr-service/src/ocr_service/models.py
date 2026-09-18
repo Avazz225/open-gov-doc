@@ -36,6 +36,14 @@ class OcrResult(Base):
     error_message: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Set once a human completes the review workflow instance started for a
+    # `needs_review` result (Phase 45 Session 3) - `status` itself flips
+    # back to "ready" on review (no new status value, so rendering-service/
+    # search-service's existing "ready"/"needs_review" handling needs no
+    # change), these two columns are the only record that a review actually
+    # happened.
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reviewed_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 

@@ -6,6 +6,7 @@ from ocr_service import repository
 from ocr_service.document_client import DocumentServiceClient
 from ocr_service.pipeline import PublishEvent, process_version
 from ocr_service.storage_client import StorageClient
+from ocr_service.workflow_client import WorkflowServiceClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 logger = logging.getLogger(__name__)
@@ -18,6 +19,8 @@ def make_handler(
     storage: StorageClient,
     publish_event: PublishEvent,
     max_attempts: int,
+    workflow_client: WorkflowServiceClient,
+    review_process_definition_id: int,
 ) -> Callable[[bytes], Awaitable[None]]:
     """Reacts to `document.created` (first version, payload contains no
     `version_number`) and `document.version.created` (check-in, `version_
@@ -46,6 +49,8 @@ def make_handler(
             storage=storage,
             publish_event=publish_event,
             max_attempts=max_attempts,
+            workflow_client=workflow_client,
+            review_process_definition_id=review_process_definition_id,
         )
 
     return handle
@@ -71,6 +76,8 @@ async def start_consuming(
     storage: StorageClient,
     publish_event: PublishEvent,
     max_attempts: int,
+    workflow_client: WorkflowServiceClient,
+    review_process_definition_id: int,
 ) -> None:
     handler = make_handler(
         session_factory=session_factory,
@@ -78,6 +85,8 @@ async def start_consuming(
         storage=storage,
         publish_event=publish_event,
         max_attempts=max_attempts,
+        workflow_client=workflow_client,
+        review_process_definition_id=review_process_definition_id,
     )
     for subject in subjects:
         try:

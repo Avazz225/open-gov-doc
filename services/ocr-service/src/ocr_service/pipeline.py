@@ -8,6 +8,7 @@ from ocr_service.models import OcrResult
 from ocr_service.settings import Settings
 from ocr_service.storage_client import StorageClient
 from ocr_service.text_layer import embed_text_layer
+from ocr_service.workflow_client import WorkflowServiceClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,8 @@ async def process_version(
     storage: StorageClient,
     publish_event: PublishEvent,
     max_attempts: int,
+    workflow_client: WorkflowServiceClient,
+    review_process_definition_id: int,
 ) -> OcrResult | None:
     """Called both by the NATS consumer (`consumer.py`, automatic path after
     `document.created`/`document.version.created`) and directly in tests.
@@ -163,6 +166,37 @@ async def process_version(
             error_message=None,
         )
         await session.commit()
+
+    # Real workflow-engine review task instead of the purely informational
+    # flag alone (3.9, Phase 45 Session 3 - deferred since P5-S3/P6-S1
+    # pending workflow-service, which has existed since Phase 6). Same
+    # "secondary side effect, non-blocking" idiom as the text-layer
+    # embedding below: a failure here must not invalidate the already-
+    # persisted, useful OCR result. Deliberately unconditional (no guard
+    # against a rare NATS-redelivery double-trigger for the same version) -
+    # `needs_review` results are never automatically reprocessed (only
+    # `failed` ones are, via `_ocr_retry_poll_loop`, and `POST .../retry`
+    # requires `failed_permanent`), so the only realistic duplicate-task
+    # risk is an at-least-once event redelivery, an already-accepted class
+    # of risk elsewhere in this project - a harmless duplicate reviewer-ui
+    # task, not a data-integrity issue.
+    if status == "needs_review":
+        try:
+            await workflow_client.start_instance(
+                review_process_definition_id,
+                business_key=result.id,
+                initial_data={
+                    "document_id": document_id,
+                    "ocr_result_id": result.id,
+                    "average_confidence": result.average_confidence,
+                },
+            )
+        except Exception:
+            logger.exception(
+                "OCR-Review-Workflowinstanz konnte fuer %r nicht gestartet werden - "
+                "OCR-Ergebnis bleibt trotzdem gueltig",
+                result.id,
+            )
 
     # Searchable PDF instead of a plain scan (user feedback): only if
     # Tesseract actually ran (the PDF had no usable text layer yet), the

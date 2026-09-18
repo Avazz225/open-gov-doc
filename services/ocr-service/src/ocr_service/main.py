@@ -1,9 +1,11 @@
 import asyncio
 import logging
+import os
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 
+import httpx
 from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
@@ -22,15 +24,65 @@ from ocr_service.consumer import start_consuming
 from ocr_service.document_client import DocumentServiceClient
 from ocr_service.models import Base, OcrResult
 from ocr_service.pipeline import process_version
-from ocr_service.schemas import OcrConfigIn, OcrConfigOut, OcrResultOut
+from ocr_service.schemas import OcrConfigIn, OcrConfigOut, OcrResultOut, OcrResultReviewedIn
 from ocr_service.settings import Settings
 from ocr_service.storage_client import StorageClient
+from ocr_service.workflow_client import OCR_SERVICE_PRINCIPAL_ID, WorkflowServiceClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 settings = Settings()
 configure_logging(settings)
 logger = logging.getLogger(__name__)
+
+_RESOURCES_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "resources")
+
+# Roles shipped by default with `permission-service` (4.6) - `POST
+# /process-definitions` requires `admin.object_config`, same bootstrap
+# pattern as migration-service's own `_ensure_config_admin_permission`
+# (this service only needs the one role, not `domain-admin-users` too -
+# it never calls `permission-service`'s own `POST`/`PUT /roles`).
+_REQUIRED_ROLE_NAMES = ("domain-admin-config",)
+
+
+def _read_resource(name: str) -> str:
+    with open(os.path.join(_RESOURCES_DIR, name), encoding="utf-8") as f:
+        return f.read().replace(
+            "__SELF_BASE_URL__", settings.self_address or "http://localhost:8000"
+        )
+
+
+async def _ensure_review_workflow_permission() -> None:
+    """Bootstrap instead of manual admin preparation (same pattern/rationale
+    as migration-service's `_ensure_config_admin_permission`): idempotently
+    self-assigns `domain-admin-config` to this service's own technical
+    principal, so `WorkflowServiceClient.ensure_process_definition` below
+    can actually succeed on a fresh installation."""
+    async with httpx.AsyncClient(
+        base_url=settings.permission_service_base_url, timeout=10.0
+    ) as client:
+        roles = (await client.get("/roles")).json()
+        existing = (
+            await client.get("/role-assignments", params={"principal_id": OCR_SERVICE_PRINCIPAL_ID})
+        ).json()
+        existing_role_ids = {a["role_id"] for a in existing}
+        for role_name in _REQUIRED_ROLE_NAMES:
+            role = next((r for r in roles if r["name"] == role_name), None)
+            if role is None:
+                logger.warning("ocr_service_domain_admin_role_missing: %r", role_name)
+                continue
+            if role["id"] in existing_role_ids:
+                continue
+            response = await client.post(
+                "/role-assignments",
+                json={
+                    "principal_type": "service",
+                    "principal_id": OCR_SERVICE_PRINCIPAL_ID,
+                    "role_id": role["id"],
+                    "resource_id": "root",
+                },
+            )
+            response.raise_for_status()
 
 
 async def _run_retry_tick(session_factory) -> None:
@@ -54,6 +106,8 @@ async def _run_retry_tick(session_factory) -> None:
             storage=app.state.storage,
             publish_event=publish_event,
             max_attempts=settings.max_ocr_attempts,
+            workflow_client=app.state.workflow_client,
+            review_process_definition_id=app.state.ocr_review_definition_id,
         )
 
 
@@ -114,12 +168,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await conn.execute(
             text("ALTER TABLE ocr.ocr_result ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ")
         )
+        # OCR review workflow integration (Phase 45 Session 3).
+        await conn.execute(
+            text("ALTER TABLE ocr.ocr_result ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ")
+        )
+        await conn.execute(
+            text("ALTER TABLE ocr.ocr_result ADD COLUMN IF NOT EXISTS reviewed_by VARCHAR(255)")
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 
     app.state.document_client = DocumentServiceClient(settings.document_service_base_url)
     app.state.storage = StorageClient(settings.storage_service_base_url)
     app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
+    app.state.workflow_client = WorkflowServiceClient(settings.workflow_service_base_url)
+
+    await _ensure_review_workflow_permission()
+    app.state.ocr_review_definition_id = await app.state.workflow_client.ensure_process_definition(
+        name="ocr_review", bpmn_xml=_read_resource("ocr_review.bpmn")
+    )
 
     sensor_config_client = SensorConfigClient(settings.monitoring_service_base_url)
     await sensor_config_client.start()
@@ -147,6 +214,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         storage=app.state.storage,
         publish_event=publish_event,
         max_attempts=settings.max_ocr_attempts,
+        workflow_client=app.state.workflow_client,
+        review_process_definition_id=app.state.ocr_review_definition_id,
     )
 
     registration = await maybe_start_registration(
@@ -177,6 +246,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await app.state.document_client.close()
     await app.state.storage.close()
     await app.state.permission_client.close()
+    await app.state.workflow_client.close()
     await engine.dispose()
 
 
@@ -332,6 +402,8 @@ async def retry_ocr_result(
         storage=app.state.storage,
         publish_event=publish_event,
         max_attempts=settings.max_ocr_attempts,
+        workflow_client=app.state.workflow_client,
+        review_process_definition_id=app.state.ocr_review_definition_id,
     )
     # Fresh session instead of the `session` above (whose identity map would
     # otherwise return the now-stale instance loaded BEFORE `process_version`
@@ -364,3 +436,42 @@ async def download_page_image(
     # the multi-page bugfix, see `pipeline.process_version`.
     data = await app.state.storage.download(f"{result.page_image_storage_key}-{page_number}.png")
     return Response(content=data, media_type="image/png")
+
+
+@app.post("/ocr-results/{ocr_result_id}/reviewed", response_model=OcrResultOut)
+async def mark_ocr_result_reviewed(
+    ocr_result_id: str,
+    body: OcrResultReviewedIn,
+    session: AsyncSession = Depends(get_session),
+) -> OcrResultOut:
+    """Connector-call callback from the `ocr_review.bpmn` review workflow
+    (Phase 45 Session 3) - fires once a human completes the Manual Task.
+    Deliberately ungated (no `X-DMS-Principal` check), same precedent as
+    migration-service's own `/transfers/{id}/steps/*` connector-call
+    targets: `workflow-service`'s `_handle_connector_task` sends no
+    principal header at all, so gating this like every other endpoint
+    would make it permanently unreachable via the one path that's actually
+    meant to call it."""
+    try:
+        result = await repository.get_ocr_result(session, ocr_result_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if result.status != "needs_review":
+        raise HTTPException(
+            status_code=409,
+            detail=f"OCR-Ergebnis hat Status {result.status!r}, nur 'needs_review' kann "
+            "als geprüft markiert werden",
+        )
+    await repository.mark_reviewed(session, result, reviewed_by=body.reviewed_by)
+    await session.commit()
+    await publish_event(
+        "ocr.reviewed",
+        result.document_id,
+        {
+            "version_number": result.version_number,
+            "ocr_result_id": result.id,
+            "reviewed_by": body.reviewed_by,
+        },
+        actor=body.reviewed_by or "system:ocr-service",
+    )
+    return result

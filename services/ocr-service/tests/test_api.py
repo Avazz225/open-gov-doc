@@ -109,6 +109,73 @@ async def test_retry_for_a_permanently_missing_document_resets_attempts_but_stay
     assert body["error_message"] is None
 
 
+def test_mark_reviewed_returns_404_for_unknown_result():
+    with TestClient(app, headers={"X-DMS-Principal": "ocr-service-tests"}) as client:
+        response = client.post("/ocr-results/unbekannt:1/reviewed", json={})
+    assert response.status_code == 404
+
+
+async def test_mark_reviewed_returns_409_for_a_result_not_needing_review(session):
+    document_id = _upload_corrupt_pdf()
+    result = await repository.upsert_ocr_result(
+        session,
+        document_id=document_id,
+        version_number=1,
+        status="ready",
+        engine="native_text_layer",
+        average_confidence=100.0,
+        full_text="Hallo",
+        pages=[],
+        page_image_storage_key=None,
+        error_message=None,
+    )
+    await session.commit()
+
+    with TestClient(app, headers={"X-DMS-Principal": "ocr-service-tests"}) as client:
+        response = client.post(f"/ocr-results/{result.id}/reviewed", json={})
+
+    assert response.status_code == 409
+
+
+async def test_mark_reviewed_flips_status_to_ready_and_records_reviewer(session):
+    """Deliberately no `X-DMS-Principal` header on the request client below
+    (unlike every other test in this file) - this endpoint is meant to be
+    reachable exactly the way `workflow-service`'s `_handle_connector_task`
+    calls it: no principal header at all (Phase 45 Session 3, see the
+    endpoint's own docstring)."""
+    document_id = _upload_corrupt_pdf()
+    result = await repository.upsert_ocr_result(
+        session,
+        document_id=document_id,
+        version_number=1,
+        status="needs_review",
+        engine="tesseract",
+        average_confidence=40.0,
+        full_text="unklar",
+        pages=[],
+        page_image_storage_key=None,
+        error_message=None,
+    )
+    await session.commit()
+
+    with TestClient(app) as client:
+        response = client.post(
+            f"/ocr-results/{result.id}/reviewed",
+            json={
+                "reviewed_by": "alice",
+                "document_id": document_id,
+                "ocr_result_id": result.id,
+                "average_confidence": 40.0,
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ready"
+    assert body["reviewed_by"] == "alice"
+    assert body["reviewed_at"] is not None
+
+
 def test_get_config_returns_defaults_on_first_access():
     with TestClient(app, headers={"X-DMS-Principal": "ocr-service-tests"}) as client:
         response = client.get("/config")

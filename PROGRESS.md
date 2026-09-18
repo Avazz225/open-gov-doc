@@ -2,10 +2,77 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P45-S2 (`favorite-service`/`user-ui`: case-binder favorites — second session of
-Phase 45, "Dependency-Resolved Functional Completions"). Deferred since the original P7-S1d plan
-approval purely because `case-service` had no browsing UI to add a favorite toggle to yet — untrue
-since "Umlaufmappen" shipped in Phase 34 (ADR 0141).
+**Last completed:** P45-S3 (`ocr-service`: `needs_review` workflow integration — third session of
+Phase 45, "Dependency-Resolved Functional Completions", see [ADR 0165](docs/adr/0165-ocr-review-manual-task-workflow-integration.md)).
+Originally planned as one session covering both `ocr-service`'s `needs_review` flag AND
+`object-type-service`'s status-transition (Konzept 4.5) validation, both deferred pending
+`workflow-service` (exists since Phase 6). A research pass at the start of this session found the two
+halves share no code, no data model, and even the call direction is reversed (OCR: producer →
+workflow-service; status-transition: workflow-service → object-type-service, which has no
+status/status-machine concept anywhere in the codebase yet — a genuinely greenfield design question,
+not a wiring task) — split into two sessions (ADR 0165), `IMPLEMENTATION_PLAN.md` renumbered
+accordingly (the status-transition half is now **P45-S4**, the former P45-S4 UI bundle is now
+**P45-S5**). This session builds the OCR half only.
+
+`pipeline.process_version()` now starts a real BPMN instance whenever a result becomes
+`needs_review` (`average_confidence < 70.0`, unchanged threshold), instead of only setting the
+previously purely-informational flag. Bundled `resources/ocr_review.bpmn` (Start → Manual Task
+"OCR-Ergebnis pruefen" → Service Task `taskType=connector_call` → End), idempotently registered at
+startup via a new `WorkflowServiceClient.ensure_process_definition()` — exact same pattern already
+established by `migration-service`'s own client of the same name. `start_instance()` sets
+`business_key` to the OCR result ID (`{document_id}:{version_number}`) and `initial_data` to
+`{document_id, ocr_result_id, average_confidence}`.
+
+The Manual Task surfaces automatically in `reviewer-ui`'s already-fully-generic `GET /tasks` inbox
+(`TaskList.tsx`) — **zero `reviewer-ui` code changes needed**: a reviewer identifies the document via
+the task row's existing `business_key` column, and the review outcome flows through the
+already-existing free-form "additional data" JSON field on task completion (`workflow-service`'s
+`complete_task` already merges it into the process's shared data, which the subsequent connector call
+already forwards on verbatim). The connector Service Task calls a new, deliberately **ungated**
+`POST /ocr-results/{id}/reviewed` (no `X-DMS-Principal` — `workflow-service`'s
+`_handle_connector_task` sends no principal header at all, same precedent as migration-service's own
+`/transfers/{id}/steps/*` connector targets), which flips `status` back to `"ready"` (no new status
+value — `rendering-service`/`search-service` already treat `"ready"`/`"needs_review"` identically) and
+records new `reviewed_at`/`reviewed_by` columns.
+
+Startup bootstrap: new `_ensure_review_workflow_permission()` idempotently self-assigns the default
+`domain-admin-config` role (`admin.object_config`) to `system:ocr-service`, mirroring
+migration-service's `_ensure_config_admin_permission` exactly — needed because `POST
+/process-definitions` requires it (`start_instance` itself only needs `workflow.write`, which
+"everyone" already grants by default, no extra bootstrap needed there).
+
+Deliberate simplifications (see ADR 0165 for full rationale): the workflow trigger is unconditional
+(no de-duplication guard against a rare NATS-redelivery double-trigger — harmless duplicate task, not
+a data-integrity issue); a failed `start_instance` call is logged and swallowed, same "secondary side
+effect, non-blocking" idiom as the existing text-layer-embedding step; no document/OCR-text preview is
+linked from the review task itself, a reviewer must separately open the document in `user-ui`.
+
+New tests: a repository test for `mark_reviewed`, two new API tests for `POST
+/ocr-results/{id}/reviewed` (`404`/`409`), and a new Tesseract-gated pipeline test confirming a real
+workflow-service instance starts with the correct `business_key`. **66/66 backend tests passing**
+(+5, was 61 — found the doc's own previously-claimed "53" was itself already stale from several
+untracked additions across intervening sessions, not otherwise investigated further).
+
+Docker image rebuilt and redeployed. **Live-verified end-to-end against the real running stack**:
+temporarily allowed `image/png` via `PUT /config`, uploaded a blank PNG → `status="needs_review"` →
+confirmed via `GET /instances?business_key=...` on the real running workflow-service that an instance
+started → `GET /instances/{id}/tasks` showed the Manual Task with the correct
+`document_id`/`ocr_result_id`/`average_confidence` → completed it via `POST
+/instances/{id}/tasks/{task_id}/complete` with `data={"reviewed_by": "alice"}` → the instance
+completed (connector call succeeded synchronously) → `GET /ocr-results/{id}` confirmed
+`status="ready"`, `reviewed_by="alice"`, `reviewed_at` set. Also confirmed at container startup:
+`GET /process-definitions?name=ocr_review` shows the bundled BPMN registered,
+`GET /role-assignments?principal_id=system:ocr-service` shows the self-bootstrapped role assignment.
+Restored the `PUT /config` allowlist afterward.
+
+`docs/services/ocr-service.md` updated (API table, "`needs_review` Instead of Real BPMN Integration"
+rewritten into its actual-integration counterpart, Backend Integration/Events tables, test count, Open
+Points bullet struck through + a new one added for the missing document preview link).
+`docs/services/reviewer-ui.md` and `docs/services/workflow-service.md` each gained a short
+discoverability mention of the new `ocr-service` producer/connector-call user. New
+[ADR 0165](docs/adr/0165-ocr-review-manual-task-workflow-integration.md) (a real architecture
+decision — the session's own plan text said "no new ADR expected" for this phase, but the Manual-Task-
+vs-approval-mechanism choice and the session split both warranted recording).
 
 **Backend**: `favorite_service.schemas.ObjectType` extended to `Literal["document", "folder", "case"]`
 — no schema/migration change needed at all, since the DB column is already a generic `String(16)` and
@@ -61,10 +128,71 @@ count entry). No new ADR (this session's own Definition of Done — pure functio
 already-established pattern against a now-satisfied dependency, same shape as P45-S1 — didn't expect
 one).
 
-**Next session:** **P45-S3** (`ocr-service`/`object-type-service`: `needs_review` and status-transition
-(4.5) workflow integration — third session of Phase 45; likely the largest session of this phase, split
-into two if the OCR-review and status-transition halves need genuinely independent design decisions once
-started) — see `IMPLEMENTATION_PLAN.md` "Phase 45" for the full plan.
+**Next session:** **P45-S4** (`object-type-service`: status-transition (4.5) workflow integration —
+fourth session of Phase 45, split out of the former P45-S3, see ADR 0165 — genuinely greenfield, no
+status/status-machine concept exists anywhere in the codebase yet) — see `IMPLEMENTATION_PLAN.md`
+"Phase 45" for the full plan.
+
+---
+
+Immediately before P45-S3: **P45-S2** (`favorite-service`/`user-ui`: case-binder favorites — second
+session of Phase 45). Deferred since the original P7-S1d plan approval purely because `case-service`
+had no browsing UI to add a favorite toggle to yet — untrue since "Umlaufmappen" shipped in Phase 34
+(ADR 0141).
+
+`favorite_service.schemas.ObjectType` extended to `Literal["document", "folder", "case"]` — no schema/
+migration change needed at all, since the DB column is already a generic `String(16)` and this service
+deliberately never validates `object_id` referentially against any sibling service (see its own
+"Architecture decision" doc section). Backend tests: `test_create_case_favorite` (repository) plus a
+third `object_type="case"` `POST` inside `test_list_filters_by_object_type` and a new
+`test_create_list_and_delete_a_case_favorite` full round trip (API). **14/14 passing** (was 12, +2).
+
+**Frontend** (`user-ui`): `lib/api.ts` gained `FavoriteObjectType = "document" | "folder" | "case"`,
+used consistently by `Favorite`/`listFavorites`/`addFavorite`/`removeFavorite`. `CasesPane.tsx` gained
+a ☆/★ `favorite-toggle` button per list row and one next to the case-detail heading (the first visible
+favorite-star button in the app — `ExplorerPane.tsx`'s existing document/folder favorite toggle is
+context-menu-only, no icon), both calling a new `toggleFavoriteCase` following the same "server remains
+source of truth, reload after every toggle" idiom already established there; a new `openCaseId` prop,
+read via a `useEffect` (not a `useState` initial value) so a later view-switching refactor can't
+silently stop picking up a newly-opened case id. `FavoritesPane.tsx` gained a `case: Case | null` field
+on `ResolvedFavorite`, a third `getCase` resolution branch, and a new `onOpenCase` prop.
+`DocumentWorkspace.tsx` gained `handleOpenFavoriteCase` (sets the new `openCaseId` state, switches the
+view to `"cases"`) wired into `<FavoritesPane onOpenCase=.../>`, and passes `openCaseId` into
+`<CasesPane>`. New i18n keys under `cases.*` (`addFavorite`/`removeFavorite`/`favoriteError`, mirroring
+`explorer.*`'s existing wording) and a new `.favorite-toggle`/`.heading-with-favorite` CSS pair in
+`globals.css`.
+
+**A note on the "kept mounted" assumption inherited from an earlier phase's own doc comments**: turned
+out not to actually apply to the special-view panes (`CasesPane` included) — only `DockableDocumentArea`
+(the documents view) stays mounted via a `hidden` prop; every other `IconRail` view (including
+`"cases"`/`"favorites"`) is a plain ternary branch in `DocumentWorkspace.tsx` that unmounts/remounts on
+every switch. The `useEffect`-over-`openCaseId` approach still works correctly either way (a fresh mount
+re-runs the effect too), so this wasn't a functional bug — just an inaccurate premise in an inherited
+code comment, corrected in place in `CasesPane.tsx` this session.
+
+Frontend checks: `tsc --noEmit` clean, `eslint .` clean (2 pre-existing, unrelated `<img>` warnings
+only), full `vitest run` **279/279 passing** (was 274, +5: 4 new `cases-pane.test.tsx` cases + 1 new
+`favorites-pane.test.tsx` case), `next build` clean.
+
+Docker images for `favorite-service` and `user-ui` rebuilt and redeployed. **Live-verified via a real
+Playwright browser session** (no `chromium-cli` in this sandbox; `@playwright/test`'s own bundled
+Chromium, already present in `apps/user-ui/node_modules`, driven directly instead) against the real
+running stack, logged in as `users-admin`: favorited an existing case ("Testfall") via the list-view
+star, confirmed the label flipped to "...aus Favoriten entfernen"; opened the case detail view and
+confirmed the same star (now filled) appears next to the heading there too; navigated to the Favorites
+pane and confirmed the case is listed with the resolved name and the new "Umlaufmappe" type label;
+clicked "Öffnen" and confirmed it navigated back into the correct case's detail view; un-favorited again
+to leave the stack clean. No unrelated console/network errors introduced (two pre-existing, unrelated
+401/500 responses on `/auth-service/sso-config` and `/auth-service/me/preferences` seen during login,
+neither touched by this session's diff).
+
+`docs/services/favorite-service.md` updated (Responsibility line, `ObjectType` in the endpoint/data
+model tables, test count, a new live-smoke-test bullet, Open Points bullet removed since now closed).
+`docs/services/user-ui.md` updated (the P7-S1d case-binder-deferral paragraph corrected in place with a
+new bullet describing this session's addition, the matching Open Points bullet struck through, new test
+count entry). No new ADR (this session's own Definition of Done — pure functional completion of an
+already-established pattern against a now-satisfied dependency, same shape as P45-S1 — didn't expect
+one).
 
 ---
 

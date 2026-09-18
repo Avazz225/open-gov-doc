@@ -131,6 +131,22 @@ async def list_due_for_retry(session: AsyncSession) -> list[OcrResult]:
     return list(result.scalars().all())
 
 
+async def mark_reviewed(
+    session: AsyncSession, result: OcrResult, *, reviewed_by: str | None
+) -> None:
+    """Called from the `POST /ocr-results/{id}/reviewed` connector-call
+    callback (Phase 45 Session 3), once a human completes the review
+    workflow instance. Flips `status` back to "ready" instead of a new
+    status value, so `rendering-service`/`search-service`'s existing
+    "ready"/"needs_review" handling needs no change - `reviewed_at`/
+    `reviewed_by` are the only record that a review actually happened."""
+    result.status = "ready"
+    result.reviewed_at = datetime.now(UTC)
+    result.reviewed_by = reviewed_by
+    result.updated_at = result.reviewed_at
+    await session.flush()
+
+
 async def get_ocr_result(session: AsyncSession, ocr_result_key: str) -> OcrResult:
     result = await session.get(OcrResult, ocr_result_key)
     if result is None:

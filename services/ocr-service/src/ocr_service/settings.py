@@ -22,6 +22,11 @@ class Settings(BaseServiceSettings):
 
     monitoring_service_base_url: str = "http://localhost:8026"
 
+    # Real BPMN review task instead of the purely informational
+    # `needs_review` flag alone (Phase 45 Session 3, deferred since P5-S3/
+    # P6-S1 pending this service, which has existed since Phase 6).
+    workflow_service_base_url: str = "http://localhost:8014"
+
     # Same pattern as rendering-service: one broad document.> subscription
     # instead of two separate ones, dispatch by event_type in the consumer.
     document_subjects: list[str] = ["document.>"]
