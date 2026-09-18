@@ -7,6 +7,7 @@ import { I18nProvider } from "@/i18n";
 const listFavoritesMock = vi.fn();
 const getDocumentMock = vi.fn();
 const getFolderMock = vi.fn();
+const getCaseMock = vi.fn();
 const removeFavoriteMock = vi.fn();
 
 vi.mock("@/lib/api", async () => {
@@ -16,11 +17,12 @@ vi.mock("@/lib/api", async () => {
     listFavorites: (...args: unknown[]) => listFavoritesMock(...args),
     getDocument: (...args: unknown[]) => getDocumentMock(...args),
     getFolder: (...args: unknown[]) => getFolderMock(...args),
+    getCase: (...args: unknown[]) => getCaseMock(...args),
     removeFavorite: (...args: unknown[]) => removeFavoriteMock(...args),
   };
 });
 
-function renderPane(onOpenDocument = vi.fn(), onOpenFolder = vi.fn()) {
+function renderPane(onOpenDocument = vi.fn(), onOpenFolder = vi.fn(), onOpenCase = vi.fn()) {
   return render(
     <I18nProvider>
       <FavoritesPane
@@ -28,6 +30,7 @@ function renderPane(onOpenDocument = vi.fn(), onOpenFolder = vi.fn()) {
         currentUsername="alice"
         onOpenDocument={onOpenDocument}
         onOpenFolder={onOpenFolder}
+        onOpenCase={onOpenCase}
       />
     </I18nProvider>
   );
@@ -38,6 +41,7 @@ describe("FavoritesPane", () => {
     listFavoritesMock.mockReset();
     getDocumentMock.mockReset();
     getFolderMock.mockReset();
+    getCaseMock.mockReset();
     removeFavoriteMock.mockReset();
   });
 
@@ -103,6 +107,32 @@ describe("FavoritesPane", () => {
         object_id: "doc-gone",
       })
     );
+  });
+
+  it("resolves and lists a favorited case, opening it via the callback", async () => {
+    const onOpenCase = vi.fn();
+    listFavoritesMock.mockResolvedValue([
+      {
+        id: "fav-1",
+        user_id: "alice",
+        object_type: "case",
+        object_id: "case-1",
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ]);
+    getCaseMock.mockResolvedValue({ id: "case-1", name: "Beschwerde Müller", status: "open" });
+
+    const user = userEvent.setup();
+    renderPane(vi.fn(), vi.fn(), onOpenCase);
+
+    await screen.findByText(/Beschwerde Müller/);
+    await user.click(screen.getByText("Öffnen"));
+
+    expect(onOpenCase).toHaveBeenCalledWith({
+      id: "case-1",
+      name: "Beschwerde Müller",
+      status: "open",
+    });
   });
 
   it("opens a favorited document via the callback", async () => {

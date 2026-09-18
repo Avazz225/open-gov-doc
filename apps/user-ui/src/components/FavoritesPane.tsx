@@ -3,10 +3,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "@/i18n";
 import {
+  getCase,
   getDocument,
   getFolder,
   listFavorites,
   removeFavorite,
+  type Case,
   type DocumentSummary,
   type Favorite,
   type Folder,
@@ -16,6 +18,7 @@ interface ResolvedFavorite {
   favorite: Favorite;
   document: DocumentSummary | null;
   folder: Folder | null;
+  case: Case | null;
 }
 
 // Filtered view/bookmark list for quickly finding things again (since
@@ -31,11 +34,13 @@ export function FavoritesPane({
   currentUsername,
   onOpenDocument,
   onOpenFolder,
+  onOpenCase,
 }: {
   token: string;
   currentUsername: string;
   onOpenDocument: (doc: DocumentSummary) => void;
   onOpenFolder: (folder: Folder) => void;
+  onOpenCase: (caseItem: Case) => void;
 }) {
   const { t } = useI18n();
   const [entries, setEntries] = useState<ResolvedFavorite[]>([]);
@@ -53,10 +58,14 @@ export function FavoritesPane({
         favorites.map(async (favorite): Promise<ResolvedFavorite> => {
           if (favorite.object_type === "document") {
             const document = await getDocument(token, favorite.object_id).catch(() => null);
-            return { favorite, document, folder: null };
+            return { favorite, document, folder: null, case: null };
+          }
+          if (favorite.object_type === "case") {
+            const caseItem = await getCase(token, favorite.object_id).catch(() => null);
+            return { favorite, document: null, folder: null, case: caseItem };
           }
           const folder = await getFolder(token, favorite.object_id).catch(() => null);
-          return { favorite, document: null, folder };
+          return { favorite, document: null, folder, case: null };
         })
       );
       setEntries(resolved);
@@ -105,15 +114,22 @@ export function FavoritesPane({
         <p className="empty-state">{t("favorites.empty")}</p>
       ) : (
         <ul className="entry-list">
-          {entries.map(({ favorite, document, folder }) => {
-            const name = document?.title ?? folder?.name ?? t("favorites.unresolvedName");
+          {entries.map(({ favorite, document, folder, case: caseItem }) => {
+            const name =
+              document?.title ??
+              folder?.name ??
+              caseItem?.name ??
+              t("favorites.unresolvedName");
+            const typeLabel =
+              favorite.object_type === "document"
+                ? t("favorites.typeDocument")
+                : favorite.object_type === "case"
+                  ? t("favorites.typeCase")
+                  : t("favorites.typeFolder");
             return (
               <li className="entry-row" key={favorite.id}>
                 <span className="entry-name">
-                  {favorite.object_type === "document"
-                    ? t("favorites.typeDocument")
-                    : t("favorites.typeFolder")}{" "}
-                  {name}
+                  {typeLabel} {name}
                 </span>
                 <span className="actions">
                   {document && (
@@ -123,6 +139,11 @@ export function FavoritesPane({
                   )}
                   {folder && (
                     <button type="button" onClick={() => onOpenFolder(folder)}>
+                      {t("favorites.open")}
+                    </button>
+                  )}
+                  {caseItem && (
+                    <button type="button" onClick={() => onOpenCase(caseItem)}>
                       {t("favorites.open")}
                     </button>
                   )}

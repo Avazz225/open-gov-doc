@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "@/i18n";
 import {
+  addFavorite,
   ApiError,
   exportCaseXdomea,
   exportCaseXjustiz,
@@ -12,7 +13,9 @@ import {
   importXjustizIntoCase,
   listCaseDocuments,
   listCases,
+  listFavorites,
   listProcessDefinitions,
+  removeFavorite,
   type Case,
   type CaseDocumentReference,
   type DocumentSummary,
@@ -45,12 +48,21 @@ function triggerBrowserDownload(blob: Blob, filename: string): void {
 export function CasesPane({
   token,
   onOpenDocument,
+  openCaseId,
 }: {
   token: string;
   onOpenDocument: (doc: DocumentSummary) => void;
+  // "Open" from the favorites bookmark list (Phase 45 Session 2) - a
+  // `useEffect` re-selects whenever this prop changes, rather than only
+  // reading it as a `useState` initial value, since a future refactor of
+  // DocumentWorkspace.tsx's view-switching (currently a ternary that remounts
+  // this pane on every switch, unlike the always-mounted documents area)
+  // could otherwise silently stop picking up a new id.
+  openCaseId?: string | null;
 }) {
   const { t, locale } = useI18n();
-  const { permissions } = useAuth();
+  const { permissions, user } = useAuth();
+  const username = user?.username ?? "";
   // Export/import are archival actions (ADR 0126/0128/0129/0139), gated
   // server-side on `archival.write` - hidden client-side too so a principal
   // without it doesn't see buttons that would just 403, same idiom as
@@ -65,6 +77,14 @@ export function CasesPane({
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
+  // Case-binder favorites (Phase 45 Session 2) - deliberately deferred at
+  // plan approval (P7-S1d) until this pane existed at all. Same
+  // "server remains source of truth, reload after every toggle" idiom as
+  // `ExplorerPane.tsx`'s document/folder favorites, scoped to
+  // `object_type="case"` only (a plain `Set<caseId>`, no compound key
+  // needed here since there's only one object type in this pane).
+  const [favoriteCaseIds, setFavoriteCaseIds] = useState<Set<string>>(new Set());
+  const [favoriteError, setFavoriteError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     if (!token) return;
@@ -79,9 +99,42 @@ export function CasesPane({
     }
   }, [token, statusFilter, t]);
 
+  const reloadFavorites = useCallback(async () => {
+    if (!token || !username) return;
+    try {
+      const favorites = await listFavorites(token, username, "case");
+      setFavoriteCaseIds(new Set(favorites.map((f) => f.object_id)));
+    } catch {
+      // Non-critical - the pane still works without the favorite markers.
+    }
+  }, [token, username]);
+
   useEffect(() => {
     reload();
   }, [reload]);
+
+  useEffect(() => {
+    reloadFavorites();
+  }, [reloadFavorites]);
+
+  useEffect(() => {
+    if (openCaseId) setSelectedCaseId(openCaseId);
+  }, [openCaseId]);
+
+  async function toggleFavoriteCase(caseId: string) {
+    if (!token || !username) return;
+    setFavoriteError(null);
+    try {
+      if (favoriteCaseIds.has(caseId)) {
+        await removeFavorite(token, { user_id: username, object_type: "case", object_id: caseId });
+      } else {
+        await addFavorite(token, { user_id: username, object_type: "case", object_id: caseId });
+      }
+      await reloadFavorites();
+    } catch {
+      setFavoriteError(t("cases.favoriteError"));
+    }
+  }
 
   if (selectedCaseId) {
     return (
@@ -91,6 +144,9 @@ export function CasesPane({
         canArchive={canArchive}
         onBack={() => setSelectedCaseId(null)}
         onOpenDocument={onOpenDocument}
+        isFavorite={favoriteCaseIds.has(selectedCaseId)}
+        onToggleFavorite={() => toggleFavoriteCase(selectedCaseId)}
+        favoriteError={favoriteError}
       />
     );
   }
@@ -99,6 +155,12 @@ export function CasesPane({
     <section className="cases-pane" aria-label={t("cases.paneLabel")}>
       <h2 className="pane-heading">{t("cases.heading")}</h2>
       <p className="hint">{t("cases.hint")}</p>
+
+      {favoriteError && (
+        <p className="error-text" role="alert">
+          {favoriteError}
+        </p>
+      )}
 
       <label>
         {t("cases.statusFilterLabel")}
@@ -136,6 +198,18 @@ export function CasesPane({
                 {" · "}
                 {t("cases.createdAt", { date: formatDate(c.created_at, locale) })}
               </span>
+              <button
+                type="button"
+                className="favorite-toggle"
+                aria-label={
+                  favoriteCaseIds.has(c.id)
+                    ? t("cases.removeFavorite", { name: c.name })
+                    : t("cases.addFavorite", { name: c.name })
+                }
+                onClick={() => toggleFavoriteCase(c.id)}
+              >
+                {favoriteCaseIds.has(c.id) ? "★" : "☆"}
+              </button>
             </li>
           ))}
         </ul>
@@ -364,12 +438,18 @@ function CaseDetail({
   canArchive,
   onBack,
   onOpenDocument,
+  isFavorite,
+  onToggleFavorite,
+  favoriteError,
 }: {
   token: string;
   caseId: string;
   canArchive: boolean;
   onBack: () => void;
   onOpenDocument: (doc: DocumentSummary) => void;
+  isFavorite: boolean;
+  onToggleFavorite: () => void;
+  favoriteError: string | null;
 }) {
   const { t, locale } = useI18n();
 
@@ -532,7 +612,21 @@ function CaseDetail({
       <button type="button" onClick={onBack}>
         {t("cases.backToList")}
       </button>
-      <h2 className="pane-heading">{activeCase.name}</h2>
+      <span className="heading-with-favorite">
+        <h2 className="pane-heading">{activeCase.name}</h2>
+        <button
+          type="button"
+          className="favorite-toggle"
+          aria-label={
+            isFavorite
+              ? t("cases.removeFavorite", { name: activeCase.name })
+              : t("cases.addFavorite", { name: activeCase.name })
+          }
+          onClick={onToggleFavorite}
+        >
+          {isFavorite ? "★" : "☆"}
+        </button>
+      </span>
       <p className="hint">
         {activeCase.vorgangsnummer ? `${activeCase.vorgangsnummer} · ` : ""}
         {activeCase.status === "open" ? t("cases.statusOpen") : t("cases.statusClosed")}
@@ -546,6 +640,11 @@ function CaseDetail({
       {error && (
         <p className="error-text" role="alert">
           {error}
+        </p>
+      )}
+      {favoriteError && (
+        <p className="error-text" role="alert">
+          {favoriteError}
         </p>
       )}
 

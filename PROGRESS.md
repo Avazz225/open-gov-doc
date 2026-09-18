@@ -2,11 +2,77 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P45-S1 (`reporting-service`: license-utilization report — first session of
-Phase 45, "Dependency-Resolved Functional Completions"). This report was deliberately left out of the
-original standard-reports session (P7-S2b) — 4 of 5 concept-example reports were built then, license
-utilization skipped purely because `license-service` didn't exist yet. It's existed since Phase 9, so
-this session simply retrofits the last one; all 5 concept-example reports now exist.
+**Last completed:** P45-S2 (`favorite-service`/`user-ui`: case-binder favorites — second session of
+Phase 45, "Dependency-Resolved Functional Completions"). Deferred since the original P7-S1d plan
+approval purely because `case-service` had no browsing UI to add a favorite toggle to yet — untrue
+since "Umlaufmappen" shipped in Phase 34 (ADR 0141).
+
+**Backend**: `favorite_service.schemas.ObjectType` extended to `Literal["document", "folder", "case"]`
+— no schema/migration change needed at all, since the DB column is already a generic `String(16)` and
+this service deliberately never validates `object_id` referentially against any sibling service (see
+its own "Architecture decision" doc section). Backend tests: `test_create_case_favorite` (repository)
+plus a third `object_type="case"` `POST` inside `test_list_filters_by_object_type` and a new
+`test_create_list_and_delete_a_case_favorite` full round trip (API). **14/14 passing** (was 12, +2).
+
+**Frontend** (`user-ui`): `lib/api.ts` gained `FavoriteObjectType = "document" | "folder" | "case"`,
+used consistently by `Favorite`/`listFavorites`/`addFavorite`/`removeFavorite`. `CasesPane.tsx` gained:
+a ☆/★ `favorite-toggle` button per list row and one next to the case-detail heading (the first visible
+favorite-star button in the app — `ExplorerPane.tsx`'s existing document/folder favorite toggle is
+context-menu-only, no icon), both calling a new `toggleFavoriteCase` following the same "server remains
+source of truth, reload after every toggle" idiom already established there; a new `openCaseId` prop,
+read via a `useEffect` (not a `useState` initial value) so a later view-switching refactor can't
+silently stop picking up a newly-opened case id. `FavoritesPane.tsx` gained a `case: Case | null` field
+on `ResolvedFavorite`, a third `getCase` resolution branch, and a new `onOpenCase` prop.
+`DocumentWorkspace.tsx` gained `handleOpenFavoriteCase` (sets the new `openCaseId` state, switches the
+view to `"cases"`) wired into `<FavoritesPane onOpenCase=.../>`, and passes `openCaseId` into
+`<CasesPane>`. New i18n keys under `cases.*` (`addFavorite`/`removeFavorite`/`favoriteError`, mirroring
+`explorer.*`'s existing wording) and a new `.favorite-toggle`/`.heading-with-favorite` CSS pair in
+`globals.css`.
+
+**A note on the "kept mounted" assumption inherited from an earlier phase's own doc comments**: turned
+out not to actually apply to the special-view panes (`CasesPane` included) — only `DockableDocumentArea`
+(the documents view) stays mounted via a `hidden` prop; every other `IconRail` view (including
+`"cases"`/`"favorites"`) is a plain ternary branch in `DocumentWorkspace.tsx` that unmounts/remounts on
+every switch. The `useEffect`-over-`openCaseId` approach still works correctly either way (a fresh mount
+re-runs the effect too), so this wasn't a functional bug — just an inaccurate premise in an inherited
+code comment, corrected in place in `CasesPane.tsx` this session.
+
+Frontend checks: `tsc --noEmit` clean, `eslint .` clean (2 pre-existing, unrelated `<img>` warnings
+only), full `vitest run` **279/279 passing** (was 274, +5: 4 new `cases-pane.test.tsx` cases + 1 new
+`favorites-pane.test.tsx` case), `next build` clean.
+
+Docker images for `favorite-service` and `user-ui` rebuilt and redeployed. **Live-verified via a real
+Playwright browser session** (no `chromium-cli` in this sandbox; `@playwright/test`'s own bundled
+Chromium, already present in `apps/user-ui/node_modules`, driven directly instead) against the real
+running stack, logged in as `users-admin`: favorited an existing case ("Testfall") via the list-view
+star, confirmed the label flipped to "...aus Favoriten entfernen"; opened the case detail view and
+confirmed the same star (now filled) appears next to the heading there too; navigated to the Favorites
+pane and confirmed the case is listed with the resolved name and the new "Umlaufmappe" type label;
+clicked "Öffnen" and confirmed it navigated back into the correct case's detail view; un-favorited again
+to leave the stack clean. No unrelated console/network errors introduced (two pre-existing, unrelated
+401/500 responses on `/auth-service/sso-config` and `/auth-service/me/preferences` seen during login,
+neither touched by this session's diff).
+
+`docs/services/favorite-service.md` updated (Responsibility line, `ObjectType` in the endpoint/data
+model tables, test count, a new live-smoke-test bullet, Open Points bullet removed since now closed).
+`docs/services/user-ui.md` updated (the P7-S1d case-binder-deferral paragraph corrected in place with a
+new bullet describing this session's addition, the matching Open Points bullet struck through, new test
+count entry). No new ADR (this session's own Definition of Done — pure functional completion of an
+already-established pattern against a now-satisfied dependency, same shape as P45-S1 — didn't expect
+one).
+
+**Next session:** **P45-S3** (`ocr-service`/`object-type-service`: `needs_review` and status-transition
+(4.5) workflow integration — third session of Phase 45; likely the largest session of this phase, split
+into two if the OCR-review and status-transition halves need genuinely independent design decisions once
+started) — see `IMPLEMENTATION_PLAN.md` "Phase 45" for the full plan.
+
+---
+
+Immediately before P45-S2: **P45-S1** (`reporting-service`: license-utilization report — first session
+of Phase 45). This report was deliberately left out of the original standard-reports session (P7-S2b) —
+4 of 5 concept-example reports were built then, license utilization skipped purely because
+`license-service` didn't exist yet. It's existed since Phase 9, so this session simply retrofits the
+last one; all 5 concept-example reports now exist.
 
 `reports.license_utilization()` reads `license-service`'s single `GET /license/status` snapshot
 (already computed live, fanning out to `auth-service`/`storage-service`/`document-service`, on every
@@ -46,10 +112,6 @@ now-satisfied dependency, same shape as the earlier Phase 42 — didn't expect o
 example reports" Architecture Decision and its Open Points counterpart both corrected in place, a new
 API table row pair, and the test count. `docs/services/license-service.md` gained a one-line mention of
 the new consumer for discoverability.
-
-**Next session:** **P45-S2** (`favorite-service`/`user-ui`: case-binder favorites — second session of
-Phase 45; deferred until now purely because case-browsing UI didn't exist yet, which has been untrue
-since "Umlaufmappen" shipped in Phase 34) — see `IMPLEMENTATION_PLAN.md` "Phase 45" for the full plan.
 
 ---
 

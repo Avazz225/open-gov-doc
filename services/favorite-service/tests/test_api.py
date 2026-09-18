@@ -44,12 +44,42 @@ def test_list_filters_by_object_type(client):
     client.post(
         "/favorites", json={"user_id": "alice", "object_type": "folder", "object_id": "folder-1"}
     )
+    client.post(
+        "/favorites", json={"user_id": "alice", "object_type": "case", "object_id": "case-1"}
+    )
 
     response = client.get("/favorites", params={"user_id": "alice", "object_type": "folder"})
     assert response.status_code == 200
     results = response.json()
     assert len(results) == 1
     assert results[0]["object_type"] == "folder"
+
+
+def test_create_list_and_delete_a_case_favorite(client):
+    """Phase 45 Session 2 - `"case"` added as a third `object_type`
+    alongside `document`/`folder`, deliberately deferred at plan approval
+    (P7-S1d) until `case-service` had a browsing UI to add a favorite
+    toggle to ("Umlaufmappen", ADR 0141, Phase 34). No repository/model
+    change was needed - the DB column is already a generic `String(16)`
+    and this service never validates `object_id` against any sibling
+    service regardless of type - only the `ObjectType` Literal in
+    `schemas.py` needed extending."""
+    create_response = client.post(
+        "/favorites", json={"user_id": "alice", "object_type": "case", "object_id": "case-1"}
+    )
+    assert create_response.status_code == 201
+    assert create_response.json()["object_type"] == "case"
+
+    list_response = client.get("/favorites", params={"user_id": "alice", "object_type": "case"})
+    assert list_response.status_code == 200
+    assert len(list_response.json()) == 1
+
+    delete_response = client.request(
+        "DELETE",
+        "/favorites",
+        params={"user_id": "alice", "object_type": "case", "object_id": "case-1"},
+    )
+    assert delete_response.status_code == 204
 
 
 def test_list_scoped_to_user(client):

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "@/i18n";
 import {
   ApiError,
+  type Case,
   type DocumentSummary,
   type Folder,
   createFolder as apiCreateFolder,
@@ -58,6 +59,12 @@ export function DocumentWorkspace() {
   const [error, setError] = useState<string | null>(null);
   const [openDocuments, setOpenDocuments] = useState<DocumentSummary[]>([]);
   const [view, setView] = useState<WorkspaceView>("documents");
+  // "Open" from the favorites bookmark list (Phase 45 Session 2) - `CasesPane`
+  // stays mounted (only CSS-hidden) like every other pane, so it needs an
+  // explicit prop it can watch via `useEffect` rather than a one-time
+  // navigation call, same reasoning as `openCaseId`'s own doc comment in
+  // CasesPane.tsx.
+  const [openCaseId, setOpenCaseId] = useState<string | null>(null);
   const dockableAreaRef = useRef<DockableDocumentAreaHandle>(null);
   // Version bump counter per document ID (P23-S7): `SignaturesPanel` and
   // `PreviewPane` are independently mounted dockview siblings
@@ -266,6 +273,11 @@ export function DocumentWorkspace() {
     await openFolderPath(folder);
   }
 
+  function handleOpenFavoriteCase(caseItem: Case) {
+    setOpenCaseId(caseItem.id);
+    setView("cases");
+  }
+
   // Authenticated direct links (post-roadmap phase 29, ADR 0109) - reads
   // `?document=<id>`/`?folder=<id>` directly from `window.location.search`
   // once on mount (not `useSearchParams()`, same reasoning as
@@ -379,6 +391,7 @@ export function DocumentWorkspace() {
                 currentUsername={user?.username ?? ""}
                 onOpenDocument={handleOpenFavoriteDocument}
                 onOpenFolder={handleOpenFavoriteFolder}
+                onOpenCase={handleOpenFavoriteCase}
               />
             ) : view === "teamspaces" ? (
               <TeamspacesPane
@@ -399,7 +412,11 @@ export function DocumentWorkspace() {
             ) : view === "vorlagen" ? (
               <VorlagenPane token={accessToken ?? ""} createdBy={user?.username ?? ""} />
             ) : view === "cases" ? (
-              <CasesPane token={accessToken ?? ""} onOpenDocument={openDocumentTab} />
+              <CasesPane
+                token={accessToken ?? ""}
+                onOpenDocument={openDocumentTab}
+                openCaseId={openCaseId}
+              />
             ) : view === "handFolders" ? (
               <HandFolderOverviewPane
                 token={accessToken ?? ""}

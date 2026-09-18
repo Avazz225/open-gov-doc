@@ -14,6 +14,9 @@ const exportCaseXjustizMock = vi.fn();
 const importXdomeaIntoCaseMock = vi.fn();
 const importXjustizIntoCaseMock = vi.fn();
 const listProcessDefinitionsMock = vi.fn();
+const listFavoritesMock = vi.fn();
+const addFavoriteMock = vi.fn();
+const removeFavoriteMock = vi.fn();
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
@@ -28,6 +31,9 @@ vi.mock("@/lib/api", async () => {
     importXdomeaIntoCase: (...args: unknown[]) => importXdomeaIntoCaseMock(...args),
     importXjustizIntoCase: (...args: unknown[]) => importXjustizIntoCaseMock(...args),
     listProcessDefinitions: (...args: unknown[]) => listProcessDefinitionsMock(...args),
+    listFavorites: (...args: unknown[]) => listFavoritesMock(...args),
+    addFavorite: (...args: unknown[]) => addFavoriteMock(...args),
+    removeFavorite: (...args: unknown[]) => removeFavoriteMock(...args),
   };
 });
 
@@ -76,10 +82,14 @@ const DOCUMENT_REF: CaseDocumentReference = {
   has_active_quarantine: false,
 };
 
-function renderPane(onOpenDocument = vi.fn()) {
+function renderPane(onOpenDocument = vi.fn(), openCaseId: string | null = null) {
   return render(
     <I18nProvider>
-      <CasesPane token="token-123" onOpenDocument={onOpenDocument} />
+      <CasesPane
+        token="token-123"
+        onOpenDocument={onOpenDocument}
+        openCaseId={openCaseId}
+      />
     </I18nProvider>
   );
 }
@@ -95,6 +105,9 @@ describe("CasesPane", () => {
     importXdomeaIntoCaseMock.mockReset();
     importXjustizIntoCaseMock.mockReset();
     listProcessDefinitionsMock.mockReset().mockResolvedValue([]);
+    listFavoritesMock.mockReset().mockResolvedValue([]);
+    addFavoriteMock.mockReset().mockResolvedValue(undefined);
+    removeFavoriteMock.mockReset().mockResolvedValue(undefined);
     mockPermissions = ["archival.write"];
   });
 
@@ -312,6 +325,73 @@ describe("CasesPane", () => {
     // Phase 42 Session 1) instead of staying on the list.
     await waitFor(() => expect(getCaseMock).toHaveBeenCalledWith("token-123", "case-new-1"));
     expect(await screen.findByRole("heading", { name: "Neuer Vorgang" })).toBeInTheDocument();
+  });
+
+  it("adds a case to favorites via the star toggle in the list view", async () => {
+    const user = userEvent.setup();
+    renderPane();
+
+    await user.click(
+      await screen.findByRole("button", { name: '"Umlaufmappe A" zu Favoriten hinzufügen' })
+    );
+
+    await waitFor(() =>
+      expect(addFavoriteMock).toHaveBeenCalledWith("token-123", {
+        user_id: "alice",
+        object_type: "case",
+        object_id: "case-1",
+      })
+    );
+  });
+
+  it("removes a case from favorites via the star toggle once it is already favorited", async () => {
+    listFavoritesMock.mockResolvedValue([
+      {
+        id: "fav-1",
+        user_id: "alice",
+        object_type: "case",
+        object_id: "case-1",
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ]);
+    const user = userEvent.setup();
+    renderPane();
+
+    await user.click(
+      await screen.findByRole("button", { name: '"Umlaufmappe A" aus Favoriten entfernen' })
+    );
+
+    await waitFor(() =>
+      expect(removeFavoriteMock).toHaveBeenCalledWith("token-123", {
+        user_id: "alice",
+        object_type: "case",
+        object_id: "case-1",
+      })
+    );
+  });
+
+  it("toggles the favorite star from within the case detail view too", async () => {
+    const user = userEvent.setup();
+    renderPane();
+
+    await user.click(await screen.findByText("Umlaufmappe A (2026-001)"));
+    await user.click(
+      await screen.findByRole("button", { name: '"Umlaufmappe A" zu Favoriten hinzufügen' })
+    );
+
+    await waitFor(() =>
+      expect(addFavoriteMock).toHaveBeenCalledWith("token-123", {
+        user_id: "alice",
+        object_type: "case",
+        object_id: "case-1",
+      })
+    );
+  });
+
+  it("opens the case detail view directly when openCaseId is set", async () => {
+    renderPane(vi.fn(), "case-1");
+
+    expect(await screen.findByRole("heading", { name: "Umlaufmappe A" })).toBeInTheDocument();
   });
 
   it("creates a new case via XJustiz import with the selected process definition", async () => {

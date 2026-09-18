@@ -879,6 +879,28 @@ body {
   gap: 0.5rem;
 }
 
+.heading-with-favorite {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Case-binder favorite star toggle (Phase 45 Session 2) - the first
+   visible star-icon favorite button in the app; ExplorerPane's own
+   document/folder favorite toggle is context-menu-only, no icon. The
+   button lives next to the heading, not inside it, so the heading's own
+   accessible name stays just the case name for `getByRole("heading")`
+   queries. */
+.favorite-toggle {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0 0.25rem;
+  color: var(--dms-accent);
+}
+
 .login-form {
   max-width: 320px;
   margin: 4rem auto;

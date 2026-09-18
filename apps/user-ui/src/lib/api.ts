@@ -1996,10 +1996,15 @@ export async function getFolder(token: string, folderId: string): Promise<Folder
 // Favorites/watch list (quick retrieval, since P7-S1d) - new, deliberately
 // decoupled `favorite-service` without referential checks against
 // document-/folder-service (see docs/services/favorite-service.md).
+// "case" added in Phase 45 Session 2 - deliberately deferred at plan
+// approval until case-service had a browsing UI to add a favorite toggle
+// to ("Umlaufmappen", ADR 0141, Phase 34).
+export type FavoriteObjectType = "document" | "folder" | "case";
+
 export interface Favorite {
   id: string;
   user_id: string;
-  object_type: "document" | "folder";
+  object_type: FavoriteObjectType;
   object_id: string;
   created_at: string;
 }
@@ -2007,7 +2012,7 @@ export interface Favorite {
 export async function listFavorites(
   token: string,
   userId: string,
-  objectType?: "document" | "folder"
+  objectType?: FavoriteObjectType
 ): Promise<Favorite[]> {
   const query = new URLSearchParams({ user_id: userId });
   if (objectType) query.set("object_type", objectType);
@@ -2017,7 +2022,7 @@ export async function listFavorites(
 
 export async function addFavorite(
   token: string,
-  params: { user_id: string; object_type: "document" | "folder"; object_id: string }
+  params: { user_id: string; object_type: FavoriteObjectType; object_id: string }
 ): Promise<Favorite> {
   const response = await request(
     "favorite-service",
@@ -2034,7 +2039,7 @@ export async function addFavorite(
 
 export async function removeFavorite(
   token: string,
-  params: { user_id: string; object_type: "document" | "folder"; object_id: string }
+  params: { user_id: string; object_type: FavoriteObjectType; object_id: string }
 ): Promise<void> {
   const query = new URLSearchParams(params);
   await request("favorite-service", `favorites?${query.toString()}`, { method: "DELETE" }, token);

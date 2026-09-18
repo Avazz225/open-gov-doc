@@ -11,6 +11,17 @@ async def test_create_favorite(session):
     assert favorite.user_id == "alice"
 
 
+async def test_create_case_favorite(session):
+    """Phase 45 Session 2 - `"case"` as a third `object_type`, see
+    `test_api.py::test_create_list_and_delete_a_case_favorite` for the
+    full deferral rationale."""
+    favorite = await repository.create_favorite(
+        session, FavoriteCreate(user_id="alice", object_type="case", object_id="case-1")
+    )
+    assert favorite.object_type == "case"
+    assert favorite.object_id == "case-1"
+
+
 async def test_create_duplicate_raises(session):
     payload = FavoriteCreate(user_id="alice", object_type="document", object_id="doc-1")
     await repository.create_favorite(session, payload)
