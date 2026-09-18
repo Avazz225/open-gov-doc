@@ -447,6 +447,19 @@ EVERYONE_ROLE_PERMISSIONS: list[str] = [
     "document.write",
     "folder.read",
     "folder.write",
+    # Post-Roadmap Phase 44 Session 2 (ADR 0163): `folder-service`'s
+    # `DELETE /folders/{id}`/`POST /folders/{id}/trash` now check the
+    # dedicated `folder.delete` permission instead of the broader
+    # `folder.write` above, specifically so a teamspace's non-manager
+    # members (who DO get `folder.write` via `teamspace-member`, but
+    # deliberately not `folder.delete`) can no longer delete/trash the
+    # entire teamspace by calling folder-service directly, bypassing
+    # `teamspace-service`'s own manager-only guard. Granting it to
+    # "everyone" here preserves today's default-open delete/trash
+    # behavior for every ordinary, non-teamspace folder - this is a
+    # narrowing for teamspaces specifically (via their root folder's
+    # `inherit=False` isolation), not a new restriction project-wide.
+    "folder.delete",
 ]
 
 

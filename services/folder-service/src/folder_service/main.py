@@ -130,6 +130,16 @@ async def _execute_or_defer_forced_deletion(session: AsyncSession, folder: Folde
         {"reason": reason, "triggered_by": "system:retention-poll"},
         actor="system:retention-poll",
     )
+    # Phase 44 Session 2/ADR 0163: distinct from the business event above -
+    # this is the structure-tree lifecycle event `structure_consumer.py`
+    # (permission-service) listens for. Only `DELETE /folders/{id}` (the
+    # one call site written when this event type was introduced) ever
+    # published it; this forced-deletion path never did, leaving an
+    # orphaned `ResourceNode` behind on every forced deletion (ADR 0154's
+    # own documented, then-untracked finding).
+    await publish_event(
+        "folder.resource.deleted", subject=folder_id, payload={"resource_id": folder_id}
+    )
 
 
 async def _retention_poll_loop(session_factory) -> None:
@@ -194,6 +204,14 @@ async def _retention_poll_loop(session_factory) -> None:
                         folder_id,
                         {"trigger": "trash_expiry"},
                         actor="system:retention-poll",
+                    )
+                    # Phase 44 Session 2/ADR 0163: see the forced-deletion
+                    # path above - same missing structure-tree event, same
+                    # fix.
+                    await publish_event(
+                        "folder.resource.deleted",
+                        subject=folder_id,
+                        payload={"resource_id": folder_id},
                     )
         except Exception:
             logger.exception(
@@ -564,6 +582,11 @@ async def purge_folder(
         {"trigger": "manual_purge", "triggered_by": x_dms_principal},
         actor=x_dms_principal,
     )
+    # Phase 44 Session 2/ADR 0163: see `_execute_or_defer_forced_deletion`'s
+    # identical fix - same missing structure-tree event.
+    await publish_event(
+        "folder.resource.deleted", subject=folder_id, payload={"resource_id": folder_id}
+    )
 
 
 @app.get("/folders/{folder_id}", response_model=FolderOut)
@@ -683,7 +706,7 @@ async def delete_folder(
         raise HTTPException(
             status_code=409, detail=f"Sonderordner {folder_id!r} kann nicht gelöscht werden"
         )
-    await _require_folder_permission(x_dms_principal, folder_id, access_type="write")
+    await _require_folder_delete_permission(x_dms_principal, folder_id)
     try:
         await repository.delete_folder(session, folder_id)
     except repository.NotFoundError as exc:
@@ -718,7 +741,7 @@ async def trash_folder(
             status_code=409,
             detail=f"Sonderordner {folder_id!r} kann nicht in den Papierkorb verschoben werden",
         )
-    await _require_folder_permission(x_dms_principal, folder_id, access_type="write")
+    await _require_folder_delete_permission(x_dms_principal, folder_id)
     if await app.state.approval_client.requires_approval("folder.delete"):
         request = await app.state.approval_client.create_request(
             action_type="folder.delete",
@@ -878,6 +901,41 @@ async def _require_folder_permission(
     if not allowed:
         raise HTTPException(
             status_code=403, detail=f"Fehlende Berechtigung {permission!r} auf {resource_id!r}"
+        )
+
+
+async def _require_folder_delete_permission(x_dms_principal: str, folder_id: str) -> None:
+    """Deliberately its OWN permission, `folder.delete`, NOT the generic
+    `folder.write` `_require_folder_permission` above checks (Post-Roadmap
+    Phase 44 Session 2, ADR 0163) - same "dedicated permission pair" shape
+    as `_require_folder_document_reference_permission`'s existing
+    precedent, applied here for a different reason: `folder.write` is
+    granted broadly (to "everyone" for ordinary folders, and to every
+    `teamspace-member` - not just managers - on a teamspace's root folder,
+    ADR 0149) because ordinary write actions (create/rename/move/restore)
+    are meant to be that open. Deleting/trashing a folder is not the same
+    kind of action - in particular, ANY teamspace member could otherwise
+    destroy the entire teamspace by calling `DELETE /folders/{root_folder_
+    id}` or `POST /folders/{root_folder_id}/trash` directly, bypassing
+    `teamspace-service`'s own manager-only guard on `DELETE /teamspaces/
+    {id}` entirely (that guard only ever protected the teamspace metadata
+    row, never the underlying folder). `folder.delete` is granted to
+    "everyone" (preserving today's default-open behavior for ordinary,
+    non-teamspace folders - this is a narrowing for teamspaces specifically,
+    not a new restriction project-wide) but, on a teamspace's root folder,
+    only to members with `can_manage_members=True` (`teamspace-manager`,
+    see `docs/services/teamspace-service.md`)."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    allowed = await app.state.permission_client.check(
+        principal_id=x_dms_principal,
+        resource_id=folder_id,
+        permission="folder.delete",
+        access_type="write",
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=403, detail=f"Fehlende Berechtigung 'folder.delete' auf {folder_id!r}"
         )
 
 
@@ -1212,6 +1270,11 @@ async def reconcile_restore_deletion(
             "reconciliation_of_entry_id": payload.original_entry_id,
         },
         actor="system:restore-reconciliation",
+    )
+    # Phase 44 Session 2/ADR 0163: same missing structure-tree event as
+    # every other real hard-delete call site in this module.
+    await publish_event(
+        "folder.resource.deleted", subject=folder_id, payload={"resource_id": folder_id}
     )
 
 

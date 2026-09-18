@@ -418,6 +418,150 @@ def test_delete_teamspace_succeeds(client):
     )
 
 
+def test_non_manager_member_cannot_delete_or_trash_teamspace_root_folder_via_folder_service(
+    client,
+):
+    """Post-Roadmap Phase 44 Session 2 (ADR 0163) - the actual bypass this
+    session closes: before this fix, `teamspace-member`'s `folder.write`
+    let ANY member (not just a manager) delete/trash the entire teamspace
+    by calling `folder-service` directly, bypassing this service's own
+    manager-only guard on `DELETE /teamspaces/{id}` (which only ever
+    protected the teamspace METADATA row, never the underlying folder).
+    "bob" is invited WITHOUT `can_manage_members` (the default) - a
+    completely ordinary member."""
+    teamspace = _create_teamspace(client)
+    root_folder_id = teamspace["root_folder_id"]
+    client.post(
+        f"/teamspaces/{teamspace['id']}/members",
+        json={"principal_id": "bob"},
+        headers=_headers("alice"),
+    )
+
+    with httpx.Client(base_url=FOLDER_SERVICE_URL, timeout=30.0) as folder_client:
+        trash_response = folder_client.post(
+            f"/folders/{root_folder_id}/trash",
+            json={"deleted_by": "bob"},
+            headers={"X-DMS-Principal": "bob"},
+        )
+        assert trash_response.status_code == 403
+
+        delete_response = folder_client.delete(
+            f"/folders/{root_folder_id}", headers={"X-DMS-Principal": "bob"}
+        )
+        assert delete_response.status_code == 403
+
+
+def test_manager_member_can_trash_teamspace_root_folder_via_folder_service(client):
+    """Counterpart to the test above - a member invited WITH
+    `can_manage_members=True` gets the second, `folder.delete`-carrying
+    role (`teamspace-manager`, ADR 0163) and can legitimately trash the
+    teamspace root folder directly. Restores it again afterward so the
+    module's `_cleanup_teamspace_folders` fixture (trash-then-purge) still
+    finds an untrashed folder to work with, same as every other test."""
+    teamspace = _create_teamspace(client)
+    root_folder_id = teamspace["root_folder_id"]
+    client.post(
+        f"/teamspaces/{teamspace['id']}/members",
+        json={"principal_id": "carol", "can_manage_members": True},
+        headers=_headers("alice"),
+    )
+
+    with httpx.Client(base_url=FOLDER_SERVICE_URL, timeout=30.0) as folder_client:
+        trash_response = folder_client.post(
+            f"/folders/{root_folder_id}/trash",
+            json={"deleted_by": "carol"},
+            headers={"X-DMS-Principal": "carol"},
+        )
+        assert trash_response.status_code == 200
+
+        restore_response = folder_client.post(
+            f"/folders/{root_folder_id}/restore", headers={"X-DMS-Principal": "carol"}
+        )
+        assert restore_response.status_code == 200
+
+
+def test_promoting_member_grants_folder_delete_and_demoting_revokes_it(client):
+    """`update_member` (`PUT .../members/{id}`) must keep the
+    `teamspace-manager` role in sync with `can_manage_members` (ADR 0163) -
+    not just `invite_member`/`create_teamspace`, which only cover the
+    grant at creation/invite time."""
+    teamspace = _create_teamspace(client)
+    root_folder_id = teamspace["root_folder_id"]
+    client.post(
+        f"/teamspaces/{teamspace['id']}/members",
+        json={"principal_id": "bob"},
+        headers=_headers("alice"),
+    )
+
+    with httpx.Client(base_url=FOLDER_SERVICE_URL, timeout=30.0) as folder_client:
+        assert (
+            folder_client.post(
+                f"/folders/{root_folder_id}/trash",
+                json={"deleted_by": "bob"},
+                headers={"X-DMS-Principal": "bob"},
+            ).status_code
+            == 403
+        )
+
+        promote = client.put(
+            f"/teamspaces/{teamspace['id']}/members/bob",
+            json={"can_manage_members": True},
+            headers=_headers("alice"),
+        )
+        assert promote.status_code == 200
+
+        trashed = folder_client.post(
+            f"/folders/{root_folder_id}/trash",
+            json={"deleted_by": "bob"},
+            headers={"X-DMS-Principal": "bob"},
+        )
+        assert trashed.status_code == 200
+        assert (
+            folder_client.post(
+                f"/folders/{root_folder_id}/restore", headers={"X-DMS-Principal": "bob"}
+            ).status_code
+            == 200
+        )
+
+        demote = client.put(
+            f"/teamspaces/{teamspace['id']}/members/bob",
+            json={"can_manage_members": False},
+            headers=_headers("alice"),
+        )
+        assert demote.status_code == 200
+
+        assert (
+            folder_client.post(
+                f"/folders/{root_folder_id}/trash",
+                json={"deleted_by": "bob"},
+                headers={"X-DMS-Principal": "bob"},
+            ).status_code
+            == 403
+        )
+
+
+def test_remove_member_revokes_manager_role_too(client):
+    teamspace = _create_teamspace(client)
+    client.post(
+        f"/teamspaces/{teamspace['id']}/members",
+        json={"principal_id": "bob", "can_manage_members": True},
+        headers=_headers("alice"),
+    )
+    response = client.delete(
+        f"/teamspaces/{teamspace['id']}/members/bob", headers=_headers("alice")
+    )
+    assert response.status_code == 204
+
+    with httpx.Client(base_url=PERMISSION_SERVICE_URL) as permission_client:
+        roles = permission_client.get("/roles").json()
+        manager_role = next(r for r in roles if r["name"] == "teamspace-manager")
+        assignments = permission_client.get(
+            "/role-assignments",
+            params={"principal_id": "bob", "resource_id": teamspace["root_folder_id"]},
+        ).json()
+    assert not any(a["role_id"] == manager_role["id"] for a in assignments)
+
+
 def test_create_and_list_appointments(client):
     teamspace = _create_teamspace(client)
     response = client.post(

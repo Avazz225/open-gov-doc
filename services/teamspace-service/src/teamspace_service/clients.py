@@ -59,6 +59,19 @@ class PermissionServiceClient:
         "folder.read",
         "folder.write",
     ]
+    # Post-Roadmap Phase 44 Session 2 (ADR 0163): a SECOND role, granted
+    # IN ADDITION to `teamspace-member` for members with
+    # `can_manage_members=True` only. Before this, every member got
+    # `folder.write` on the teamspace root folder regardless of manager
+    # status - since `folder-service`'s `DELETE /folders/{id}`/
+    # `POST /folders/{id}/trash` now check the narrower `folder.delete`
+    # instead (see `docs/services/folder-service.md`), a non-manager
+    # member without this second role can no longer delete/trash the
+    # entire teamspace by calling folder-service directly, closing the
+    # bypass around this service's own manager-only `DELETE /teamspaces/
+    # {id}` guard.
+    TEAMSPACE_MANAGER_ROLE_NAME = "teamspace-manager"
+    TEAMSPACE_MANAGER_ROLE_PERMISSIONS = ["folder.delete"]
     _PRINCIPAL_ID = "teamspace-service"
 
     def __init__(self, base_url: str) -> None:
@@ -71,36 +84,49 @@ class PermissionServiceClient:
         self._client = httpx.AsyncClient(
             base_url=base_url, timeout=30.0, headers={"X-DMS-Principal": self._PRINCIPAL_ID}
         )
-        self._role_id: int | None = None
+        self._role_ids: dict[str, int] = {}
 
-    async def _ensure_role(self) -> int:
+    async def _ensure_role(self, name: str, permissions: list[str], description: str) -> int:
         """Get-or-create the role by name (same pattern as
         `migration-service`'s `apply_role_assignment` for migrated
         permissions). `POST /roles` now wraps its response in a
         `status`/`role` envelope (P32-S1, ADR 0130) - unwrap `["role"]`
-        instead of reading fields directly off the top-level object."""
-        if self._role_id is not None:
-            return self._role_id
+        instead of reading fields directly off the top-level object.
+        Generalized from a single hard-coded role (Phase 44 Session 2) to
+        also cover `TEAMSPACE_MANAGER_ROLE_NAME` - cached per role name,
+        not just once, since this client now manages two."""
+        if name in self._role_ids:
+            return self._role_ids[name]
         response = await self._client.get("/roles")
         response.raise_for_status()
-        existing = next(
-            (r for r in response.json() if r["name"] == self.TEAMSPACE_MEMBER_ROLE_NAME), None
-        )
+        existing = next((r for r in response.json() if r["name"] == name), None)
         if existing is not None:
-            self._role_id = existing["id"]
+            role_id = existing["id"]
         else:
             create_response = await self._client.post(
                 "/roles",
-                json={
-                    "name": self.TEAMSPACE_MEMBER_ROLE_NAME,
-                    "description": "Teamspace-Mitgliedschaft (2.5) - automatisch verwaltet, "
-                    "nicht von Hand zuzuweisen",
-                    "permissions": self.TEAMSPACE_MEMBER_ROLE_PERMISSIONS,
-                },
+                json={"name": name, "description": description, "permissions": permissions},
             )
             create_response.raise_for_status()
-            self._role_id = create_response.json()["role"]["id"]
-        return self._role_id
+            role_id = create_response.json()["role"]["id"]
+        self._role_ids[name] = role_id
+        return role_id
+
+    async def _ensure_member_role(self) -> int:
+        return await self._ensure_role(
+            self.TEAMSPACE_MEMBER_ROLE_NAME,
+            self.TEAMSPACE_MEMBER_ROLE_PERMISSIONS,
+            "Teamspace-Mitgliedschaft (2.5) - automatisch verwaltet, nicht von Hand zuzuweisen",
+        )
+
+    async def _ensure_manager_role(self) -> int:
+        return await self._ensure_role(
+            self.TEAMSPACE_MANAGER_ROLE_NAME,
+            self.TEAMSPACE_MANAGER_ROLE_PERMISSIONS,
+            "Teamspace-Verwaltung (2.5, ADR 0163) - zusätzlich zu 'teamspace-member' für "
+            "Mitglieder mit can_manage_members=true, automatisch verwaltet, nicht von Hand "
+            "zuzuweisen",
+        )
 
     async def ensure_isolated_resource(self, *, resource_id: str, parent_id: str) -> None:
         """Post-Roadmap Phase 38 Session 4 (ADR 0149) - the resource-tree
@@ -147,8 +173,21 @@ class PermissionServiceClient:
         response = await self._client.patch(f"/resources/{resource_id}", json={"inherit": True})
         response.raise_for_status()
 
-    async def grant_resource_access(self, *, principal_id: str, resource_id: str) -> None:
-        role_id = await self._ensure_role()
+    async def _grant(self, *, role_id: int, principal_id: str, resource_id: str) -> None:
+        """Idempotent (Phase 44 Session 2) - checks for an existing
+        assignment first, same pattern as `dms_permission_client.
+        PermissionServiceClient.ensure_role_assignment`. Needed now that
+        `grant_manager_access` can be called from `update_member` on an
+        ALREADY-manager (e.g. re-saving the same `can_manage_members=true`)
+        - `permission-service`'s `POST /role-assignments` has no unique
+        constraint of its own and would otherwise accumulate duplicate
+        rows on every repeated call."""
+        existing = await self._client.get(
+            "/role-assignments", params={"principal_id": principal_id, "resource_id": resource_id}
+        )
+        existing.raise_for_status()
+        if any(a["role_id"] == role_id for a in existing.json()):
+            return
         response = await self._client.post(
             "/role-assignments",
             json={
@@ -160,6 +199,19 @@ class PermissionServiceClient:
         )
         response.raise_for_status()
 
+    async def grant_resource_access(self, *, principal_id: str, resource_id: str) -> None:
+        role_id = await self._ensure_member_role()
+        await self._grant(role_id=role_id, principal_id=principal_id, resource_id=resource_id)
+
+    async def grant_manager_access(self, *, principal_id: str, resource_id: str) -> None:
+        """Phase 44 Session 2 (ADR 0163) - grants the second,
+        `folder.delete`-carrying role. Called alongside `grant_resource_
+        access` (never instead of it - a manager still needs the base
+        member role too) whenever a member has/gains `can_manage_
+        members=true`."""
+        role_id = await self._ensure_manager_role()
+        await self._grant(role_id=role_id, principal_id=principal_id, resource_id=resource_id)
+
     async def has_permission(self, principal_id: str, permission: str) -> bool:
         """Post-Roadmap Phase 22 Session 5 - domain-admin capability check
         (`admin.teamspace_management`) for the new installation-wide
@@ -170,8 +222,7 @@ class PermissionServiceClient:
         response.raise_for_status()
         return permission in response.json()["permissions"]
 
-    async def revoke_resource_access(self, *, principal_id: str, resource_id: str) -> None:
-        role_id = await self._ensure_role()
+    async def _revoke(self, *, role_id: int, principal_id: str, resource_id: str) -> None:
         response = await self._client.get(
             "/role-assignments", params={"principal_id": principal_id, "resource_id": resource_id}
         )
@@ -180,6 +231,19 @@ class PermissionServiceClient:
             if assignment["role_id"] == role_id:
                 delete_response = await self._client.delete(f"/role-assignments/{assignment['id']}")
                 delete_response.raise_for_status()
+
+    async def revoke_resource_access(self, *, principal_id: str, resource_id: str) -> None:
+        role_id = await self._ensure_member_role()
+        await self._revoke(role_id=role_id, principal_id=principal_id, resource_id=resource_id)
+
+    async def revoke_manager_access(self, *, principal_id: str, resource_id: str) -> None:
+        """Phase 44 Session 2 (ADR 0163) - counterpart to `grant_manager_
+        access`. Safe/idempotent to call even when the principal never
+        held the manager role (e.g. `remove_member` calls this
+        unconditionally for every departing member, manager or not) -
+        `_revoke` is a no-op if no matching assignment exists."""
+        role_id = await self._ensure_manager_role()
+        await self._revoke(role_id=role_id, principal_id=principal_id, resource_id=resource_id)
 
     async def close(self) -> None:
         await self._client.aclose()

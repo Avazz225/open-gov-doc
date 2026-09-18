@@ -2,8 +2,91 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P44-S1 (`federation-hub-service`: gate `POST /handovers/{id}/retry` — first session
-of Phase 44, "Security & Correctness Hardening"). `GET /handovers`/`GET /handovers/{id}` stay
+**Last completed:** P44-S2 (`folder-service`/`teamspace-service`: close the teamspace write-bypass +
+the `ResourceNode`-orphan gap — second session of Phase 44, "Security & Correctness Hardening"). Two
+independent gaps bundled in one session, same area (`folder-service`'s deletion paths):
+
+**(a) The write-bypass**: `teamspace-member`'s broad `folder.write` let ANY teamspace member — not just
+a manager — delete/trash the entire teamspace by calling `folder-service` directly
+(`DELETE`/`POST .../trash` on the root folder), bypassing `teamspace-service`'s own manager-only guard
+on `DELETE /teamspaces/{id}` (which only ever protected the teamspace's metadata row, never the
+underlying folder — an already-known "residual, accepted gap" from ADR 0149). Fixed with a NEW,
+dedicated `folder.delete` permission (not a `folder-service`→`teamspace-service` lookup, which would
+have inverted the existing dependency direction) — `DELETE /folders/{id}`/`POST /folders/{id}/trash`
+now check it instead of the broader `folder.write`. Granted to "everyone" by default (preserving
+unchanged delete/trash behavior for every ordinary, non-teamspace folder — the narrowing only bites on a
+teamspace root, via its pre-existing `inherit=False` isolation, ADR 0149). `teamspace-service` gains a
+SECOND, additive role, `teamspace-manager` (`folder.delete` only), granted alongside the existing
+`teamspace-member` role only for members with `can_manage_members=true` — wired into `create_teamspace`
+(creator), `invite_member` (if invited as manager), `update_member` (promotion/demotion — this endpoint
+now touches `permission-service` for the first time), and `remove_member`/`delete_teamspace` (revoke
+unconditionally, safe no-op if never held). `_grant` had to become idempotent (check-then-create) since
+`update_member` can now be called repeatedly with the same value.
+
+**(b) The orphan-`ResourceNode` gap**: researching "forced-purge/trash-expiry-purge never publish
+`folder.resource.deleted`" (ADR 0154's own documented, then-untracked finding) turned up **four** real
+call sites, not the two the plan's shorthand named — `reconcile_restore_deletion` (10.4, P11-S4) shares
+the identical `retention_actions.execute_forced_deletion` call and had the identical gap. All four
+(manual purge, retention-poll forced-deletion, retention-poll trash-expiry purge, restore-reconciliation)
+now also publish `folder.resource.deleted` right after their existing business event
+(`folder.force_deleted`/`folder.trash_purged`) — only the direct, synchronous `DELETE /folders/{id}`
+path ever did before this session.
+
+New [ADR 0163](docs/adr/0163-teamspace-folder-delete-permission-and-orphan-resource-cleanup.md) records
+both decisions and their rationale (including a deliberate non-issue: the new `folder.delete`
+*permission* string coincidentally matches an unrelated, pre-existing four-eyes *action type* of the
+same name in `approval-service` — two independent registries, checked explicitly, not a collision).
+
+**Migration note, applied live**: `permission-service`'s `ensure_everyone_role` is deliberately NOT
+self-healing (same caveat ADR 0149 already hit) — a fresh installation gets `folder.delete` on
+"everyone" automatically, but this already-running dev stack needed a manual `PUT /roles/{id}` (applied
+via `curl`, using the `teamspace-service` principal, which already holds `admin.user_management`) to
+add it to the existing "everyone" role. Documented in the ADR so any other already-running installation
+knows it needs the same one-time step.
+
+**Testing hit two real infrastructure snags, both resolved, neither a code bug**: (1) `docker compose up
+-d` restarting `folder-service`/`permission-service` in quick succession during `scripts/run-tests.sh`'s
+stop/test/restart choreography caused a transient DNS-resolution race at `folder-service` startup
+(`httpx.ConnectError` reaching `permission-service` mid-restart) — not caused by this session's changes,
+resolved by just restarting the container; re-running the affected suites afterward confirmed everything
+green. (2) The new `test_execute_or_defer_forced_deletion_publishes_resource_deleted` test initially hit
+a genuine cross-event-loop `RuntimeError` from asyncpg when built on the `client` fixture's `TestClient`
+(whose lifespan runs in its own anyio portal/event loop, not pytest-asyncio's) — fixed by following
+`document-service`'s own already-established precedent for testing this exact kind of private,
+poll-loop-only function: a bare `session` fixture (no `TestClient`) plus manually stubbing
+`app.state.approval_client`/`document_client`/`event_bus` (the last one with a REAL `NatsEventBusClient`,
+not a mock, so the actual publish is genuinely observed).
+
+Six new `teamspace-service` tests (non-manager gets `403` from `folder-service` directly on both
+delete/trash, an invited manager can trash+restore, promotion/demotion syncs `folder.delete` correctly,
+removal revokes the manager role too) — **51/51 passing** (was 45). Three new `folder-service` tests
+(`folder.resource.deleted` now published from manual-purge, restore-reconciliation, and
+retention-poll-forced-deletion) — **143/143 passing** (was 140; the fourth call site, the poll loop's
+own trash-expiry purge, shares the identical fix shape as manual-purge and is covered by that shared
+code path, not given its own dedicated live-poll-tick test). `permission-service`: **181/181 passing**,
+unchanged. `ruff check`/`ruff format` clean on every file this session touched (the standing, unrelated,
+pre-existing `test_repository.py` formatting issue in `federation-hub-service` — noted in the P44-S1
+entry below — remains untouched, out of scope for this session too).
+
+Docker images rebuilt for `folder-service`, `teamspace-service`, and `permission-service`; all three
+redeployed. Live-verified directly against `permission-service`'s real `/check` endpoint before and
+after the "everyone" role migration (confirms the isolation mechanism itself was always correct — an
+ordinary teamspace member never got `folder.delete` via inheritance, matching the design intent).
+
+`docs/services/folder-service.md`/`docs/services/teamspace-service.md` updated: the now-resolved
+"residual, accepted gap" bullets (both docs had their own copy of the same finding from ADR 0149), the
+`folder.resource.deleted` event-table row, the API table's `PUT .../members/{id}` row, and both test
+counts. `docs/adr/0154-...md`'s own "not attempted here" note for the orphan-`ResourceNode` gap corrected
+in place with a pointer to ADR 0163.
+
+**Next session:** **P44-S3** (`permission-service`: maintenance-mode coverage for
+`federation-hub-service`/`plugin-orchestration-service` + the service-to-service write-enforcement
+build from ADR 0152) — see `IMPLEMENTATION_PLAN.md` "Phase 44" for the full plan.
+
+---
+
+Immediately before P44-S2: **P44-S1** (`federation-hub-service`: gate `POST /handovers/{id}/retry` —
+first session of Phase 44, "Security & Correctness Hardening"). `GET /handovers`/`GET /handovers/{id}` stay
 deliberately ungated (pure metadata, same precedent as `GET /installations`) — but the mutating
 `POST /handovers/{id}/retry` had **no auth check of any kind** before this session. Decided to reuse the
 existing `hub_operator_key` bearer secret (already gating `POST /installations/{id}/revoke`, ADR 0039)
@@ -56,9 +139,6 @@ simple, directly-inspectable state expression already covered by `tsc`.
 UI Visibility" paragraph, the test count, and — importantly — a stale Open Points bullet corrected (it
 had claimed BOTH `GET /handovers` and `POST .../retry` were ungated; the `GET` half was never actually a
 gap, same rationale as `GET /installations`, only the `POST` half needed fixing, and now has been).
-
-**Next session:** **P44-S2** (`folder-service`/`teamspace-service`: close the write-bypass +
-`ResourceNode`-orphan gaps) — see `IMPLEMENTATION_PLAN.md` "Phase 44" for the full plan.
 
 ---
 

@@ -240,6 +240,12 @@ async def create_teamspace(
     await app.state.permission_client.grant_resource_access(
         principal_id=x_dms_principal, resource_id=teamspace.root_folder_id
     )
+    # The creator is always the first member with `can_manage_members=true`
+    # (`repository.create_teamspace`) - Phase 44 Session 2/ADR 0163's
+    # second role must be granted here too, not just on a later promotion.
+    await app.state.permission_client.grant_manager_access(
+        principal_id=x_dms_principal, resource_id=teamspace.root_folder_id
+    )
     await session.commit()
     await publish_event(
         "teamspace.created",
@@ -327,6 +333,11 @@ async def delete_teamspace(
         await app.state.permission_client.revoke_resource_access(
             principal_id=member.principal_id, resource_id=teamspace.root_folder_id
         )
+        # Phase 44 Session 2 (ADR 0163) - same cleanup for the second
+        # role, no-op for members who never held it.
+        await app.state.permission_client.revoke_manager_access(
+            principal_id=member.principal_id, resource_id=teamspace.root_folder_id
+        )
     await app.state.permission_client.restore_default_inheritance(
         resource_id=teamspace.root_folder_id
     )
@@ -366,6 +377,10 @@ async def invite_member(
     await app.state.permission_client.grant_resource_access(
         principal_id=payload.principal_id, resource_id=teamspace.root_folder_id
     )
+    if payload.can_manage_members:
+        await app.state.permission_client.grant_manager_access(
+            principal_id=payload.principal_id, resource_id=teamspace.root_folder_id
+        )
     await session.commit()
     await publish_event(
         "teamspace.member_invited",
@@ -396,11 +411,28 @@ async def update_member(
 ) -> TeamspaceMemberOut:
     await _require_manager(session, teamspace_id, x_dms_principal)
     try:
+        teamspace = await repository.get_teamspace(session, teamspace_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    try:
         member = await repository.update_member(
             session, teamspace_id, principal_id, can_manage_members=payload.can_manage_members
         )
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    # Phase 44 Session 2 (ADR 0163) - keep the `folder.delete`-carrying
+    # `teamspace-manager` role in sync with `can_manage_members`. Both
+    # calls are idempotent (`_grant`/`_revoke`), so no need to diff
+    # against the PREVIOUS value first - always granting/revoking
+    # according to the new value converges to the same result.
+    if payload.can_manage_members:
+        await app.state.permission_client.grant_manager_access(
+            principal_id=principal_id, resource_id=teamspace.root_folder_id
+        )
+    else:
+        await app.state.permission_client.revoke_manager_access(
+            principal_id=principal_id, resource_id=teamspace.root_folder_id
+        )
     await session.commit()
     return member
 
@@ -432,6 +464,12 @@ async def remove_member(
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     await app.state.permission_client.revoke_resource_access(
+        principal_id=principal_id, resource_id=teamspace.root_folder_id
+    )
+    # Unconditional, safe even for a departing non-manager (Phase 44
+    # Session 2/ADR 0163) - `revoke_manager_access` is a no-op when no
+    # matching assignment exists.
+    await app.state.permission_client.revoke_manager_access(
         principal_id=principal_id, resource_id=teamspace.root_folder_id
     )
     await session.commit()

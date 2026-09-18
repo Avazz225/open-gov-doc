@@ -146,7 +146,9 @@ always fail-closed against a check that never supplies it.
   themselves**: building the mechanism fresh made the fix nearly free for documents; retrofitting
   folder-service's own purge paths is a separate, independently-scoped piece of work with its own blast
   radius (`folder-service`'s trash/retention poll loop), not attempted here to keep this already-large
-  session's scope bounded to what was asked.
+  session's scope bounded to what was asked. **Closed in Phase 44 Session 2**
+  ([ADR 0163](0163-teamspace-folder-delete-permission-and-orphan-resource-cleanup.md)) — all four of
+  `folder-service`'s real hard-delete call sites now also publish `folder.resource.deleted`.
 - **Migrating query-service/reporting-service/search-service's row-level filtering, even though the plan
   didn't explicitly name them**: leaving them checking the folder while document-service itself checks
   the document would have been an internal inconsistency INTRODUCED by this session's own item 1, not a
