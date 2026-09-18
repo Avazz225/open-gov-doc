@@ -134,6 +134,37 @@ def _apply_then(action: str, attributes: dict[str, Any], errors: list[str]) -> N
             errors.append(f"Bedingte Pflichtangabe fehlt: '{required_attr}'")
 
 
+def _validate_status_transition(
+    schema: dict,
+    from_status: str | None,
+    to_status: str | None,
+    attributes: dict[str, Any],
+    errors: list[str],
+) -> None:
+    """Status transitions (4.5: "creation, modification, **and status
+    transitions**", 7.1: BPMN steps carry the associated status transitions
+    through the same constraint checks - Phase 45 Session 4, ADR 0165's
+    successor). ``statusTransitions`` entries are matched by exact
+    ``from``/``to`` pair; a transition with no matching entry is
+    unconditionally allowed (backward compatibility, same "absence = no
+    restriction" default as ``allowedParentTypes``). Only rule type built so
+    far: ``requiredAttributes`` - the same "missing/empty" check as a plain
+    required attribute (see ``_validate_attribute``), just scoped to this
+    specific transition instead of unconditionally."""
+    if from_status is None and to_status is None:
+        return
+    for transition in schema.get("statusTransitions", []):
+        if transition.get("from") != from_status or transition.get("to") != to_status:
+            continue
+        for required_attr in transition.get("requiredAttributes", []):
+            value = attributes.get(required_attr)
+            if value is None or value == "":
+                errors.append(
+                    f"Statusübergang {from_status!r} -> {to_status!r} erfordert gesetztes "
+                    f"Attribut '{required_attr}'"
+                )
+
+
 def _validate_parent(schema: dict, parent_type_name: str | None, errors: list[str]) -> None:
     """Enforced object hierarchy (2.2a): ``allowedParentTypes`` lists the
     names of permitted parent folder classes, ``ROOT_PARENT_TYPE`` stands for
@@ -159,6 +190,8 @@ def validate(
     name: str,
     attributes: dict[str, Any],
     parent_type_name: str | None = None,
+    from_status: str | None = None,
+    to_status: str | None = None,
 ) -> list[str]:
     """Validates ``attributes`` (and ``name``) against an object type schema (2.2).
 
@@ -167,8 +200,12 @@ def validate(
     required as a minimum in 4.5 - as well as the enforced placement
     hierarchy from 2.2a (``allowedParentTypes`` in the schema,
     ``parent_type_name`` as the resolved name of the parent class or
-    ``ROOT_PARENT_TYPE`` for the root). Returns a list of human-readable
-    error messages (empty = valid).
+    ``ROOT_PARENT_TYPE`` for the root), and, since Phase 45 Session 4,
+    status-transition rules (``statusTransitions`` in the schema,
+    ``from_status``/``to_status`` as the transition being attempted - both
+    ``None`` means "not a status transition", the default, unchanged
+    behavior). Returns a list of human-readable error messages (empty =
+    valid).
     """
     errors: list[str] = []
 
@@ -182,5 +219,7 @@ def validate(
             _apply_then(condition["then"], attributes, errors)
 
     _validate_parent(schema, parent_type_name, errors)
+
+    _validate_status_transition(schema, from_status, to_status, attributes, errors)
 
     return errors

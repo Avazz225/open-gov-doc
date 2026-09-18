@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 WORKFLOW_SERVICE_URL = os.environ.get("TEST_WORKFLOW_SERVICE_URL", "http://localhost:8014")
 DOCUMENT_SERVICE_URL = os.environ.get("TEST_DOCUMENT_SERVICE_URL", "http://localhost:8006")
 PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://localhost:8004")
+OBJECT_TYPE_SERVICE_URL = os.environ.get("TEST_OBJECT_TYPE_SERVICE_URL", "http://localhost:8007")
 
 
 @pytest.fixture
@@ -125,6 +126,78 @@ def test_create_case_for_a_fully_automated_process_closes_immediately(
     assert body["status"] == "closed"
     assert body["closed_at"] is not None
     assert body["process_instance_id"] is not None
+
+
+@pytest.fixture
+def object_type_with_close_requirement(workflow_admin_headers: dict[str, str]) -> int:
+    """Real object type registered against the real, running
+    object-type-service (Phase 45 Session 4, ADR 0165's successor) - a
+    `statusTransitions` rule requiring `Abschlussgrund` before "open"->
+    "closed" is allowed. `workflow_admin_headers` (`domain-admin-config`,
+    `admin.object_config`) is reused unchanged - the same principal already
+    creates process definitions in this same file."""
+    response = httpx.post(
+        f"{OBJECT_TYPE_SERVICE_URL}/object-types",
+        json={
+            "name": f"case-service-test-type-{uuid.uuid4().hex[:8]}",
+            "applies_to": "document",
+            "attributes": [{"name": "Abschlussgrund", "type": "string"}],
+            "status_transitions": [
+                {"from": "open", "to": "closed", "requiredAttributes": ["Abschlussgrund"]}
+            ],
+        },
+        headers=workflow_admin_headers,
+    )
+    response.raise_for_status()
+    return response.json()["id"]
+
+
+def test_create_case_blocked_by_object_type_stays_open(
+    client, no_tasks_process_definition_id, object_type_with_close_requirement, case_headers
+):
+    """Phase 45 Session 4 (ADR 0165's successor) - a fully-automated
+    process still completes its BPMN instance, but the case itself stays
+    `"open"` since the object type requires `Abschlussgrund` before
+    closing, and this case was created without it."""
+    response = client.post(
+        "/cases",
+        json={
+            "name": "Blockierter Vorgang",
+            "object_type_id": object_type_with_close_requirement,
+            "process_definition_id": no_tasks_process_definition_id,
+            "created_by": "alice",
+        },
+        headers=case_headers,
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["status"] == "open"
+    assert body["closed_at"] is None
+    assert body["process_instance_id"] is not None
+
+
+def test_create_case_allowed_by_object_type_closes_immediately(
+    client, no_tasks_process_definition_id, object_type_with_close_requirement, case_headers
+):
+    """Mirror of the blocked test above - supplying the required attribute
+    at creation time (the only time `Case.attributes` can ever be set, see
+    `status_transitions.close_with_validation`'s own docstring) lets the
+    fully-automated closure go through as before this session."""
+    response = client.post(
+        "/cases",
+        json={
+            "name": "Erlaubter Vorgang",
+            "object_type_id": object_type_with_close_requirement,
+            "attributes": {"Abschlussgrund": "Erledigt"},
+            "process_definition_id": no_tasks_process_definition_id,
+            "created_by": "alice",
+        },
+        headers=case_headers,
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["status"] == "closed"
+    assert body["closed_at"] is not None
 
 
 def test_create_case_with_unknown_process_definition_returns_400(client, case_headers):

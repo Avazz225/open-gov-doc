@@ -19,7 +19,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from case_service import repository
+from case_service import repository, status_transitions
 from case_service.consumer import start_consuming
 from case_service.document_client import DocumentClient
 from case_service.models import Base
@@ -141,6 +141,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.session_factory,
         app.state.document_client,
         publish_event,
+        app.state.object_type_client,
     )
 
     registration = await maybe_start_registration(
@@ -416,14 +417,22 @@ async def create_case(
     # response - no need to wait for or race against the event at all for
     # THIS specific, already-known-at-creation-time case.
     if instance["status"] == "completed":
-        await repository.close_case(session, case, snapshots={})
-        await session.commit()
-        await publish_event(
-            "case.closed",
-            subject=case_id,
-            payload={"process_instance_id": instance["id"]},
+        closed = await status_transitions.close_with_validation(
+            session,
+            case,
+            object_type_client=app.state.object_type_client,
+            snapshots={},
+            publish_event=publish_event,
             actor=payload.created_by,
         )
+        await session.commit()
+        if closed:
+            await publish_event(
+                "case.closed",
+                subject=case_id,
+                payload={"process_instance_id": instance["id"]},
+                actor=payload.created_by,
+            )
     return case
 
 

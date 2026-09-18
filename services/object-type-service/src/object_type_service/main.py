@@ -121,6 +121,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ADD COLUMN IF NOT EXISTS classification_level VARCHAR(32)"
             )
         )
+        # Status-transition rules (4.5/7.1, Phase 45 Session 4) - same
+        # ad-hoc migration pattern.
+        await conn.execute(
+            text(
+                "ALTER TABLE object_type.object_type "
+                "ADD COLUMN IF NOT EXISTS status_transitions JSON DEFAULT '[]'::json NOT NULL"
+            )
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 
@@ -301,9 +309,15 @@ async def validate_against_object_type(
         "namingConstraints": object_type.naming_constraints,
         "conditions": object_type.conditions,
         "allowedParentTypes": object_type.allowed_parent_types,
+        "statusTransitions": object_type.status_transitions,
     }
     errors = run_validation(
-        schema, name=payload.name, attributes=payload.attributes, parent_type_name=parent_type_name
+        schema,
+        name=payload.name,
+        attributes=payload.attributes,
+        parent_type_name=parent_type_name,
+        from_status=payload.from_status,
+        to_status=payload.to_status,
     )
     return ValidateResult(valid=not errors, errors=errors)
 

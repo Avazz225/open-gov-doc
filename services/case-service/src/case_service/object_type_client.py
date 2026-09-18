@@ -10,16 +10,28 @@ class ObjectTypeClient:
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=10.0)
 
-    async def validate(self, object_type_id: int, *, name: str, attributes: dict) -> list[str]:
-        response = await self._client.post(
-            f"/object-types/{object_type_id}/validate",
-            json={
-                "name": name,
-                "attributes": attributes,
-                "parent_object_type_id": None,
-                "parent_is_root": True,
-            },
-        )
+    async def validate(
+        self,
+        object_type_id: int,
+        *,
+        name: str,
+        attributes: dict,
+        status_transition: dict[str, str] | None = None,
+    ) -> list[str]:
+        """``status_transition`` (Phase 45 Session 4, ADR 0165's successor):
+        `{"from": ..., "to": ...}`, used for `Case.status`'s "open"->"closed"
+        transition - the first (and, for now, only) real status-transition
+        trigger in this codebase, see docs/services/object-type-service.md."""
+        body = {
+            "name": name,
+            "attributes": attributes,
+            "parent_object_type_id": None,
+            "parent_is_root": True,
+        }
+        if status_transition is not None:
+            body["from_status"] = status_transition["from"]
+            body["to_status"] = status_transition["to"]
+        response = await self._client.post(f"/object-types/{object_type_id}/validate", json=body)
         response.raise_for_status()
         return response.json()["errors"]
 

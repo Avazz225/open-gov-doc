@@ -87,6 +87,34 @@ async def _validate_allowed_parent_types(
         )
 
 
+def _validate_status_transitions(attributes: list[dict], status_transitions: list[dict]) -> None:
+    """``statusTransitions`` entries (4.5/7.1, Phase 45 Session 4) may only
+    reference attribute names that actually belong to this object type in
+    ``requiredAttributes`` - same "no orphaned field references" principle
+    as `_validate_layout_attributes` (2.2b) - and each entry needs a
+    non-empty, distinct `from`/`to` pair (a transition to itself is not a
+    transition)."""
+    if not status_transitions:
+        return
+    known = {attribute["name"] for attribute in attributes}
+    for transition in status_transitions:
+        from_status = transition.get("from")
+        to_status = transition.get("to")
+        if not from_status or not to_status:
+            raise InvalidFieldError(
+                f"statusTransitions-Eintrag benötigt sowohl 'from' als auch 'to': {transition!r}"
+            )
+        if from_status == to_status:
+            raise InvalidFieldError(
+                f"statusTransitions-Eintrag hat identisches 'from'/'to': {from_status!r}"
+            )
+        unknown = set(transition.get("requiredAttributes", [])) - known
+        if unknown:
+            raise InvalidFieldError(
+                f"statusTransitions referenziert unbekannte Attribute: {sorted(unknown)}"
+            )
+
+
 def _validate_icon(applies_to: str, icon: str | None) -> None:
     if icon is not None and applies_to != "folder":
         raise InvalidFieldError("icon ist nur für Ordnerklassen (applies_to='folder') zulässig")
@@ -178,6 +206,7 @@ async def create_object_type(session: AsyncSession, payload: ObjectTypeCreate) -
     _validate_default_retention_days(payload.default_retention_days)
     _validate_default_archive_after_days(payload.default_archive_after_days)
     _validate_classification_level(payload.applies_to, payload.classification_level)
+    _validate_status_transitions(payload.attributes, payload.status_transitions)
 
     now = datetime.now(UTC)
     object_type = ObjectType(
@@ -187,6 +216,7 @@ async def create_object_type(session: AsyncSession, payload: ObjectTypeCreate) -
         naming_constraints=payload.naming_constraints,
         conditions=payload.conditions,
         allowed_parent_types=payload.allowed_parent_types,
+        status_transitions=payload.status_transitions,
         icon=payload.icon,
         kennzeichen_format=payload.kennzeichen_format,
         kennzeichen_display_override=payload.kennzeichen_display_override,
@@ -245,10 +275,12 @@ async def update_object_type(
     _validate_default_retention_days(payload.default_retention_days)
     _validate_default_archive_after_days(payload.default_archive_after_days)
     _validate_classification_level(object_type.applies_to, payload.classification_level)
+    _validate_status_transitions(payload.attributes, payload.status_transitions)
     object_type.attributes = payload.attributes
     object_type.naming_constraints = payload.naming_constraints
     object_type.conditions = payload.conditions
     object_type.allowed_parent_types = payload.allowed_parent_types
+    object_type.status_transitions = payload.status_transitions
     object_type.icon = payload.icon
     object_type.kennzeichen_format = payload.kennzeichen_format
     object_type.kennzeichen_display_override = payload.kennzeichen_display_override

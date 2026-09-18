@@ -174,3 +174,57 @@ def test_allowed_parent_types_supports_multiple_alternatives():
     assert validate(schema, name="x", attributes={}, parent_type_name="Projektordner") == []
     assert validate(schema, name="x", attributes={}, parent_type_name=ROOT_PARENT_TYPE) == []
     assert validate(schema, name="x", attributes={}, parent_type_name="Anderer") != []
+
+
+def test_no_status_transition_requested_ignores_status_transitions_entirely():
+    schema = {
+        "attributes": [],
+        "statusTransitions": [{"from": "open", "to": "closed", "requiredAttributes": ["Grund"]}],
+    }
+    assert validate(schema, name="x", attributes={}) == []
+
+
+def test_status_transition_with_missing_required_attribute_is_reported():
+    schema = {
+        "attributes": [],
+        "statusTransitions": [{"from": "open", "to": "closed", "requiredAttributes": ["Grund"]}],
+    }
+    errors = validate(schema, name="x", attributes={}, from_status="open", to_status="closed")
+    assert any("Grund" in e for e in errors)
+
+
+def test_status_transition_with_required_attribute_present_passes():
+    schema = {
+        "attributes": [],
+        "statusTransitions": [{"from": "open", "to": "closed", "requiredAttributes": ["Grund"]}],
+    }
+    errors = validate(
+        schema,
+        name="x",
+        attributes={"Grund": "Erledigt"},
+        from_status="open",
+        to_status="closed",
+    )
+    assert errors == []
+
+
+def test_status_transition_with_no_matching_rule_is_unrestricted():
+    schema = {
+        "attributes": [],
+        "statusTransitions": [{"from": "open", "to": "closed", "requiredAttributes": ["Grund"]}],
+    }
+    # "open" -> "archived" has no matching rule - unrestricted, same
+    # "absence = no restriction" default as allowedParentTypes.
+    errors = validate(schema, name="x", attributes={}, from_status="open", to_status="archived")
+    assert errors == []
+
+
+def test_status_transition_empty_string_attribute_counts_as_missing():
+    schema = {
+        "attributes": [],
+        "statusTransitions": [{"from": "open", "to": "closed", "requiredAttributes": ["Grund"]}],
+    }
+    errors = validate(
+        schema, name="x", attributes={"Grund": ""}, from_status="open", to_status="closed"
+    )
+    assert any("Grund" in e for e in errors)

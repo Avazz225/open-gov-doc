@@ -29,6 +29,7 @@ class ObjectTypeCreate(BaseModel):
     naming_constraints: dict | None = None
     conditions: list[dict] = []
     allowed_parent_types: list[str] | None = None
+    status_transitions: list[dict] = []
     icon: str | None = None
     kennzeichen_format: str | None = None
     kennzeichen_display_override: bool | None = None
@@ -45,6 +46,7 @@ class ObjectTypeUpdate(BaseModel):
     naming_constraints: dict | None = None
     conditions: list[dict] = []
     allowed_parent_types: list[str] | None = None
+    status_transitions: list[dict] = []
     icon: str | None = None
     kennzeichen_format: str | None = None
     kennzeichen_display_override: bool | None = None
@@ -64,6 +66,7 @@ class ObjectTypeOut(BaseModel):
     naming_constraints: dict | None
     conditions: list[dict]
     allowed_parent_types: list[str] | None
+    status_transitions: list[dict]
     icon: str | None
     kennzeichen_format: str | None
     kennzeichen_display_override: bool | None
@@ -114,6 +117,11 @@ class ValidateRequest(BaseModel):
     # caller).
     parent_object_type_id: int | None = None
     parent_is_root: bool = False
+    # Status-transition validation (4.5/7.1, Phase 45 Session 4) - both
+    # unset (the default) means "not a status transition", identical
+    # behavior to before this field existed.
+    from_status: str | None = None
+    to_status: str | None = None
 
 
 class ValidateResult(BaseModel):

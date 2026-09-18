@@ -108,6 +108,69 @@ def test_validate_unknown_object_type_returns_404(client):
     assert response.status_code == 404
 
 
+def test_create_and_validate_status_transitions(client):
+    object_type_id = client.post(
+        "/object-types",
+        json={
+            "name": "Umlaufmappe",
+            "applies_to": "document",
+            "attributes": [{"name": "Abschlussgrund", "type": "string"}],
+            "status_transitions": [
+                {"from": "open", "to": "closed", "requiredAttributes": ["Abschlussgrund"]}
+            ],
+        },
+    ).json()["id"]
+
+    get_response = client.get(f"/object-types/{object_type_id}")
+    assert get_response.json()["status_transitions"] == [
+        {"from": "open", "to": "closed", "requiredAttributes": ["Abschlussgrund"]}
+    ]
+
+    blocked = client.post(
+        f"/object-types/{object_type_id}/validate",
+        json={
+            "name": "irrelevant",
+            "attributes": {},
+            "from_status": "open",
+            "to_status": "closed",
+        },
+    )
+    assert blocked.json()["valid"] is False
+    assert any("Abschlussgrund" in e for e in blocked.json()["errors"])
+
+    allowed = client.post(
+        f"/object-types/{object_type_id}/validate",
+        json={
+            "name": "irrelevant",
+            "attributes": {"Abschlussgrund": "Erledigt"},
+            "from_status": "open",
+            "to_status": "closed",
+        },
+    )
+    assert allowed.json() == {"valid": True, "errors": []}
+
+    # No from_status/to_status at all - unaffected by the transition rule,
+    # same behavior as before this field existed (e.g. plain creation).
+    creation_check = client.post(
+        f"/object-types/{object_type_id}/validate", json={"name": "irrelevant", "attributes": {}}
+    )
+    assert creation_check.json() == {"valid": True, "errors": []}
+
+
+def test_create_with_status_transition_referencing_unknown_attribute_returns_422(client):
+    response = client.post(
+        "/object-types",
+        json={
+            "name": "Umlaufmappe",
+            "applies_to": "document",
+            "status_transitions": [
+                {"from": "open", "to": "closed", "requiredAttributes": ["Unbekannt"]}
+            ],
+        },
+    )
+    assert response.status_code == 422
+
+
 def test_create_with_allowed_parent_types_referencing_unknown_type_returns_422(client):
     response = client.post(
         "/object-types",

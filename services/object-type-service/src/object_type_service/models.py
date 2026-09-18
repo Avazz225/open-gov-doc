@@ -24,6 +24,16 @@ class ObjectType(Base):
     # or the sentinel "$ROOT" for placement directly under the root. None/empty
     # = can be placed anywhere (backward compatibility for types without this).
     allowed_parent_types: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # Status-transition rules (4.5: "creation, modification, and status
+    # transitions"; 7.1: BPMN steps carry the associated status transitions
+    # through the same constraint checks) - Phase 45 Session 4, ADR 0165's
+    # successor. `[{"from": str, "to": str, "requiredAttributes": [str]}]`.
+    # Empty/absent = no restriction on any transition (backward
+    # compatibility, same default as `allowed_parent_types`). The only
+    # caller so far is case-service's `Case.status` "open"->"closed" - the
+    # first (and, for now, only) real status-transition trigger anywhere in
+    # this codebase, see docs/services/object-type-service.md.
+    status_transitions: Mapped[list] = mapped_column(JSON, default=list)
     # Only set for folder classes (applies_to == "folder") (2.2a) - display in
     # the user UI explorer before the name only follows with P5b-S4.
     icon: Mapped[str | None] = mapped_column(String(64), nullable=True)

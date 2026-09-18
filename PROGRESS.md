@@ -2,8 +2,84 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P45-S3 (`ocr-service`: `needs_review` workflow integration — third session of
-Phase 45, "Dependency-Resolved Functional Completions", see [ADR 0165](docs/adr/0165-ocr-review-manual-task-workflow-integration.md)).
+**Last completed:** P45-S4 (`object-type-service`: status-transition (4.5) workflow integration —
+fourth session of Phase 45, "Dependency-Resolved Functional Completions", split out of the former
+P45-S3, see [ADR 0165](docs/adr/0165-ocr-review-manual-task-workflow-integration.md) and
+[ADR 0166](docs/adr/0166-status-transition-constraint-engine.md)). Genuinely greenfield: neither
+Konzept 4.5 nor 7.1 ever defined a concrete status vocabulary. Research at session start found exactly
+ONE real, already-wired status-transition trigger anywhere in the codebase — `case-service`'s
+`Case.status` `"open"`→`"closed"`, already carrying an optional `object_type_id` linking it to
+object-type-service's schema world — and grounded the whole session's design in that one real
+integration point rather than inventing a new status field speculatively.
+
+New `statusTransitions` schema field on the object type (`[{"from": str, "to": str,
+"requiredAttributes": [str]}]`, same "absence = no restriction" default as `allowedParentTypes`).
+`dms_constraint_engine.validate()` gained `from_status`/`to_status` params (both `None` by default —
+every existing caller, `document-service`/`folder-service`, unaffected); when given, it checks every
+matching `statusTransitions` entry and reports a missing/empty `requiredAttributes` entry, same check
+as a plain `required` attribute just scoped to that transition. `POST /object-types/{id}/validate`
+gained matching optional `from_status`/`to_status` body fields. `requiredAttributes` may only
+reference attribute names that actually belong to the object type (422 otherwise, same "no orphaned
+field references" check `object_type_layout`'s own attribute references already use).
+
+`case-service`'s `Case.status` "open"→"closed" is now gated through this mechanism: new
+`status_transitions.close_with_validation()` wraps BOTH existing closure call sites (`main.py`'s
+synchronous branch for a fully-automated process, `consumer.py`'s `workflow.instance.completed`
+handler) with a call to `object_type_client.validate(..., status_transition={"from": "open", "to":
+"closed"})` before actually closing. On rejection the case stays `"open"` (the BPMN instance itself
+still completes normally — only the case's own status field is gated) and a new `case.close_blocked`
+event is published with the constraint engine's error messages, automatically covered by
+`audit-service`'s existing `case.>` wildcard subscription (no new consumer wiring needed).
+Deliberately **no automatic retry**: `Case.attributes` is immutable after creation (no `PATCH`
+endpoint), so an object type declaring a `requiredAttributes` rule for this transition effectively
+requires the caller to supply that attribute already at `POST /cases` time — an accepted limitation,
+not a bug (see ADR 0166 "Consequences").
+
+New tests: object-type-service gained `status_transitions` CRUD tests (valid entry, 422 for an
+unknown referenced attribute, 422 for a missing `from`/`to`, 422 for identical `from`/`to`) and
+`/validate` tests (blocked, allowed, unaffected when no transition requested) — **104/104 tests**
+(+7, was 97). case-service gained two new `test_api.py` cases (a real object type against the real
+running object-type-service, proving a fully-automated process stays open when the required attribute
+is missing and closes immediately when present) and two new `test_consumer.py` cases (`FakeObjectTypeClient`,
+same proof for the async path) — **72/72 tests** (+4, was 68). `libs/dms-constraint-engine` gained 6
+new unit tests for the engine-level `statusTransitions` logic directly — **26/26 tests**.
+
+Docker images for `object-type-service` and `case-service` rebuilt and redeployed (an initial test run
+against the stale, not-yet-rebuilt `object-type-service` container caught a real gap: the live
+container still ran the old schema, so the "blocked" test observed the transition being silently
+allowed — a genuine reminder that a shared-library change alone means nothing until the services that
+call it are actually redeployed). **Live-verified end-to-end against the real running stack**: created
+a real object type with a `status_transitions` rule requiring `Abschlussgrund`; a case created against
+a zero-manual-task process WITHOUT the attribute stayed `"open"` after its BPMN instance completed,
+with `case.close_blocked` correctly recorded in the tamper-evident audit trail (exact constraint-engine
+error message); a case created WITH the attribute closed immediately with the expected `archive_after`
+resolution; repeated the blocked scenario via a real manual-task process (human task completion →
+`workflow.instance.completed` → `consumer.py`'s path) to confirm BOTH call sites are gated identically.
+
+`docs/services/object-type-service.md` updated (API table, Data Model, new "Status-Transition Rules
+(4.5/7.1)" section, test count, Open Points bullet struck through + a new one for the missing
+admin-UI editor). `docs/services/case-service.md` updated (new status-transition-gating paragraph
+under "Object Type Integration", new `case.close_blocked` event row, test count, new live-smoke-test
+bullet, new Open Points bullet for the no-retry limitation). New
+[ADR 0166](docs/adr/0166-status-transition-constraint-engine.md) (a real architecture decision — the
+new schema vocabulary, the choice of `Case.status` as the one real integration point, and the
+deliberate no-retry limitation all warranted recording, same reasoning as ADR 0165 for its own session).
+
+**Next session:** **P45-S5** (UI completion bundle — fifth and last session of Phase 45; renumbered
+from the former P45-S4, see ADR 0165: case-browsing-ui's document list resolves real titles instead
+of raw `document_id`; `admin-ui`'s RBAC gating extends from `/users/` to the rest of its admin pages
+for consistency) — see `IMPLEMENTATION_PLAN.md` "Phase 45" for the full plan.
+
+**Also fixed while restructuring this file**: the previous entry (P45-S3) had accidentally left P45-S2's
+full body duplicated in two places — once (correctly) under its own "Immediately before P45-S3: P45-S2"
+header below, and once (incorrectly) still attached to the end of the "Last completed: P45-S3" section
+with no header of its own, apparently left behind from an earlier restructuring pass that missed
+removing it. Removed the orphaned duplicate; the single, correctly-headed copy below is unchanged.
+
+---
+
+Immediately before P45-S4: **P45-S3** (`ocr-service`: `needs_review` workflow integration — third
+session of Phase 45, see [ADR 0165](docs/adr/0165-ocr-review-manual-task-workflow-integration.md)).
 Originally planned as one session covering both `ocr-service`'s `needs_review` flag AND
 `object-type-service`'s status-transition (Konzept 4.5) validation, both deferred pending
 `workflow-service` (exists since Phase 6). A research pass at the start of this session found the two
@@ -11,8 +87,8 @@ halves share no code, no data model, and even the call direction is reversed (OC
 workflow-service; status-transition: workflow-service → object-type-service, which has no
 status/status-machine concept anywhere in the codebase yet — a genuinely greenfield design question,
 not a wiring task) — split into two sessions (ADR 0165), `IMPLEMENTATION_PLAN.md` renumbered
-accordingly (the status-transition half is now **P45-S4**, the former P45-S4 UI bundle is now
-**P45-S5**). This session builds the OCR half only.
+accordingly (the status-transition half became P45-S4, just completed above; the former P45-S4 UI
+bundle is now **P45-S5**). This session builds the OCR half only.
 
 `pipeline.process_version()` now starts a real BPMN instance whenever a result becomes
 `needs_review` (`average_confidence < 70.0`, unchanged threshold), instead of only setting the
@@ -73,65 +149,6 @@ discoverability mention of the new `ocr-service` producer/connector-call user. N
 [ADR 0165](docs/adr/0165-ocr-review-manual-task-workflow-integration.md) (a real architecture
 decision — the session's own plan text said "no new ADR expected" for this phase, but the Manual-Task-
 vs-approval-mechanism choice and the session split both warranted recording).
-
-**Backend**: `favorite_service.schemas.ObjectType` extended to `Literal["document", "folder", "case"]`
-— no schema/migration change needed at all, since the DB column is already a generic `String(16)` and
-this service deliberately never validates `object_id` referentially against any sibling service (see
-its own "Architecture decision" doc section). Backend tests: `test_create_case_favorite` (repository)
-plus a third `object_type="case"` `POST` inside `test_list_filters_by_object_type` and a new
-`test_create_list_and_delete_a_case_favorite` full round trip (API). **14/14 passing** (was 12, +2).
-
-**Frontend** (`user-ui`): `lib/api.ts` gained `FavoriteObjectType = "document" | "folder" | "case"`,
-used consistently by `Favorite`/`listFavorites`/`addFavorite`/`removeFavorite`. `CasesPane.tsx` gained:
-a ☆/★ `favorite-toggle` button per list row and one next to the case-detail heading (the first visible
-favorite-star button in the app — `ExplorerPane.tsx`'s existing document/folder favorite toggle is
-context-menu-only, no icon), both calling a new `toggleFavoriteCase` following the same "server remains
-source of truth, reload after every toggle" idiom already established there; a new `openCaseId` prop,
-read via a `useEffect` (not a `useState` initial value) so a later view-switching refactor can't
-silently stop picking up a newly-opened case id. `FavoritesPane.tsx` gained a `case: Case | null` field
-on `ResolvedFavorite`, a third `getCase` resolution branch, and a new `onOpenCase` prop.
-`DocumentWorkspace.tsx` gained `handleOpenFavoriteCase` (sets the new `openCaseId` state, switches the
-view to `"cases"`) wired into `<FavoritesPane onOpenCase=.../>`, and passes `openCaseId` into
-`<CasesPane>`. New i18n keys under `cases.*` (`addFavorite`/`removeFavorite`/`favoriteError`, mirroring
-`explorer.*`'s existing wording) and a new `.favorite-toggle`/`.heading-with-favorite` CSS pair in
-`globals.css`.
-
-**A note on the "kept mounted" assumption inherited from an earlier phase's own doc comments**: turned
-out not to actually apply to the special-view panes (`CasesPane` included) — only `DockableDocumentArea`
-(the documents view) stays mounted via a `hidden` prop; every other `IconRail` view (including
-`"cases"`/`"favorites"`) is a plain ternary branch in `DocumentWorkspace.tsx` that unmounts/remounts on
-every switch. The `useEffect`-over-`openCaseId` approach still works correctly either way (a fresh mount
-re-runs the effect too), so this wasn't a functional bug — just an inaccurate premise in an inherited
-code comment, corrected in place in `CasesPane.tsx` this session.
-
-Frontend checks: `tsc --noEmit` clean, `eslint .` clean (2 pre-existing, unrelated `<img>` warnings
-only), full `vitest run` **279/279 passing** (was 274, +5: 4 new `cases-pane.test.tsx` cases + 1 new
-`favorites-pane.test.tsx` case), `next build` clean.
-
-Docker images for `favorite-service` and `user-ui` rebuilt and redeployed. **Live-verified via a real
-Playwright browser session** (no `chromium-cli` in this sandbox; `@playwright/test`'s own bundled
-Chromium, already present in `apps/user-ui/node_modules`, driven directly instead) against the real
-running stack, logged in as `users-admin`: favorited an existing case ("Testfall") via the list-view
-star, confirmed the label flipped to "...aus Favoriten entfernen"; opened the case detail view and
-confirmed the same star (now filled) appears next to the heading there too; navigated to the Favorites
-pane and confirmed the case is listed with the resolved name and the new "Umlaufmappe" type label;
-clicked "Öffnen" and confirmed it navigated back into the correct case's detail view; un-favorited again
-to leave the stack clean. No unrelated console/network errors introduced (two pre-existing, unrelated
-401/500 responses on `/auth-service/sso-config` and `/auth-service/me/preferences` seen during login,
-neither touched by this session's diff).
-
-`docs/services/favorite-service.md` updated (Responsibility line, `ObjectType` in the endpoint/data
-model tables, test count, a new live-smoke-test bullet, Open Points bullet removed since now closed).
-`docs/services/user-ui.md` updated (the P7-S1d case-binder-deferral paragraph corrected in place with a
-new bullet describing this session's addition, the matching Open Points bullet struck through, new test
-count entry). No new ADR (this session's own Definition of Done — pure functional completion of an
-already-established pattern against a now-satisfied dependency, same shape as P45-S1 — didn't expect
-one).
-
-**Next session:** **P45-S4** (`object-type-service`: status-transition (4.5) workflow integration —
-fourth session of Phase 45, split out of the former P45-S3, see ADR 0165 — genuinely greenfield, no
-status/status-machine concept exists anywhere in the codebase yet) — see `IMPLEMENTATION_PLAN.md`
-"Phase 45" for the full plan.
 
 ---
 

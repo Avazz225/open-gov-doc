@@ -115,6 +115,83 @@ async def test_create_with_allowed_parent_types_referencing_document_type_raises
         )
 
 
+async def test_create_with_status_transitions_referencing_known_attribute_succeeds(session):
+    created = await repository.create_object_type(
+        session,
+        ObjectTypeCreate(
+            name="Umlaufmappe",
+            applies_to="document",
+            attributes=[{"name": "Abschlussgrund", "type": "string"}],
+            status_transitions=[
+                {"from": "open", "to": "closed", "requiredAttributes": ["Abschlussgrund"]}
+            ],
+        ),
+    )
+    assert created.status_transitions == [
+        {"from": "open", "to": "closed", "requiredAttributes": ["Abschlussgrund"]}
+    ]
+
+
+async def test_create_with_status_transitions_referencing_unknown_attribute_raises(session):
+    with pytest.raises(repository.InvalidFieldError):
+        await repository.create_object_type(
+            session,
+            ObjectTypeCreate(
+                name="Umlaufmappe",
+                applies_to="document",
+                status_transitions=[
+                    {"from": "open", "to": "closed", "requiredAttributes": ["Unbekannt"]}
+                ],
+            ),
+        )
+
+
+async def test_create_with_status_transition_missing_from_or_to_raises(session):
+    with pytest.raises(repository.InvalidFieldError):
+        await repository.create_object_type(
+            session,
+            ObjectTypeCreate(
+                name="Umlaufmappe",
+                applies_to="document",
+                status_transitions=[{"from": "open"}],
+            ),
+        )
+
+
+async def test_create_with_identical_from_and_to_raises(session):
+    with pytest.raises(repository.InvalidFieldError):
+        await repository.create_object_type(
+            session,
+            ObjectTypeCreate(
+                name="Umlaufmappe",
+                applies_to="document",
+                status_transitions=[{"from": "open", "to": "open"}],
+            ),
+        )
+
+
+async def test_update_replaces_status_transitions(session):
+    created = await repository.create_object_type(
+        session,
+        ObjectTypeCreate(
+            name="Umlaufmappe",
+            applies_to="document",
+            attributes=[{"name": "Grund", "type": "string"}],
+        ),
+    )
+    updated = await repository.update_object_type(
+        session,
+        created.id,
+        ObjectTypeUpdate(
+            attributes=[{"name": "Grund", "type": "string"}],
+            status_transitions=[{"from": "open", "to": "closed", "requiredAttributes": ["Grund"]}],
+        ),
+    )
+    assert updated.status_transitions == [
+        {"from": "open", "to": "closed", "requiredAttributes": ["Grund"]}
+    ]
+
+
 async def test_create_icon_on_document_type_raises(session):
     with pytest.raises(repository.InvalidFieldError):
         await repository.create_object_type(

@@ -4,8 +4,9 @@ from collections.abc import Awaitable, Callable
 from dms_eventbus_client import Event, NatsEventBusClient, SubjectNotFoundError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from case_service import repository
+from case_service import repository, status_transitions
 from case_service.document_client import DocumentClient
+from case_service.object_type_client import ObjectTypeClient
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +15,7 @@ def make_handler(
     session_factory: async_sessionmaker[AsyncSession],
     document_client: DocumentClient,
     publish_event: Callable[[str, str, dict], Awaitable[None]],
+    object_type_client: ObjectTypeClient,
 ) -> Callable[[bytes], Awaitable[None]]:
     """Uebersetzt `workflow.instance.completed` in den Abschluss-Snapshot
     (2.3) einer Umlaufmappe. case-service setzt beim Start einer Instanz
@@ -40,8 +42,17 @@ def make_handler(
                 if document is not None:
                     snapshots[reference.document_id] = document["current_version_number"]
 
-            await repository.close_case(session, case, snapshots=snapshots)
+            closed = await status_transitions.close_with_validation(
+                session,
+                case,
+                object_type_client=object_type_client,
+                snapshots=snapshots,
+                publish_event=publish_event,
+                actor=event.actor,
+            )
             await session.commit()
+            if not closed:
+                return
             # Reicht den Akteur des ausloesenden workflow.instance.completed
             # weiter (seit P7-S2) statt eines generischen "system:"-Labels -
             # derselbe kausale Vorgang, dieselbe handelnde Person (falls der
@@ -62,8 +73,9 @@ async def start_consuming(
     session_factory: async_sessionmaker[AsyncSession],
     document_client: DocumentClient,
     publish_event: Callable[[str, str, dict], Awaitable[None]],
+    object_type_client: ObjectTypeClient,
 ) -> None:
-    handler = make_handler(session_factory, document_client, publish_event)
+    handler = make_handler(session_factory, document_client, publish_event, object_type_client)
     for subject in subjects:
         try:
             await bus.subscribe(subject, handler, durable="case-service")

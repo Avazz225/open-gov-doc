@@ -53,6 +53,10 @@ case-service is the **first consumer** of workflow-service's `workflow.instance.
 
 Like document-service/folder-service: `object_type_id` is optional; if set, `POST /object-types/{id}/validate` is called. Unlike documents/folders, this **always assumes a root object** (`parent_object_type_id=None`, `parent_is_root=True`) — a case does not conceptually live in the folder tree (2.2a), but is a standalone object type.
 
+**Status-transition gating (4.5/7.1, Phase 45 Session 4, split out of the former P45-S3, see [ADR 0165](../adr/0165-ocr-review-manual-task-workflow-integration.md) and [ADR 0166](../adr/0166-status-transition-constraint-engine.md))**: `Case.status`'s `"open"`→`"closed"` transition is the first (and, for now, only) real status-transition trigger anywhere in this codebase. `status_transitions.close_with_validation()` gates BOTH existing closure call sites (`main.py`'s synchronous branch for a fully-automated process, and `consumer.py`'s `workflow.instance.completed` handler) through the SAME `POST /object-types/{id}/validate` call already made at creation, now additionally passing `status_transition={"from": "open", "to": "closed"}`. A no-op (always allowed) when `object_type_id` is unset — the same "absence = no restriction" default every other optional per-object-type integration already follows.
+
+**On rejection**, the case stays `"open"` (the BPMN instance itself still completes normally either way — only the case's own status is gated, not the workflow) and a new `case.close_blocked` event is published with the constraint engine's error messages, visible in the audit trail. **There is deliberately no automatic retry mechanism**: `Case.attributes` is immutable after creation (no `PATCH` endpoint exists), so an object type declaring a `requiredAttributes` rule for this transition effectively requires the caller to supply that attribute already at `POST /cases` time if auto-closure should ever succeed — a known, accepted limitation (see ADR 0166), not a bug.
+
 ## Records Disposal (5.6, since P7-S3b)
 
 Only **closed** cases are eligible for records disposal — the actual transfer mechanics (generating the XDOMEA 4.0.0 message, packaging referenced document contents, encrypting, archiving) live entirely in `archival-service` (see `docs/services/archival-service.md` "XDOMEA Records Disposal for Cases"), this service remains the sole authority for the case lifecycle fields.
@@ -97,6 +101,7 @@ existing rows were backfilled the same way, once, the moment the column was adde
 | `case.document.added` | `{document_id, added_by}` |
 | `case.document.removed` | `{document_id, removed_by}` |
 | `case.closed` | `{process_instance_id}` |
+| `case.close_blocked` | `{errors}` (**since Phase 45 Session 4**) — the object type rejected the `"open"`→`"closed"` transition, see "Object Type Integration" above |
 | `case.archived` | `{}` (5.6, since P7-S3b) — callback from `archival-service`, once the XDOMEA package is verified |
 | `case.resource.created` | `{resource_id, parent_id, resource_type}` (Post-Roadmap Phase 35 Session 2, ADR 0144) — same generic structure-event contract `folder-service` produces (`permission-service`'s `structure_consumer.py` is prefix-agnostic); published for symmetry/self-healing alongside the SYNCHRONOUS `POST /resources` call that's the actual authoritative registration, see "Open Points" |
 
@@ -114,7 +119,13 @@ None yet — follows in Phase 11.
 
 ## Tests
 
-`uv run pytest services/case-service/tests` (**68 tests since Phase 44 Session 4**, +1:
+`uv run pytest services/case-service/tests` (**72 tests since Phase 45 Session 4**, +4: two new
+`test_api.py` cases (`object_type_with_close_requirement` fixture, a real object type with a
+`status_transitions` rule against the real running object-type-service) proving a fully-automated
+process leaves the case `"open"` when the required attribute is missing and closes it immediately
+when present; two new `test_consumer.py` cases (`FakeObjectTypeClient`) proving the same for the
+async `workflow.instance.completed` path — see "Object Type Integration" above and
+[ADR 0166](../adr/0166-status-transition-constraint-engine.md). Previously 68 tests, +1:
 `test_create_case_for_a_fully_automated_process_closes_immediately` — a real `POST /cases` against a
 genuinely zero-manual-task BPMN, `fixtures/no_tasks.bpmn`, asserts the returned case is already
 `"closed"`, not `"open"`, closing the real race condition documented under "Closure Snapshot" above.
@@ -127,6 +138,7 @@ non-isolated case stays visible — the decisive proof that row-level filtering,
 - `test_consumer.py` — a simulated `workflow.instance.completed` event sent directly to the handler (no real NATS needed, same pattern as `notification-service/tests/test_consumer.py`), fake `DocumentClient` instead of real HTTP.
 - `test_api.py` — real integration tests against locally reachable `workflow-service`/`document-service`/`object-type-service` instances (same pattern as document-service's `folder_client`/`object_type_client` tests) — each test case creates its own process definition/test document. Deliberately does **not** cover actual asynchronous event delivery (see `test_consumer.py` for consumer logic, live smoke test for end-to-end wiring). Since P7-S3b additionally: `/cases/due-for-archival`, `/case-archival-config` roundtrip, `409` for a records-disposal request on an open case, complete trigger→callback roundtrip for a case closed directly via `session`/`repository` (no full BPMN run needed to test only the records-disposal endpoints).
 - **Live smoke test**: `docker compose build case-service document-service` + `up -d`, uploaded a BPMN process with a manual task, created a case (`process_instance_id` set), referenced two documents, checked in a new document version (dynamic reference confirmed: `GET .../documents` shows the new version), completed the manual task, waited briefly, confirmed closure (`status="closed"`, `snapshot_version_number` fixed, further version changes to the original no longer take effect) — test data subsequently deleted.
+- **Live smoke test for status-transition gating** (Phase 45 Session 4): created a real object type (`status_transitions`: `open`→`closed` requires `Abschlussgrund`) against the real running object-type-service; a case created against a zero-manual-task process WITHOUT the attribute stayed `"open"` after the BPMN instance completed, with `case.close_blocked` recorded in the audit trail (exact constraint-engine error message); a case created WITH the attribute closed immediately as before. Repeated the blocked scenario via a manual-task process (real task completion → `workflow.instance.completed` → `consumer.py`'s path) to confirm BOTH call sites are gated identically — same block, same audit event.
 - Pure backend session, no browser test needed (not on the UI sessions list in `IMPLEMENTATION_PLAN.md`).
 
 ## Open Points
@@ -139,3 +151,4 @@ non-isolated case stays visible — the decisive proof that row-level filtering,
 - **No cross-phase link to P15-S3 wired up yet** — the mail inbox/mail room functionality there is planned to build on this case API, but is not part of this session.
 - ~~No role/permission check on the new records-disposal endpoints~~ (5.6, since P7-S3b) — **partially fixed in P19-S5** (ADR 0070): `POST /cases/{id}/archive-request` (human action) is now gated (`case.write`). `PUT /cases/{id}/archived` (internal callback from `archival-service`, no human caller) remains deliberately ungated — consistent with document-service's own, likewise ungated `PUT /documents/{id}/archived`.
 - **No retry for a failed records disposal** — a `failed` `CaseArchivalTransfer` in `archival-service` remains terminal; a repeated `POST /cases/{id}/archive-request` here would fail on the active-transfer exclusion there, as long as the old row is not handled separately.
+- **No retry mechanism for a status-transition-blocked close** (Phase 45 Session 4) — `Case.attributes` is immutable after creation (no `PATCH` endpoint), so a case blocked from auto-closing by a `status_transitions` rule has no path to ever close automatically again; the caller must supply the required attribute already at `POST /cases` time. A known, accepted limitation, see [ADR 0166](../adr/0166-status-transition-constraint-engine.md) "Consequences".
