@@ -2,8 +2,70 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P47-S4 (`admin-ui` English translation + switcher — fourth session of Phase 47,
-"English i18n", 754 keys, the largest dictionary of all six apps). Same already-proven
+**Last completed:** P47-S5 (`libreoffice-addin`: i18n from scratch — fifth and last session of
+Phase 47, "English i18n", **closes Phase 47**). No new ADR — the "follow the host, no in-app
+switcher" decision was already recorded in [ADR 0167](docs/adr/0167-locale-switcher-pattern-and-office-addin-host-locale.md)
+during P47-S1; this session applies it to a genuinely different tech stack rather than making a new
+decision, matching the plan's own DoD ("no new ADR expected for S2-S5").
+
+Unlike every other app in this phase, `libreoffice-addin` had **no dictionary/`t()`-equivalent
+abstraction at all** before this session — every user-facing string was a hardcoded German literal
+directly in `python/ogdoc_addin.py`. Built the mechanism from scratch in a new `python/i18n.py`:
+`de`/`en` nested dicts (same `common.cancel`/`common.save`/`common.close` factoring every JS app's
+own `common` namespace already uses), a `t(path, **variables)` lookup with `str.format()`
+placeholders, module-level `set_locale()`/`get_locale()` state (a plain module global instead of a
+React context, since a Python-UNO script has no component tree to hang one on — the same
+"per-process singleton" reasoning `ogdoc_addin.py`'s own `_STATE` dict already established).
+Replaced every hardcoded literal in `ogdoc_addin.py` (dialog titles, field labels, button labels,
+status/error messages — roughly 50 distinct strings/templates) with `i18n.t(...)` calls;
+`hub_status_text()`/`_hub_buttons()` stay UNO-independent and unit-testable exactly as before, just
+locale-aware now. Verified programmatically that `de`/`en` have identical key sets before touching
+any call site (0 missing/extra, all `{placeholder}`s matched) — same discipline as every prior
+session's JSON-dictionary check, adapted to plain Python dicts.
+
+**Locale-switching strategy decided and built**: no in-app switcher — `i18n.detect_and_set_locale_from_host(smgr, ctx)`,
+called once at the very start of `open_ogdoc`, reads LibreOffice's own UI-language setting via the
+standard `com.sun.star.configuration.ConfigurationProvider` node `/org.openoffice.Setup/L10N`'s
+`ooLocale` property, maps it to `en`/`de` (falling back to German for anything else or on any
+detection error), and applies it before the first dialog is built. Same "follow the host" reasoning
+ADR 0167 already gave for `office-addin` — a document editor showing UI text in a language different
+from the surrounding LibreOffice chrome would be actively confusing, if anything more pressing here
+since this add-in's dialogs are modal and directly adjacent to the host's own menus.
+
+`44`/`44` tests passing (was `30`) — new `test_i18n.py` (12 tests: dictionary key-set parity,
+placeholder formatting in both locales, `resolve_locale_from_ui_locale()`'s mapping/fallback logic,
+`detect_and_set_locale_from_host()` against a hand-written fake `smgr` mirroring `tests/uno_mock.py`'s
+existing fake-UNO convention, including a fallback-on-any-error case) plus 2 new cases in
+`test_ogdoc_addin_pure.py` confirming `hub_status_text()`/`_hub_buttons()` actually route through
+`i18n.t()` rather than only being exercised in `i18n.py`'s own isolated tests. All 30 pre-existing
+tests pass completely unchanged — the default locale stays `"de"`, so every pre-existing
+exact-German-string assertion (e.g. `hub_status_text(None, None) == "Nicht angemeldet."`) still holds
+byte-for-byte. `python3 build.py` re-run to confirm the new `python/i18n.py` module is correctly
+bundled into the `.oxt` (picked up automatically by the existing `rglob("*.py")` packaging logic, no
+change needed there).
+
+**No live verification possible, same pre-existing, already-documented root cause as every other
+UNO-dependent feature in this app**: neither `unopkg` nor `soffice` is available in this sandbox at
+all (confirmed via `which`), so `detect_and_set_locale_from_host()`'s real `ConfigurationProvider`
+node path could not be verified against an actual LibreOffice installation — only unit-tested against
+a fake `smgr`. Flagged as a new bullet in `docs/services/libreoffice-addin.md`'s "Open Points",
+consistent with this app's existing convention for every other real-install-only gap.
+
+`docs/services/libreoffice-addin.md`: new "i18n: Extraction Mechanism + Follows the Host Locale"
+section, updated test counts, a new "Open Points" bullet for the unverified locale-detection node
+path.
+
+**This closes Phase 47 (English i18n) entirely.** `graphify update .` now runs for the first time
+across the whole phase (deferred at every individual session per standing convention) — see the
+graphify run recorded immediately below this entry once complete.
+
+**Next session:** not yet planned — Phase 47 is complete. See `IMPLEMENTATION_PLAN.md` for Phase 48
+(Design System Foundation, "2026 modern look") onward.
+
+---
+
+Immediately before P47-S5: **P47-S4** (`admin-ui` English translation + switcher — fourth session of
+Phase 47, "English i18n", 754 keys, the largest dictionary of all six apps). Same already-proven
 `LocaleProvider` pattern as P47-S1/S2/S3, no new ADR expected per the plan's own DoD.
 
 Own `src/i18n/en.json` — full English translation of all 754 keys in `de.json`, reusing `user-ui`'s

@@ -23,6 +23,7 @@ from pathlib import Path
 
 import dialogs
 import dms_client
+import i18n
 import settings_store
 import unohelper
 from com.sun.star.awt import XActionListener
@@ -48,13 +49,13 @@ def hub_status_text(
     has_pending_template: bool = False,
 ) -> str:
     if session is None:
-        return "Nicht angemeldet."
-    who = f"Angemeldet als {session['username']}"
+        return i18n.t("hub.notLoggedIn")
+    who = i18n.t("hub.loggedInAs", username=session["username"])
     if has_pending_template:
-        return f"{who}\nVorlage geladen, noch nicht gespeichert."
+        return f"{who}\n{i18n.t('hub.templatePendingNotSaved')}"
     if linked is None:
-        return f"{who}\nKein Dokument verknüpft."
-    return f"{who}\nVerknüpft: {linked.document_id} (Version {linked.version_number})"
+        return f"{who}\n{i18n.t('hub.noDocumentLinked')}"
+    return f"{who}\n{i18n.t('hub.linked', documentId=linked.document_id, versionNumber=linked.version_number)}"
 
 
 def attributes_from_field_values(schema_attribute_names, field_values: dict) -> dict:
@@ -173,6 +174,7 @@ def _document_bytes(doc, *, content_type: str) -> bytes:
 
 def open_ogdoc(*_args):
     _STATE["working_doc"] = XSCRIPTCONTEXT.getDocument()  # noqa: F821
+    i18n.detect_and_set_locale_from_host(_smgr(_ctx()), _ctx())
     _run_hub_loop()
 
 
@@ -195,7 +197,7 @@ def _show_hub_dialog() -> str | None:
     linked = settings_store.get_linked_document(doc) if session else None
     pending_template = _STATE.get("pending_template")
 
-    model = dialogs.create_dialog_model(smgr, ctx, title="OG Doc", width=220, height=40)
+    model = dialogs.create_dialog_model(smgr, ctx, title=i18n.t("hub.title"), width=220, height=40)
     dialogs.add_label(
         model,
         "lblStatus",
@@ -212,7 +214,7 @@ def _show_hub_dialog() -> str | None:
     for name, label in buttons:
         dialogs.add_button(model, name, x=10, y=y, width=200, label=label)
         y += 16
-    dialogs.add_button(model, "btnClose", x=10, y=y, width=200, label="Schließen")
+    dialogs.add_button(model, "btnClose", x=10, y=y, width=200, label=i18n.t("common.close"))
     model.Height = y + 18
 
     dialog = dialogs.show_dialog(smgr, ctx, model)
@@ -239,24 +241,24 @@ def _show_hub_dialog() -> str | None:
 
 def _hub_buttons(session, linked, has_pending_template: bool = False):
     if session is None:
-        return [("btnLogin", "Anmelden...")]
+        return [("btnLogin", i18n.t("hub.btnLogin"))]
     if has_pending_template:
         return [
-            ("btnSaveNewFromTemplate", "Als neues Dokument speichern..."),
-            ("btnLogout", "Abmelden"),
+            ("btnSaveNewFromTemplate", i18n.t("hub.btnSaveNewFromTemplate")),
+            ("btnLogout", i18n.t("hub.btnLogout")),
         ]
     if linked is None:
         return [
-            ("btnOpen", "Öffnen..."),
-            ("btnTemplate", "Neu aus Vorlage..."),
-            ("btnLogout", "Abmelden"),
+            ("btnOpen", i18n.t("hub.btnOpen")),
+            ("btnTemplate", i18n.t("hub.btnTemplate")),
+            ("btnLogout", i18n.t("hub.btnLogout")),
         ]
     return [
-        ("btnMetadata", "Metadaten..."),
-        ("btnSave", "In OG Doc speichern"),
-        ("btnWorkflow", "Workflow..."),
-        ("btnUnlink", "Verknüpfung lösen"),
-        ("btnLogout", "Abmelden"),
+        ("btnMetadata", i18n.t("hub.btnMetadata")),
+        ("btnSave", i18n.t("hub.btnSave")),
+        ("btnWorkflow", i18n.t("hub.btnWorkflow")),
+        ("btnUnlink", i18n.t("hub.btnUnlink")),
+        ("btnLogout", i18n.t("hub.btnLogout")),
     ]
 
 
@@ -266,16 +268,16 @@ def _hub_buttons(session, linked, has_pending_template: bool = False):
 def _handle_login():
     ctx = _ctx()
     smgr = _smgr(ctx)
-    model = dialogs.create_dialog_model(smgr, ctx, title="Anmelden", width=200, height=110)
-    dialogs.add_label(model, "lblBaseUrl", x=10, y=8, width=180, label="Gateway-Adresse")
+    model = dialogs.create_dialog_model(smgr, ctx, title=i18n.t("login.title"), width=200, height=110)
+    dialogs.add_label(model, "lblBaseUrl", x=10, y=8, width=180, label=i18n.t("login.baseUrl"))
     dialogs.add_edit(model, "edBaseUrl", x=10, y=18, width=180, text=_base_url())
-    dialogs.add_label(model, "lblUsername", x=10, y=34, width=180, label="Benutzername")
+    dialogs.add_label(model, "lblUsername", x=10, y=34, width=180, label=i18n.t("login.username"))
     dialogs.add_edit(model, "edUsername", x=10, y=44, width=180)
-    dialogs.add_label(model, "lblPassword", x=10, y=60, width=180, label="Passwort")
+    dialogs.add_label(model, "lblPassword", x=10, y=60, width=180, label=i18n.t("login.password"))
     dialogs.add_edit(model, "edPassword", x=10, y=70, width=180, password=True)
     dialogs.add_label(model, "lblError", x=10, y=86, width=180, label="")
-    dialogs.add_button(model, "btnLogin", x=10, y=98, width=85, label="Anmelden")
-    dialogs.add_button(model, "btnCancel", x=105, y=98, width=85, label="Abbrechen")
+    dialogs.add_button(model, "btnLogin", x=10, y=98, width=85, label=i18n.t("login.submit"))
+    dialogs.add_button(model, "btnCancel", x=105, y=98, width=85, label=i18n.t("common.cancel"))
 
     dialog = dialogs.show_dialog(smgr, ctx, model)
 
@@ -286,7 +288,7 @@ def _handle_login():
         try:
             token_response = dms_client.login(base_url, username, password)
         except dms_client.ApiError as exc:
-            dialogs.set_status(dialog, "lblError", f"Anmeldung fehlgeschlagen: {exc.message}")
+            dialogs.set_status(dialog, "lblError", i18n.t("login.error", detail=exc.message))
             return
         settings_store.save_session(
             base_url=base_url, token=token_response["access_token"], username=username
@@ -318,14 +320,14 @@ def _handle_open():
     token = _token()
     base_url = _base_url()
 
-    model = dialogs.create_dialog_model(smgr, ctx, title="Aus OG Doc öffnen", width=220, height=140)
-    dialogs.add_label(model, "lblQuery", x=10, y=8, width=200, label="Suchbegriff")
+    model = dialogs.create_dialog_model(smgr, ctx, title=i18n.t("open.title"), width=220, height=140)
+    dialogs.add_label(model, "lblQuery", x=10, y=8, width=200, label=i18n.t("open.query"))
     dialogs.add_edit(model, "edQuery", x=10, y=18, width=150)
-    dialogs.add_button(model, "btnSearch", x=162, y=18, width=48, height=12, label="Suchen")
+    dialogs.add_button(model, "btnSearch", x=162, y=18, width=48, height=12, label=i18n.t("open.search"))
     dialogs.add_list_box(model, "lstResults", x=10, y=34, width=200, height=80)
     dialogs.add_label(model, "lblError", x=10, y=116, width=200, label="")
-    dialogs.add_button(model, "btnOpenSelected", x=10, y=128, width=95, label="Öffnen")
-    dialogs.add_button(model, "btnCancel", x=115, y=128, width=95, label="Abbrechen")
+    dialogs.add_button(model, "btnOpenSelected", x=10, y=128, width=95, label=i18n.t("open.openButton"))
+    dialogs.add_button(model, "btnCancel", x=115, y=128, width=95, label=i18n.t("common.cancel"))
 
     dialog = dialogs.show_dialog(smgr, ctx, model)
     state = {"results": []}
@@ -335,7 +337,7 @@ def _handle_open():
         try:
             state["results"] = dms_client.search_documents(base_url, token, query)
         except dms_client.ApiError as exc:
-            dialogs.set_status(dialog, "lblError", f"Suche fehlgeschlagen: {exc.message}")
+            dialogs.set_status(dialog, "lblError", i18n.t("open.searchError", detail=exc.message))
             return
         listbox = dialog.getControl("lstResults")
         listbox.Model.StringItemList = tuple(r["title"] for r in state["results"])
@@ -344,13 +346,13 @@ def _handle_open():
         listbox = dialog.getControl("lstResults")
         index = listbox.getSelectedItemPos()
         if index < 0 or index >= len(state["results"]):
-            dialogs.set_status(dialog, "lblError", "Bitte ein Dokument auswählen.")
+            dialogs.set_status(dialog, "lblError", i18n.t("open.pleaseSelectDocument"))
             return
         document = state["results"][index]
         try:
             _open_document_by_id(smgr, ctx, document["id"])
         except dms_client.ApiError as exc:
-            dialogs.set_status(dialog, "lblError", f"Öffnen fehlgeschlagen: {exc.message}")
+            dialogs.set_status(dialog, "lblError", i18n.t("open.openError", detail=exc.message))
             return
         dialog.endExecute()
 
@@ -393,11 +395,11 @@ def _handle_template():
     smgr = _smgr(ctx)
     token, base_url = _token(), _base_url()
 
-    model = dialogs.create_dialog_model(smgr, ctx, title="Neu aus Vorlage", width=220, height=120)
+    model = dialogs.create_dialog_model(smgr, ctx, title=i18n.t("template.title"), width=220, height=120)
     dialogs.add_list_box(model, "lstTemplates", x=10, y=8, width=200, height=80)
     dialogs.add_label(model, "lblError", x=10, y=94, width=200, label="")
-    dialogs.add_button(model, "btnUse", x=10, y=104, width=95, label="Verwenden")
-    dialogs.add_button(model, "btnCancel", x=115, y=104, width=95, label="Abbrechen")
+    dialogs.add_button(model, "btnUse", x=10, y=104, width=95, label=i18n.t("template.use"))
+    dialogs.add_button(model, "btnCancel", x=115, y=104, width=95, label=i18n.t("common.cancel"))
 
     dialog = dialogs.show_dialog(smgr, ctx, model)
     state = {"templates": []}
@@ -409,7 +411,7 @@ def _handle_template():
             dms_client.list_documents_in_folder(base_url, token, folder["id"]) if folder else []
         )
     except dms_client.ApiError as exc:
-        dialogs.set_status(dialog, "lblError", f"Laden fehlgeschlagen: {exc.message}")
+        dialogs.set_status(dialog, "lblError", i18n.t("template.loadError", detail=exc.message))
     dialog.getControl("lstTemplates").Model.StringItemList = tuple(
         t["title"] for t in state["templates"]
     )
@@ -418,7 +420,7 @@ def _handle_template():
         listbox = dialog.getControl("lstTemplates")
         index = listbox.getSelectedItemPos()
         if index < 0 or index >= len(state["templates"]):
-            dialogs.set_status(dialog, "lblError", "Bitte eine Vorlage auswählen.")
+            dialogs.set_status(dialog, "lblError", i18n.t("template.pleaseSelectTemplate"))
             return
         template = state["templates"][index]
         try:
@@ -433,7 +435,7 @@ def _handle_template():
                 as_template=True,
             )
         except dms_client.ApiError as exc:
-            dialogs.set_status(dialog, "lblError", f"Vorlage laden fehlgeschlagen: {exc.message}")
+            dialogs.set_status(dialog, "lblError", i18n.t("template.useError", detail=exc.message))
             return
         # Noch kein verknüpftes Dokument - der Zustand wird erst beim ersten
         # "In OG Doc speichern" real (siehe _handle_save), analog zu
@@ -474,9 +476,9 @@ def _handle_metadata():
         attribute_names = [a["name"] for a in object_type.get("attributes", [])]
 
     model = dialogs.create_dialog_model(
-        smgr, ctx, title="Metadaten", width=220, height=40 + 14 * (len(attribute_names) + 1)
+        smgr, ctx, title=i18n.t("metadata.title"), width=220, height=40 + 14 * (len(attribute_names) + 1)
     )
-    dialogs.add_label(model, "lblTitle", x=10, y=8, width=200, label="Titel")
+    dialogs.add_label(model, "lblTitle", x=10, y=8, width=200, label=i18n.t("metadata.titleLabel"))
     dialogs.add_edit(model, "edTitle", x=10, y=18, width=200, text=detail["title"])
     y = 34
     for name in attribute_names:
@@ -493,8 +495,8 @@ def _handle_metadata():
         y += 14
     dialogs.add_label(model, "lblError", x=10, y=y, width=200, label="")
     y += 12
-    dialogs.add_button(model, "btnSave", x=10, y=y, width=95, label="Speichern")
-    dialogs.add_button(model, "btnCancel", x=115, y=y, width=95, label="Abbrechen")
+    dialogs.add_button(model, "btnSave", x=10, y=y, width=95, label=i18n.t("common.save"))
+    dialogs.add_button(model, "btnCancel", x=115, y=y, width=95, label=i18n.t("common.cancel"))
     model.Height = y + 20
 
     dialog = dialogs.show_dialog(smgr, ctx, model)
@@ -510,7 +512,7 @@ def _handle_metadata():
                 base_url, token, document_id, title=title, attributes=attributes
             )
         except dms_client.ApiError as exc:
-            dialogs.set_status(dialog, "lblError", f"Speichern fehlgeschlagen: {exc.message}")
+            dialogs.set_status(dialog, "lblError", i18n.t("metadata.saveError", detail=exc.message))
             return
         dialog.endExecute()
 
@@ -567,11 +569,11 @@ def _handle_save_new_from_template():
     model = dialogs.create_dialog_model(
         smgr,
         ctx,
-        title="Als neues Dokument speichern",
+        title=i18n.t("saveNewFromTemplate.title"),
         width=220,
         height=40 + 14 * (len(attribute_names) + 1),
     )
-    dialogs.add_label(model, "lblTitle", x=10, y=8, width=200, label="Titel")
+    dialogs.add_label(model, "lblTitle", x=10, y=8, width=200, label=i18n.t("saveNewFromTemplate.titleLabel"))
     dialogs.add_edit(model, "edTitle", x=10, y=18, width=200)
     y = 34
     for name in attribute_names:
@@ -588,8 +590,8 @@ def _handle_save_new_from_template():
         y += 14
     dialogs.add_label(model, "lblError", x=10, y=y, width=200, label="")
     y += 12
-    dialogs.add_button(model, "btnSave", x=10, y=y, width=95, label="Speichern")
-    dialogs.add_button(model, "btnCancel", x=115, y=y, width=95, label="Abbrechen")
+    dialogs.add_button(model, "btnSave", x=10, y=y, width=95, label=i18n.t("common.save"))
+    dialogs.add_button(model, "btnCancel", x=115, y=y, width=95, label=i18n.t("common.cancel"))
     model.Height = y + 20
 
     dialog = dialogs.show_dialog(smgr, ctx, model)
@@ -597,7 +599,7 @@ def _handle_save_new_from_template():
     def do_save():
         title = dialog.getControl("edTitle").getText()
         if not title.strip():
-            dialogs.set_status(dialog, "lblError", "Bitte einen Titel eingeben.")
+            dialogs.set_status(dialog, "lblError", i18n.t("saveNewFromTemplate.pleaseEnterTitle"))
             return
         field_values = {
             name: dialog.getControl(f"edAttr_{name}").getText() for name in attribute_names
@@ -621,7 +623,9 @@ def _handle_save_new_from_template():
                 derived_from_version_number=pending_template["template_version_number"],
             )
         except dms_client.ApiError as exc:
-            dialogs.set_status(dialog, "lblError", f"Speichern fehlgeschlagen: {exc.message}")
+            dialogs.set_status(
+                dialog, "lblError", i18n.t("saveNewFromTemplate.saveError", detail=exc.message)
+            )
             return
         settings_store.set_linked_document(
             doc, created["id"], created["current_version_number"], content_type
@@ -671,7 +675,7 @@ def _handle_workflow():
 
     definitions = dms_client.list_process_definitions(base_url, token)
 
-    model = dialogs.create_dialog_model(smgr, ctx, title="Workflow", width=220, height=150)
+    model = dialogs.create_dialog_model(smgr, ctx, title=i18n.t("workflow.title"), width=220, height=150)
     dialogs.add_list_box(
         model,
         "lstTasks",
@@ -681,7 +685,7 @@ def _handle_workflow():
         height=50,
         items=[t["name"] for _iid, t in task_rows],
     )
-    dialogs.add_button(model, "btnComplete", x=10, y=60, width=200, label="Abschließen")
+    dialogs.add_button(model, "btnComplete", x=10, y=60, width=200, label=i18n.t("workflow.complete"))
     dialogs.add_list_box(
         model,
         "lstDefinitions",
@@ -691,9 +695,9 @@ def _handle_workflow():
         height=40,
         items=[d["name"] for d in definitions],
     )
-    dialogs.add_button(model, "btnStart", x=10, y=118, width=200, label="Workflow starten")
+    dialogs.add_button(model, "btnStart", x=10, y=118, width=200, label=i18n.t("workflow.start"))
     dialogs.add_label(model, "lblError", x=10, y=134, width=200, label="")
-    dialogs.add_button(model, "btnClose", x=10, y=146, width=200, label="Schließen")
+    dialogs.add_button(model, "btnClose", x=10, y=146, width=200, label=i18n.t("common.close"))
     model.Height = 168
 
     dialog = dialogs.show_dialog(smgr, ctx, model)
@@ -702,7 +706,7 @@ def _handle_workflow():
         listbox = dialog.getControl("lstTasks")
         index = listbox.getSelectedItemPos()
         if index < 0 or index >= len(task_rows):
-            dialogs.set_status(dialog, "lblError", "Bitte eine Aufgabe auswählen.")
+            dialogs.set_status(dialog, "lblError", i18n.t("workflow.pleaseSelectTask"))
             return
         instance_id, task = task_rows[index]
         try:
@@ -710,7 +714,7 @@ def _handle_workflow():
                 base_url, token, instance_id, task["id"], completed_by=_session()["username"]
             )
         except dms_client.ApiError as exc:
-            dialogs.set_status(dialog, "lblError", f"Abschließen fehlgeschlagen: {exc.message}")
+            dialogs.set_status(dialog, "lblError", i18n.t("workflow.completeError", detail=exc.message))
             return
         dialog.endExecute()
 
@@ -718,7 +722,7 @@ def _handle_workflow():
         listbox = dialog.getControl("lstDefinitions")
         index = listbox.getSelectedItemPos()
         if index < 0 or index >= len(definitions):
-            dialogs.set_status(dialog, "lblError", "Bitte einen Prozess auswählen.")
+            dialogs.set_status(dialog, "lblError", i18n.t("workflow.pleaseSelectProcess"))
             return
         definition = definitions[index]
         try:
@@ -730,7 +734,7 @@ def _handle_workflow():
                 business_key=document_id,
             )
         except dms_client.ApiError as exc:
-            dialogs.set_status(dialog, "lblError", f"Start fehlgeschlagen: {exc.message}")
+            dialogs.set_status(dialog, "lblError", i18n.t("workflow.startError", detail=exc.message))
             return
         dialog.endExecute()
 

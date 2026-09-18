@@ -9,6 +9,7 @@ import uno_mock  # noqa: E402
 
 uno_mock.install()
 
+import i18n  # noqa: E402
 import ogdoc_addin  # noqa: E402
 import settings_store  # noqa: E402
 
@@ -56,6 +57,26 @@ class HubButtonsTests(unittest.TestCase):
         buttons = ogdoc_addin._hub_buttons({"username": "alice"}, None, has_pending_template=True)
         names = [name for name, _label in buttons]
         self.assertEqual(names, ["btnSaveNewFromTemplate", "btnLogout"])
+
+
+class LocaleAwareLabelTests(unittest.TestCase):
+    """Confirms `hub_status_text`/`_hub_buttons` actually route through
+    `i18n.t()` rather than only `i18n.py`'s own unit tests exercising the
+    dictionary lookup in isolation (concept 8, Phase 47 Session 5)."""
+
+    def tearDown(self):
+        i18n.set_locale(i18n.DEFAULT_LOCALE)
+
+    def test_hub_status_text_follows_active_locale(self):
+        i18n.set_locale("en")
+        text = ogdoc_addin.hub_status_text({"username": "alice"}, None)
+        self.assertIn("Logged in as alice", text)
+        self.assertIn("No document linked", text)
+
+    def test_hub_button_labels_follow_active_locale(self):
+        i18n.set_locale("en")
+        buttons = ogdoc_addin._hub_buttons(None, None)
+        self.assertEqual(buttons, [("btnLogin", "Log in...")])
 
 
 class AttributesFromFieldValuesTests(unittest.TestCase):
