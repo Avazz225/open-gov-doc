@@ -61,10 +61,12 @@ async function request(
 // directly at a fixed base URL instead - unlike `gatewayBaseUrl`, this is
 // NOT mutable per installation switch, since it's the same shared hub
 // regardless of which installation the admin is currently viewing. No
-// `Authorization` header either - the hub has no admin-token model, its
-// gated endpoints (installation rotate-key/revoke) use a different
-// mechanism entirely (signatures/an operator secret), not the JWT this
-// module otherwise carries.
+// `Authorization` header carrying this module's own JWT either - the hub
+// has no admin-token model. Its gated endpoints (installation
+// rotate-key/revoke, and since Phase 44 Session 1/ADR 0162 also
+// handovers/{id}/retry) use a different mechanism entirely, a shared
+// operator secret the caller supplies explicitly per call (see
+// `retryHandover` below), not a token this module carries around.
 async function federationHubRequest(path: string, init: RequestInit = {}): Promise<Response> {
   const response = await fetch(`${FEDERATION_HUB_BASE_URL}/${path}`, init);
   if (!response.ok) {
@@ -1961,8 +1963,11 @@ export async function listHandovers(status?: string): Promise<Handover[]> {
   return response.json();
 }
 
-export async function retryHandover(id: string): Promise<Handover> {
-  const response = await federationHubRequest(`handovers/${id}/retry`, { method: "POST" });
+export async function retryHandover(id: string, operatorKey: string): Promise<Handover> {
+  const response = await federationHubRequest(`handovers/${id}/retry`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${operatorKey}` },
+  });
   return response.json();
 }
 

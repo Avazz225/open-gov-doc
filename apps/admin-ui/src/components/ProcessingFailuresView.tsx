@@ -349,6 +349,11 @@ function HandoverFailuresSection() {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [retryingId, setRetryingId] = useState<string | null>(null);
+  // Phase 44 Session 1/ADR 0162: `POST /retry` is now gated by the hub's
+  // operator secret, same as revoke - kept only in component state (never
+  // persisted) since this UI has no other place to source it from and the
+  // secret is meant for a human operator to type in, not to be cached.
+  const [operatorKey, setOperatorKey] = useState("");
 
   // No accessToken guard here - unlike the three sections above,
   // federation-hub-service isn't gated by an admin JWT at all (it has no
@@ -382,7 +387,7 @@ function HandoverFailuresSection() {
     setError(null);
     setRetryingId(item.id);
     try {
-      await retryHandover(item.id);
+      await retryHandover(item.id, operatorKey);
       await reload();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("processingFailures.retryError"));
@@ -400,6 +405,16 @@ function HandoverFailuresSection() {
     <div className="card">
       <h2>{t("processingFailures.handoverHeading")}</h2>
       <p className="hint">{t("processingFailures.handoverHint")}</p>
+      <label>
+        {t("processingFailures.handoverOperatorKey")}
+        <input
+          type="password"
+          value={operatorKey}
+          onChange={(e) => setOperatorKey(e.target.value)}
+          placeholder={t("processingFailures.handoverOperatorKeyPlaceholder")}
+          autoComplete="off"
+        />
+      </label>
       {error && (
         <p className="error-text" role="alert">
           {error}
@@ -437,7 +452,7 @@ function HandoverFailuresSection() {
                     <button
                       type="button"
                       onClick={() => handleRetry(item)}
-                      disabled={retryingId !== null}
+                      disabled={retryingId !== null || operatorKey.length === 0}
                     >
                       {retryingId === item.id
                         ? t("common.loading")

@@ -404,6 +404,17 @@ def _make_stub_receiver() -> tuple[FastAPI, list[dict]]:
     return stub, received
 
 
+_RETRY_OPERATOR_KEY = "operator-secret-for-test"
+
+
+def _retry(client, handover_id: str, *, key: str | None = _RETRY_OPERATOR_KEY):
+    """Phase 44 Session 1/ADR 0162: `/retry` is gated the same way as
+    `/revoke` - every retry call in this file needs the operator-key
+    header now, factored here so the ~six call sites don't repeat it."""
+    headers = {"Authorization": f"Bearer {key}"} if key is not None else {}
+    return client.post(f"/handovers/{handover_id}/retry", headers=headers)
+
+
 def test_create_handover_delivers_signed_payload_to_target_callback(client):
     sender, sender_key = register_installation(client)
     target, _ = register_installation(client, callback_base_url="http://receiver.test")
@@ -527,8 +538,12 @@ def test_retry_handover_requires_delivery_failed_status(client):
     ).json()
     assert created["status"] == "pending_retry"
 
-    response = client.post(f"/handovers/{created['id']}/retry")
-    assert response.status_code == 409
+    hub_settings.hub_operator_key = _RETRY_OPERATOR_KEY
+    try:
+        response = _retry(client, created["id"])
+        assert response.status_code == 409
+    finally:
+        hub_settings.hub_operator_key = None
 
 
 def test_retry_handover_reattempts_a_delivery_failed_handover(client):
@@ -546,6 +561,7 @@ def test_retry_handover_reattempts_a_delivery_failed_handover(client):
 
     original_max_attempts = hub_settings.max_handover_delivery_attempts
     hub_settings.max_handover_delivery_attempts = 1
+    hub_settings.hub_operator_key = _RETRY_OPERATOR_KEY
     try:
         payload = {
             "handover_id": str(uuid.uuid4()),
@@ -564,7 +580,7 @@ def test_retry_handover_reattempts_a_delivery_failed_handover(client):
         stub, received = _make_stub_receiver()
         app.state.http_client = httpx.AsyncClient(transport=httpx.ASGITransport(app=stub))
 
-        response = client.post(f"/handovers/{created['id']}/retry")
+        response = _retry(client, created["id"])
         assert response.status_code == 200
         body = response.json()
         assert body["status"] == "delivered"
@@ -575,6 +591,7 @@ def test_retry_handover_reattempts_a_delivery_failed_handover(client):
         assert created["id"] not in app.state.pending_handover_payloads
     finally:
         hub_settings.max_handover_delivery_attempts = original_max_attempts
+        hub_settings.hub_operator_key = None
 
 
 def test_retry_handover_without_cached_payload_returns_409(client):
@@ -591,6 +608,7 @@ def test_retry_handover_without_cached_payload_returns_409(client):
 
     original_max_attempts = hub_settings.max_handover_delivery_attempts
     hub_settings.max_handover_delivery_attempts = 1
+    hub_settings.hub_operator_key = _RETRY_OPERATOR_KEY
     try:
         payload = {
             "handover_id": str(uuid.uuid4()),
@@ -609,10 +627,11 @@ def test_retry_handover_without_cached_payload_returns_409(client):
         # tatsächlich nicht mehr verfügbar ist.
         app.state.pending_handover_payloads.pop(created["id"], None)
 
-        response = client.post(f"/handovers/{created['id']}/retry")
+        response = _retry(client, created["id"])
         assert response.status_code == 409
     finally:
         hub_settings.max_handover_delivery_attempts = original_max_attempts
+        hub_settings.hub_operator_key = None
 
 
 def test_submit_result_only_allowed_by_target_installation(client):
@@ -769,6 +788,7 @@ def test_retry_handover_reattempts_a_result_delivery_failed_handover(client):
     app.state.http_client = httpx.AsyncClient(transport=httpx.MockTransport(_raise))
     original_max_attempts = hub_settings.max_handover_delivery_attempts
     hub_settings.max_handover_delivery_attempts = 1
+    hub_settings.hub_operator_key = _RETRY_OPERATOR_KEY
     try:
         result_payload = {"outcome": "completed", "encrypted_result": "opaque-result"}
         created = _signed_post(
@@ -783,7 +803,7 @@ def test_retry_handover_reattempts_a_result_delivery_failed_handover(client):
         stub, received = _make_stub_receiver()
         app.state.http_client = httpx.AsyncClient(transport=httpx.ASGITransport(app=stub))
 
-        response = client.post(f"/handovers/{handover['id']}/retry")
+        response = _retry(client, handover["id"])
         assert response.status_code == 200
         body = response.json()
         assert body["status"] == "completed"
@@ -792,6 +812,7 @@ def test_retry_handover_reattempts_a_result_delivery_failed_handover(client):
         assert handover["id"] not in app.state.pending_handover_result_payloads
     finally:
         hub_settings.max_handover_delivery_attempts = original_max_attempts
+        hub_settings.hub_operator_key = None
 
 
 def test_retry_handover_without_cached_result_payload_returns_409(client):
@@ -818,6 +839,7 @@ def test_retry_handover_without_cached_result_payload_returns_409(client):
     app.state.http_client = httpx.AsyncClient(transport=httpx.MockTransport(_raise))
     original_max_attempts = hub_settings.max_handover_delivery_attempts
     hub_settings.max_handover_delivery_attempts = 1
+    hub_settings.hub_operator_key = _RETRY_OPERATOR_KEY
     try:
         result_payload = {"outcome": "completed", "encrypted_result": "opaque-result"}
         created = _signed_post(
@@ -831,10 +853,11 @@ def test_retry_handover_without_cached_result_payload_returns_409(client):
 
         app.state.pending_handover_result_payloads.pop(handover["id"], None)
 
-        response = client.post(f"/handovers/{handover['id']}/retry")
+        response = _retry(client, handover["id"])
         assert response.status_code == 409
     finally:
         hub_settings.max_handover_delivery_attempts = original_max_attempts
+        hub_settings.hub_operator_key = None
 
 
 def test_retry_handover_rejects_a_status_other_than_the_two_failure_states(client):
@@ -854,8 +877,67 @@ def test_retry_handover_rejects_a_status_other_than_the_two_failure_states(clien
     ).json()
     assert created["status"] == "delivered"
 
-    response = client.post(f"/handovers/{created['id']}/retry")
-    assert response.status_code == 409
+    hub_settings.hub_operator_key = _RETRY_OPERATOR_KEY
+    try:
+        response = _retry(client, created["id"])
+        assert response.status_code == 409
+    finally:
+        hub_settings.hub_operator_key = None
+
+
+def test_retry_handover_requires_hub_operator_key(client):
+    """Phase 44 Session 1/ADR 0162: the endpoint used to have no auth model
+    at all - this proves the new gate actually rejects a call carrying no
+    `Authorization` header, mirroring `test_revoke_requires_hub_operator_key`
+    above. No `hub_operator_key` configured -> fully locked (403), same
+    fail-closed default as revoke."""
+    sender, sender_key = register_installation(client)
+    target, _ = register_installation(client, callback_base_url="http://unreachable.invalid")
+
+    def _raise(*_args, **_kwargs):
+        raise httpx.ConnectError("no route", request=httpx.Request("POST", "http://x"))
+
+    app.state.http_client = httpx.AsyncClient(transport=httpx.MockTransport(_raise))
+    payload = {
+        "handover_id": str(uuid.uuid4()),
+        "to_installation_id": target["id"],
+        "process_type": "test-process",
+        "encrypted_payload": "opaque",
+    }
+    created = _signed_post(
+        client, "/handovers", payload, sender_key, installation_id=sender["id"]
+    ).json()
+    assert created["status"] == "pending_retry"
+
+    response = _retry(client, created["id"], key=None)
+    assert response.status_code == 403
+
+
+def test_retry_handover_with_wrong_operator_key_returns_403(client):
+    sender, sender_key = register_installation(client)
+    target, _ = register_installation(client, callback_base_url="http://unreachable.invalid")
+
+    def _raise(*_args, **_kwargs):
+        raise httpx.ConnectError("no route", request=httpx.Request("POST", "http://x"))
+
+    app.state.http_client = httpx.AsyncClient(transport=httpx.MockTransport(_raise))
+    payload = {
+        "handover_id": str(uuid.uuid4()),
+        "to_installation_id": target["id"],
+        "process_type": "test-process",
+        "encrypted_payload": "opaque",
+    }
+    created = _signed_post(
+        client, "/handovers", payload, sender_key, installation_id=sender["id"]
+    ).json()
+    assert created["status"] == "pending_retry"
+
+    hub_settings.hub_operator_key = _RETRY_OPERATOR_KEY
+    try:
+        response = _retry(client, created["id"], key="wrong-secret")
+        assert response.status_code == 403
+    finally:
+        hub_settings.hub_operator_key = None
 
 
 def test_list_handovers_filters_by_status(client):

@@ -796,7 +796,9 @@ async def _retry_result_delivery(session: AsyncSession, handover: Handover) -> N
 
 @app.post("/handovers/{handover_id}/retry", response_model=HandoverOut)
 async def retry_handover(
-    handover_id: str, session: AsyncSession = Depends(get_session)
+    handover_id: str,
+    authorization: str = Header(default="", alias="Authorization"),
+    session: AsyncSession = Depends(get_session),
 ) -> HandoverOut:
     """Manual restart of a permanently failed handover (Post-Roadmap Phase 20
     Session 5, ADR 0081; extended Phase 40 Session 3 to also cover the
@@ -808,7 +810,19 @@ async def retry_handover(
     as long as the relevant encrypted payload is still in the hub's process
     memory - after a restart during an open retry window it is irrecoverably
     lost (deliberate consequence of "no payload is ever persisted",
-    ADR 0028)."""
+    ADR 0028).
+
+    Gated via the same `settings.hub_operator_key` bearer secret as
+    `POST /installations/{id}/revoke` (Post-Roadmap Phase 44 Session 1,
+    ADR 0162) rather than a second, dedicated key - this is a real mutating
+    action reachable by anyone who can reach this service's network address,
+    and this service has no admin-JWT/capability model of its own to check
+    against instead (see `docs/services/federation-hub-service.md`)."""
+    if not settings.hub_operator_key or authorization != f"Bearer {settings.hub_operator_key}":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Fehlender oder ungültiger Hub-Operator-Schlüssel",
+        )
     try:
         handover = await repository.get_handover(session, handover_id)
     except repository.NotFoundError as exc:

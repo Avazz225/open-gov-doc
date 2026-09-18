@@ -2,8 +2,68 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P43-S3 (scoping-only: a Microsoft Graph/O365 mailbox backend for `mail-connector` —
-third and last session of Phase 43, "Build/Scoping Sessions for Larger Topics", [ADR
+**Last completed:** P44-S1 (`federation-hub-service`: gate `POST /handovers/{id}/retry` — first session
+of Phase 44, "Security & Correctness Hardening"). `GET /handovers`/`GET /handovers/{id}` stay
+deliberately ungated (pure metadata, same precedent as `GET /installations`) — but the mutating
+`POST /handovers/{id}/retry` had **no auth check of any kind** before this session. Decided to reuse the
+existing `hub_operator_key` bearer secret (already gating `POST /installations/{id}/revoke`, ADR 0039)
+rather than build a second, dedicated key: this service has no admin-JWT/`permission-service`-capability
+model at all to check against instead, and adding one just for this one endpoint would have been a much
+bigger, architecturally-inconsistent change for what the gap-analysis sweep found to be a bounded,
+single-endpoint gap. New [ADR 0162](docs/adr/0162-federation-hub-retry-operator-key-gate.md) records the
+full reasoning, including why retry does NOT get the "routine, already-authenticated admin action"
+treatment `archival-/notification-/rendering-/ocr-service`'s own manual-restart buttons get — those go
+through the gateway under the admin's JWT, but `federation-hub-service` is the one service admin-ui calls
+directly, with no gateway/JWT context to piggyback on at all.
+
+`services/federation-hub-service/src/federation_hub_service/main.py`'s `retry_handover` now takes an
+`Authorization` header and applies the exact same `if not settings.hub_operator_key or authorization !=
+f"Bearer {...}": raise 403` check `revoke_installation` already had. On the caller side,
+`apps/admin-ui/src/lib/api.ts`'s `retryHandover(id, operatorKey)` now sends that header, and
+`ProcessingFailuresView.tsx`'s `HandoverFailuresSection` gained a new operator-key text input (component
+`useState` only, never persisted) that disables its "Erneut versuchen" button until filled — grepping
+`admin-ui` first confirmed **no existing UI anywhere sends this secret today** (no `revokeInstallation`
+call site either), so revocation has apparently always been a pure `curl`/manual-operator action outside
+admin-ui, and this is genuinely the first time admin-ui needs to source this kind of secret inline.
+
+All six pre-existing `/retry` tests in `tests/test_api.py` needed the new header (the gate runs before
+the handover lookup, so an unauthenticated call now gets `403` instead of reaching the `200`/`404`/`409`
+it used to reach) — collapsed onto one shared `_retry()` test helper, plus two new regression tests
+(`test_retry_handover_requires_hub_operator_key`, `test_retry_handover_with_wrong_operator_key_returns_
+403`) mirroring the existing revoke-gate tests exactly. **74/74 tests pass** (+1 over the previous 73 —
+the six pre-existing tests were modified in place to send the header, not removed; only the two new gate
+tests are net-new). `ruff check`/`ruff format` clean on every file this session
+touched (one pre-existing, unrelated formatting issue in `test_repository.py` left untouched — not
+caused by this session, out of scope). `docker compose build federation-hub-service admin-ui` both
+succeeded, including `tsc`/eslint/`next build` for `admin-ui` (Node isn't installed on the host in this
+environment — resolved by running the checks as part of the Docker build itself, which is how they'd run
+in CI anyway).
+
+**Live-verified against the real running containers**: `curl` against the running `federation-hub-
+service` confirmed no/wrong `Authorization` header returns `403` even for a non-existent handover ID
+(proving the gate runs before the lookup); a temporarily-added `DMS_HUB_OPERATOR_KEY` env override in
+`infra/docker-compose.yml` (reverted immediately after, container recreated back to the real default)
+confirmed a correct key passes through to the real `404`. Browser-verified `admin-ui`'s
+`/processing-failures` page via a one-off `mcr.microsoft.com/playwright` container on the stack's Docker
+network (no Node/Playwright installed on the host) after logging in as the `users-admin` E2E fixture
+account: the "Hub-Operator-Schlüssel" field renders correctly inside the "Handover-Vermittlungen"
+section, positioned and labeled consistently with the rest of the page. No handovers currently exist in
+the dev stack, so the empty state — not a populated table — is what's shown; the retry-button
+disabled-until-filled behavior wasn't exercised end-to-end against a real row for that reason, but is a
+simple, directly-inspectable state expression already covered by `tsc`.
+
+`docs/services/federation-hub-service.md` updated: the `/handovers/{id}/retry` endpoint row, the "Admin
+UI Visibility" paragraph, the test count, and — importantly — a stale Open Points bullet corrected (it
+had claimed BOTH `GET /handovers` and `POST .../retry` were ungated; the `GET` half was never actually a
+gap, same rationale as `GET /installations`, only the `POST` half needed fixing, and now has been).
+
+**Next session:** **P44-S2** (`folder-service`/`teamspace-service`: close the write-bypass +
+`ResourceNode`-orphan gaps) — see `IMPLEMENTATION_PLAN.md` "Phase 44" for the full plan.
+
+---
+
+Immediately before P44-S1: **P43-S3** (scoping-only: a Microsoft Graph/O365 mailbox backend for
+`mail-connector` — third and last session of Phase 43, "Build/Scoping Sessions for Larger Topics", [ADR
 0161](docs/adr/0161-mail-connector-graph-backend-scoping.md)). No code changed, no tests to run, no
 Docker rebuild, no live verification — **Scoping, kein Feature**, per this session's own Definition of
 Done (same shape as P37-S1/P43-S2).
@@ -45,11 +105,8 @@ concrete outcome. The recommended feature itself remains **scoped, not scheduled
 assigned, awaiting a future phase if an installation actually needs Exchange Online mailbox support
 (IMAP/POP3 already cover any mailbox that still permits basic auth, the majority case).
 
-**This closes Phase 43** ("Build/Scoping Sessions for Larger Topics") — `graphify update .` now runs,
-per the standing "only at phase-end" rule.
-
-**Next session:** **P44-S1** (`federation-hub-service`: gate the ungated `POST /handovers/{id}/retry`
-endpoint) — see below and `IMPLEMENTATION_PLAN.md` "Phase 44+" for the full new plan.
+**This closed Phase 43** ("Build/Scoping Sessions for Larger Topics") — `graphify update .` ran, per the
+standing "only at phase-end" rule.
 
 ---
 
@@ -89,7 +146,8 @@ reasoning per session.
 ---
 
 Immediately before this planning round: **P43-S3** (scoping-only: a Microsoft Graph/O365 mailbox backend
-for `mail-connector` — third and last session of Phase 43, full writeup above under "Last completed").
+for `mail-connector` — third and last session of Phase 43, full writeup above under "Immediately before
+P44-S1").
 
 ---
 
