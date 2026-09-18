@@ -26,6 +26,7 @@ from reporting_service import forensic, reports, repository
 from reporting_service.clients import (
     AuditClient,
     AuthServiceClient,
+    LicenseServiceClient,
     NotificationClient,
     StorageClient,
     WorkflowClient,
@@ -38,6 +39,7 @@ from reporting_service.schemas import (
     ForensicTraceEntry,
     ForensicTraceResult,
     GroupBy,
+    LicenseUtilizationEntry,
     OpenWorkflowTaskEntry,
     ReportFormat,
     ReportScheduleCreate,
@@ -180,6 +182,18 @@ async def _generate_report(
         entries = await reports.storage_usage(app.state.storage_client)
         headers = ["backend", "object_count", "total_size_bytes"]
         rows = [[e.backend, str(e.object_count), str(e.total_size_bytes)] for e in entries]
+    elif report_type == "license_utilization":
+        entries = await reports.license_utilization(app.state.license_client)
+        headers = ["dimension", "limit", "current", "exceeded"]
+        rows = [
+            [
+                e.dimension,
+                "" if e.limit is None else str(e.limit),
+                "" if e.current is None else str(e.current),
+                str(e.exceeded),
+            ]
+            for e in entries
+        ]
     elif report_type == "user_activity":
         entries = await reports.user_activity(
             app.state.audit_client,
@@ -326,6 +340,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.notification_client = NotificationClient(settings.notification_service_base_url)
     app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
     app.state.auth_client = AuthServiceClient(settings.auth_service_base_url)
+    app.state.license_client = LicenseServiceClient(settings.license_service_base_url)
 
     sensor_config_client = SensorConfigClient(settings.monitoring_service_base_url)
     await sensor_config_client.start()
@@ -375,6 +390,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await app.state.audit_client.close()
     await app.state.storage_client.close()
     await app.state.notification_client.close()
+    await app.state.license_client.close()
     await app.state.permission_client.close()
     await app.state.auth_client.close()
     await engine.dispose()
@@ -530,6 +546,30 @@ async def export_storage_usage_report(
     async with app.state.session_factory() as session:
         content, content_type = await _generate_report(
             session, "storage_usage", format, {}, principal_id=x_dms_principal
+        )
+    return Response(content=content, media_type=content_type)
+
+
+@app.get("/reports/license-utilization", response_model=list[LicenseUtilizationEntry])
+async def get_license_utilization_report(
+    x_dms_principal: str = Header(default=""),
+) -> list[LicenseUtilizationEntry]:
+    await _require_reporting_permission(
+        x_dms_principal, permission="reporting.read", access_type="read"
+    )
+    return await reports.license_utilization(app.state.license_client)
+
+
+@app.get("/reports/license-utilization/export")
+async def export_license_utilization_report(
+    format: ReportFormat, x_dms_principal: str = Header(default="")
+) -> Response:
+    await _require_reporting_permission(
+        x_dms_principal, permission="reporting.read", access_type="read"
+    )
+    async with app.state.session_factory() as session:
+        content, content_type = await _generate_report(
+            session, "license_utilization", format, {}, principal_id=x_dms_principal
         )
     return Response(content=content, media_type=content_type)
 

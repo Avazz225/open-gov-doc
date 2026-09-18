@@ -103,6 +103,29 @@ class StorageClient:
         await self._client.aclose()
 
 
+class LicenseServiceClient:
+    """Thin HTTP client against license-service - license utilization
+    (5.4a, Phase 45 Session 1) reads the single global `GET /license/
+    status` snapshot, which already computes all three dimensions
+    (`documents`/`storage_gb`/`users`) live on every call - no own read
+    model needed, same "already the authoritative live source" reasoning
+    as `AuditClient` above. Deliberately ungated, no `X-DMS-Principal`
+    forwarded: this endpoint is ungated on license-service's own side too
+    (queried by `registry-service`/the admin UI the same way, see
+    `docs/services/license-service.md`)."""
+
+    def __init__(self, base_url: str) -> None:
+        self._client = httpx.AsyncClient(base_url=base_url, timeout=10.0)
+
+    async def get_status(self) -> dict:
+        response = await self._client.get("/license/status")
+        response.raise_for_status()
+        return response.json()
+
+    async def close(self) -> None:
+        await self._client.aclose()
+
+
 class AuthServiceClient:
     """HTTP client against auth-service - `GET /superuser/status` is the
     only way to check "is the current caller the activated superuser" (4.6,

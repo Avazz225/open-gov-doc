@@ -2,8 +2,59 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P44-S4 (small correctness fixes bundle — fourth and last session of Phase 44,
-"Security & Correctness Hardening", **closing Phase 44**). Three independent, small, real bugs:
+**Last completed:** P45-S1 (`reporting-service`: license-utilization report — first session of
+Phase 45, "Dependency-Resolved Functional Completions"). This report was deliberately left out of the
+original standard-reports session (P7-S2b) — 4 of 5 concept-example reports were built then, license
+utilization skipped purely because `license-service` didn't exist yet. It's existed since Phase 9, so
+this session simply retrofits the last one; all 5 concept-example reports now exist.
+
+`reports.license_utilization()` reads `license-service`'s single `GET /license/status` snapshot
+(already computed live, fanning out to `auth-service`/`storage-service`/`document-service`, on every
+call — no caching on license-service's own side, confirmed by reading `usage.compute_usage`) and
+flattens the three dimensions (`documents`/`storage_gb`/`users`) into one row per dimension —
+`{dimension, limit, current, exceeded}` — the same one-row-per-entry shape every other report in this
+service already produces, so `to_csv`/`to_pdf` needed zero changes. The "no license installed" case
+(`installed: false`, all three dimension objects absent) is handled as a single `dimension="license"`
+row instead of three empty/misleading ones. A new `LicenseServiceClient` sends no `X-DMS-Principal` —
+`GET /license/status` is ungated on license-service's own side too (already queried the same way by
+`registry-service`/the admin UI).
+
+Wired in exactly like `storage_usage` (its closest structural analog — single external client call, no
+filters): a new `"license_utilization"` value in the `ReportType` Literal, a new branch in the
+`_generate_report` if-chain, `GET /reports/license-utilization` + `.../export?format=csv|pdf`, both
+`reporting.read`-gated (already granted to "everyone", no new permission-service work needed). This
+also makes it automatically schedulable via the existing `POST /report-schedules` mechanism — no new
+scheduling code, the poll loop dispatches on the same `report_type` string.
+
+New `Settings.license_service_base_url` (default `http://localhost:8023`, matching every other
+service's own default for this port) + `infra/docker-compose.yml` gained `DMS_LICENSE_SERVICE_BASE_URL`
++ a new `depends_on: license-service` entry for `reporting-service`.
+
+6 new tests: `test_reports.py` gained a `FakeLicenseClient` plus two tests (dimension-flattening, the
+no-license-installed one-row case); `test_api.py` gained the endpoint-wiring test, the no-license case,
+and CSV/PDF export content-type tests, mirroring `storage_usage`'s own four exactly. **74/74 passing**
+(was 68, +6). `ruff check`/`ruff format` clean.
+
+Docker image rebuilt and redeployed. **Live-verified against the real running stack**:
+`GET /reports/license-utilization` returned real numbers (`documents: 129/1000`, `storage_gb:
+~1.74/100`, `users: 0/10`, none exceeded); both `.../export?format=csv` and `?format=pdf` returned
+correctly-shaped output (`file` confirmed a genuine 1-page PDF). No new ADR (this session's own
+Definition of Done — pure functional completion of an already-established pattern against a
+now-satisfied dependency, same shape as the earlier Phase 42 — didn't expect one).
+
+`docs/services/reporting-service.md` updated: the Responsibility line, the "Only 4 of the 5 concept
+example reports" Architecture Decision and its Open Points counterpart both corrected in place, a new
+API table row pair, and the test count. `docs/services/license-service.md` gained a one-line mention of
+the new consumer for discoverability.
+
+**Next session:** **P45-S2** (`favorite-service`/`user-ui`: case-binder favorites — second session of
+Phase 45; deferred until now purely because case-browsing UI didn't exist yet, which has been untrue
+since "Umlaufmappen" shipped in Phase 34) — see `IMPLEMENTATION_PLAN.md` "Phase 45" for the full plan.
+
+---
+
+Immediately before P45-S1: **P44-S4** (small correctness fixes bundle — fourth and last session of
+Phase 44, "Security & Correctness Hardening", **closed Phase 44**). Three independent, small, real bugs:
 
 **(1) `virus-scan-service` never notified the uploader on a virus hit.** `virus_scan.completed` was
 already published unconditionally (both `"clean"` and `"infected"`) since the service was built —
@@ -69,13 +120,8 @@ workflow-service.md`/`docs/services/case-service.md` updated: all four now-resol
 bullets corrected in place, event table + test counts updated in `notification-service.md`, test
 counts updated in `workflow-service.md`/`case-service.md`.
 
-**This closes Phase 44** ("Security & Correctness Hardening", P44-S1 through P44-S4) —
-`graphify update .` now runs, per the standing "only at phase-end" rule.
-
-**Next session:** **P45-S1** (`reporting-service`: license-utilization report — first session of
-Phase 45, "Dependency-Resolved Functional Completions"; deferred until now purely because
-`license-service` didn't exist yet, which has been untrue since Phase 9) — see
-`IMPLEMENTATION_PLAN.md` "Phase 45" for the full plan.
+**This closed Phase 44** ("Security & Correctness Hardening", P44-S1 through P44-S4) —
+`graphify update .` ran, per the standing "only at phase-end" rule.
 
 ---
 

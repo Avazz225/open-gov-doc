@@ -935,6 +935,9 @@ services:
       DMS_NOTIFICATION_SERVICE_BASE_URL: http://notification-service:8000
       DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
       DMS_AUTH_SERVICE_BASE_URL: http://auth-service:8000
+      # License utilization report (5.4a, Phase 45 Session 1) - deferred
+      # since P7-S2b purely because license-service didn't exist yet.
+      DMS_LICENSE_SERVICE_BASE_URL: http://license-service:8000
       # Externally reachable gateway address for download links in scheduled
       # report emails (5.4a, since P7-S2b) - deliberately not the internal
       # Docker DNS address, see settings.py.
@@ -960,6 +963,8 @@ services:
       document-service:
         condition: service_started
       auth-service:
+        condition: service_started
+      license-service:
         condition: service_started
     networks:
       - dms-net

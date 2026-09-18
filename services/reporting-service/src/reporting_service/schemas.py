@@ -3,7 +3,13 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-ReportType = Literal["document_volume", "open_workflow_tasks", "storage_usage", "user_activity"]
+ReportType = Literal[
+    "document_volume",
+    "open_workflow_tasks",
+    "storage_usage",
+    "user_activity",
+    "license_utilization",
+]
 ReportFormat = Literal["csv", "pdf"]
 Frequency = Literal["daily", "weekly", "monthly"]
 GroupBy = Literal["day", "week", "month"]
@@ -34,6 +40,21 @@ class UserActivityEntry(BaseModel):
     actor: str
     event_type: str
     count: int
+
+
+class LicenseUtilizationEntry(BaseModel):
+    """One row per license dimension (5.4a, Phase 45 Session 1) - flattened
+    from `license-service`'s single `GET /license/status` snapshot
+    (`documents`/`storage_gb`/`users`, each a `limit`/`current`/`exceeded`
+    triple) into the same one-row-per-entry shape every other report in
+    this service already uses. `dimension="license"` with every other
+    field `None`/`False` is the one exception, used only when no license
+    is installed at all."""
+
+    dimension: str
+    limit: float | int | None
+    current: float | int | None
+    exceeded: bool
 
 
 class ReportScheduleCreate(BaseModel):

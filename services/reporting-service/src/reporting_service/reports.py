@@ -9,9 +9,15 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from reporting_service import repository
-from reporting_service.clients import AuditClient, StorageClient, WorkflowClient
+from reporting_service.clients import (
+    AuditClient,
+    LicenseServiceClient,
+    StorageClient,
+    WorkflowClient,
+)
 from reporting_service.schemas import (
     DocumentVolumeEntry,
+    LicenseUtilizationEntry,
     OpenWorkflowTaskEntry,
     StorageUsageEntry,
     UserActivityEntry,
@@ -55,6 +61,41 @@ async def open_workflow_tasks(workflow_client: WorkflowClient) -> list[OpenWorkf
 
 async def storage_usage(storage_client: StorageClient) -> list[StorageUsageEntry]:
     return [StorageUsageEntry(**entry) for entry in await storage_client.get_usage()]
+
+
+async def license_utilization(
+    license_client: LicenseServiceClient,
+) -> list[LicenseUtilizationEntry]:
+    """License utilization report (5.4a, Phase 45 Session 1) - deferred since
+    the original standard-reports session (P7-S2b) purely because
+    license-service didn't exist yet (Phase 9). `GET /license/status`
+    already returns a live-computed snapshot of all three dimensions
+    together (`documents`/`storage_gb`/`users`) - this just flattens that
+    single object into one row per dimension, the same shape every other
+    report in this module already produces, so `to_csv`/`to_pdf` need no
+    changes. No license installed at all (`installed: false`) - none of
+    the three dimensions are ever populated in that case (see
+    `license-service`'s own `_status_out`) - reported as a single row
+    naming that state instead of three empty/misleading dimension rows."""
+    status = await license_client.get_status()
+    if not status.get("installed"):
+        return [
+            LicenseUtilizationEntry(dimension="license", limit=None, current=None, exceeded=False)
+        ]
+    entries = []
+    for dimension in ("documents", "storage_gb", "users"):
+        usage = status.get(dimension)
+        if usage is None:
+            continue
+        entries.append(
+            LicenseUtilizationEntry(
+                dimension=dimension,
+                limit=usage.get("limit"),
+                current=usage.get("current"),
+                exceeded=usage.get("exceeded", False),
+            )
+        )
+    return entries
 
 
 async def user_activity(

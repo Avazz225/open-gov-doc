@@ -143,6 +143,8 @@ def client():
         app.state.storage_client = AsyncMock()
         app.state.storage_client.get_usage.return_value = []
         app.state.notification_client = AsyncMock()
+        app.state.license_client = AsyncMock()
+        app.state.license_client.get_status.return_value = {"installed": False, "valid": False}
         yield c
 
 
@@ -248,6 +250,47 @@ def test_storage_usage_report_uses_storage_client(client):
 
     assert response.status_code == 200
     assert response.json() == [{"backend": "local", "object_count": 2, "total_size_bytes": 100}]
+
+
+def test_license_utilization_report_uses_license_client(client):
+    app.state.license_client.get_status.return_value = {
+        "installed": True,
+        "valid": True,
+        "documents": {"limit": 1000, "current": 842, "exceeded": False},
+        "storage_gb": {"limit": 50, "current": 12.3, "exceeded": False},
+        "users": {"limit": 25, "current": 30, "exceeded": True},
+    }
+
+    response = client.get("/reports/license-utilization")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 3
+    by_dimension = {e["dimension"]: e for e in body}
+    assert by_dimension["documents"]["current"] == 842
+    assert by_dimension["users"]["exceeded"] is True
+
+
+def test_license_utilization_report_without_a_license_returns_one_row(client):
+    response = client.get("/reports/license-utilization")
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {"dimension": "license", "limit": None, "current": None, "exceeded": False}
+    ]
+
+
+def test_license_utilization_export_csv_has_correct_content_type(client):
+    response = client.get("/reports/license-utilization/export", params={"format": "csv"})
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+
+
+def test_license_utilization_export_pdf_has_correct_content_type(client):
+    response = client.get("/reports/license-utilization/export", params={"format": "pdf"})
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    assert response.content.startswith(b"%PDF")
 
 
 def test_user_activity_report_uses_audit_client(client):

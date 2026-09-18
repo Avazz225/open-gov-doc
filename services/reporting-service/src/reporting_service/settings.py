@@ -10,6 +10,9 @@ class Settings(BaseServiceSettings):
     audit_service_base_url: str = "http://localhost:8002"
     storage_service_base_url: str = "http://localhost:8005"
     notification_service_base_url: str = "http://localhost:8015"
+    # License utilization report (5.4a, Phase 45 Session 1) - deferred since
+    # P7-S2b purely because license-service didn't exist yet.
+    license_service_base_url: str = "http://localhost:8023"
     # RBAC (Post-Roadmap Phase 19 Session 7, ADR 0072) - reporting-service
     # previously had no permission check at all, not even for the forensic
     # trace.

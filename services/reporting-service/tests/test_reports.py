@@ -24,6 +24,14 @@ class FakeStorageClient:
         return self._usage
 
 
+class FakeLicenseClient:
+    def __init__(self, status):
+        self._status = status
+
+    async def get_status(self):
+        return self._status
+
+
 class FakeAuditClient:
     def __init__(self, events):
         self._events = events
@@ -81,6 +89,39 @@ async def test_storage_usage_maps_raw_entries():
 
     assert entries[0].backend == "local"
     assert entries[0].object_count == 3
+
+
+async def test_license_utilization_flattens_dimensions():
+    client = FakeLicenseClient(
+        status={
+            "installed": True,
+            "valid": True,
+            "documents": {"limit": 1000, "current": 842, "exceeded": False},
+            "storage_gb": {"limit": 50, "current": 12.3, "exceeded": False},
+            "users": {"limit": 25, "current": 30, "exceeded": True},
+        }
+    )
+
+    entries = await reports.license_utilization(client)
+
+    assert len(entries) == 3
+    by_dimension = {e.dimension: e for e in entries}
+    assert by_dimension["documents"].limit == 1000
+    assert by_dimension["documents"].current == 842
+    assert by_dimension["documents"].exceeded is False
+    assert by_dimension["storage_gb"].current == 12.3
+    assert by_dimension["users"].exceeded is True
+
+
+async def test_license_utilization_without_an_installed_license_returns_one_row():
+    client = FakeLicenseClient(status={"installed": False, "valid": False})
+
+    entries = await reports.license_utilization(client)
+
+    assert len(entries) == 1
+    assert entries[0].dimension == "license"
+    assert entries[0].limit is None
+    assert entries[0].exceeded is False
 
 
 async def test_user_activity_aggregates_by_actor_and_event_type():
