@@ -2,8 +2,97 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P46-S1 (Rebrand rollout — the one and only session of Phase 46, "OG Doc"
-Rebrand, **closes Phase 46**). Mechanical, no new ADR expected per this phase's own DoD.
+**Last completed:** P47-S1 (Build and validate the locale-switcher pattern once, in
+`process-designer` — first session of Phase 47, "English i18n"). Short ADR:
+[0167](docs/adr/0167-locale-switcher-pattern-and-office-addin-host-locale.md).
+
+**Backend** (`auth-service`): extended `ThemePreference`/`GET PUT /me/preferences` (ADR 0009) with a
+new `locale: "de" | "en"` field, persisted the same way as `theme` (its own Keycloak user attribute
+`dms_locale`, declared in the realm's Declarative User Profile via a new `_ensure_locale_attribute`
+alongside the existing `_ensure_theme_attribute`). `PUT /me/preferences` now takes a new
+`PreferencesUpdate` request model with both fields `Optional[None]` (not defaulting to
+`ThemePreference`'s real defaults) — only a field actually present in the request is written, so
+every existing `{"theme": ...}`-only caller (every app before this session) cannot accidentally reset
+`locale` back to its default, and vice versa.
+
+**Real bug found and fixed live** (present since P4-S6, not introduced this session, but only
+discovered during this session's own end-to-end live verification): `set_theme_preference`/the new
+`set_locale_preference` called `admin.update_user(user_id, {"attributes": ...})` — Keycloak's admin
+`PUT` endpoint treats the body as the *full* user representation, not a merge, so this silently wiped
+`firstName`/`lastName`/`email` on every single preference change. Found via a throwaway Keycloak test
+user whose profile lost those fields after two preference updates and could no longer log in
+afterward. Fixed by spreading the just-read full representation before overriding `attributes`
+(`{**raw, "attributes": attributes}`) in both setters. New regression test
+`test_update_preferences_does_not_wipe_other_profile_fields`. `140` `auth-service` tests passing (was
+`139` before the locale addition, `+1` net for this fix's regression test plus the other new
+locale-round-trip tests already counted in that delta). `ruff check`/`format` clean (the two
+pre-existing, unrelated `ruff` failures — `loadtest/notebook/analysis.ipynb`,
+`federation-hub-service/tests/test_repository.py` — confirmed unchanged, as in every prior session).
+Docker image rebuilt/redeployed twice (once before the bug fix, once after) — **live-verified via
+curl** against a repaired throwaway Keycloak user: the no-clobber PUT behavior round-trips correctly,
+and `firstName`/`lastName`/`email` now survive two consecutive preference updates. Throwaway user
+deleted afterward.
+
+**Frontend** (`process-designer`, chosen over `office-addin` for this first build — zero
+host/platform ambiguity, closest existing persistence precedent to copy): new `en.json` (full English
+translation of all keys, including a new `locale.label` key added to both dictionaries). `I18nProvider`
+is no longer a static-prop consumer — a new `LocaleProvider`/`useLocale()` (`lib/locale-context.tsx`)
+mirrors `ThemeProvider`'s persistence pattern and renders `I18nProvider` internally, moved inside
+`AuthProvider` in `layout.tsx`. New `LocaleSwitcher.tsx` mirrors `ThemeSwitcher.tsx`; both are now wired
+into `RequireAuth.tsx`'s top bar (using the previously-unused `.top-bar-actions` CSS class) — as a side
+effect, `ThemeSwitcher` goes from completely dead/unwired code in this app to actually working.
+
+**Real hydration bug found and fixed live, before first deploy was accepted**: an initial version of
+`LocaleProvider` seeded its React state directly from the cached `localStorage` value on mount (safe
+for `ThemeProvider`, which only drives an imperative `dataset.theme` attribute) — but `locale` drives
+the actual rendered text tree via `t()`, and this app is a static export that always server-renders
+`defaultLocale`'s ("de") strings. Seeding a cached non-default locale as the *initial* state mismatched
+that server-rendered markup on hydration (React error #418, reproduced live via Playwright on a page
+reload right after switching to English). Fixed by starting `useState` at `defaultLocale` and applying
+the cached value only in a post-mount `useEffect`. New regression test added alongside the normal
+default/cache/persistence tests for `LocaleProvider`. `42` `process-designer` Vitest tests passing (was
+`39`). `tsc --noEmit`/`eslint .`/`next build` clean. Docker image rebuilt/redeployed twice (once before
+the hydration fix, once after).
+
+**Live-verified via Playwright** against the running stack (logged in as the `config-admin` technical
+account): both switchers render correctly; switching locale to English changes the rendered text
+immediately (heading, buttons, tab labels) with no console/hydration errors after the fix; the choice
+persists across a page reload (`document.documentElement.lang` and the rendered text both stay
+English, via the `localStorage` cache — the technical account itself can't exercise the server
+round-trip, see below); `PUT /me/preferences` round-trips `theme`/`locale` independently without
+clobbering the other. Screenshot confirmed visually, then deleted along with the throwaway `.mjs`
+verification scripts, per this project's established convention.
+
+**`office-addin`'s open question resolved as a decision only, no code this session** (per the plan's
+own text: whichever app is picked first, the other still needs its own session regardless): it will
+keep following the host Word application's own locale automatically instead of gaining an in-app
+switcher — the same "follow the host" reasoning already applied to its existing "no theme switcher"
+precedent, arguably an even cleaner fit for locale than for theme. Recorded in
+`docs/services/office-addin.md`'s "Open Points" and in ADR 0167; no host-locale-detection code exists
+yet, deferred to whichever future session actually builds this app's i18n.
+
+**Known, pre-existing, unrelated limitation reconfirmed** (not caused by this session): `/me/preferences`
+still doesn't work for `TechnicalAccount` principals (`config-admin`, `users-admin`, ...) — they aren't
+real Keycloak users, so `admin.get_user()` 404s and the endpoint 500s. This is why the live Playwright
+verification above could only prove `localStorage`-cache persistence for `config-admin`, not the actual
+server round-trip (that half was already proven separately via curl against a real Keycloak user during
+the backend verification step). Not fixed this session — out of scope, same limitation already noted
+in an earlier session's summary for `theme`.
+
+`docs/services/auth-service.md` (new `locale` field/endpoint behavior, the Keycloak wipe-bug fix),
+`docs/services/process-designer.md` (new `LocaleProvider`/`LocaleSwitcher`, the hydration fix, updated
+test count, a new live-browser-test bullet), `docs/services/office-addin.md` (the host-locale-follow
+decision) all updated.
+
+**Next session:** P47-S2 — propagate the now-proven switcher pattern to `reviewer-ui`,
+`migration-console`, and `office-addin` (per the decision above, `office-addin` gets host-locale
+detection instead of an in-app switcher). `graphify update .` deferred to Phase 47's close (multiple
+sessions still planned: S2 through S5), not run after this session alone.
+
+---
+
+Immediately before P47-S1: **P46-S1** (Rebrand rollout — the one and only session of Phase 46, "OG Doc"
+Rebrand, **closed Phase 46**). Mechanical, no new ADR expected per this phase's own DoD.
 
 Seven i18n string edits following `office-addin`/`libreoffice-addin`'s already-done precedent
 exactly: `admin-ui`'s `meta.title`/`login.heading`/`home.title` → "OG Doc Admin"; `user-ui`'s

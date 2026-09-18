@@ -18,8 +18,8 @@
 | `POST` | `/users` | Create user (`username`, `email`, `password`, `first_name`, `last_name`) — 409 for an already-taken username. Gated like `GET /users`. **Since Post-Roadmap Phase 42 Session 2**: also checks `license-service`'s `"users"` usage dimension first, `403` if exceeded — see "License-Limit Block on New Users" below |
 | `DELETE` | `/users/{id}` | Delete user — 404 for an unknown `id`. Gated like `GET /users` |
 | `GET` | `/users/{id}` | **Since P19-S4** (ADR 0069): reverse identity resolution, counterpart to `GET /users/lookup` — returns only `{id, username}`, `404` for an unknown `id`. Same gate as `GET /users/lookup` (`users.lookup` via the "everyone" group). Must be registered after all static `/users/...` paths (registration order, see ADR 0069) |
-| `GET` | `/me/preferences` | Theme preference of the logged-in account (`{theme}`, default `"auto"`) — since P4-S6 |
-| `PUT` | `/me/preferences` | Set theme preference (`{theme}` ∈ `light`/`dark`/`high-contrast`/`auto`, otherwise 422) — since P4-S6 |
+| `GET` | `/me/preferences` | Theme and locale preference of the logged-in account (`{theme, locale}`, defaults `"auto"`/`"de"`) — since P4-S6, `locale` added in Phase 47 Session 1 |
+| `PUT` | `/me/preferences` | Partial update: `{theme?, locale?}` (`theme` ∈ `light`/`dark`/`high-contrast`/`auto`, `locale` ∈ `de`/`en`, otherwise 422) — a field omitted from the body is left unchanged, see "Theme/Locale Preference" below |
 | `GET` | `/superuser/status` | Break-glass status (4.6, since P6-S5): `{active, expires_at}`, since **P6-S6** additionally `principal_id` (since Phase 18 Session 2 the `TechnicalAccount.id`, previously the Keycloak `id`, for the Permission Service's not-shutdown lift check, 4.8) — 404 if the superuser account has not yet been created |
 | `POST` | `/superuser/deactivate` | Early, voluntary deactivation (since P6-S5) — complements the automatic expiry enforcement via the poll loop |
 | `GET` | `/users/lookup` | Exact name resolution (`?username=`) — returns only `{id, username}`, `404` for an unknown name. New in P14-S6, for `teamspace-service`'s invite-by-username (2.5): deliberately NOT gated behind `admin.user_management` like `GET /users` above — every person, not just domain admins, should be able to invite others to a team workspace. Since P19-S3 (ADR 0068) gated via the "everyone" group from permission-service (`users.lookup`, pre-seeded since P19-S2) instead of only `Depends(get_current_user)` — actual behavior is unchanged, but the permission is now admin-editable. See [ADR 0043](../adr/0043-teamspace-service-membership-and-permission-integration.md) |
@@ -54,7 +54,7 @@ On every start (`ensure_realm_and_client`, idempotent via `skip_exists=True`):
 - Realm `dms`
 - Confidential client `dms-api` with `directAccessGrantsEnabled=true`, `standardFlowEnabled=false` (no browser redirect flow in this session)
 - Audience mapper, so that `aud` in the access token contains `dms-api` instead of just `account` (Keycloak default without a mapper)
-- Declared user profile attribute `dms_theme` (since P4-S6, see below) — without this declaration, Keycloak's declarative user profile silently drops the attribute on every `update_user` call
+- Declared user profile attributes `dms_theme` (since P4-S6) and `dms_locale` (since Phase 47 Session 1, see below) — without this declaration, Keycloak's declarative user profile silently drops the attribute on every `update_user` call
 - Realm role `dms-admin` (since **P5e-S2**, `create_realm_role(..., skip_exists=True)`) — the first role actually evaluated in the system, see `docs/services/document-service.md` "File Reference Number Generator" (privileged change of `attributes["Kennzeichen"]`)
 - ~~Declared user profile attribute `dms_superuser_expires_at`~~ / ~~superuser account created here~~ — **removed since Phase 18 Session 2** ([ADR 0064](../adr/0064-superuser-migration-lokale-tokens-gateway-multi-issuer.md)): the superuser no longer lives in Keycloak, its idempotent creation now happens async in `main.py`'s lifespan (`superuser.ensure_superuser_account`, DB-based), no longer here in this synchronous, purely Keycloak-focused bootstrap step.
 - ~~Technical domain admin accounts created here~~ — **removed since Phase 18 Session 3**
@@ -67,9 +67,13 @@ On every start (`ensure_realm_and_client`, idempotent via `skip_exists=True`):
 
 **Known limitation**: `skip_exists=True` continues to prevent a later change to the rest of the client configuration (e.g. a new mapper) from being applied to an already-existing client — uncritical for dev/test, but to be kept in mind for production configuration changes. Only `standardFlowEnabled`/`redirectUris` are exempt from this since the SSO feature (see above).
 
-## Theme Preference (Concept 8, since P4-S6)
+## Theme/Locale Preference (Concept 8, since P4-S6, `locale` since Phase 47 Session 1)
 
-Cross-UI theming (light/dark/high-contrast/automatic, User UI and Admin UI) stores its preference on the user account across devices instead of only locally in the browser — rationale and pitfalls (declarative user profile trap) in [ADR 0009](../adr/0009-cross-ui-theming-profile-persistence.md). Summary: `dms_theme` is a declared Keycloak user attribute, read/written via the existing admin client (`admin_users.get_theme_preference`/`set_theme_preference`), exposed via `/me/preferences`. No new persistence component needed.
+Cross-UI theming (light/dark/high-contrast/automatic, User UI and Admin UI) stores its preference on the user account across devices instead of only locally in the browser — rationale and pitfalls (declarative user profile trap) in [ADR 0009](../adr/0009-cross-ui-theming-profile-persistence.md). Summary: `dms_theme` is a declared Keycloak user attribute, read/written via the existing admin client (`admin_users.get_theme_preference`/`set_theme_preference`), exposed via `/me/preferences`.
+
+**Since Phase 47 Session 1** ([ADR 0167](../adr/0167-locale-switcher-pattern-and-office-addin-host-locale.md)): UI display language (`de`/`en`) added the same way, as its own independent Keycloak attribute `dms_locale` (`admin_users.get_locale_preference`/`set_locale_preference`) — kept separate from `dms_theme` so either preference can be read/written without touching the other. `PUT /me/preferences` takes a dedicated `PreferencesUpdate` body with both fields optional/`None`-defaulted (not `ThemePreference`'s own defaults): only a field actually present in the request is written, so an existing caller that only ever sends `{"theme": ...}` (every app before this session) cannot accidentally reset `locale` back to its default, and vice versa.
+
+That same ADR also fixed a real, pre-existing bug present since P4-S6: `set_theme_preference`/`set_locale_preference` called `admin.update_user(user_id, {"attributes": ...})`, which Keycloak's admin API treats as a full user-representation replacement, not a merge — silently wiping `firstName`/`lastName`/`email` on every preference change. Fixed by spreading the just-read full user representation (`{**raw, "attributes": attributes}`) before writing.
 
 ## Domain-Separated Admin Roles (4.6, since P6-S5)
 

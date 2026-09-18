@@ -108,6 +108,14 @@ body {
   gap: 1rem;
 }
 
+.theme-switcher,
+.locale-switcher {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.9rem;
+}
+
 /* Tab-Umschalter Prozessdefinitionen/DMN-Entscheidungstabellen (P14-S4). */
 .tab-bar {
   display: flex;

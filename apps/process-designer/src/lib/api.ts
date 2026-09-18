@@ -118,6 +118,31 @@ export async function updateThemePreference(token: string, theme: ThemeName): Pr
   );
 }
 
+// UI display language (8, Phase 47 Session 1) - same `/me/preferences`
+// round trip as the theme above, own independent field: the backend's
+// `PreferencesUpdate` only writes a field actually present in the PUT
+// body, so this and `updateThemePreference` never clobber each other.
+export type LocaleName = "de" | "en";
+
+export async function getLocalePreference(token: string): Promise<LocaleName> {
+  const response = await request("auth-service", "me/preferences", {}, token);
+  const body = (await response.json()) as { locale: LocaleName };
+  return body.locale;
+}
+
+export async function updateLocalePreference(token: string, locale: LocaleName): Promise<void> {
+  await request(
+    "auth-service",
+    "me/preferences",
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ locale }),
+    },
+    token
+  );
+}
+
 export interface MaintenanceMode {
   active: boolean;
 }

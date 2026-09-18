@@ -4,7 +4,9 @@ import { useRouter } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
 import { useI18n } from "@/i18n";
 import { useAuth } from "@/lib/auth-context";
+import { LocaleSwitcher } from "./LocaleSwitcher";
 import { MaintenanceBanner } from "./MaintenanceBanner";
+import { ThemeSwitcher } from "./ThemeSwitcher";
 
 // A static export has no server that could perform redirects before
 // rendering (no middleware equivalent) - protection therefore kicks in
@@ -38,6 +40,10 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   return (
     <>
       <MaintenanceBanner />
+      <div className="top-bar-actions">
+        <LocaleSwitcher />
+        <ThemeSwitcher />
+      </div>
       {children}
     </>
   );

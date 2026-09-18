@@ -70,7 +70,7 @@ def test_get_preferences_defaults_to_auto(test_user):
         )
 
     assert response.status_code == 200
-    assert response.json() == {"theme": "auto"}
+    assert response.json() == {"theme": "auto", "locale": "de"}
 
 
 def test_update_preferences_persists_theme(test_user):
@@ -80,10 +80,77 @@ def test_update_preferences_persists_theme(test_user):
 
         update_response = client.put("/me/preferences", json={"theme": "dark"}, headers=headers)
         assert update_response.status_code == 200
-        assert update_response.json() == {"theme": "dark"}
+        assert update_response.json() == {"theme": "dark", "locale": "de"}
 
         get_response = client.get("/me/preferences", headers=headers)
-        assert get_response.json() == {"theme": "dark"}
+        assert get_response.json() == {"theme": "dark", "locale": "de"}
+
+
+def test_update_preferences_persists_locale(test_user):
+    """Phase 47 Session 1 - same round trip as theme, own independent
+    Keycloak attribute."""
+    with TestClient(app) as client:
+        tokens = client.post("/login", json=test_user).json()
+        headers = {"Authorization": f"Bearer {tokens['access_token']}"}
+
+        update_response = client.put("/me/preferences", json={"locale": "en"}, headers=headers)
+        assert update_response.status_code == 200
+        assert update_response.json() == {"theme": "auto", "locale": "en"}
+
+        get_response = client.get("/me/preferences", headers=headers)
+        assert get_response.json() == {"theme": "auto", "locale": "en"}
+
+
+def test_update_preferences_theme_does_not_reset_locale(test_user):
+    """Regression test for the exact bug `PreferencesUpdate`'s own docstring
+    warns about: an existing caller that only ever sends `{"theme": ...}`
+    must not silently reset an already-set `locale` back to its default."""
+    with TestClient(app) as client:
+        tokens = client.post("/login", json=test_user).json()
+        headers = {"Authorization": f"Bearer {tokens['access_token']}"}
+
+        client.put("/me/preferences", json={"locale": "en"}, headers=headers)
+        update_response = client.put("/me/preferences", json={"theme": "dark"}, headers=headers)
+
+    assert update_response.json() == {"theme": "dark", "locale": "en"}
+
+
+def test_update_preferences_does_not_wipe_other_profile_fields(test_user, keycloak_admin):
+    """Regression test for a real bug found live during this session's own
+    end-to-end verification: `admin.update_user(user_id, {"attributes":
+    ...})` isn't a merge at the Keycloak protocol level - `PUT /admin/
+    realms/{realm}/users/{id}` treats the body as the full representation,
+    so sending only `attributes` silently wiped `firstName`/`lastName`/
+    `email` on every single preference change (present since P4-S6's
+    `set_theme_preference`, only now actually exercised against a user
+    profile with those fields set). Fixed by spreading the just-read full
+    representation before overriding `attributes` (see `admin_users.
+    set_theme_preference`'s own docstring)."""
+    with TestClient(app) as client:
+        tokens = client.post("/login", json=test_user).json()
+        headers = {"Authorization": f"Bearer {tokens['access_token']}"}
+
+        client.put("/me/preferences", json={"theme": "dark"}, headers=headers)
+        client.put("/me/preferences", json={"locale": "en"}, headers=headers)
+
+        users = keycloak_admin.get_users(query={"username": test_user["username"], "exact": True})
+        profile = keycloak_admin.get_user(users[0]["id"])
+
+    assert profile["firstName"] == "Test"
+    assert profile["lastName"] == "User"
+    assert profile["email"] == f"{test_user['username']}@example.com"
+
+
+def test_update_preferences_rejects_unknown_locale(test_user):
+    with TestClient(app) as client:
+        tokens = client.post("/login", json=test_user).json()
+        response = client.put(
+            "/me/preferences",
+            json={"locale": "fr"},
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+
+    assert response.status_code == 422
 
 
 def test_update_preferences_rejects_unknown_theme(test_user):

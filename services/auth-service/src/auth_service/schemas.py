@@ -4,6 +4,9 @@ from typing import Literal
 from pydantic import BaseModel
 
 ThemeName = Literal["light", "dark", "high-contrast", "auto"]
+# UI display language (8, Phase 47 Session 1 - ADR 0007's "a second language
+# is just an additional JSON file" put into practice for the first time).
+LocaleName = Literal["de", "en"]
 
 
 class LoginRequest(BaseModel):
@@ -154,6 +157,19 @@ class DirectoryFederationStatusOut(BaseModel):
 
 class ThemePreference(BaseModel):
     theme: ThemeName = "auto"
+    locale: LocaleName = "de"
+
+
+class PreferencesUpdate(BaseModel):
+    """Request body for `PUT /me/preferences` (Phase 47 Session 1) - both
+    fields are optional and default to `None`, NOT to `ThemePreference`'s
+    own defaults: an existing caller that only ever sent `{"theme": ...}`
+    (every app before this session) must not accidentally reset the other,
+    unrelated preference back to its default on every unrelated update.
+    Only a field actually present in the request is written."""
+
+    theme: ThemeName | None = None
+    locale: LocaleName | None = None
 
 
 class RealmRoleOut(BaseModel):

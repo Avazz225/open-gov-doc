@@ -28,6 +28,13 @@ def _ensure_theme_attribute(admin: KeycloakAdmin) -> None:
     _declare_profile_attribute(admin, name="dms_theme", display_name="DMS Theme-Präferenz")
 
 
+def _ensure_locale_attribute(admin: KeycloakAdmin) -> None:
+    """UI display language (8, Phase 47 Session 1) - same declaration
+    requirement as `_ensure_theme_attribute` above (Keycloak 25+ silently
+    drops undeclared attributes, see ADR 0009)."""
+    _declare_profile_attribute(admin, name="dms_locale", display_name="DMS Sprach-Präferenz")
+
+
 def _ensure_dms_admin_role(admin: KeycloakAdmin) -> None:
     """Realm role for the first real role check in the entire system
     (P5e-S2, privileged reference number change in the Document Service) -
@@ -241,6 +248,7 @@ def ensure_realm_and_client(settings: Settings) -> None:
         skip_exists=True,
     )
     _ensure_theme_attribute(admin)
+    _ensure_locale_attribute(admin)
     _ensure_dms_admin_role(admin)
     _ensure_client_updated(admin, settings)
     _ensure_groups_mapper(admin, settings)

@@ -1,0 +1,94 @@
+{
+  "meta": {
+    "title": "OG Doc Process Designer",
+    "description": "Graphical BPMN 2.0 modeling (Process Designer, concept 7.1/8)"
+  },
+  "common": {
+    "logout": "Log out",
+    "loading": "Loading...",
+    "create": "Create",
+    "cancel": "Cancel",
+    "save": "Save",
+    "delete": "Delete",
+    "open": "Open",
+    "back": "Back to list",
+    "loadError": "Failed to load",
+    "deleteError": "Failed to delete"
+  },
+  "theme": {
+    "label": "Theme",
+    "auto": "Automatic",
+    "light": "Light",
+    "dark": "Dark",
+    "highContrast": "High contrast"
+  },
+  "locale": {
+    "label": "Language"
+  },
+  "maintenanceBanner": {
+    "text": "System-wide emergency lockdown active - only the activated superuser can act."
+  },
+  "login": {
+    "heading": "Log in",
+    "username": "Username",
+    "password": "Password",
+    "submit": "Log in",
+    "submitting": "Logging in...",
+    "error": "Login failed"
+  },
+  "nav": {
+    "processesTab": "Process definitions",
+    "dmnTab": "Decision tables (DMN)"
+  },
+  "processList": {
+    "heading": "Process definitions",
+    "newButton": "Create new",
+    "nameColumn": "Name",
+    "versionColumn": "Version",
+    "processIdColumn": "Process ID",
+    "updatedColumn": "Last changed",
+    "actionsColumn": "Actions",
+    "empty": "No process definitions yet.",
+    "history": "Version history",
+    "historyToggleShow": "Show versions",
+    "historyToggleHide": "Hide versions",
+    "deleteConfirm": "Really delete this version?",
+    "noCapabilityHint": "Saving/deleting requires the domain admin role \"Workflow configuration\"."
+  },
+  "designer": {
+    "newHeading": "New process definition",
+    "editHeading": "Edit process definition",
+    "nameLabel": "Name",
+    "nameHint": "An unchanged name saves a new version of this family, a different name creates a new family.",
+    "importButton": "Import file",
+    "exportButton": "Export as XML",
+    "saveButton": "Save",
+    "saving": "Saving...",
+    "saveSuccess": "Saved as version {version}.",
+    "savePendingApproval": "Submitted for approval - a second admin must confirm the import before the process definition becomes active.",
+    "saveError": "Failed to save",
+    "importError": "Import failed - BPMN file could not be read",
+    "loadError": "Process definition could not be loaded"
+  },
+  "dmnList": {
+    "heading": "DMN decision tables",
+    "decisionIdColumn": "Decision ID",
+    "empty": "No decision tables yet.",
+    "deleteConfirm": "Really delete this version?"
+  },
+  "dmnDesigner": {
+    "nameHint": "An unchanged name saves a new version of this family, a different name creates a new family.",
+    "saveSuccess": "Saved as version {version}.",
+    "saveError": "Failed to save",
+    "importError": "Import failed - DMN file could not be read",
+    "loadError": "Decision table could not be loaded"
+  },
+  "signatureTask": {
+    "groupLabel": "Signature (3.10)",
+    "requiredLabel": "Signature required",
+    "levelLabel": "Minimum level",
+    "levelSes": "SES",
+    "levelAes": "AES",
+    "levelQes": "QES"
+  }
+}

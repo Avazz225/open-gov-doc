@@ -73,6 +73,7 @@ from auth_service.schemas import (
     LogoutRequest,
     OidcAuthorizeOut,
     OidcCallbackRequest,
+    PreferencesUpdate,
     RealmRoleOut,
     RealmRolesRequest,
     RefreshRequest,
@@ -661,17 +662,31 @@ async def me(
 def get_my_preferences(user: dict = Depends(get_current_user)) -> ThemePreference:
     """Cross-UI theming (8, P4-S6) - the preference is attached to the user
     account (Keycloak attribute), not a single installation/single browser,
-    so it applies across devices (user feedback after P4-S5)."""
+    so it applies across devices (user feedback after P4-S5). Since Phase 47
+    Session 1 additionally the UI display language, same cross-device
+    reasoning, own independent Keycloak attribute (see `admin_users.
+    get_locale_preference`)."""
     theme = admin_users.get_theme_preference(app.state.keycloak_admin, user["sub"])
-    return ThemePreference(theme=theme)
+    locale = admin_users.get_locale_preference(app.state.keycloak_admin, user["sub"])
+    return ThemePreference(theme=theme, locale=locale)
 
 
 @app.put("/me/preferences", response_model=ThemePreference)
 def update_my_preferences(
-    payload: ThemePreference, user: dict = Depends(get_current_user)
+    payload: PreferencesUpdate, user: dict = Depends(get_current_user)
 ) -> ThemePreference:
-    admin_users.set_theme_preference(app.state.keycloak_admin, user["sub"], payload.theme)
-    return payload
+    """Partial update (Phase 47 Session 1, see `PreferencesUpdate`'s own
+    docstring): only a field actually present in the request body is
+    written, so an existing caller that only ever sends `{"theme": ...}`
+    (every app before this session) cannot accidentally reset the other
+    preference back to its default."""
+    if payload.theme is not None:
+        admin_users.set_theme_preference(app.state.keycloak_admin, user["sub"], payload.theme)
+    if payload.locale is not None:
+        admin_users.set_locale_preference(app.state.keycloak_admin, user["sub"], payload.locale)
+    theme = admin_users.get_theme_preference(app.state.keycloak_admin, user["sub"])
+    locale = admin_users.get_locale_preference(app.state.keycloak_admin, user["sub"])
+    return ThemePreference(theme=theme, locale=locale)
 
 
 async def _require_permission(user: dict, permission: str, message: str) -> None:

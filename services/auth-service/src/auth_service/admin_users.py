@@ -138,6 +138,7 @@ def delete_user(admin: KeycloakAdmin, user_id: str) -> None:
 
 
 _THEME_ATTRIBUTE = "dms_theme"
+_LOCALE_ATTRIBUTE = "dms_locale"
 
 
 def get_theme_preference(admin: KeycloakAdmin, user_id: str) -> str:
@@ -154,8 +155,36 @@ def get_theme_preference(admin: KeycloakAdmin, user_id: str) -> str:
 def set_theme_preference(admin: KeycloakAdmin, user_id: str, theme: str) -> None:
     """Merge attributes individually instead of overwriting - an update
     without existing attributes in the payload would otherwise delete them
-    in Keycloak."""
+    in Keycloak. **Bug found and fixed in Phase 47 Session 1**: sending
+    only `{"attributes": ...}` to `update_user()` isn't itself a merge at
+    the Keycloak protocol level either - `PUT /admin/realms/{realm}/
+    users/{id}` treats the body as the full representation, so any other
+    top-level field not included (`firstName`/`lastName`/`email`, ...)
+    gets silently wiped. Spreading `raw` first (the just-read full
+    representation) before overriding `attributes` keeps everything else
+    unchanged - found live during Phase 47 Session 1's own end-to-end
+    verification of the new locale preference (`set_locale_preference`
+    below shares this exact pattern, so the same fix applies to both)."""
     raw = admin.get_user(user_id)
     attributes = dict(raw.get("attributes", {}))
     attributes[_THEME_ATTRIBUTE] = [theme]
-    admin.update_user(user_id, {"attributes": attributes})
+    admin.update_user(user_id, {**raw, "attributes": attributes})
+
+
+def get_locale_preference(admin: KeycloakAdmin, user_id: str) -> str:
+    """UI display language (8, Phase 47 Session 1) - same Keycloak-attribute
+    mechanism as `get_theme_preference` above, kept as its own attribute
+    (not merged into the theme one) so either preference can be read/
+    written independently."""
+    raw = admin.get_user(user_id)
+    values = raw.get("attributes", {}).get(_LOCALE_ATTRIBUTE)
+    return values[0] if values else "de"
+
+
+def set_locale_preference(admin: KeycloakAdmin, user_id: str, locale: str) -> None:
+    """Same merge-not-overwrite reasoning, and the same full-representation
+    fix, as `set_theme_preference` above."""
+    raw = admin.get_user(user_id)
+    attributes = dict(raw.get("attributes", {}))
+    attributes[_LOCALE_ATTRIBUTE] = [locale]
+    admin.update_user(user_id, {**raw, "attributes": attributes})
