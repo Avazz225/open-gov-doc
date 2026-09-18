@@ -906,6 +906,138 @@ phase end, backend regression (`scripts/run-tests.sh --build`) + frontend regres
 (`tsc`/`eslint`/`vitest`/`next build`) before completion, live verification in a real browser for every
 UI change.
 
+## Phase 44+: Gap Analysis After Phase 43, Plus Three New User-Requested Initiatives
+
+After Phase 43 completed, a third gap-analysis round (same methodology as Phases 32+/38+ above) plus
+three new user-requested initiatives — English i18n support, a modern/consistent 2026 visual look, and
+completing the "OG Doc" rebrand — were folded into this new plan. Six parallel research agents covered:
+ADR self-named open scope (all 161 ADRs), `docs/services/*.md` Open Points (all ~50 files), concept
+coverage plus reassessment of every previously-deferred item, frontend i18n architecture, frontend
+visual-design current state, and a "DMS" branding-occurrence audit. Result: the system remains mature —
+most suspected gaps were already closed, still-correctly deferred, or already precisely re-scoped by
+Phase 43 itself. Real findings fell into four groups: cheap security/correctness fixes, dependency-now-
+resolved functional completions, the rebrand (small, mostly mechanical), and the two new initiatives,
+each needing one foundational session before a mechanical per-app rollout. (Drive-by finding: `CLAUDE.md`
+references `Business__DMS-Konzept.md`, but the file on disk is `Konzept.md` — fixed in P46-S1 below.)
+
+### Phase 44 — Security & Correctness Hardening
+
+| Session | Deliverable |
+|---|---|
+| P44-S1 | `federation-hub-service`: gate the one real mutating, currently-ungated endpoint. `GET /handovers` stays ungated (pure metadata, same precedent as `GET /installations`), but `POST /handovers/{id}/retry` has no admin-token model at all today, unlike `POST /installations/{id}/revoke` (`hub_operator_key`). Session decides whether `/retry` reuses that same key or needs its own. |
+| P44-S2 | `folder-service`/`teamspace-service`: close two write-bypass/orphan gaps in the same deletion-path area. (a) `teamspace-member`'s broad `folder.write` lets a non-manager delete an entire teamspace via `folder-service`'s `DELETE /folders/{root_folder_id}` directly, bypassing the manager-only guard. (b) `folder-service`'s forced-purge/trash-expiry-purge paths never publish `folder.resource.deleted` (only direct `DELETE /folders/{id}` does), leaving orphaned `permission-service` `ResourceNode` rows — an already-identified-but-untracked gap from ADR 0154. |
+| P44-S3 | `permission-service`: maintenance-mode coverage + service-to-service write enforcement. (a) Maintenance mode (4.8/ADR 0024) still can't pause `federation-hub-service` delivery or halt `plugin-orchestration-service` instances — both blocking dependencies now exist. (b) No system-wide prohibition on service-to-service writes during maintenance beyond the gateway's own header — ADR 0152 already gives a concrete, ready-to-build recommendation (`is_maintenance_active()` in a shared client lib); this session builds it. |
+| P44-S4 | Small correctness fixes bundle: `virus-scan-service` never notifies the uploader on a virus hit even though the event already exists and `notification-service` has existed since P6-S2 (cheap, high-value, simply never wired); `workflow-service`'s `create_dmn_definition` has the same cross-family race `create_process_definition` already fixed via an advisory lock (ADR 0096) — the DMN side was missed; `case-service`'s fully-automated process (no manual task) leaves case status `"open"` instead of `"closed"`. |
+
+**Definition of Done**: regression test per fix, especially one proving the teamspace/folder-service
+bypass is closed; new ADR for P44-S1/S2 (real authorization-model decisions) and a short one for P44-S3's
+maintenance-mode-coverage half (the write-enforcement half already has its design in ADR 0152); docs and
+`PROGRESS.md` updated per session.
+
+### Phase 45 — Dependency-Resolved Functional Completions
+
+Each item below was explicitly deferred earlier specifically because a named dependency didn't exist
+yet — that dependency now exists in every case.
+
+| Session | Deliverable |
+|---|---|
+| P45-S1 | `reporting-service`: license-utilization report, deferred pending `license-service` (exists since Phase 9). |
+| P45-S2 | `favorite-service`/`user-ui`: case-binder favorites, deferred pending a case-browsing UI ("Umlaufmappen", shipped Phase 34). |
+| P45-S3 | `ocr-service`/`object-type-service`: `needs_review` and status-transition (4.5) workflow integration, both deferred pending `workflow-service` (exists since Phase 6) — likely the largest session of this phase; split into two if the OCR-review and status-transition halves need genuinely independent design once started. |
+| P45-S4 | UI completion bundle: case-browsing-ui's document list resolves real titles instead of raw `document_id`; `admin-ui`'s RBAC gating extends from `/users/` (currently the only gated area) to the rest of its admin pages for consistency (backend endpoints are typically already gated, this closes the frontend-side inconsistency). |
+
+**Definition of Done**: tests per fix; no new ADR expected (pure functional completion of already-
+established patterns and now-satisfied dependencies); docs and `PROGRESS.md` updated per session.
+
+### Phase 46 — "OG Doc" Rebrand
+
+| Session | Deliverable |
+|---|---|
+| P46-S1 | Rebrand rollout, one session, mechanical. Seven one-line i18n string edits (`admin-ui`: `meta.title`/`login.heading`/`home.title`; `user-ui`/`reviewer-ui`/`migration-console`/`process-designer`: `meta.title` each) — `office-addin`/`libreoffice-addin` are already fully done, serving as the precedent to copy exactly. Plus: `rendering-service`'s `pdf_archive.py` hardcodes "DMS Rendering Service" into every archival-copy PDF's `/Producer` metadata — real, delivered branding, one line to fix. Plus: a spot-check of `notification-service`'s `EmailTemplate` DB rows for any seeded "DMS" text (outside static-code search reach). Plus: fix the stale `Business__DMS-Konzept.md` → `Konzept.md` filename reference in `CLAUDE.md`. |
+
+**Definition of Done**: no new ADR expected (pure content/string change); a quick visual check per app
+(browser tab title, login screen) that the new name renders correctly; docs and `PROGRESS.md` updated.
+
+### Phase 47 — English i18n
+
+Every app's mechanism is already extensible by design (ADR 0007: "a second language is just an
+additional JSON file"), duplicated per app rather than shared (deliberate, ADR 0006/0007) — the real
+sequencing question is where to build the one genuinely missing piece (a language switcher; none exists
+today in any app) once, then repeat translation content per app.
+
+| Session | Deliverable |
+|---|---|
+| P47-S1 | Build and validate the switcher pattern once, in one small app. Session decides between `office-addin` and `process-designer` as the first target (both ~50-67 keys) — reuses the existing per-user theme-preference round-trip (`PUT /me/preferences`, ADR 0009) for persisting the chosen locale. Also resolves `office-addin`'s own open question (follow the host Office application's locale automatically, matching its existing "no manual theme switcher, follows host" reasoning, vs. its own in-app switcher) — whichever app is picked first, the other still needs its own session regardless. |
+| P47-S2 | Propagate to the remaining small apps: `reviewer-ui`, `migration-console`, and whichever of `office-addin`/`process-designer` wasn't done in S1 — pure repetition of the now-proven pattern. |
+| P47-S3 | `user-ui` English translation + switcher (569 keys, the larger of the two big apps). |
+| P47-S4 | `admin-ui` English translation + switcher (752 keys, the largest dictionary of all apps). |
+| P47-S5 | `libreoffice-addin`: i18n from scratch. No dictionary/`t()`-equivalent abstraction exists at all today (Python/UNO dialogs, ~75 hardcoded German string literals) — builds the extraction-into-a-dictionary mechanism first, then decides its own locale-switching strategy (conventionally host-locale-follow for LibreOffice extensions, mirroring the `office-addin` question but for a genuinely different tech stack with no existing precedent to copy). |
+
+**Note, flagged not resolved by this phase**: backend `HTTPException(detail=...)` error text is plain
+German, shown 1:1 in every frontend today — genuinely end-to-end English would eventually need backend
+error messages to become locale-aware too. Out of scope for "the frontends" as asked.
+
+**Definition of Done**: no new ADR expected for S2-S5 (repetition of an already-decided pattern); S1 gets
+a short ADR recording the switcher-persistence mechanism and the office-addin host-locale decision; live
+browser verification of the actual switcher plus a sample of translated strings per app.
+
+### Phase 48 — Design System Foundation ("2026 Modern Look")
+
+| Session | Deliverable |
+|---|---|
+| P48-S1 | Extract the existing `--dms-*` CSS-variable convention into one real shared source, define the missing token scales, and get explicit user sign-off before any app is touched. Today the color-token convention and the `data-theme` light/dark/high-contrast mechanism are consistent in spirit but copy-pasted independently per app (deliberate, ADR 0006), already visibly drifting (missing tokens in `office-addin`, differing high-contrast fixes landing at different times). Builds: (a) one real shared source (new `libs/dms-ui` CSS/token package, or a shared Next.js config layer — session decides) — a genuine, deliberate reversal of ADR 0006's "duplicate on purpose" stance for this one layer, recorded in a new ADR that also names which parts stay intentionally exceptional (`office-addin`'s reduced theming stays as-is); (b) actual spacing/radius/shadow/typography scales next to the existing color tokens (today only colors are tokenized); (c) a real design-system preview published as an Artifact (the token set, the spacing/radius scale, representative components in light/dark/high-contrast) for the user to review and approve BEFORE any app is touched — the right checkpoint for something this subjective. |
+
+**Definition of Done**: new ADR required (real architecture decision); the published preview Artifact is
+the actual sign-off gate — do not proceed to Phase 49 without the user having reviewed it; docs and
+`PROGRESS.md` updated.
+
+### Phase 49 — Visual Modernization Rollout
+
+| Session | Deliverable |
+|---|---|
+| P49-S1..n | Apply the approved token/scale system to each app, grouped by size the same way Phase 47 was sequenced (small apps together first to prove the rollout mechanics cheaply, then `user-ui`/`admin-ui` each getting their own session). Each session ends with real browser verification — before/after screenshots of the actual running app. `office-addin`'s already-intentional reduced theming (established in P48-S1) is preserved, not blanket-unified with the other five apps. |
+
+**Definition of Done**: no new ADR expected per session (execution of the already-approved P48-S1
+design) unless a session hits a genuine per-app exception worth recording; live browser verification with
+screenshots, both themes, for every session; docs and `PROGRESS.md` updated.
+
+### Phase 50 — Remaining Lower-Priority Hardening
+
+Bundles the real-but-lower-value findings from this round's `docs/services/*.md` sweep that don't fit
+naturally into Phases 44–49: `storage-service`'s `replication.py` not propagating `lock_until` to the
+backend `write()` call on caught-up replication for governance targets; `rendering-service`'s rendition
+permission checks remaining coarse (service-wide) instead of inheriting the originating document's
+permission; `webdav-connector`'s root `PROPFIND` being O(N) and degrading with document volume;
+`auth-service`'s AD-group→role mapping rules having no admin-UI CRUD (API-only); `notification-service`/
+`signature-service` both independently reusing the `users-admin` technical account as an internal service
+identity (the same small architectural-debt item flagged twice, worth one shared fix rather than two
+separate patches).
+
+**Definition of Done**: tests per fix; no new ADR expected (polish/hardening of already-established
+patterns); docs and `PROGRESS.md` updated per session.
+
+## Deliberately Not Included in Phases 44–50
+
+- **`mail-connector`'s Microsoft Graph/O365 backend** (ADR 0161) — stays scoped, not scheduled; no
+  operator need identified, needs a real Azure AD tenant to build against.
+- **Teamspace group invitation** (ADR 0160) — stays scoped, not scheduled, same reasoning.
+- **`workflow-service`'s distributed lock for boundary timers across replicas** — still correctly
+  deferred; `workflow-service` remains single-replica by default (`infra/k8s/dms/values.yaml`'s
+  autoscaling only covers four hot-path services), so the premise this gap depends on still doesn't hold.
+- **SAML 2.0, QES, PKCS#11/HSM, OCSP/CRL, XAdES/CAdES, Excel/PowerPoint/Outlook for `office-addin`,
+  Calc/Impress for `libreoffice-addin`, CheckMK integration** — all re-checked this round, all still
+  valid with no new trigger found.
+- Assorted named minor polish items already deferred in the Phase 38+ round above (`config-service`'s
+  shallow diff, `search-service`'s two-word proximity cap, `registry-service`'s unreachable-instance
+  cleanup) — unchanged, still individually too low-value for their own session.
+
+**Definition of Done for Phases 44–50** (unchanged, `CONTRIBUTING.md`): tests green per session, new ADR
+for non-trivial decisions (see per-phase notes above), `PROGRESS.md` updated, `graphify update .` at
+phase end only, backend regression (`scripts/run-tests.sh --build`) + frontend regression
+(`tsc`/`eslint`/`vitest`/`next build`) before completion, real browser verification (screenshots) for
+every UI-visible change — non-negotiable for Phases 47/49 specifically, since their entire point is
+user-visible.
+
 ## PROGRESS.md — Resume Mechanism
 
 `dms/PROGRESS.md` is created as the first order of business in P0-S1 and is the entry point for every new session:

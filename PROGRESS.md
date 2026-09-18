@@ -48,8 +48,48 @@ assigned, awaiting a future phase if an installation actually needs Exchange Onl
 **This closes Phase 43** ("Build/Scoping Sessions for Larger Topics") — `graphify update .` now runs,
 per the standing "only at phase-end" rule.
 
-**Next session:** not yet planned — Phase 43 is complete. See `IMPLEMENTATION_PLAN.md` for the phase
-index and whatever comes next.
+**Next session:** **P44-S1** (`federation-hub-service`: gate the ungated `POST /handovers/{id}/retry`
+endpoint) — see below and `IMPLEMENTATION_PLAN.md` "Phase 44+" for the full new plan.
+
+---
+
+Immediately after P43-S3 concluded the entire Phase 43 plan, the user requested a third gap
+re-analysis — same methodology as after P31-S13 and P37-S1: six parallel research agents this time (ADR
+self-named-open-scope sweep across all 161 ADRs, `docs/services/*.md` Open-Points sweep across ~50
+files, concept-coverage check plus reassessment of every previously-deferred item across three separate
+deferred-item lists, frontend i18n architecture across all six React apps plus `libreoffice-addin`,
+frontend visual-design current state across all six apps, and a "DMS"-branding-occurrence audit) —
+alongside three concrete new initiatives the user asked to fold in: English i18n support, a modern/
+consistent 2026 visual look, and completing the "OG Doc" rebrand (a naming decision from an earlier
+session, only executed so far in `office-addin`/`libreoffice-addin`).
+
+**Result**: the system remains mature — most suspected gaps were already closed, still-correctly
+deferred, or already precisely re-scoped by Phase 43 itself (teamspace group invitation/ADR 0160,
+`mail-connector`'s Graph backend/ADR 0161 — both correctly stay scoped-not-scheduled). Real findings:
+a short list of cheap security/correctness fixes (`federation-hub-service`'s ungated retry endpoint, a
+real teamspace/`folder-service` write-bypass, `permission-service`'s maintenance-mode coverage gaps),
+several "was blocked on X, X now exists" dependency-resolved functional completions
+(`reporting-service`'s license-utilization report, case-binder favorites, OCR/object-type-service
+workflow integration), a small, almost entirely mechanical rebrand (2 of 8 apps already done as
+precedent, 7 one-line string edits plus one PDF-metadata string left), and the two new initiatives —
+each needing one foundational session (a language switcher; a shared design-token system with a
+published preview Artifact for sign-off) before a mechanical per-app rollout. A drive-by finding: no
+uncovered concept requirement exists (Part 1 of the concept-coverage check came back clean), and exactly
+one previously-deferred item turned out re-openable (cross-installation XDOMEA handoff — but that was
+already resolved by P43-S1 itself, so nothing new to add there); every other deferred item's original
+blocking reason still holds, re-verified rather than assumed.
+
+This produced a new plan, **Phases 44–50**, added to `IMPLEMENTATION_PLAN.md` right after Phase 43
+(security/correctness hardening → dependency-resolved completions → rebrand → English i18n → design-
+system foundation → visual-modernization rollout → remaining lower-priority hardening), approved via the
+same plan-mode flow as the two prior rounds (plan file: `~/.claude/plans/ich-habe-hier-ein-calm-thacker.md`,
+now containing all three plans). See `IMPLEMENTATION_PLAN.md` "Phase 44+" for the full breakdown and
+reasoning per session.
+
+---
+
+Immediately before this planning round: **P43-S3** (scoping-only: a Microsoft Graph/O365 mailbox backend
+for `mail-connector` — third and last session of Phase 43, full writeup above under "Last completed").
 
 ---
 
