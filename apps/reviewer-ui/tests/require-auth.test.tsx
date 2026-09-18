@@ -1,7 +1,7 @@
 import { render } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RequireAuth } from "@/components/RequireAuth";
-import { I18nProvider } from "@/i18n";
+import { LocaleProvider } from "@/lib/locale-context";
 import { ThemeProvider } from "@/lib/theme-context";
 
 const replaceMock = vi.fn();
@@ -25,13 +25,13 @@ vi.mock("@/lib/auth-context", async () => {
 
 function renderProtected() {
   return render(
-    <I18nProvider>
+    <LocaleProvider>
       <ThemeProvider>
         <RequireAuth>
           <p>secret content</p>
         </RequireAuth>
       </ThemeProvider>
-    </I18nProvider>
+    </LocaleProvider>
   );
 }
 

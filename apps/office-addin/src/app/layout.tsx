@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import Script from "next/script";
 import type { ReactNode } from "react";
 import { OfficeGate } from "@/components/OfficeGate";
-import { I18nProvider } from "@/i18n";
 import de from "@/i18n/de.json";
 import { AuthProvider } from "@/lib/auth-context";
+import { LocaleProvider } from "@/lib/locale-context";
 import "./globals.css";
 
 // Direct JSON import instead of via `@/i18n` (marked with "use client"
@@ -33,11 +33,11 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         />
       </head>
       <body>
-        <I18nProvider>
+        <LocaleProvider>
           <OfficeGate>
             <AuthProvider>{children}</AuthProvider>
           </OfficeGate>
-        </I18nProvider>
+        </LocaleProvider>
       </body>
     </html>
   );

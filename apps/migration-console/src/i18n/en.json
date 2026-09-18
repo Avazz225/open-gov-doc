@@ -1,0 +1,96 @@
+{
+  "meta": {
+    "title": "OG Doc Migrations-Konsole",
+    "description": "Installation pairing and transfer operations (concept 7.2/8)"
+  },
+  "common": {
+    "logout": "Log out",
+    "loading": "Loading...",
+    "cancel": "Cancel",
+    "create": "Create",
+    "delete": "Delete",
+    "loadError": "Failed to load",
+    "actionError": "Action failed",
+    "back": "Back to list"
+  },
+  "theme": {
+    "label": "Theme",
+    "auto": "Automatic",
+    "light": "Light",
+    "dark": "Dark",
+    "highContrast": "High contrast"
+  },
+  "locale": {
+    "label": "Language"
+  },
+  "maintenanceBanner": {
+    "text": "System-wide emergency lockdown active - only the activated superuser can act."
+  },
+  "login": {
+    "heading": "Log in",
+    "username": "Username",
+    "password": "Password",
+    "submit": "Log in",
+    "submitting": "Logging in...",
+    "error": "Login failed"
+  },
+  "nav": {
+    "transfers": "Transfers",
+    "pairedInstallations": "Paired installations"
+  },
+  "pairedInstallations": {
+    "heading": "Paired installations (7.2)",
+    "hint": "Direct installation pairing instead of hub mediation (ADR 0034) - each row is a possible target installation for a transfer.",
+    "newButton": "Pair installation",
+    "nameColumn": "Name",
+    "baseUrlColumn": "Gateway address",
+    "createdColumn": "Created at",
+    "actionsColumn": "Action",
+    "empty": "No installation paired yet.",
+    "displayNameLabel": "Display name",
+    "baseUrlLabel": "Gateway address of the target installation",
+    "apiKeyLabel": "API key (leave empty if this installation is initiating the pairing)",
+    "submit": "Pair",
+    "submitting": "Pairing...",
+    "apiKeyNotice": "API key (visible only now, cannot be retrieved again):",
+    "deleteConfirm": "Really remove this pairing?"
+  },
+  "transfers": {
+    "heading": "Transfers (7.2)",
+    "hint": "Migration/handover operations between this and a paired installation - itself running as an auditable, resumable workflow (workflow-service).",
+    "statusFilterLabel": "Status",
+    "statusAll": "All",
+    "newButton": "New transfer",
+    "idColumn": "ID",
+    "sourceColumn": "Source folder",
+    "targetColumn": "Target",
+    "statusColumn": "Status",
+    "progressColumn": "Progress",
+    "createdColumn": "Started at",
+    "actionsColumn": "Action",
+    "empty": "No transfers yet.",
+    "detailButton": "Details",
+    "sourceFolderIdLabel": "Source folder ID",
+    "targetInstallationLabel": "Target installation",
+    "targetInstallationEmpty": "Pair an installation first",
+    "createdByLabel": "Started by",
+    "dryRunLabel": "Dry run only (no data movement)",
+    "retentionDaysLabel": "Deletion delay in days (empty = default)",
+    "submit": "Start transfer",
+    "submitting": "Starting...",
+    "pendingApprovalNotice": "Four-eyes approval required (4.3) - request {id} was created, the transfer starts after approval.",
+    "startError": "Transfer could not be started",
+    "detailHeading": "Transfer details",
+    "documentsProgress": "{copied}/{total} copied, {verified} verified",
+    "dryRunBadge": "Dry run",
+    "errorLabel": "Error",
+    "phasesHeading": "Timeline",
+    "phaseCreated": "Created",
+    "phaseLocked": "Locked",
+    "phaseCopied": "Copied",
+    "phaseVerified": "Verified",
+    "phaseReleased": "Released",
+    "phaseDeletionScheduled": "Deletion scheduled",
+    "phaseDeleted": "Source deleted"
+  }
+}

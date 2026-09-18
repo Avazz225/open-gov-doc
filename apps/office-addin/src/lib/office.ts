@@ -20,6 +20,18 @@ export async function waitForOfficeReady(): Promise<void> {
   await Office.onReady();
 }
 
+// UI display language (8, Phase 47 Session 2, ADR 0167) - this add-in
+// follows Word's own display language instead of offering its own
+// switcher (space constraints, same "follow the host" reasoning already
+// applied to the missing theme switcher, see docs/services/
+// office-addin.md). `Office.context.displayLanguage` is only valid after
+// `Office.onReady()` has resolved, like every other `Office.context`
+// access in this file - callers must only read it from inside
+// `OfficeGate`'s ready branch (see `lib/locale-context.tsx`).
+export function getHostDisplayLanguage(): string | undefined {
+  return Office.context.displayLanguage;
+}
+
 // `Office.context.document.settings` is add-in-specific key/value state
 // stored inside the file itself (its own XML custom part) - designed for
 // EXACTLY this purpose: "which DMS document belongs to this

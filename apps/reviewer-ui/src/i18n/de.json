@@ -17,6 +17,9 @@
     "dark": "Dunkel",
     "highContrast": "Hoher Kontrast"
   },
+  "locale": {
+    "label": "Sprache"
+  },
   "maintenanceBanner": {
     "text": "Systemweite Notfallsperre aktiv - nur der aktivierte Superuser ist handlungsfähig."
   },

@@ -2,15 +2,18 @@
 
 import { createContext, useContext, type ReactNode } from "react";
 import de from "./de.json";
+import en from "./en.json";
 
-// Vorbereitet für weitere Sprachen (Konzept 8, "Anpassbarkeit"), deckt aber
-// bewusst erstmal nur Deutsch ab, identisches Muster wie den übrigen Apps.
-export type Locale = "de";
+// Zweite Sprache (Konzept 8, Phase 47 Session 2) - anders als die anderen
+// Apps folgt dieses Add-in dem Host (Word) automatisch statt einem eigenen
+// Sprachumschalter (ADR 0167, gleiche Begründung wie das bereits fehlende
+// Theme-Umschalter) - siehe `lib/locale-context.tsx`.
+export type Locale = "de" | "en";
 export const defaultLocale: Locale = "de";
 
 type Dictionary = typeof de;
 
-const dictionaries: Record<Locale, Dictionary> = { de };
+const dictionaries: Record<Locale, Dictionary> = { de, en };
 
 function resolve(dict: Dictionary, path: string): string {
   const value = path

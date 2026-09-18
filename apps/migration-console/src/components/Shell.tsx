@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { useI18n } from "@/i18n";
 import { useAuth } from "@/lib/auth-context";
+import { LocaleSwitcher } from "./LocaleSwitcher";
 import { MaintenanceBanner } from "./MaintenanceBanner";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 
@@ -32,6 +33,7 @@ export function Shell({ children }: { children: ReactNode }) {
           </Link>
         </nav>
         <div className="top-bar-actions">
+          <LocaleSwitcher />
           <ThemeSwitcher />
           {user && <span>{user.username}</span>}
           <button type="button" onClick={logout}>

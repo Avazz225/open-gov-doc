@@ -2,7 +2,70 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P47-S1 (Build and validate the locale-switcher pattern once, in
+**Last completed:** P47-S2 (Propagate the switcher pattern to the remaining small apps —
+`reviewer-ui`, `migration-console`, `office-addin` — second session of Phase 47, "English i18n").
+Pure repetition of P47-S1's already-decided pattern, no new ADR expected per the plan's own DoD.
+
+**`reviewer-ui`/`migration-console`** (identical treatment, both had the exact same pre-P47-S1
+`ThemeProvider`/`I18nProvider`/`Shell.tsx` structure as `process-designer`): own `en.json` (112 keys
+for `reviewer-ui`, 75 for `migration-console`, including a new `locale.label` key added to both
+dictionaries in both apps), `LocaleProvider`/`useLocale()` (`lib/locale-context.tsx`) copied verbatim
+from `process-designer`'s hydration-safe version (starts at `defaultLocale`, applies a cached
+non-default locale only in a post-mount `useEffect` — never as the initial `useState` value, avoiding
+the React error #418 already found and fixed in P47-S1), `getLocalePreference`/`updateLocalePreference`
+added to `api.ts`, `LocaleSwitcher.tsx` copied and wired into `Shell.tsx`'s existing `.top-bar-actions`
+row (both apps already had `ThemeSwitcher` actually working here, unlike `process-designer`'s
+previously-dead one — no incidental fix needed this time). `layout.tsx` restructured in both apps:
+`I18nProvider` moved from the outer position into `LocaleProvider`'s internal render, itself moved
+inside `AuthProvider`.
+
+**One real, pre-existing test broken by the restructuring, found and fixed**: `reviewer-ui`'s
+`tests/require-auth.test.tsx` rendered `RequireAuth` (which now renders `Shell` → `LocaleSwitcher` →
+`useLocale()`) wrapped only in a bare `I18nProvider`, not `LocaleProvider` — fixed by swapping the
+wrapper (`I18nProvider` is no longer imported directly there, `LocaleProvider` renders it internally).
+`migration-console` has no equivalent test, needed no fix. New `locale-context.test.tsx` added to both
+apps (3 tests each: default/cache-after-mount/persistence, mirroring `process-designer`'s regression
+test for the hydration-safety property). `47`/`17` Vitest tests passing respectively (were `44`/`14`).
+`tsc --noEmit`/`eslint .`/`next build` clean for both. Docker images rebuilt/redeployed.
+**Live-verified via Playwright** (logged in as `config-admin`): both switchers render, switching to
+English changes the rendered text immediately with no console/hydration errors, persists across a
+page reload via the `localStorage` cache (the technical account can't exercise the actual server
+round-trip — same pre-existing, unrelated `/me/preferences`-for-technical-accounts limitation
+reconfirmed in P47-S1, not fixed here either). Screenshots checked visually, then deleted along with
+the throwaway `.mjs` scripts.
+
+**`office-addin`** (different task than the other two — no switcher, per P47-S1's own decision):
+own `en.json` (50 keys). `i18n/index.tsx` gained `en`, same as the other apps. New
+`lib/locale-context.tsx` — structurally similar `LocaleProvider`/`useLocale()`, but no `localStorage`
+cache and no backend persistence at all (this app never called `/me/preferences` for anything, and
+still doesn't): starts at `defaultLocale`, exposes `setLocale` for exactly one caller. New
+`getHostDisplayLanguage()` in `lib/office.ts` (`Office.context.displayLanguage`, a BCP-47 tag).
+`OfficeGate.tsx` (the one place that already waits for `Office.onReady()`, since
+`Office.context.displayLanguage` is invalid before that) now also calls
+`resolveLocaleFromDisplayLanguage(getHostDisplayLanguage())` and applies it via `setLocale`, exactly
+once, right after Office becomes ready — matching or falling back to `defaultLocale` for any display
+language without a matching dictionary (only `de`/`en` exist). `layout.tsx` restructured the same way
+(`I18nProvider` → `LocaleProvider`, itself still outside `OfficeGate` since `OfficeGate` needs `t()`
+for its own loading/error text before Office is even ready). `tests/office-mock.ts` gained a
+`displayLanguage` option on `installOfficeMock()`; new `tests/office-gate.test.tsx` (3 tests) proves
+the detection logic against a mocked `Office.context` — German stays German, English switches,
+an unsupported language (`fr-FR`) falls back to the default. `21` tests passing (was `18`).
+`tsc --noEmit`/`eslint .`/`next build` clean. Docker image rebuilt/redeployed.
+**No live browser verification possible** — same pre-existing, already-documented limitation as every
+other office-addin feature (no real Office host in this environment); the Vitest coverage against a
+mocked `Office` object is this app's own established verification method for anything host-dependent.
+
+`docs/services/reviewer-ui.md`/`migration-console.md` (new i18n/locale section, updated test counts),
+`docs/services/office-addin.md` (new "i18n: Follows the Host Locale" section, updated test count,
+"Open Points" bullet updated from "decision recorded, not yet built" to "built, verified via mock")
+all updated.
+
+**Next session:** P47-S3 — `user-ui` English translation + switcher (569 keys, the larger of the two
+big apps). `graphify update .` still deferred to Phase 47's close (S3 through S5 remain).
+
+---
+
+Immediately before P47-S2: **P47-S1** (Build and validate the locale-switcher pattern once, in
 `process-designer` — first session of Phase 47, "English i18n"). Short ADR:
 [0167](docs/adr/0167-locale-switcher-pattern-and-office-addin-host-locale.md).
 

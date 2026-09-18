@@ -11,14 +11,16 @@ export interface OfficeMockState {
   savedSettings: boolean;
   lastInsertedBase64: string | null;
   fileSlices: number[][];
+  displayLanguage: string;
 }
 
-export function installOfficeMock(): OfficeMockState {
+export function installOfficeMock(options: { displayLanguage?: string } = {}): OfficeMockState {
   const state: OfficeMockState = {
     settingsStore: {},
     savedSettings: false,
     lastInsertedBase64: null,
     fileSlices: [[1, 2, 3]],
+    displayLanguage: options.displayLanguage ?? "de-DE",
   };
 
   const AsyncResultStatus = { Succeeded: "succeeded", Failed: "failed" } as const;
@@ -65,7 +67,7 @@ export function installOfficeMock(): OfficeMockState {
 
   (globalThis as Record<string, unknown>).Office = {
     onReady: vi.fn().mockResolvedValue({ host: "Word", platform: "PC" }),
-    context: { document },
+    context: { document, displayLanguage: state.displayLanguage },
     AsyncResultStatus,
     FileType: { Compressed: "compressed" },
   };

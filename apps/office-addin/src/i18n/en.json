@@ -1,0 +1,70 @@
+{
+  "meta": {
+    "title": "OG Doc - Office Add-in",
+    "description": "Word add-in for OG Doc: open/save, metadata, workflows, template library (concept 3.3a)"
+  },
+  "common": {
+    "loading": "Loading...",
+    "logout": "Log out"
+  },
+  "login": {
+    "heading": "Log in",
+    "username": "Username",
+    "password": "Password",
+    "submit": "Log in",
+    "submitting": "Logging in...",
+    "error": "Login failed"
+  },
+  "officeGate": {
+    "loading": "Initializing add-in...",
+    "error": "Office.js could not be initialized - this add-in must run inside Word."
+  },
+  "documentPicker": {
+    "heading": "Open from OG Doc",
+    "placeholder": "Search document...",
+    "searchButton": "Search",
+    "openButton": "Open",
+    "searchError": "Search failed"
+  },
+  "templatePicker": {
+    "heading": "New from template",
+    "hint": "Shows documents from the root folder \"{folder}\" - access follows the usual folder read rights.",
+    "empty": "No templates available (no \"Templates\" folder found, or no read rights).",
+    "useButton": "Use",
+    "loadError": "Templates could not be loaded"
+  },
+  "metadataForm": {
+    "titleLabel": "Title",
+    "saveButton": "Save metadata",
+    "saving": "Saving...",
+    "saveError": "Failed to save"
+  },
+  "workflowPanel": {
+    "heading": "Workflow",
+    "empty": "No running workflows for this document.",
+    "loadError": "Workflows could not be loaded",
+    "startError": "Workflow could not be started",
+    "completeError": "Task could not be completed",
+    "completeButton": "Complete",
+    "startLabel": "Start new workflow",
+    "selectPlaceholder": "Select process...",
+    "startButton": "Start",
+    "runningNoTask": "Running ({id}...) - no task ready"
+  },
+  "taskPane": {
+    "loadError": "Document could not be loaded",
+    "openError": "Failed to open",
+    "templateError": "Template could not be loaded",
+    "lockConflict": "Note: document is locked ({detail}) - opened read-only.",
+    "lockConflictGeneric": "Note: document could not be locked - opened read-only.",
+    "metadataSaved": "Metadata saved.",
+    "saveError": "Failed to save to OG Doc",
+    "saved": "Saved to OG Doc.",
+    "savedAsConflictCopy": "Saved as a conflict copy - the main version was changed by someone else in the meantime.",
+    "newFromTemplateHeading": "New document from template",
+    "saveNewDocumentButton": "Save as new document in OG Doc",
+    "readOnlyHint": "Document is currently locked by someone else - saving is disabled.",
+    "saveVersionButton": "Save to OG Doc",
+    "unlinkButton": "Unlink"
+  }
+}

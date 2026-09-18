@@ -48,12 +48,16 @@ Exclusively via the API gateway (3.5):
 | Identity after login | `GET /api/auth-service/me` |
 | List/create/remove paired installations | `GET/POST/DELETE /api/migration-service/paired-installations[/{id}]` |
 | List/create/detail transfers | `GET/POST /api/migration-service/transfers`, `GET /api/migration-service/transfers/{id}` |
-| Read/write theme preference | `GET/PUT /api/auth-service/me/preferences` |
+| Read/write theme and locale preference | `GET/PUT /api/auth-service/me/preferences` (`locale` since Phase 47 Session 2) |
 | Emergency shutdown / maintenance mode status | `GET /api/permission-service/maintenance-mode` |
 
 ## Theming/i18n/auth state
 
-Identical provider copy from user-ui/admin-ui/process-designer/reviewer-ui (`ThemeProvider`, `I18nProvider`, `auth-context.tsx`), own `src/i18n/de.json`, global `dms.tokens` storage key (single installation). **Since Post-Roadmap Phase 33 Session 1** ([ADR 0135](../adr/0135-accessibility-audit-five-frontend-apps.md)): the `high-contrast` theme's `--dms-accent-bg` was fixed from an accidental `#ffff00` (identical to `--dms-accent`, rendering `.badge-pending` — the dry-run badge in `TransferConsole.tsx` — as illegible yellow-on-yellow) to `#000000`, matching `--dms-danger-bg`/`--dms-success-bg`'s pattern; `.badge` also gained the `high-contrast`-only `border: 1px solid currentColor` rule `user-ui`/`admin-ui` already had since ADR 0119, so `.badge-approved`/`.badge-rejected` keep a visible pill shape once the background flattens to the page background.
+Identical provider copy from user-ui/admin-ui/process-designer/reviewer-ui (`ThemeProvider`, `I18nProvider`, `auth-context.tsx`), own `src/i18n/de.json`, global `dms.tokens` storage key (single installation).
+
+**Since Phase 47 Session 2** ([ADR 0167](../adr/0167-locale-switcher-pattern-and-office-addin-host-locale.md)): the language-switcher pattern proven in `process-designer` (P47-S1) propagated here — own `src/i18n/en.json`, a new `LocaleProvider`/`useLocale()` (`lib/locale-context.tsx`) replacing `I18nProvider`'s previously-static `locale` prop, a new `LocaleSwitcher.tsx` wired into `Shell.tsx`'s top bar next to the already-working `ThemeSwitcher`.
+
+**Since Post-Roadmap Phase 33 Session 1** ([ADR 0135](../adr/0135-accessibility-audit-five-frontend-apps.md)): the `high-contrast` theme's `--dms-accent-bg` was fixed from an accidental `#ffff00` (identical to `--dms-accent`, rendering `.badge-pending` — the dry-run badge in `TransferConsole.tsx` — as illegible yellow-on-yellow) to `#000000`, matching `--dms-danger-bg`/`--dms-success-bg`'s pattern; `.badge` also gained the `high-contrast`-only `border: 1px solid currentColor` rule `user-ui`/`admin-ui` already had since ADR 0119, so `.badge-approved`/`.badge-rejected` keep a visible pill shape once the background flattens to the page background.
 
 ## Build & deployment
 
@@ -62,7 +66,7 @@ Two-stage Docker image (`apps/migration-console/Dockerfile`, `node:22-alpine` bu
 ## Tests
 
 - `npm run typecheck` / `npm run lint` / `npm run build` — TypeScript check, ESLint, production-ready static export.
-- `npm test` (Vitest + Testing Library, **14 tests**): `AuthProvider` (4 tests, identical to the pattern of the other apps), `PairedInstallationList` (empty list, listing, creation incl. one-time API key display, deletion after confirmation, 4 tests), `TransferConsole` (empty list, listing with resolved target installation name + progress, expanding the detail timeline, starting a transfer incl. reload, four-eyes notice on `pending_approval`, polling interval triggers a re-fetch, 6 tests).
+- `npm test` (Vitest + Testing Library, **17 tests since Phase 47 Session 2**, previously 14 — adds `locale-context.test.tsx`, default/cache-after-mount/persistence, same hydration-safety design as `process-designer`'s, 3 tests): `AuthProvider` (4 tests, identical to the pattern of the other apps), `PairedInstallationList` (empty list, listing, creation incl. one-time API key display, deletion after confirmation, 4 tests), `TransferConsole` (empty list, listing with resolved target installation name + progress, expanding the detail timeline, starting a transfer incl. reload, four-eyes notice on `pending_approval`, polling interval triggers a re-fetch, 6 tests).
 - Live verified against the built container in a real (headless) browser (login, transfer list incl. expanding the detail timeline, installation pairing incl. the full create→show-one-time-key→delete cycle, theme switch to dark — each without console errors; the lists showed real installations/transfers left over from earlier test runs, including the self-loopback test from P12-S2).
 
 ## Open Points
