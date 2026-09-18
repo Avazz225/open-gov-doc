@@ -2,8 +2,59 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P43-S2 (scoping-only: teamspace group invitation — second session of Phase 43,
-"Build/Scoping Sessions for Larger Topics", [ADR
+**Last completed:** P43-S3 (scoping-only: a Microsoft Graph/O365 mailbox backend for `mail-connector` —
+third and last session of Phase 43, "Build/Scoping Sessions for Larger Topics", [ADR
+0161](docs/adr/0161-mail-connector-graph-backend-scoping.md)). No code changed, no tests to run, no
+Docker rebuild, no live verification — **Scoping, kein Feature**, per this session's own Definition of
+Done (same shape as P37-S1/P43-S2).
+
+Confirmed the corrected framing already recorded in `IMPLEMENTATION_PLAN.md`/`PROGRESS.md`'s own prior
+entries: the previously suspected "IMAP is only mocked" gap does not exist (a real, production-grade
+`ImapBackend` already exists, live-verified against a real `greenmail` container — only the unit test
+suite mocks at the `imaplib` boundary, ADR 0095, a test-infrastructure limitation since `mailpit` has no
+IMAP server, not a production gap). What genuinely remains unbuilt, and what this session actually
+scoped, is a Microsoft Graph/O365 backend for Exchange Online mailboxes.
+
+**Found the one load-bearing fact this scoping needed**: Microsoft Graph exposes a message's raw
+MIME/RFC-822 bytes directly via `GET /messages/{id}/$value` — meaning a future `GraphBackend` can feed
+that straight into the existing `RawIncomingMessage.raw_bytes`, and `main.py`'s already-existing
+`email`-stdlib parsing pipeline (attachment extraction, matching, virus scan, staging) needs **zero
+changes**. Without this, the natural-seeming path would have been reconstructing MIME from Graph's JSON
+message shape — a real, nontrivial problem a build session could easily have discovered only
+mid-implementation. Finding this now is exactly the value a scoping pass is supposed to add.
+
+**Build recommendation for a future session** (not committed here): a fourth `MailboxBackend`
+implementation (the existing interface, a single `fetch_new_messages()` method, needs no change — ADR
+0095 already anticipated this three sessions ago and it still holds); OAuth2 client-credentials with
+Azure AD **application permissions** (not delegated — no signed-in user exists for a headless poller);
+`$filter=receivedDateTime gt ...` polling on the existing tick interval rather than delta queries or
+webhooks (both would need new persisted state — a delta token, a subscription lease — this schema has
+never had to hold); a client secret rather than a certificate credential (simpler, reference-
+implementation-appropriate, the same judgment call already made for `archival-service`'s single static
+encryption key); reuse of the existing `libs/dms-retry` full-jitter backoff for Graph's own rate
+limiting. **Flagged explicitly as this project's first-ever external OAuth2 client-credentials
+integration** — checked every existing external-trust mechanism (Keycloak tokens are internal/
+user-facing, `federation-hub-service`'s trust model is RSA request-signing, explicitly not bearer tokens,
+`fleet-management-service`'s agent key is a static shared secret) and confirmed none of them is a
+reusable precedent; a build session should budget real time for the token client/cache specifically,
+even though the rest of the integration slots cleanly into the existing backend interface.
+
+New [ADR 0161](docs/adr/0161-mail-connector-graph-backend-scoping.md) records the full reasoning and
+recommendation. `docs/services/mail-connector.md`'s Open Points bullet updated in place with the
+concrete outcome. The recommended feature itself remains **scoped, not scheduled** — no session number
+assigned, awaiting a future phase if an installation actually needs Exchange Online mailbox support
+(IMAP/POP3 already cover any mailbox that still permits basic auth, the majority case).
+
+**This closes Phase 43** ("Build/Scoping Sessions for Larger Topics") — `graphify update .` now runs,
+per the standing "only at phase-end" rule.
+
+**Next session:** not yet planned — Phase 43 is complete. See `IMPLEMENTATION_PLAN.md` for the phase
+index and whatever comes next.
+
+---
+
+Immediately before P43-S3: **P43-S2** (scoping-only: teamspace group invitation — second session of
+Phase 43, "Build/Scoping Sessions for Larger Topics", [ADR
 0160](docs/adr/0160-teamspace-group-invitation-scoping.md)). No code changed, no tests to run, no
 Docker rebuild, no live verification — **Scoping, kein Feature**, per this session's own Definition of
 Done (same shape as P37-S1).
