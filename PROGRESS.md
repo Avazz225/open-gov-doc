@@ -2,9 +2,90 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P45-S4 (`object-type-service`: status-transition (4.5) workflow integration —
-fourth session of Phase 45, "Dependency-Resolved Functional Completions", split out of the former
-P45-S3, see [ADR 0165](docs/adr/0165-ocr-review-manual-task-workflow-integration.md) and
+**Last completed:** P45-S5 (UI completion bundle — fifth and last session of Phase 45,
+"Dependency-Resolved Functional Completions", **closes Phase 45**). Renumbered from the former
+P45-S4 when P45-S3 split into two (see [ADR 0165](docs/adr/0165-ocr-review-manual-task-workflow-integration.md)).
+Two independent halves.
+
+**Half 1 — `user-ui`'s `CasesPane.tsx`**: `CaseDetail`'s document reference list previously showed
+the raw `document_id` as the clickable row text (deliberately deferred at the time — resolving titles
+would have meant an extra `getDocument()` call per row). Now `reload()` batch-resolves every
+non-deleted reference's title via `Promise.all(getDocument(...))` right alongside
+`listCaseDocuments()`, same idiom as `RecordsQuarantineOverviewPane.tsx`'s own already-established
+per-row title resolution (mirrored exactly rather than inventing a second pattern) — keyed by
+`document_id` into a new `documentTitles: Record<string, string | null>` state, since `documents`
+itself is still needed unchanged for its other per-row fields. A failed resolution (rare — a
+reference not yet marked `document_deleted_at` but no longer actually reachable) shows a
+non-clickable "Dokumenttitel nicht verfügbar" placeholder instead of a broken link, same precedent as
+`RecordsQuarantineOverviewPane.tsx`'s own placeholder. The row still opens the document via a second,
+separate `getDocument()` call on click (not deduplicated with the batch resolve — same acceptable
+duplication that component's own `handleOpen` already has).
+
+**Half 2 — `admin-ui` RBAC gating audit**: the plan's own framing ("gating extends from `/users/` to
+the rest") turned out stale — most pages were already gated by several intervening sessions that never
+corrected the doc's own "Authorization enforced only for `/users/`" Open Points bullet. Audited every
+page in `apps/admin-ui/src/app/`: found exactly 4 genuinely ungated pages with a real, cleanly-scoped
+backend permission to gate on — `/archival-transfers/` (`archival.read`), `/forensic-trace/`
+(`reporting.forensic_trace`), `/reports/` (`reporting.read`), `/superuser/` (`breakglass.approve` —
+the capability that actually gates this page's core request/approve flow server-side per
+`SuperuserBreakGlass.tsx`'s own doc comment, deliberately NOT `system.not_shutdown.trigger`, which
+only conditionally shows one narrower button already client-gated inside that same component). Each
+page.tsx wrapped in `<RequireCapability capability="...">` (existing component, unchanged), and
+`AdminSidebar.tsx`'s matching nav entries gained `requiresCapability` (defense-in-depth, same pattern
+as every other gated entry). 5 more pages (`/deletion-register/`, `/registry/`, `/installations/`,
+`/ocr-settings/`, `/processing-failures/`) were deliberately left ungated — their backend endpoints
+have no permission check of their own to gate on (`/installations/` calls no backend at all, being
+pure `localStorage`; `/processing-failures/` mixes gated and ungated data sources with no single
+clean capability). Adding client-side gating with no server-side backing would imply a permission
+boundary that doesn't actually exist.
+
+New tests: `user-ui` gained 1 new `cases-pane.test.tsx` case (title resolution failure → placeholder,
+no clickable button) plus 2 existing cases adjusted to assert the resolved title instead of the raw
+ID, and a new assertion that `getDocument` is never called for an already-known-deleted reference —
+**280/280 tests** (+1, was 279). `admin-ui` gained 1 new `admin-sidebar.test.tsx` case (the four
+newly-gated entries hide without their capabilities, while the deliberately-still-ungated
+`/deletion-register/` entry stays visible) plus a fixture fix (`breakglass.approve` added to the
+existing "shows both groups expanded by default" test's default permission set, which would otherwise
+no longer show the now-gated "Superuser Break-Glass" entry it asserts on) — **250/250 tests** (+1, was
+249). Found and flagged (not fixed, out of this session's scope) one pre-existing, unrelated failure in
+`processing-failures.test.tsx`'s handover-retry test — reproduced in isolation, no file it depends on
+was touched this session.
+
+Both apps: `tsc --noEmit`/`eslint .`/`next build` clean. Docker images for `user-ui` and `admin-ui`
+rebuilt and redeployed. **Live-verified via real Playwright browser sessions against the running
+stack**: uploaded a real document, attached it to an existing case, confirmed the case-detail document
+list showed the real title instead of the raw ID; logged in as `users-admin` (who has
+`archival.read`/`reporting.forensic_trace`/`reporting.read` via the "everyone" default but not
+`breakglass.approve`) and confirmed the three former stayed visible/accessible while "Superuser
+Break-Glass" was hidden from the sidebar and a direct navigation to `/superuser/` redirected to `/`;
+granted `breakglass.approve` and confirmed the page became visible and accessible; revoked the grant
+again and confirmed it was hidden/redirected once more.
+
+`docs/services/user-ui.md` updated (`CasesPane.tsx` description corrected in place, no dedicated Open
+Points bullet existed to strike through, new test count entry). `docs/services/admin-ui.md` updated
+(the stale "Authorization enforced only for `/users/`" bullet struck through with the full audit
+result, a new bullet for the deliberately-ungated pages, the "no browser available" limitation
+corrected in place, new test count entry, the pre-existing unrelated test failure flagged as its own
+Open Points bullet). `IMPLEMENTATION_PLAN.md` P45-S5 checked off, closing Phase 45. No new ADR (pure
+mechanical completion of already-established patterns, matching this phase's own DoD).
+
+**Phase-end `graphify update .`** ran to completion per standing convention: incremental detect found
+63 new/changed files (48 code, 15 docs) + 1 deleted file (harmless, already clean). AST extraction:
+1,056 nodes/2,243 edges. One semantic subagent dispatched for the 15 doc files, produced 123
+nodes/130 edges/3 hyperedges. Final merged graph: **15,201 nodes, 26,335 edges, 1,580 communities**
+(up from 15,078/26,219/1,527). 1,527 prior communities kept their existing labels unchanged via
+`.graphify_labels.json` reuse; 53 new communities (all singletons from this update's new nodes) were
+labeled using each node's own name. Health check clean (no dangling/missing/collapsed edges). HTML
+exported (aggregated, 1,580 community nodes/1,608 cross-community edges). Cost tracker: 44 runs
+total, 9,576,894 input/1,573,655 output tokens all-time.
+
+**Next session:** not yet planned — Phase 45 is complete. See `IMPLEMENTATION_PLAN.md` for Phase 46
+("OG Doc" Rebrand) onward.
+
+---
+
+Immediately before P45-S5: **P45-S4** (`object-type-service`: status-transition (4.5) workflow
+integration — fourth session of Phase 45, split out of the former P45-S3, see
 [ADR 0166](docs/adr/0166-status-transition-constraint-engine.md)). Genuinely greenfield: neither
 Konzept 4.5 nor 7.1 ever defined a concrete status vocabulary. Research at session start found exactly
 ONE real, already-wired status-transition trigger anywhere in the codebase — `case-service`'s
@@ -64,11 +145,6 @@ bullet, new Open Points bullet for the no-retry limitation). New
 [ADR 0166](docs/adr/0166-status-transition-constraint-engine.md) (a real architecture decision — the
 new schema vocabulary, the choice of `Case.status` as the one real integration point, and the
 deliberate no-retry limitation all warranted recording, same reasoning as ADR 0165 for its own session).
-
-**Next session:** **P45-S5** (UI completion bundle — fifth and last session of Phase 45; renumbered
-from the former P45-S4, see ADR 0165: case-browsing-ui's document list resolves real titles instead
-of raw `document_id`; `admin-ui`'s RBAC gating extends from `/users/` to the rest of its admin pages
-for consistency) — see `IMPLEMENTATION_PLAN.md` "Phase 45" for the full plan.
 
 **Also fixed while restructuring this file**: the previous entry (P45-S3) had accidentally left P45-S2's
 full body duplicated in two places — once (correctly) under its own "Immediately before P45-S3: P45-S2"
