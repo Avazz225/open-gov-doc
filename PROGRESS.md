@@ -2,8 +2,57 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P43-S1 (DMS-to-DMS XDOMEA handoff, the actual build — first session of Phase 43,
+**Last completed:** P43-S2 (scoping-only: teamspace group invitation — second session of Phase 43,
 "Build/Scoping Sessions for Larger Topics", [ADR
+0160](docs/adr/0160-teamspace-group-invitation-scoping.md)). No code changed, no tests to run, no
+Docker rebuild, no live verification — **Scoping, kein Feature**, per this session's own Definition of
+Done (same shape as P37-S1).
+
+Re-examined `IMPLEMENTATION_PLAN.md`'s own framing — "the old blocking reasoning ('waiting on
+AD/Keycloak group integration') is stale, that integration has existed since P24-S2 (ADR 0093)" — and
+found it half right: **the blocker is only PARTIALLY stale, not fully resolved as the plan's initial
+framing assumed.** ADR 0093/ADR 0153 (P24-S2/P39-S3) built a real, working AD-group→**role** mapping
+(a Keycloak `groups` JWT claim resolved live at `GET /me` into `permission-service` roles), which
+genuinely removed the ORIGINAL, broader blocker ADR 0043 cited ("no AD/Keycloak group integration
+exists at all"). But that work solved a different problem than teamspace group invitation actually
+needs: `GET /me` deliberately never returns the raw `groups` claim, only the roles it resolves to, and
+no endpoint anywhere in the project exposes "who is currently a member of AD group X" as a queryable
+list — confirmed by checking every `KeycloakAdmin` call site in `auth-service`, none touches a group.
+Treating the blocker as fully gone (the plan's initial framing) would have sent a build session into
+implementation only to discover mid-way that the actual missing piece was never built — exactly the
+kind of premise-checking this project's research-first discipline exists to catch (the same pattern as
+P42-S1's XDOMEA-fallback correction and P42-S3's Kennzeichen-duplication correction, earlier in this
+same phase).
+
+**Build recommendation for a future session** (not committed here): (1) a new, narrow `auth-service`
+endpoint (`GET /groups/{name}/members`, same minimal `{id, username}` shape as the existing
+`GET /users/lookup` precedent) wrapping the already-vendored but currently completely unused
+`KeycloakAdmin.get_group_by_path()`/`get_group_members()` — a real library capability, not a new
+dependency; (2) a new `teamspace-service` mapping table binding a teamspace to an AD group name; (3)
+**live poll-loop reconciliation of `permission-service` role assignments, not a one-time snapshot
+copy** — the one genuine architectural fork this scoping surfaces, resolved explicitly in favor of live
+resolution because ADR 0093 already committed this project to "Keycloak/AD is the sole source of truth,
+never mirrored" for the exact same reason (a snapshot would immediately go stale: removals from the AD
+group would silently leave stale teamspace access behind). The gating question for the new
+group-members endpoint (a strictly wider disclosure than `/users/lookup`'s single-name check) is
+deliberately left open for the build session, not pre-decided here.
+
+New [ADR 0160](docs/adr/0160-teamspace-group-invitation-scoping.md) records the full reasoning and
+recommendation. `docs/adr/0043-teamspace-service-membership-and-permission-integration.md` and
+`docs/services/teamspace-service.md` both had their stale "group invitation/membership unbuilt" bullets
+corrected in place (crossed out, not deleted, with a pointer to ADR 0160) rather than left looking
+fully-either-resolved-or-blocked. The recommended feature itself remains **scoped, not scheduled** — no
+session number assigned, awaiting a future phase if this gap is ever prioritized for an actual build.
+
+No `graphify update .` — not a phase end (Phase 43 has one more session planned: P43-S3, also
+scoping-only). Next step: **P43-S3** (scoping only: a Microsoft Graph/O365 mailbox backend for
+`mail-connector` — a genuine external OAuth2/Graph API dependency, same "research before a build
+session" approach as this session and P37-S1).
+
+---
+
+Immediately before P43-S2: **P43-S1** (DMS-to-DMS XDOMEA handoff, the actual build — first session of
+Phase 43, "Build/Scoping Sessions for Larger Topics", [ADR
 0159](docs/adr/0159-dms-to-dms-xdomea-handoff-implementation.md)). Already fully scoped by
 [ADR 0147](docs/adr/0147-cross-installation-xdomea-handoff-scoping.md)/P37-S1 — this session builds
 exactly what that scoping recommended: a reserved `taskType=federated` process type
