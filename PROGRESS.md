@@ -2,7 +2,61 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P47-S2 (Propagate the switcher pattern to the remaining small apps —
+**Last completed:** P47-S3 (`user-ui` English translation + switcher — third session of Phase 47,
+"English i18n", 574 keys, the larger of the two big apps). Same already-proven `LocaleProvider`
+pattern as P47-S1/S2, no new ADR expected per the plan's own DoD.
+
+Own `src/i18n/en.json` — full English translation of all 574 keys in `de.json`, verified
+programmatically (not just by eye) with a small script comparing the flattened key sets of both
+files (0 missing, 0 extra) and the `{placeholder}` variables inside each matching string (all
+matched) before touching any code. Reused this project's already-established German→English
+glossary for consistency with existing docs/ADRs: "Umlaufmappe" → "case binder" (`favorite-service`'s
+own docs precedent), "Aussonderung" → "records disposal" (`document-service`'s docs), "Handakte"/
+"Hand-Ordner" → "hand folder" (`folder-service`'s docs, ADR 0118), "Kennzeichen" → "file reference
+number" (`object-type-service`'s docs), "Postbuch" kept as its literal name rather than translated
+(`mail-connector`'s own English docs do the same, treating it as a proper noun).
+
+`I18nProvider`'s previously-static `locale` prop replaced by a new `LocaleProvider`/`useLocale()`
+(`lib/locale-context.tsx`) and `LocaleSwitcher.tsx` (`components/`), both copied from the
+already-proven, hydration-safe `process-designer`/P47-S1 pattern (starts at `defaultLocale`, applies
+a cached `localStorage` value only in a post-mount `useEffect` — never as the initial `useState`
+value, avoiding the React error #418 hydration mismatch already found and fixed in P47-S1).
+`getLocalePreference`/`updateLocalePreference` added to `api.ts`. `LocaleSwitcher` wired into
+`IconRail.tsx`'s existing settings popover, right next to the already-working `ThemeSwitcher`
+(`user-ui`, unlike `process-designer`, already had `ThemeSwitcher` correctly wired before this
+session — no incidental fix needed here). `layout.tsx` restructured the same way as every other app
+this phase: `I18nProvider` moved from the outer position into `LocaleProvider`'s internal render,
+itself moved inside `AuthProvider`.
+
+**No existing test broke** from the restructuring, unlike `reviewer-ui`'s P47-S2 fix — checked
+specifically, since `IconRail`'s settings popover (where `LocaleSwitcher`/`useLocale()` actually gets
+invoked) is conditionally rendered only once opened, and no existing test (including
+`document-workspace.test.tsx`'s 70 tests, which render `IconRail` but never open its settings
+popover) exercises that path. New `locale-context.test.tsx` added (3 tests: default/cache-after-mount/
+persistence, mirroring `theme-context.test.tsx`'s own structure exactly). `283` Vitest tests passing
+(was `280`). `tsc --noEmit`/`eslint .` clean (2 pre-existing, unrelated `<img>`-vs-`next/image`
+warnings in `PreviewPane.tsx`/`RedactionModal.tsx`, unchanged). `next build` clean. Docker image
+rebuilt/redeployed. **Live-verified via Playwright** (logged in as `users-admin`): opened the
+settings popover, found both switchers, switched to English, confirmed the rendered text actually
+changes (heading, buttons, panel titles — "Documents"/"Home"/"New folder"/"Upload"/"Explorer"/
+"Preview"/"Metadata"/"No document selected."/"Log out"), confirmed persistence across a page reload
+via the `localStorage` cache (`users-admin` is a technical account and can't exercise the actual
+`/me/preferences` server round-trip — same pre-existing, unrelated limitation reconfirmed in every
+prior Phase 47 session, not fixed here either — the 2 expected `500`s on reload are exactly that).
+Screenshot checked visually, then deleted along with the throwaway `.mjs` script.
+
+`docs/services/user-ui.md`: new `locale` field noted in the theme-preference endpoint row, a new
+"i18n: English Translation + Locale Switcher" section, and a test-count update (flagging that the
+existing historical test-count enumeration in that file predates many later sessions and was never
+fully kept in sync - not attempting to retroactively fix years of doc drift in this session, just
+not perpetuating the false impression that "64 tests" is current).
+
+**Next session:** P47-S4 — `admin-ui` English translation + switcher (752 keys, the largest
+dictionary of all apps). `graphify update .` still deferred to Phase 47's close (S4/S5 remain).
+
+---
+
+Immediately before P47-S3: **P47-S2** (Propagate the switcher pattern to the remaining small apps —
 `reviewer-ui`, `migration-console`, `office-addin` — second session of Phase 47, "English i18n").
 Pure repetition of P47-S1's already-decided pattern, no new ADR expected per the plan's own DoD.
 

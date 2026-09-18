@@ -2,20 +2,19 @@
 
 import { createContext, useContext, type ReactNode } from "react";
 import de from "./de.json";
+import en from "./en.json";
 
-// Vorbereitet für weitere Sprachen (Konzept 8, "Anpassbarkeit"), deckt aber
-// bewusst erstmal nur Deutsch ab. Eine weitere Sprache hinzuzufügen heißt:
-// (1) neue JSON-Datei nach diesem Schema anlegen, (2) hier registrieren,
-// (3) `Locale` erweitern - keine Änderung an den Komponenten nötig, die rufen
-// ausschließlich `t("bereich.schlüssel")` auf. Eine Sprachumschaltung in der
-// UI selbst ist noch nicht gebaut (kein Bedarf, solange nur eine Sprache
-// existiert) - `locale` ist aktuell fest auf "de" verdrahtet.
-export type Locale = "de";
+// Zweite Sprache (Konzept 8, Phase 47 Session 3) - genau der zuvor
+// vorbereitete Schritt: neue JSON-Datei nach diesem Schema angelegt, hier
+// registriert, `Locale` erweitert - kein Component musste dafür angefasst
+// werden. Die Umschaltung selbst lebt in `lib/locale-context.tsx`
+// (`LocaleProvider`/`LocaleSwitcher`, ADR 0167).
+export type Locale = "de" | "en";
 export const defaultLocale: Locale = "de";
 
 type Dictionary = typeof de;
 
-const dictionaries: Record<Locale, Dictionary> = { de };
+const dictionaries: Record<Locale, Dictionary> = { de, en };
 
 function resolve(dict: Dictionary, path: string): string {
   const value = path

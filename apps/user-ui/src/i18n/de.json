@@ -84,6 +84,9 @@
     "dark": "Dunkel",
     "highContrast": "Hoher Kontrast"
   },
+  "locale": {
+    "label": "Sprache"
+  },
   "explorer": {
     "paneLabel": "Explorer",
     "newFolder": "Neuer Ordner",

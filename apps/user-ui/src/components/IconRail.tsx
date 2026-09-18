@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { useI18n } from "@/i18n";
+import { LocaleSwitcher } from "./LocaleSwitcher";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 
 export type WorkspaceView =
@@ -231,6 +232,7 @@ export function IconRail({
         </button>
         {isSettingsOpen && (
           <div className="icon-rail-popover" aria-label={t("iconRail.settings")}>
+            <LocaleSwitcher />
             <ThemeSwitcher />
           </div>
         )}
