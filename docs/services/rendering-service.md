@@ -83,6 +83,8 @@ If a conversion technically fails (missing binary path, timeout), `_libreoffice.
 
 **Still not independently veraPDF-validated**: LibreOffice's own PDF/A export filter is technically more conformant than the previous pure `pypdf` post-processing, but this remains an unchanged limitation, now merely communicated transparently.
 
+**"OG Doc" rebrand (Phase 46 Session 1)**: path 1's `/Producer` metadata string (real, delivered branding embedded into every archival-copy PDF) was hardcoded as `"DMS Rendering Service - PDF-Archivkopie ..."` — corrected to `"OG Doc Rendering Service - ..."`, verified live via a real upload → download of the resulting `pdf_archive` rendition, `pypdf`-read `/Producer` field.
+
 ## Follow-up Effect: OCR Full Text as a `substitute_text` Rendition (P5-S3, 2.4/3.9)
 
 In addition to the `document.>` subscription, rendering-service has consumed `ocr.completed` from the new `ocr-service` since P5-S3 (its own durable name `rendering-service-ocr`, separate from the `document.>` subscription, since both live on different streams — the same `event_bus` client, two subscriptions). For every `ocr.completed` with status `ready`/`needs_review`:

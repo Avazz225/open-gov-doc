@@ -98,7 +98,7 @@ class PdfArchiveRenderer(Renderer):
         writer = PdfWriter(clone_from=reader)
         writer.add_metadata(
             {
-                "/Producer": "DMS Rendering Service - PDF-Archivkopie "
+                "/Producer": "OG Doc Rendering Service - PDF-Archivkopie "
                 "(Best-Effort, nicht ISO-19005-validiert)",
                 "/Title": filename,
             }

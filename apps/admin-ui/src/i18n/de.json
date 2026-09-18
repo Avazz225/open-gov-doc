@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "DMS Admin",
+    "title": "OG Doc Admin",
     "description": "Nutzer-/Rollenverwaltung, Objekttyp-Editor, Registry-Übersicht (Admin-UI, Konzept 8)"
   },
   "common": {
@@ -23,7 +23,7 @@
     "highContrast": "Hoher Kontrast"
   },
   "login": {
-    "heading": "DMS Admin",
+    "heading": "OG Doc Admin",
     "username": "Benutzername",
     "password": "Passwort",
     "submit": "Anmelden",
@@ -70,7 +70,7 @@
     "license": "Lizenzstatus"
   },
   "home": {
-    "title": "DMS Admin",
+    "title": "OG Doc Admin",
     "hint": "Wähle einen Bereich aus der Navigation."
   },
   "users": {
