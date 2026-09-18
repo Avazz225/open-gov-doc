@@ -2,9 +2,55 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P45-S5 (UI completion bundle — fifth and last session of Phase 45,
-"Dependency-Resolved Functional Completions", **closes Phase 45**). Renumbered from the former
-P45-S4 when P45-S3 split into two (see [ADR 0165](docs/adr/0165-ocr-review-manual-task-workflow-integration.md)).
+**Last completed:** P46-S1 (Rebrand rollout — the one and only session of Phase 46, "OG Doc"
+Rebrand, **closes Phase 46**). Mechanical, no new ADR expected per this phase's own DoD.
+
+Seven i18n string edits following `office-addin`/`libreoffice-addin`'s already-done precedent
+exactly: `admin-ui`'s `meta.title`/`login.heading`/`home.title` → "OG Doc Admin"; `user-ui`'s
+`meta.title` → "OG Doc"; `reviewer-ui` → "OG Doc Reviewer"; `migration-console` → "OG Doc
+Migrations-Konsole"; `process-designer` → "OG Doc Process Designer". `rendering-service`'s
+`pdf_archive.py` hardcoded `/Producer` metadata string ("DMS Rendering Service...") fixed to "OG
+Doc Rendering Service..." — real, delivered branding embedded into every archival-copy PDF, not
+just UI text. Spot-checked `notification-service`'s `EmailTemplate` DB rows live against the
+running stack for any seeded "DMS" text outside static-code search reach — found none (empty
+list, nothing seeded on this installation), nothing to fix. Fixed the stale
+`Business__DMS-Konzept.md` → `Konzept.md` filename reference in `CLAUDE.md` (found during the
+Phase 44+ research round, folded into this session per the plan's own text since it's trivial and
+unrelated to the rebrand itself). **Deliberately left untouched**: the same stale filename
+reference still appears inside `IMPLEMENTATION_PLAN.md`'s and `PROGRESS.md`'s own historical
+narrative — those are point-in-time logs of what was true when written, not live instructions like
+`CLAUDE.md`, so "correcting" them would be rewriting history rather than fixing a live reference.
+
+Also deliberately **not** touched (documented, not silently assumed): `Konzept.md`'s own internal
+prose (a technical spec, not user-facing product surface), the `X-DMS-Principal`/`X-DMS-*` internal
+HTTP header family (an API protocol convention name, not user-visible branding — renaming it would
+be a large, unrelated breaking change across every service), and Postgres schema names like
+`dms`/`dms_test` (internal infra naming, invisible to any user).
+
+All 5 affected frontend apps (`admin-ui`/`user-ui`/`reviewer-ui`/`migration-console`/
+`process-designer`) + `rendering-service`: `tsc --noEmit`/`eslint .`/`npm test`/`next build` clean
+(no test asserted the old strings, so nothing needed adjusting), `ruff check`/`format` clean,
+`101/101` `rendering-service` tests passing unchanged. Docker images for all six rebuilt and
+redeployed. **Live-verified via a real Playwright browser session** against the running stack: all
+five apps' `<title>` tags read the new "OG Doc..." names, `admin-ui`'s login heading AND
+post-login home heading both read "OG Doc Admin". **Live-verified the `rendering-service` fix
+separately**: uploaded a real PDF, waited for its automatic `pdf_archive` rendition, downloaded it,
+and confirmed via `pypdf` that its `/Producer` field now reads "OG Doc Rendering Service - ...".
+
+`docs/services/rendering-service.md` gained a short new paragraph under "Universal PDF/A
+Conversion" documenting the fix. Updated the standing memory `project_dms_product_name.md` to
+record the retrofit as done (previously noted "not yet done, later dedicated session" — this was
+that session) and to explicitly scope what was deliberately NOT renamed, so a future session
+doesn't reopen that question unprompted.
+
+**Next session:** not yet planned — Phase 46 is complete. See `IMPLEMENTATION_PLAN.md` for Phase 47
+(English i18n) onward.
+
+---
+
+Immediately before P46-S1: **P45-S5** (UI completion bundle — fifth and last session of Phase 45,
+"Dependency-Resolved Functional Completions", closed Phase 45). Renumbered from the former P45-S4
+when P45-S3 split into two (see [ADR 0165](docs/adr/0165-ocr-review-manual-task-workflow-integration.md)).
 Two independent halves.
 
 **Half 1 — `user-ui`'s `CasesPane.tsx`**: `CaseDetail`'s document reference list previously showed
