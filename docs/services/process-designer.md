@@ -90,9 +90,13 @@ Identical copy of the providers from user-ui/admin-ui (`ThemeProvider`, `I18nPro
 
 **Hydration-safety subtlety** (found live, see ADR 0167): unlike `theme`, which only drives an imperative `dataset.theme` attribute, `locale` selects which JSON dictionary `t()` renders text from — i.e. it changes the actual server-rendered text tree of this static export. `LocaleProvider` therefore initializes its React state to `defaultLocale` ("de", matching what the static export always pre-renders) and only applies a cached non-default locale in a `useEffect` after mount, never as the initial `useState` value — seeding the initial state from `localStorage` directly (safe for `theme`) caused a real React hydration mismatch (error #418) for `locale`.
 
+**Since Phase 49 Session 1** ([ADR 0168](../adr/0168-shared-design-tokens-and-scales.md)): `globals.css`'s own `--dms-*` color-token declarations (the `:root`/`@media`/`[data-theme]` blocks) were removed and replaced by `@import "../../../../libs/dms-ui/tokens.css";` at the top of the file — the shared, de-drifted token source built in Phase 48 Session 1. This app was one of the three (with `user-ui`/`admin-ui`) still carrying the unfixed high-contrast `--dms-accent-bg: #ffff00` bug (ADR 0135 never reached it) — adopting the shared file fixes it, confirmed live via Playwright (the `.badge`-style high-contrast rendering no longer yellow-on-yellow). Component-level hardcoded spacing/radius/font-size values throughout the rest of `globals.css` were also switched to the new `--dms-space-*`/`--dms-radius-*`/`--dms-font-size-*` scale tokens where they matched a scale step (a few off-grid values, e.g. the `.badge`'s `0.1rem` vertical padding, were deliberately left as literals — too far from any step to round without a visible size change).
+
 ## Build & Deployment
 
 Two-stage Docker image (`apps/process-designer/Dockerfile`, `node:22-alpine` build stage → `nginx:alpine` runtime), `NEXT_PUBLIC_GATEWAY_BASE_URL` as a build arg, overridable via `PROCESS_DESIGNER_GATEWAY_BASE_URL` in `infra/.env`. `infra/docker-compose.yml`: port `${PROCESS_DESIGNER_PORT:-3002}:80`.
+
+**Since Phase 49 Session 1**: the build stage's `WORKDIR`/`COPY` layout changed from flattening this app directly into `/app` to mirroring the actual repo shape (`/repo/apps/process-designer/`, plus `/repo/libs/dms-ui/`) — needed so `globals.css`'s new relative `@import` of `libs/dms-ui/tokens.css` resolves identically inside the Docker build stage and in a local `npm run build` (the flattened layout put the app's own files one directory shallower than local dev, breaking the same relative path). `npm install`/`npm run build` now run via `--prefix apps/process-designer` instead of relying on `WORKDIR` alone.
 
 ## Tests
 

@@ -1,91 +1,13 @@
-/* Cross-UI-Theming (8, P4-S6, siehe ADR 0009): CSS-Variablen statt fest
-   verdrahteter Farben, damit `data-theme` auf <html> (gesetzt von
-   `ThemeProvider`) Hell/Dunkel/Hoher-Kontrast umschalten kann, unabhängig
-   von der OS-Einstellung. Identische Variablen wie die übrigen Apps. */
+@import "../../../../libs/dms-ui/tokens.css";
+
+/* Cross-UI-Theming (8, P4-S6, siehe ADR 0009): Farb-Tokens selbst leben seit
+   Phase 48 Session 1 (ADR 0168) in der geteilten libs/dms-ui/tokens.css -
+   diese Datei wendet nur noch den Font-Family-Token an und enthält die
+   App-spezifischen Komponentenstile. Die Post-Roadmap Phase 33 Session 1
+   (ADR 0135) high-contrast `--dms-accent-bg`-Korrektur ist jetzt Teil der
+   geteilten Datei (`#000000`, nicht mehr `#ffff00`). */
 :root {
-  color-scheme: light dark;
-  font-family:
-    system-ui,
-    -apple-system,
-    "Segoe UI",
-    sans-serif;
-
-  --dms-bg: #ffffff;
-  --dms-fg: #1a1a1a;
-  --dms-border: rgba(128, 128, 128, 0.25);
-  --dms-hover-bg: rgba(128, 128, 128, 0.12);
-  --dms-accent: #2563eb;
-  --dms-accent-bg: rgba(37, 99, 235, 0.15);
-  --dms-danger: #b91c1c;
-  --dms-danger-bg: #b91c1c33;
-  --dms-success: #16a34a;
-  --dms-success-bg: #16a34a33;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --dms-bg: #16181c;
-    --dms-fg: #e8e8e8;
-    --dms-border: rgba(200, 200, 200, 0.2);
-    --dms-hover-bg: rgba(200, 200, 200, 0.15);
-    --dms-accent: #60a5fa;
-    --dms-accent-bg: rgba(96, 165, 250, 0.2);
-    --dms-danger: #f87171;
-    --dms-danger-bg: #f8717133;
-    --dms-success: #4ade80;
-    --dms-success-bg: #4ade8033;
-  }
-}
-
-:root[data-theme="light"] {
-  color-scheme: light;
-  --dms-bg: #ffffff;
-  --dms-fg: #1a1a1a;
-  --dms-border: rgba(128, 128, 128, 0.25);
-  --dms-hover-bg: rgba(128, 128, 128, 0.12);
-  --dms-accent: #2563eb;
-  --dms-accent-bg: rgba(37, 99, 235, 0.15);
-  --dms-danger: #b91c1c;
-  --dms-danger-bg: #b91c1c33;
-  --dms-success: #16a34a;
-  --dms-success-bg: #16a34a33;
-}
-
-:root[data-theme="dark"] {
-  color-scheme: dark;
-  --dms-bg: #16181c;
-  --dms-fg: #e8e8e8;
-  --dms-border: rgba(200, 200, 200, 0.2);
-  --dms-hover-bg: rgba(200, 200, 200, 0.15);
-  --dms-accent: #60a5fa;
-  --dms-accent-bg: rgba(96, 165, 250, 0.2);
-  --dms-danger: #f87171;
-  --dms-danger-bg: #f8717133;
-  --dms-success: #4ade80;
-  --dms-success-bg: #4ade8033;
-}
-
-/* Hoher Kontrast (WCAG-orientiert): reines Schwarz/Weiß, kräftige Ränder,
-   keine transparenten Akzentflächen (schlecht lesbar bei hohem Kontrast).
-   Post-Roadmap Phase 33 Session 1 (accessibility audit, ADR 0135):
-   `--dms-accent-bg` was previously the identical `#ffff00` as `--dms-accent`
-   itself, rendering `.badge-pending` (TransferConsole.tsx's dry-run badge)
-   as yellow text on a yellow background - completely illegible. Set to
-   `#000000` instead, matching `--dms-danger-bg`/`--dms-success-bg`'s
-   already-correct pattern (a colored foreground on the flattened page
-   background) rather than the accidental solid-yellow fill. */
-:root[data-theme="high-contrast"] {
-  color-scheme: dark;
-  --dms-bg: #000000;
-  --dms-fg: #ffffff;
-  --dms-border: #ffffff;
-  --dms-hover-bg: #333333;
-  --dms-accent: #ffff00;
-  --dms-accent-bg: #000000;
-  --dms-danger: #ff6b6b;
-  --dms-danger-bg: #000000;
-  --dms-success: #6bff6b;
-  --dms-success-bg: #000000;
+  font-family: var(--dms-font-family);
 }
 
 body {
@@ -98,34 +20,34 @@ body {
 .page {
   max-width: 1100px;
   margin: 0 auto;
-  padding: 1.5rem;
+  padding: var(--dms-space-6);
 }
 
 .top-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-bottom: 0.75rem;
-  margin-bottom: 1.5rem;
+  padding-bottom: var(--dms-space-3);
+  margin-bottom: var(--dms-space-6);
   border-bottom: 1px solid var(--dms-border);
 }
 
 .top-bar-actions {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: var(--dms-space-4);
 }
 
 .tab-nav {
   display: flex;
-  gap: 1.5rem;
+  gap: var(--dms-space-6);
 }
 
 .tab-nav a {
   text-decoration: none;
   color: var(--dms-fg);
   opacity: 0.7;
-  padding-bottom: 0.25rem;
+  padding-bottom: var(--dms-space-1);
 }
 
 .tab-nav a.tab-active {
@@ -136,12 +58,12 @@ body {
 
 .hint {
   opacity: 0.8;
-  font-size: 0.9rem;
+  font-size: var(--dms-font-size-sm);
 }
 
 .actions {
   display: flex;
-  gap: 0.5rem;
+  gap: var(--dms-space-2);
 }
 
 .login-form {
@@ -149,7 +71,7 @@ body {
   margin: 4rem auto;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: var(--dms-space-3);
 }
 
 .error-text {
@@ -168,28 +90,27 @@ body {
 .data-table {
   width: 100%;
   border-collapse: collapse;
-  margin-bottom: 1.5rem;
+  margin-bottom: var(--dms-space-6);
 }
 
 .data-table th,
 .data-table td {
   text-align: left;
-  padding: 0.4rem 0.5rem;
+  padding: var(--dms-space-2) var(--dms-space-2);
   border-bottom: 1px solid var(--dms-border);
 }
 
 .badge {
   display: inline-block;
-  padding: 0.1rem 0.5rem;
-  border-radius: 999px;
-  font-size: 0.75rem;
+  padding: 0.1rem var(--dms-space-2);
+  border-radius: var(--dms-radius-full);
+  font-size: var(--dms-font-size-xs);
 }
 
-/* Post-Roadmap Phase 33 Session 1 (accessibility audit, ADR 0135) - high
-   contrast flattens every `--dms-*-bg` token to the page background, so a
-   badge's pill shape - its only remaining visual cue once the fill
-   disappears - needs an explicit border, same fix already applied to
-   `user-ui`/`admin-ui` in Phase 31 Session 8 (ADR 0119). */
+/* Post-Roadmap Phase 33 Session 1 (accessibility audit, ADR 0119/0135) -
+   high contrast flattens every `--dms-*-bg` token to the page background,
+   so a badge's pill shape - its only remaining visual cue once the fill
+   disappears - needs an explicit border. */
 :root[data-theme="high-contrast"] .badge {
   border: 1px solid currentColor;
 }
@@ -212,7 +133,7 @@ body {
 .maintenance-banner {
   background: var(--dms-danger-bg);
   color: var(--dms-danger);
-  padding: 0.5rem 1.5rem;
+  padding: var(--dms-space-2) var(--dms-space-6);
   text-align: center;
   font-weight: 600;
   margin: -1.5rem -1.5rem 1.5rem;
@@ -221,12 +142,12 @@ body {
 .inline-form {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: var(--dms-space-2);
   max-width: 420px;
-  padding: 0.75rem;
-  margin-top: 0.5rem;
+  padding: var(--dms-space-3);
+  margin-top: var(--dms-space-2);
   border: 1px solid var(--dms-border);
-  border-radius: 4px;
+  border-radius: var(--dms-radius-sm);
 }
 
 .inline-form textarea,

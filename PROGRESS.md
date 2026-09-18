@@ -2,9 +2,72 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P48-S1 (Extract the shared `--dms-*` convention into one real source, define new
-spacing/radius/shadow/typography scales, get explicit user sign-off — first session of Phase 48,
-"Design System Foundation"). New ADR: [0168](docs/adr/0168-shared-design-tokens-and-scales.md).
+**Last completed:** P49-S1 (Apply the approved token/scale system to the four smallest apps —
+`process-designer`, `office-addin`, `reviewer-ui`, `migration-console` — first session of Phase 49,
+"Visual Modernization Rollout"). User explicitly approved the Phase 48 Session 1 preview artifact
+("ja, das passt so") before this session started. No new ADR (execution of the already-approved
+ADR 0168 design, per the plan's own DoD).
+
+**Per app**: `globals.css`'s own `--dms-*` color-token declarations (the `:root`/`@media`/
+`[data-theme]` blocks) removed, replaced by `@import "../../../../libs/dms-ui/tokens.css";` at the
+top of the file. Component-level hardcoded spacing/radius/font-size values throughout the rest of
+each file also switched to the new `--dms-space-*`/`--dms-radius-*`/`--dms-font-size-*` scale tokens
+where they matched a scale step (a handful of clearly-custom off-grid values, e.g. `process-designer`'s
+`.badge` vertical padding, deliberately left as literals rather than force-rounded into a visibly
+different size).
+
+**The real high-contrast bug ADR 0168 found is now fixed**: `process-designer` was one of the three
+apps (with `user-ui`/`admin-ui`, not touched this session) still carrying the unfixed
+`--dms-accent-bg: #ffff00` — confirmed fixed live via Playwright (readable text/borders in
+high-contrast mode where the old value would have been yellow-on-yellow). `reviewer-ui`/
+`migration-console` already had the ADR 0135 fix and stayed visually identical, confirmed via the
+same live check (the "Dry-Run" badge in `migration-console`, which uses `--dms-accent-bg`, remained
+correctly legible in high-contrast).
+
+**Real, unrelated-to-CSS build breakage found and fixed**: the first Docker build attempt for all
+four apps failed — `Module not found: Can't resolve '../../../../libs/dms-ui/tokens.css'`. Root
+cause: each app's Dockerfile's build stage flattens the app directly into `/app` (`COPY
+apps/<name>/ ./`), one directory shallower than local dev's `apps/<name>/src/app/globals.css` →
+repo-root relative path expects. Fixed by restructuring all four Dockerfiles to mirror the actual
+repo shape inside the build stage (`WORKDIR /repo`, `COPY apps/<name>/ apps/<name>/`, `COPY
+libs/dms-ui/ libs/dms-ui/`, `npm install`/`npm run build --prefix apps/<name>`) instead of
+flattening — the same relative `@import` path now resolves identically in Docker and locally, no
+special-cased path arithmetic. All four images then built and deployed successfully.
+
+**Real, but confirmed-unrelated crash found in `office-addin` during live verification**: a fresh
+Playwright load now reaches far enough to actually fetch Microsoft's real, CDN-hosted `office.js`
+(confirmed via its own "Office.js is loaded outside of Office client" console warning) and crashes
+inside Next.js's router (`window.history.replaceState is not a function`) — office.js patches
+browser APIs assuming a real Office host's message bridge, which doesn't exist here. Confirmed this
+is unrelated to this session's CSS-only diff by blocking the script via `page.route()`: with it
+blocked, the app renders its own graceful `OfficeGate` error state correctly, styled with the new
+shared tokens. Also verified the actual custom-property values resolve correctly via
+`getComputedStyle(document.documentElement)` — including `--dms-success-bg`/`--dms-accent-bg-strong`/
+`--dms-surface`/`--dms-surface-fg`, which this app was previously missing entirely before adopting
+the shared file. Full click-through verification past `OfficeGate` remains blocked by the same
+pre-existing "no real Office host in this sandbox" limitation as every other office-addin feature.
+
+`44`/`44`, `21`/`21`, `47`/`47`, `17`/`17` tests passing respectively for `process-designer`/
+`office-addin`/`reviewer-ui`/`migration-console` (all unchanged counts — pure CSS session, no test
+diff expected or found). `tsc --noEmit`/`eslint .`/`next build` clean for all four. All four Docker
+images rebuilt and redeployed. Confirmed the shared tokens actually appear in each app's compiled
+CSS output before considering the Docker fix complete.
+
+`docs/services/process-designer.md`/`office-addin.md`/`reviewer-ui.md`/`migration-console.md`:
+Theming sections updated per app, a new Dockerfile-restructuring note in each Build section,
+`office-addin.md` gained its first-ever dedicated "Theming" section (previously undocumented) plus a
+new Tests bullet recording this session's crash investigation.
+
+**Next session:** P49-S2 — `user-ui` (its own session, given size and component count, per the
+plan's own sequencing). `admin-ui` follows in a session after that. `office-addin`'s Docker/office.js
+crash finding is informational only, not a blocker — no further action planned for it.
+
+---
+
+Immediately before P49-S1: **P48-S1** (Extract the shared `--dms-*` convention into one real
+source, define new spacing/radius/shadow/typography scales, get explicit user sign-off — first
+session of Phase 48, "Design System Foundation"). New ADR:
+[0168](docs/adr/0168-shared-design-tokens-and-scales.md).
 
 **Audited every app's actual `globals.css` before writing anything down** (not assuming the drift
 the plan predicted): confirmed real gaps per app (`user-ui` alone has `--dms-accent-bg-strong`/
