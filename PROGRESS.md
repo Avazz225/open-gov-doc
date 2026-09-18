@@ -55,9 +55,17 @@ consistent with this app's existing convention for every other real-install-only
 section, updated test counts, a new "Open Points" bullet for the unverified locale-detection node
 path.
 
-**This closes Phase 47 (English i18n) entirely.** `graphify update .` now runs for the first time
-across the whole phase (deferred at every individual session per standing convention) — see the
-graphify run recorded immediately below this entry once complete.
+**This closes Phase 47 (English i18n) entirely.** `graphify update .` run (deferred at every
+individual session per standing convention, now caught up on the whole phase at once): 74 changed
+files (63 code + 11 docs, all from P47-S1 through S5) plus 1 pruned deletion — `CLAUDE.md`, the
+known `.gitignore` false-positive "deleted" report from every prior update run, confirmed still on
+disk and excluded from pruning as always. Merged graph: 15,305 nodes / 26,548 edges / 1,607
+communities (up from 15,029/25,974/1,567) — 40 newly-formed communities labeled (mostly individual
+Pydantic model classes reshuffled into their own community by the re-cluster, given short
+descriptive names). Graph health check: OK, no dangling/missing/collapsed edges. Notable new
+hyperedges surfaced: the ADR-0167 `LocaleProvider`/`LocaleSwitcher` rollout across five apps, and
+`office-addin`+`libreoffice-addin` both following their host's locale instead of an in-app switcher —
+exactly the cross-cutting pattern this whole phase built.
 
 **Next session:** not yet planned — Phase 47 is complete. See `IMPLEMENTATION_PLAN.md` for Phase 48
 (Design System Foundation, "2026 modern look") onward.
