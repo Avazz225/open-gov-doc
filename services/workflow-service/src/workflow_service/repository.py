@@ -96,6 +96,16 @@ class InstanceNotRunningError(Exception):
 # arbitrary, but deterministic per family name.
 _PROCESS_DEFINITION_LOCK_NAMESPACE = 1
 _DMN_DEFINITION_LOCK_NAMESPACE = 2
+# Post-Roadmap Phase 44 Session 4 (ADR 0096's own documented, deliberately
+# unfixed "Consequences" gap): a THIRD namespace, keyed on the DMN's own
+# extracted `decision_id` rather than `name` - `_DMN_DEFINITION_LOCK_
+# NAMESPACE` above only serializes concurrent creates within the SAME
+# family (`name`), which does nothing for two concurrent first-time
+# creations of DIFFERENT families whose `dmn_xml` happens to extract the
+# same `decision_id` (each takes ITS OWN `name`-keyed lock, so neither
+# blocks the other) - exactly the cross-family race ADR 0096 named as
+# out of scope for that session.
+_DMN_DECISION_ID_LOCK_NAMESPACE = 3
 
 
 async def create_process_definition(
@@ -212,7 +222,18 @@ async def create_dmn_definition(session: AsyncSession, *, name: str, dmn_xml: st
     **P25-S1 (ADR 0096)**: same advisory-lock protection against the
     version race condition as `create_process_definition` - see its
     docstring for the reasoning why `pg_advisory_xact_lock` is used here
-    instead of `SELECT ... FOR UPDATE` on a counter row."""
+    instead of `SELECT ... FOR UPDATE` on a counter row.
+
+    **Post-Roadmap Phase 44 Session 4**: a SECOND advisory lock, taken
+    on the extracted `decision_id` right after parsing and before the
+    cross-family `DuplicateDecisionIdError` check below, closes ADR
+    0096's own named remaining gap - two concurrent creates of
+    DIFFERENT families (different `name`, so the lock above doesn't
+    serialize them against each other) whose `dmn_xml` extracts the
+    SAME `decision_id` now genuinely serialize on that second lock, so
+    the second call's `latest_others` read below is guaranteed to see
+    the first call's already-committed row instead of racing against
+    an uncommitted one."""
     await session.execute(
         select(func.pg_advisory_xact_lock(_DMN_DEFINITION_LOCK_NAMESPACE, func.hashtext(name)))
     )
@@ -226,6 +247,11 @@ async def create_dmn_definition(session: AsyncSession, *, name: str, dmn_xml: st
     except spiff_adapter.DmnParseError as exc:
         raise InvalidDmnError(str(exc)) from exc
 
+    await session.execute(
+        select(
+            func.pg_advisory_xact_lock(_DMN_DECISION_ID_LOCK_NAMESPACE, func.hashtext(decision_id))
+        )
+    )
     latest_others = await list_latest_dmn_definitions(session)
     for other in latest_others:
         if other.name != name and other.decision_id == decision_id:

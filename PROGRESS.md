@@ -2,12 +2,89 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P44-S3 (`permission-service`: maintenance-mode coverage + service-to-service
-write enforcement — third and last session of Phase 44, "Security & Correctness Hardening"). Two
-halves, both grounded in prior scoping: (a) ADR 0024 itself named "pause federation-hub operations"/
-"halt plugin instances" as unimplemented since neither service existed yet — both now do; (b) ADR
-0152 had already scoped (not built) a concrete recommendation for service-to-service write
-enforcement during a lockdown — this session builds it in full.
+**Last completed:** P44-S4 (small correctness fixes bundle — fourth and last session of Phase 44,
+"Security & Correctness Hardening", **closing Phase 44**). Three independent, small, real bugs:
+
+**(1) `virus-scan-service` never notified the uploader on a virus hit.** `virus_scan.completed` was
+already published unconditionally (both `"clean"` and `"infected"`) since the service was built —
+nothing ever consumed it. Fix lives entirely in `notification-service`: a new consumer branch
+(`_handle_virus_scan_completed`) gated on `status == "infected"`, plus the new subject registered in
+`settings.subjects`. `virus-scan-service` itself needed zero code changes. `document_id` is almost
+always `None` for a real hit (no document exists yet at that point, per the service's own docstring),
+handled gracefully — the direct link is simply omitted when unknown.
+
+**(2) `workflow-service`'s `create_dmn_definition` had a real, still-open cross-family race.** ADR
+0096 already fixed the WITHIN-family version-assignment race (an advisory lock on `name`) but
+explicitly named a DIFFERENT, cross-family race as deliberately out of scope: two concurrent
+first-time creations under DIFFERENT `name`s whose `dmn_xml` happens to extract the SAME
+`decision_id` don't serialize against each other at all (each only locks on its OWN `name`), so both
+could pass the unlocked `DuplicateDecisionIdError` check and both succeed — leaving two DMN families
+simultaneously claiming one `decision_id`, which SpiffWorkflow's parsing can't then distinguish. Fixed
+with a THIRD advisory-lock namespace, keyed on `decision_id` itself, taken right before that check.
+
+**(3) `case-service` left a case status `"open"` for a fully-automated process.** A process with zero
+manual tasks completes SYNCHRONOUSLY inside workflow-service's own `start_instance` call — before
+case-service's `Case` row is ever committed in the same `POST /cases` request. Since the same-process
+NATS consumer reacts near-instantly, `workflow.instance.completed` could be (and, per this project's
+own prior live-verification notes, plausibly was) processed before the case exists, found nothing, and
+been silently dropped forever (ACKed, no retry). Fixed by having `create_case` check
+`instance["status"]` — already known synchronously, right there — and close the case itself
+immediately if it's already `"completed"`, sidestepping the event-ordering race entirely rather than
+trying to fix delivery ordering. The event-driven path stays exactly as-is for every other case (one
+with a manual task, which completes well after `POST /cases` already returned); its own
+`status != "open"` guard means it simply no-ops if it still sees the event for an already-closed case,
+so there's no double-close risk regardless of timing.
+
+No new ADR (the plan's own Definition of Done for this session didn't expect one — three small,
+independent fixes following already-established patterns, not new architecture decisions).
+
+**Found the same pre-existing, unrelated test-infra issue as P44-S3, a second time**: `notification-
+service`'s own `ROLE_ADMIN_PRINCIPAL_ID` (`notification-service-test-role-admin`) had also lost its
+`admin.user_management` grant on the shared, persistent dev-stack `permission-service` (19 test-setup
+errors, all in `test_api.py`, all `403` on `POST /roles`) — same root cause, same fix (a direct
+`role-assignments` grant via `curl`, mirroring what an admin would do). This is now the SECOND service
+found with this exact issue across two consecutive sessions — worth a future session actually
+auditing every `_grant_role_admin_permission`-shaped fixture across all services rather than fixing
+them one at a time as they're stumbled into, though not attempted here (out of this session's own
+scope).
+
+Regression tests: 4 new in `notification-service` (`_handle_virus_scan_completed`'s infected/clean/
+link-with-known-document_id cases) — **93/93 passing** (was 89, +4). 1 new in `workflow-service`
+(the cross-family concurrency test) — **216/216 passing** (was 215, +1). 1 new in `case-service` (the
+zero-task-BPMN end-to-end test, using a new `no_tasks.bpmn` fixture copied from workflow-service's own
+tests) — **68/68 passing** (was 67, +1). `ruff check`/`ruff format` clean on every file touched.
+
+Docker images rebuilt and redeployed for `virus-scan-service` (unchanged, no rebuild needed — confirmed
+no code changes), `notification-service`, `workflow-service`, `case-service`. **Live-verified
+end-to-end against the real running stack**: uploaded a real EICAR test file to `virus-scan-service`
+(`status: "infected"` confirmed), confirmed `notification-service` created a real in-app notification
+for the uploader; registered a real zero-task BPMN (`no_tasks.bpmn`) with `workflow-service`, created a
+real case against it via `case-service`, confirmed the response already showed `"status": "closed"`
+(not `"open"`). Bug 2 (a genuine race condition) was verified via the automated concurrency test
+instead of a live reproduction, the same verification method ADR 0096's own original fix used.
+Throwaway live-verification role assignments cleaned up afterward.
+
+`docs/services/virus-scan-service.md`/`docs/services/notification-service.md`/`docs/services/
+workflow-service.md`/`docs/services/case-service.md` updated: all four now-resolved Open Points
+bullets corrected in place, event table + test counts updated in `notification-service.md`, test
+counts updated in `workflow-service.md`/`case-service.md`.
+
+**This closes Phase 44** ("Security & Correctness Hardening", P44-S1 through P44-S4) —
+`graphify update .` now runs, per the standing "only at phase-end" rule.
+
+**Next session:** **P45-S1** (`reporting-service`: license-utilization report — first session of
+Phase 45, "Dependency-Resolved Functional Completions"; deferred until now purely because
+`license-service` didn't exist yet, which has been untrue since Phase 9) — see
+`IMPLEMENTATION_PLAN.md` "Phase 45" for the full plan.
+
+---
+
+Immediately before P44-S4: **P44-S3** (`permission-service`: maintenance-mode coverage +
+service-to-service write enforcement — third session of Phase 44, "Security & Correctness
+Hardening"). Two halves, both grounded in prior scoping: (a) ADR 0024 itself named "pause
+federation-hub operations"/"halt plugin instances" as unimplemented since neither service existed
+yet — both now do; (b) ADR 0152 had already scoped (not built) a concrete recommendation for
+service-to-service write enforcement during a lockdown — this session builds it in full.
 
 **Extended `libs/dms-permission-client` with `is_maintenance_active()`** (`GET /maintenance-mode`, no
 caching, mirroring `workflow-service`'s own already-working local method almost verbatim). Rolled out
@@ -82,11 +159,6 @@ service.md`/`document-service.md`/`mail-connector.md`/`ocr-service.md`/`renderin
 `reporting-service.md`/`federation-hub-service.md`/`plugin-orchestration-service.md` documenting the
 new maintenance-mode behavior at each poll loop/endpoint, plus test-count updates for the services that
 actually gained or fixed a test.
-
-**Next session:** **P44-S4** (small correctness fixes bundle: `virus-scan-service` uploader
-notification wiring, `workflow-service`'s `create_dmn_definition` advisory-lock race fix, `case-service`
-fully-automated-process status bug) — the fourth and last session of Phase 44. See
-`IMPLEMENTATION_PLAN.md` "Phase 44" for the full plan.
 
 ---
 

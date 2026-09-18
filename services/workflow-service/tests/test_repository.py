@@ -189,6 +189,43 @@ async def test_create_dmn_definition_same_decision_id_replacing_own_family_succe
     assert second.version == 2
 
 
+async def test_create_dmn_definition_concurrent_different_families_same_decision_id(
+    engine, approval_level_dmn
+):
+    """Post-Roadmap Phase 44 Session 4 - closes the cross-family race ADR
+    0096 itself named as deliberately unfixed ("Consequences"): two
+    concurrent FIRST-TIME creations under DIFFERENT `name`s (so the
+    existing per-`name` advisory lock does NOT serialize them against
+    each other) whose `dmn_xml` extracts the SAME `decision_id`. Before
+    this session's fix, both calls' unlocked `list_latest_dmn_
+    definitions()` read would run before either commits, both would see
+    no conflicting row yet, and both would succeed - leaving two DMN
+    families simultaneously claiming the same `decision_id`, which
+    SpiffWorkflow's `list_latest_dmn_xml()`-based BPMN parsing cannot
+    then distinguish. With the new `decision_id`-keyed advisory lock,
+    exactly one call succeeds and the other genuinely raises
+    `DuplicateDecisionIdError` (not a flaky/racy outcome depending on
+    timing - the loser's own `latest_others` read, now correctly
+    ordered after the winner's commit, always sees the winner's row)."""
+    factory = make_session_factory(engine)
+
+    async def _create(name: str) -> str:
+        async with factory() as own_session:
+            await repository.create_dmn_definition(
+                own_session, name=name, dmn_xml=approval_level_dmn
+            )
+            await own_session.commit()
+            return "created"
+
+    results = await asyncio.gather(
+        _create("Familie A"), _create("Familie B"), return_exceptions=True
+    )
+    successes = [r for r in results if r == "created"]
+    failures = [r for r in results if isinstance(r, repository.DuplicateDecisionIdError)]
+    assert len(successes) == 1
+    assert len(failures) == 1
+
+
 async def test_get_dmn_definition_unknown_raises(session):
     with pytest.raises(repository.NotFoundError):
         await repository.get_dmn_definition(session, 999999)

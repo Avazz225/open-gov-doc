@@ -69,7 +69,7 @@ None yet — follows in Phase 11.
 ## Open Points
 
 - **`ClamdEngine` not wired up in production**: code exists and is activatable via `DMS_SCAN_ENGINE=clamd`, but no `clamd` container is part of `infra/docker-compose.yml` (rationale: see above/ADR 0010). To be added once an environment with reliable access to the ClamAV signature database is available.
-- **No notification of the uploader on a hit**: the Notification Service only exists from P6-S2 onward; `virus_scan.completed` is already published and can be consumed there without any change to this service.
+- ~~**No notification of the uploader on a hit**: the Notification Service only exists from P6-S2 onward; `virus_scan.completed` is already published and can be consumed there without any change to this service.~~ — **closed in Phase 44 Session 4**: `notification-service` now consumes `virus_scan.completed` (a new subject registration + consumer branch, no change needed here — this service already published everything required). See `docs/services/notification-service.md`.
 - ~~No authorization on `/scan`/`GET /scans/{id}`/`GET /scans?document_id=`~~ — **resolved in Post-Roadmap Phase 38 Session 2**, see "Authorization" above.
 - **Scan latency increases upload latency** (ADR 0010) — negligible with `EicarSignatureEngine`, potentially noticeable with `clamd`/large files.
 - **Release requires manual entry of `folder_id`/`object_type_id`/`attributes`** — none of these values were known at the originally failed upload. See [ADR 0052](../adr/0052-quarantaene-bereich-internal-creation-endpoint-bypasses-rescan.md) for the rationale.

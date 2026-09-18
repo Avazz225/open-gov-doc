@@ -66,6 +66,13 @@ class Settings(BaseServiceSettings):
         # name (see `_SHARED_STREAM_DURABLE_OVERRIDES`), same reasoning as
         # `workflow.federation.inbound_received` above.
         "workflow.task_claim.abandoned",
+        # Virus-hit notification to the uploader (10.3, Post-Roadmap Phase
+        # 44 Session 4) - `virus-scan-service` already published this
+        # unconditionally (both "clean" and "infected") since it was
+        # built; this is the first-ever consumer. First (and only)
+        # subject of this service on the "virus_scan" stream, so no
+        # `_SHARED_STREAM_DURABLE_OVERRIDES` entry is needed.
+        "virus_scan.completed",
     ]
 
     # Recipient of the optional security notification on break-glass

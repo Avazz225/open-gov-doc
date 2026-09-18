@@ -38,6 +38,26 @@ def process_definition_id(workflow_admin_headers: dict[str, str]) -> int:
 
 
 @pytest.fixture
+def no_tasks_process_definition_id(workflow_admin_headers: dict[str, str]) -> int:
+    """A genuinely fully-automated process (zero tasks at all, start event
+    straight to end event) - real BPMN registered against the real,
+    running workflow-service, same pattern as `process_definition_id`
+    above. Used for the Post-Roadmap Phase 44 Session 4 regression test
+    proving a case whose process completes synchronously at start is
+    actually closed, not left stuck `"open"`."""
+    path = os.path.join(os.path.dirname(__file__), "fixtures", "no_tasks.bpmn")
+    with open(path, "rb") as f:
+        response = httpx.post(
+            f"{WORKFLOW_SERVICE_URL}/process-definitions",
+            data={"name": f"case-service-test-no-tasks-{uuid.uuid4()}"},
+            files={"bpmn_xml": ("process.bpmn", f, "application/xml")},
+            headers=workflow_admin_headers,
+        )
+    response.raise_for_status()
+    return response.json()["id"]
+
+
+@pytest.fixture
 def document_id(case_headers: dict[str, str]) -> str:
     """RBAC-Retrofit auf document-service's `POST /documents` (Post-Roadmap,
     Permission-Retrofit) - Aufruf braucht seither einen gültigen
@@ -75,6 +95,36 @@ def test_create_case_starts_workflow_instance(client, process_definition_id, cas
     assert body["status"] == "open"
     assert body["process_instance_id"] is not None
     assert body["closed_at"] is None
+
+
+def test_create_case_for_a_fully_automated_process_closes_immediately(
+    client, no_tasks_process_definition_id, case_headers
+):
+    """Post-Roadmap Phase 44 Session 4 - regression test for a real,
+    previously-open race: a process with zero manual tasks completes
+    SYNCHRONOUSLY inside `start_instance`, before this endpoint's own
+    `Case` row is ever committed - `workflow.instance.completed` could
+    therefore be published (and, since the same-process NATS consumer
+    reacts near-instantly, plausibly processed) before the case exists,
+    silently dropping the closure forever (see `consumer.py`'s early
+    `return` when `get_case_or_none` finds nothing - ACKed, no retry).
+    `create_case` now closes the case synchronously itself using the
+    `instance["status"]` it already has in hand, sidestepping the race
+    entirely rather than trying to fix event-delivery ordering."""
+    response = client.post(
+        "/cases",
+        json={
+            "name": "Vollautomatischer Vorgang",
+            "process_definition_id": no_tasks_process_definition_id,
+            "created_by": "alice",
+        },
+        headers=case_headers,
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["status"] == "closed"
+    assert body["closed_at"] is not None
+    assert body["process_instance_id"] is not None
 
 
 def test_create_case_with_unknown_process_definition_returns_400(client, case_headers):

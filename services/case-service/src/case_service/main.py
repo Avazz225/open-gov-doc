@@ -404,6 +404,26 @@ async def create_case(
         payload={"resource_id": case_id, "parent_id": "root", "resource_type": "case"},
         actor=payload.created_by,
     )
+    # Fully-automated process, closed synchronously right here instead of
+    # relying on `workflow.instance.completed` (Post-Roadmap Phase 44
+    # Session 4 - a real, previously-open race: a process with no manual
+    # task at all completes synchronously inside `start_instance` above,
+    # BEFORE this `Case` row is ever committed, so workflow-service may
+    # publish that event before it exists - `consumer.py`'s handler then
+    # finds no matching case and silently drops it for good (ACKed, no
+    # retry), leaving the case stuck `"open"` forever. `instance["status"]`
+    # is already known here, synchronously, from `start_instance`'s own
+    # response - no need to wait for or race against the event at all for
+    # THIS specific, already-known-at-creation-time case.
+    if instance["status"] == "completed":
+        await repository.close_case(session, case, snapshots={})
+        await session.commit()
+        await publish_event(
+            "case.closed",
+            subject=case_id,
+            payload={"process_instance_id": instance["id"]},
+            actor=payload.created_by,
+        )
     return case
 
 

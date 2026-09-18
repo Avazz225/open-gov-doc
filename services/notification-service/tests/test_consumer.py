@@ -471,6 +471,112 @@ async def test_lock_reminder_uses_configured_template(engine, settings):
     assert notifications[0].body == "Vertrag.pdf (id=doc-22) gesperrt von alice"
 
 
+async def test_virus_scan_infected_event_creates_in_app_notification_for_the_uploader(
+    engine, settings
+):
+    """Post-Roadmap Phase 44 Session 4 - `virus_scan.completed` was
+    already published unconditionally by `virus-scan-service` since it
+    was built; this is the first-ever consumer, closing a real,
+    previously-open gap (ADR 0073's own documented "no notification of
+    the uploader on a hit")."""
+    published = []
+
+    async def fake_publish(event_type, subject, payload, actor=None):
+        published.append((event_type, subject, payload))
+
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    event = Event(
+        event_type="virus_scan.completed",
+        service_name="virus-scan-service",
+        subject="scan-1",
+        payload={
+            "document_id": None,
+            "filename": "invoice.exe",
+            "status": "infected",
+            "threat_name": "Eicar-Test-Signature",
+            "created_by": "alice",
+        },
+    )
+
+    await handler(event.to_bytes())
+
+    session_factory = _session_factory(engine)
+    async with session_factory() as session:
+        notifications = await repository.list_notifications(session)
+    assert len(notifications) == 1
+    assert notifications[0].channel == "in_app"
+    assert notifications[0].recipient == "alice"
+    assert "invoice.exe" in notifications[0].body
+    assert "Eicar-Test-Signature" in notifications[0].body
+    assert len(published) == 1
+
+
+async def test_virus_scan_clean_event_creates_no_notification(engine, settings):
+    """The same subject also fires for a clean result (`virus-scan-
+    service` publishes `virus_scan.completed` unconditionally) - only an
+    actual hit is worth notifying anyone about."""
+
+    async def fake_publish(event_type, subject, payload, actor=None):
+        pass
+
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    event = Event(
+        event_type="virus_scan.completed",
+        service_name="virus-scan-service",
+        subject="scan-2",
+        payload={
+            "document_id": "doc-30",
+            "filename": "invoice.pdf",
+            "status": "clean",
+            "threat_name": None,
+            "created_by": "alice",
+        },
+    )
+
+    await handler(event.to_bytes())
+
+    session_factory = _session_factory(engine)
+    async with session_factory() as session:
+        notifications = await repository.list_notifications(session)
+    assert notifications == []
+
+
+async def test_virus_scan_infected_event_includes_a_direct_link_when_document_id_known(
+    engine, settings
+):
+    """`document_id` is usually `None` for an infected result (the
+    document is never created for one, see `virus-scan-service`'s own
+    `POST /scan` docstring) - but when it IS known (e.g. a re-scan of an
+    already-registered document), the link should use `document_id`,
+    NOT the event's own `subject` (the scan's own id, a different
+    resource type entirely)."""
+
+    async def fake_publish(event_type, subject, payload, actor=None):
+        pass
+
+    configured = settings.model_copy(update={"user_ui_public_base_url": "http://localhost:3000"})
+    handler = consumer.make_handler(_session_factory(engine), configured, fake_publish)
+    event = Event(
+        event_type="virus_scan.completed",
+        service_name="virus-scan-service",
+        subject="scan-3",
+        payload={
+            "document_id": "doc-31",
+            "filename": "invoice.exe",
+            "status": "infected",
+            "threat_name": "Eicar-Test-Signature",
+            "created_by": "alice",
+        },
+    )
+
+    await handler(event.to_bytes())
+
+    session_factory = _session_factory(engine)
+    async with session_factory() as session:
+        notifications = await repository.list_notifications(session)
+    assert "http://localhost:3000/?document=doc-31" in notifications[0].body
+
+
 async def test_task_claim_abandoned_event_creates_in_app_notification_for_the_claimant(
     engine, settings
 ):

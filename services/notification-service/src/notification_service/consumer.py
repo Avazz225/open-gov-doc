@@ -69,6 +69,9 @@ def make_handler(
         if event.event_type == "workflow.task_claim.abandoned":
             await _handle_task_claim_abandoned(session_factory, settings, publish_event, event)
             return
+        if event.event_type == "virus_scan.completed":
+            await _handle_virus_scan_completed(session_factory, settings, publish_event, event)
+            return
         if event.event_type == "license.limit_exceeded":
             await _handle_license_limit_exceeded(session_factory, settings, publish_event, event)
             return
@@ -423,6 +426,63 @@ async def _handle_lock_reminder(
         )
         notification = await repository.create_and_send(
             session, settings, channel="in_app", recipient=locked_by, subject=subject, body=body
+        )
+        await session.commit()
+        await publish_notification_result(publish_event, notification)
+
+
+async def _handle_virus_scan_completed(
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    publish_event: Callable[[str, str, dict], Awaitable[None]],
+    event: Event,
+) -> None:
+    """Uploader notification on a virus hit (Post-Roadmap Phase 44 Session
+    4, ADR 0073's own documented gap: `virus_scan.completed` was already
+    published unconditionally by `virus-scan-service`, but nothing ever
+    consumed it - this is the first consumer at all). `virus_scan.
+    completed` fires for BOTH `"clean"` and `"infected"` scans; only the
+    latter is worth notifying anyone about, so a clean result is a
+    silent no-op here, same "not every event needs a notification"
+    pattern this module already has for its other consumed subjects."""
+    data = event.payload
+    if data.get("status") != "infected":
+        return
+    filename = data.get("filename", "?")
+    document_id = data.get("document_id")
+    # `created_by` is an optional Form field on virus-scan-service's own
+    # `POST /scan` (`document_id`/`created_by` are both `Form(None)`) - a
+    # present-but-`None` key means `.get(..., "?")`'s default never kicks
+    # in, so this needs an explicit `or` fallback instead.
+    created_by = data.get("created_by") or "?"
+    threat_name = data.get("threat_name") or "unbekannt"
+    fallback_subject = f"Virus gefunden: {filename}"
+    fallback_body = (
+        f"Beim Hochladen von {filename!r} wurde ein Virus gefunden ({threat_name}) - "
+        "die Datei wurde in Quarantäne verschoben."
+    )
+    link = (
+        build_resource_link(settings.user_ui_public_base_url, "document", document_id)
+        if document_id
+        else None
+    )
+    if link:
+        fallback_body += f"\n\nDokument öffnen: {link}"
+
+    async with session_factory() as session:
+        subject, body = await _render_or_fallback(
+            session,
+            use_case="virus_scan.completed",
+            recipient=created_by,
+            fallback_subject=fallback_subject,
+            fallback_body=fallback_body,
+            filename=filename,
+            document_id=document_id or "",
+            threat_name=threat_name,
+            link=link or "",
+        )
+        notification = await repository.create_and_send(
+            session, settings, channel="in_app", recipient=created_by, subject=subject, body=body
         )
         await session.commit()
         await publish_notification_result(publish_event, notification)
