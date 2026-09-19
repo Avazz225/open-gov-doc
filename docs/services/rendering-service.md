@@ -8,10 +8,10 @@
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/renditions?document_id=...&version_number=...&status=...` | Generated renditions/previews for a version (`version_number` optional — without it: all versions of the document) — since **P19-S8** `rendering.read`-gated. Since **Post-Roadmap Phase 20 Session 7**, `document_id` is also optional (previously required) and a new `status` filter was added — without `document_id` this returns a cross-document list, the basis for the new Admin UI view of `failed_permanent` renditions ([ADR 0083](../adr/0083-admin-ui-processing-failures-visibility.md)) |
-| `GET` | `/renditions/{id}` | Single rendition (metadata) — 404 on unknown `id`; since **P19-S8** `rendering.read`-gated |
-| `GET` | `/renditions/{id}/content` | Bytes of the rendition (proxy to the Storage Service) — 404 on unknown `id`, 409 on status `failed`/`failed_permanent`; since **P19-S8** `rendering.read`-gated |
-| `POST` | `/renditions/{id}/retry` | Manual restart of a `failed_permanent` rendition (since **P20-S4**, [ADR 0080](../adr/0080-rendering-ocr-service-retry-backoff-failed-permanent.md)) — `404` on unknown `id`, `409` if `status != "failed_permanent"`, otherwise an immediate retry for ONLY the affected renderer; `rendering.write`-gated |
+| `GET` | `/renditions?document_id=...&version_number=...&status=...` | Generated renditions/previews for a version (`version_number` optional — without it: all versions of the document) — since **P19-S8** `rendering.read`-gated. Since **Post-Roadmap Phase 20 Session 7**, `document_id` is also optional (previously required) and a new `status` filter was added — without `document_id` this returns a cross-document list, the basis for the new Admin UI view of `failed_permanent` renditions ([ADR 0083](../adr/0083-admin-ui-processing-failures-visibility.md)), and stays behind the coarse, service-wide `rendering.read` check (no single document to scope against). **With** a `document_id` (Phase 50 Session 3): checked against that document's own `document.read` instead — see "Per-Document Permission (Phase 50 Session 3)" below |
+| `GET` | `/renditions/{id}` | Single rendition (metadata) — 404 on unknown `id`; since **P19-S8** `rendering.read`-gated, **since Phase 50 Session 3** checked against the rendition's own `document_id` (`document.read`) instead — see below |
+| `GET` | `/renditions/{id}/content` | Bytes of the rendition (proxy to the Storage Service) — 404 on unknown `id`, 409 on status `failed`/`failed_permanent`; since **P19-S8** `rendering.read`-gated, **since Phase 50 Session 3** checked against the rendition's own `document_id` (`document.read`) instead — see below |
+| `POST` | `/renditions/{id}/retry` | Manual restart of a `failed_permanent` rendition (since **P20-S4**, [ADR 0080](../adr/0080-rendering-ocr-service-retry-backoff-failed-permanent.md)) — `404` on unknown `id`, `409` if `status != "failed_permanent"`, otherwise an immediate retry for ONLY the affected renderer; `rendering.write`-gated, **since Phase 50 Session 3** checked against the rendition's own `document_id` (`document.write`) instead — see below |
 | `POST` | `/render/watermark` | Multipart (`file`: PDF, `value`, optional `stamp_type`/`position`) → on-demand output stamp, returns the stamped PDF directly, **without** persisting it; since **P19-S8** ([ADR 0073](../adr/0073-ocr-rendering-virus-scan-rbac.md)) `rendering.write`-gated. Since **Post-Roadmap Phase 31 Session 6** ([ADR 0117](../adr/0117-output-stamping-qr-barcode-position-export-pipeline.md)): `stamp_type` (`"text"`/`"qr"`/`"barcode"`) and `position` (`"diagonal-center"`/four page corners), see "Output Stamping" below |
 | `POST` | `/render/convert-to-pdf` | Multipart (`file`: any `PdfArchiveRenderer`-supported format) → on-demand PDF conversion, same dispatch as the automatic pipeline but without persisting a `Rendition` row; since **Post-Roadmap Phase 28** ([ADR 0107](../adr/0107-pdf-export-two-pass-merge-subnumbering.md)) `rendering.write`-gated |
 | `POST` | `/render/export/document` | Multipart (`file`, `title`, `history_position`, `history`: JSON array) → Pass A of the PDF export feature — converts + merges with the (already document-service-resolved) export history, stamps a local page-number footer; since **Post-Roadmap Phase 28** ([ADR 0107](../adr/0107-pdf-export-two-pass-merge-subnumbering.md)) `rendering.write`-gated |
@@ -203,6 +203,41 @@ back-reference to the correct already-appended page with no extra code) and renu
 each source independently numbers its own pages from 0 and would otherwise collide once combined. See
 ADR 0158 for the full spec-level mechanism and its one deliberate scope cut.
 
+## Per-Document Permission (Phase 50 Session 3)
+
+Every rendition endpoint used to gate through one coarse, service-wide `_require_rendering_permission`
+(`rendering.read`/`.write` on `PermissionServiceClient.ROOT_RESOURCE_ID`) — granted to "everyone" by
+default (ADR 0073), so in practice a near-no-op check on most installations. This meant an isolated
+document (ADR 0149's `inherit=False`, revoking the default "everyone" grant on that document's own
+`ResourceNode`) stayed fully readable/retryable via its renditions regardless — a real bypass of the
+document's own access control.
+
+Fixed for the four endpoints that operate on a real, persisted `Rendition` tied to a real `document_id`
+(`GET /renditions/{id}`, `GET /renditions/{id}/content`, `POST /renditions/{id}/retry`, and
+`GET /renditions?document_id=...` when `document_id` is given): a new `_require_rendition_document_permission`
+checks `document.read`/`document.write` against `resource_id=<document_id>` — the SAME per-document
+`ResourceNode` `document-service` already anchors the source document to (ADR 0144/0154), not a new
+rendering-specific resource type. Renditions don't need their own `ResourceNode`; they piggyback on the
+document's existing one, the same way `document-service`'s own redaction-preview endpoints already do
+when calling into this service. Since the rendition row (not the caller) is the only place `document_id`
+is known for the three single-rendition endpoints, each fetches the row FIRST (resolving `404` for an
+unknown `id`) before the permission check can even run — same ordering `document-service`'s own
+`_require_document_permission` already established.
+
+**Deliberately left on the coarse check**: `GET /renditions` without a `document_id` (the cross-document
+admin view behind `ProcessingFailuresView`, ADR 0083 — there is no single document to scope a check
+against) and all eight `/render/*` utility endpoints (`watermark`, `convert-to-pdf`, `pdf-page-count`,
+`pdf-tag-check`, `pdf-page-image`, `redact`, `export/document`, `export/folder`) — these take raw
+uploaded bytes with no persisted document reference at all; the caller (typically `document-service`
+proxying for a UI action) has already checked the source document's own permission before forwarding
+bytes here, so there is nothing for rendering-service itself to additionally scope against.
+
+Live-verified against the real running stack: uploaded a real document via `document-service` (real
+`ResourceNode` created automatically), confirmed `GET /renditions?document_id=...` succeeds for an
+unrelated principal (default "everyone" access, unchanged behavior), then isolated the document
+(`PATCH /resources/{id}` `{"inherit": false}`) and confirmed the SAME call now correctly `403`s for that
+same unrelated principal — closing the exact bypass this session fixed.
+
 ## Backend Integration
 
 - **Document Service** (3.1): `GET /documents/{id}/versions/{n}` (metadata) and `.../content` (original bytes) — no direct access to its schema/storage key. **Since Post-Roadmap Phase 38 Session 4** ([ADR 0149](../adr/0149-teamspace-permission-anchoring-broad-rbac-retrofit.md)): both calls send a fixed `X-DMS-Principal: rendering-service` header — these endpoints previously had no permission check at all.
@@ -229,7 +264,23 @@ None yet — follows in Phase 11.
 
 ## Tests
 
-- `uv run pytest services/rendering-service/tests` (**101 tests**, net +3 since **Post-Roadmap Phase 42
+- `uv run pytest services/rendering-service/tests` (**103 tests since Phase 50 Session 3** — +2 over the
+  previous 101: `test_list_renditions_empty_for_unknown_document` split into
+  `test_list_renditions_empty_for_a_document_with_no_renditions` (now creates a real `ResourceNode` for
+  its synthetic `document_id` first, via a new `_ensure_document_resource` test helper — `POST
+  /resources` is idempotent and ungated) and
+  `test_list_renditions_returns_403_for_a_document_without_a_resource_node` (proves a `document_id` with
+  no `ResourceNode` at all now fails closed instead of silently returning an empty list); a new
+  `test_isolating_a_document_blocks_its_renditions_until_explicitly_granted` mirrors
+  `document-service/tests/test_per_document_rbac.py`'s isolation pattern applied to renditions — the
+  actual point of this session, proving `GET /renditions/{id}`, `GET /renditions?document_id=...`, and
+  `POST /renditions/{id}/retry` all correctly `403` once the underlying document is isolated
+  (`inherit=False`), then restoring access via a document-scoped role grant. The two existing
+  synthetic-`document_id` retry tests (`test_retry_returns_409_for_a_still_retryable_rendition`,
+  `..._for_a_permanently_missing_document...`) also needed `_ensure_document_resource` added, since they
+  bypass `document-service` entirely (direct DB fixture via `repository.record_failure`) and would
+  otherwise now `403` before reaching the state they actually test. Before that, 101 tests, net +3 since
+  **Post-Roadmap Phase 42
   Session 4** ([ADR 0158](../adr/0158-multi-document-struct-tree-merge.md)): `test_export_pdf.py` gained
   a real, navigable structure-tree fixture (`_add_real_struct_tree` — one genuine `/StructElem` linked to
   page 0 via a real `/ParentTree` entry, replacing the old bare-presence-only marker for these specific
@@ -270,7 +321,7 @@ None yet — follows in Phase 11.
 - **Larger Docker image** due to the LibreOffice installation (since P7-S3) — a deliberate trade-off for the required format coverage (5.6), no way around it without proprietary cloud APIs.
 - **No video transcription plugin**: optional per the concept itself, no engine available.
 - ~~**No cleanup of failed renditions**~~ — **fixed in Post-Roadmap Phase 20 Session 4** ([ADR 0080](../adr/0080-rendering-ocr-service-retry-backoff-failed-permanent.md)): automatic retry with full-jitter backoff up to `max_rendering_attempts`, after that `failed_permanent` + manual restart via `POST .../retry` (targeted only at the affected renderer).
-- ~~No authorization~~ — **fixed in Post-Roadmap Phase 19 Session 8** ([ADR 0073](../adr/0073-ocr-rendering-virus-scan-rbac.md)): all endpoints now check `rendering.read`/`rendering.write` via `permission-service`. Still open: per 2.4, renditions should inherit the same permissions as the original (fine-grained, document-specific) — the new check is a coarse, service-wide `read`/`write`, not inheritance of the concrete document permission.
+- ~~No authorization~~ — **fixed in Post-Roadmap Phase 19 Session 8** ([ADR 0073](../adr/0073-ocr-rendering-virus-scan-rbac.md)): all endpoints now check `rendering.read`/`rendering.write` via `permission-service`. ~~Still open: per 2.4, renditions should inherit the same permissions as the original (fine-grained, document-specific) — the new check is a coarse, service-wide `read`/`write`, not inheritance of the concrete document permission.~~ — **closed in Phase 50 Session 3** for the four `/renditions/*` endpoints, which operate on a real, persisted `Rendition` tied to a real `document_id` — see "Per-Document Permission (Phase 50 Session 3)" below. The eight stateless `/render/*` utility endpoints (raw bytes in, bytes out, no persisted document reference — the caller, typically `document-service` proxying for a UI action, has already checked the source document's own permission before forwarding bytes here) deliberately stay on the coarse, service-wide check — there is no document to scope against.
 - **Watermark endpoint deliberately minimal**: fixed diagonal stamp, no position/repetition/color configuration.
 - **`is_tagged_pdf()` is a `/StructTreeRoot`-presence check, not full PDF/UA validation** (Post-Roadmap
   Phase 31 Session 8, ADR 0119) — same documented limitation category as the PDF/A-without-veraPDF gap

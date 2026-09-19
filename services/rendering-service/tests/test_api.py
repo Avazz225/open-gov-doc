@@ -1,12 +1,36 @@
 import json
+import os
 import uuid
 from io import BytesIO
 
+import httpx
 from fastapi.testclient import TestClient
 from pypdf import PdfReader
 from rendering_service import repository
 from rendering_service.main import app
 from reportlab.pdfgen import canvas
+
+PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://localhost:8004")
+
+
+def _ensure_document_resource(document_id: str) -> None:
+    """Phase 50 Session 3: `/renditions/*` now checks `document.read`/
+    `.write` against `document_id`'s own `ResourceNode` (see
+    `_require_rendition_document_permission`) - a document created for real
+    via `document-service` already has one (ADR 0154), but several tests
+    here deliberately use a synthetic `document_id` (direct DB fixture via
+    `repository.record_failure`, no real document-service round trip - see
+    the docstring on the "gone" document test below for why). Creates a
+    bare node under `root` with default `inherit=True`, matching a real,
+    non-isolated document's default shape exactly - `POST /resources` is
+    idempotent and ungated (same endpoint `case-service`/`document-service`
+    themselves call on creation)."""
+    response = httpx.post(
+        f"{PERMISSION_SERVICE_URL}/resources",
+        json={"resource_id": document_id, "parent_id": "root", "resource_type": "document"},
+        timeout=10.0,
+    )
+    response.raise_for_status()
 
 
 def _real_pdf(pages: int = 2) -> bytes:
@@ -26,11 +50,23 @@ def test_healthz():
     assert response.json()["service"] == "rendering-service"
 
 
-def test_list_renditions_empty_for_unknown_document():
+def test_list_renditions_empty_for_a_document_with_no_renditions():
+    document_id = f"doc-{uuid.uuid4().hex[:8]}"
+    _ensure_document_resource(document_id)
     with TestClient(app, headers={"X-DMS-Principal": "rendering-service-tests"}) as client:
-        response = client.get("/renditions", params={"document_id": "unbekannt"})
+        response = client.get("/renditions", params={"document_id": document_id})
     assert response.status_code == 200
     assert response.json() == []
+
+
+def test_list_renditions_returns_403_for_a_document_without_a_resource_node():
+    """Phase 50 Session 3: a `document_id` with no `ResourceNode` at all
+    (never created, or already purged) now fails closed instead of silently
+    returning an empty list - proves the new per-document check actually
+    denies rather than merely being present but toothless."""
+    with TestClient(app, headers={"X-DMS-Principal": "rendering-service-tests"}) as client:
+        response = client.get("/renditions", params={"document_id": "unbekannt"})
+    assert response.status_code == 403
 
 
 def test_list_renditions_without_document_id_is_accepted():
@@ -61,6 +97,7 @@ def test_retry_returns_404_for_unknown_rendition():
 
 async def test_retry_returns_409_for_a_still_retryable_rendition(session):
     document_id = f"doc-{uuid.uuid4().hex[:8]}"
+    _ensure_document_resource(document_id)
     await repository.record_failure(
         session,
         document_id=document_id,
@@ -97,6 +134,7 @@ async def test_retry_for_a_permanently_missing_document_resets_attempts_but_stay
     echten NATS-Konsumenten unabhängig verarbeitet und mit diesem Testaufruf
     um die `attempts`-Buchführung konkurrieren (nicht deterministisch)."""
     document_id = f"gone-{uuid.uuid4().hex[:8]}"
+    _ensure_document_resource(document_id)
     await repository.record_failure(
         session,
         document_id=document_id,
@@ -117,6 +155,69 @@ async def test_retry_for_a_permanently_missing_document_resets_attempts_but_stay
     assert body["status"] == "failed_permanent"
     assert body["attempts"] == 0
     assert body["error_message"] is None
+
+
+async def test_isolating_a_document_blocks_its_renditions_until_explicitly_granted(session):
+    """Phase 50 Session 3, the actual point of this session: a document's
+    own `ResourceNode` (ADR 0144/0154) lets a role be assigned scoped to
+    just THAT document - proven the same way `document-service`'s own
+    `test_per_document_rbac.py` proves it for documents themselves, applied
+    here to that document's renditions instead. Before this session, NONE
+    of this mattered - every rendition was reachable via the coarse,
+    default-open `rendering.read`/`.write` on root regardless of whether the
+    underlying document itself had been isolated."""
+    document_id = f"doc-{uuid.uuid4().hex[:8]}"
+    _ensure_document_resource(document_id)
+    rendition = await repository.record_failure(
+        session,
+        document_id=document_id,
+        version_number=1,
+        rendition_type="pdf_archive",
+        source_filename="a.pdf",
+        source_content_type="application/pdf",
+        error="e",
+        max_attempts=5,
+    )
+    await session.commit()
+
+    async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL, timeout=10.0) as pc:
+        patch_response = await pc.patch(f"/resources/{document_id}", json={"inherit": False})
+        patch_response.raise_for_status()
+
+    scoped_principal = "rendering-service-tests-scoped-reader"
+    with TestClient(app, headers={"X-DMS-Principal": scoped_principal}) as client:
+        denied_get = client.get(f"/renditions/{rendition.id}")
+        assert denied_get.status_code == 403
+        denied_list = client.get("/renditions", params={"document_id": document_id})
+        assert denied_list.status_code == 403
+        denied_retry = client.post(f"/renditions/{rendition.id}/retry")
+        assert denied_retry.status_code == 403
+
+    async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL, timeout=10.0) as pc:
+        role_response = await pc.post(
+            "/roles",
+            json={"name": f"document-reader-{document_id}", "permissions": ["document.read"]},
+            headers={"X-DMS-Principal": "rendering-service-test-role-admin"},
+        )
+        role_response.raise_for_status()
+        role = role_response.json()["role"]
+        assignment_response = await pc.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": scoped_principal,
+                "role_id": role["id"],
+                "resource_id": document_id,
+            },
+        )
+    assignment_response.raise_for_status()
+    assert assignment_response.json()["status"] == "created"
+
+    with TestClient(app, headers={"X-DMS-Principal": scoped_principal}) as client:
+        now_allowed_get = client.get(f"/renditions/{rendition.id}")
+        assert now_allowed_get.status_code == 200
+        now_allowed_list = client.get("/renditions", params={"document_id": document_id})
+        assert now_allowed_list.status_code == 200
 
 
 def test_render_watermark_returns_stamped_pdf():

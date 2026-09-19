@@ -259,6 +259,43 @@ async def _require_rendering_permission(x_dms_principal: str, *, access_type: st
         raise HTTPException(status_code=403, detail=f"Fehlende Berechtigung {permission!r}")
 
 
+async def _require_rendition_document_permission(
+    x_dms_principal: str, resource_id: str, *, access_type: str
+) -> None:
+    """RBAC (Phase 50 Session 3) - unlike `_require_rendering_permission`
+    above (a coarse, service-wide check appropriate for the stateless
+    `/render/*` utility endpoints further below, which operate on raw
+    uploaded bytes with no persisted document reference at all - the caller,
+    typically `document-service` proxying for a UI action, has already
+    checked the source document's own permission before forwarding bytes
+    here), the `/renditions/*` endpoints operate on a real, persisted
+    `Rendition` tied to a real `document_id`. Checking `rendering.read`/
+    `.write` on the root resource for those let anyone with the
+    (default-open, "everyone"-granted) coarse capability read/retry ANY
+    rendition regardless of whether the underlying document itself had been
+    isolated (ADR 0149's `inherit=False`) - this closes that bypass by
+    checking the SAME `document.read`/`.write` capability against the SAME
+    per-document `ResourceNode` `document-service` already anchors the
+    source document to (ADR 0144/0154), not a new rendering-specific
+    resource type. Callers resolve `404` (unknown rendition) themselves
+    first, fetching the row to learn its `document_id` before this check
+    can even run - same ordering `document-service`'s own
+    `_require_document_permission` already established."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    permission = "document.read" if access_type == "read" else "document.write"
+    allowed = await app.state.permission_client.check(
+        principal_id=x_dms_principal,
+        resource_id=resource_id,
+        permission=permission,
+        access_type=access_type,
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=403, detail=f"Fehlende Berechtigung {permission!r} auf {resource_id!r}"
+        )
+
+
 @app.get("/renditions", response_model=list[RenditionOut])
 async def list_renditions(
     document_id: str | None = None,
@@ -270,8 +307,18 @@ async def list_renditions(
     """``document_id`` has been optional since post-roadmap phase 20 session
     7 - without it (typically combined with ``status``) this returns a
     cross-document list, the basis for the new admin UI view of
-    permanently failed renditions."""
-    await _require_rendering_permission(x_dms_principal, access_type="read")
+    permanently failed renditions - stays behind the coarse, service-wide
+    check in that case (there is no single document to scope a check
+    against). **With** a ``document_id`` (Phase 50 Session 3) checked
+    against that document's own permission instead - otherwise the coarse,
+    default-open `rendering.read` would let anyone list an isolated
+    document's renditions regardless of the document's own ACL."""
+    if document_id is not None:
+        await _require_rendition_document_permission(
+            x_dms_principal, document_id, access_type="read"
+        )
+    else:
+        await _require_rendering_permission(x_dms_principal, access_type="read")
     return await repository.list_renditions(
         session, document_id=document_id, version_number=version_number, status=status
     )
@@ -283,11 +330,14 @@ async def get_rendition(
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> RenditionOut:
-    await _require_rendering_permission(x_dms_principal, access_type="read")
     try:
-        return await repository.get_rendition(session, rendition_id)
+        rendition = await repository.get_rendition(session, rendition_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await _require_rendition_document_permission(
+        x_dms_principal, rendition.document_id, access_type="read"
+    )
+    return rendition
 
 
 @app.post("/renditions/{rendition_id}/retry", response_model=RenditionOut)
@@ -301,11 +351,13 @@ async def retry_rendition_endpoint(
     `failed_permanent` (409 otherwise); immediately makes a new synchronous
     attempt ONLY for the affected renderer instead of waiting for the next
     poll tick."""
-    await _require_rendering_permission(x_dms_principal, access_type="write")
     try:
         rendition = await repository.get_rendition(session, rendition_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await _require_rendition_document_permission(
+        x_dms_principal, rendition.document_id, access_type="write"
+    )
     if rendition.status != "failed_permanent":
         raise HTTPException(
             status_code=409,
@@ -344,11 +396,13 @@ async def download_rendition_content(
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> Response:
-    await _require_rendering_permission(x_dms_principal, access_type="read")
     try:
         rendition = await repository.get_rendition(session, rendition_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await _require_rendition_document_permission(
+        x_dms_principal, rendition.document_id, access_type="read"
+    )
     if rendition.status != "ready":
         raise HTTPException(
             status_code=409, detail=f"Ersatzdarstellung hat Status {rendition.status!r}"

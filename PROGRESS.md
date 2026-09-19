@@ -2,10 +2,79 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P50-S2 (`notification-service`/`signature-service`: replace the `users-admin` login
-with a narrow, service-only directory lookup — second session of Phase 50, "Remaining Lower-Priority
-Hardening"). No new ADR (polish/hardening — a real excess-privilege fix, but following an already-
-established gating pattern, not a new architecture decision, per the plan's own DoD).
+**Last completed:** P50-S3 (`rendering-service`: per-document permission inheritance for renditions —
+third session of Phase 50, "Remaining Lower-Priority Hardening"). No new ADR (polish/hardening — a real
+bypass fix, but reusing document-service's already-established per-document `ResourceNode` pattern, not
+a new architecture decision, per the plan's own DoD).
+
+Every rendition endpoint used to gate through one coarse, service-wide `rendering.read`/`.write` check
+(granted to "everyone" by default, ADR 0073 — in practice a near-no-op) instead of the concrete
+originating document's own permission, despite `Rendition` already storing `document_id`. This meant an
+isolated document (ADR 0149's `inherit=False`) stayed fully readable/retryable via its renditions
+regardless of the document's own ACL — a real bypass. Fixed for the four endpoints that operate on a
+real, persisted `Rendition`: `GET /renditions/{id}`, `GET /renditions/{id}/content`,
+`POST /renditions/{id}/retry`, and `GET /renditions?document_id=...` (only when `document_id` is given).
+A new `_require_rendition_document_permission` checks `document.read`/`document.write` against
+`resource_id=<document_id>` — the SAME per-document `ResourceNode` `document-service` already anchors
+the source document to (ADR 0144/0154), no new resource type. The three single-rendition endpoints fetch
+the row FIRST (resolving `404` for an unknown id) before the permission check can even run, since only
+the row (not the caller) knows `document_id` — same ordering `document-service`'s own
+`_require_document_permission` already established.
+
+**Deliberately left on the coarse check**: `GET /renditions` without a `document_id` (the cross-document
+admin view behind `ProcessingFailuresView`/ADR 0083 — no single document to scope against) and all eight
+`/render/*` utility endpoints (`watermark`, `convert-to-pdf`, `pdf-page-count`, `pdf-tag-check`,
+`pdf-page-image`, `redact`, `export/document`, `export/folder`) — these take raw uploaded bytes with no
+persisted document reference at all; the caller (typically `document-service` proxying for a UI action)
+has already checked the source document's own permission before forwarding bytes here. Recognizing this
+distinction (checked during research, not assumed) kept the fix scoped to where it actually applies,
+instead of naively wrapping every endpoint in the file.
+
+Test changes: `test_list_renditions_empty_for_unknown_document` split into a version using a real
+`ResourceNode` (still 200/empty) and a new test proving a `document_id` with no `ResourceNode` at all now
+correctly `403`s (previously silently returned an empty list). A new
+`test_isolating_a_document_blocks_its_renditions_until_explicitly_granted` mirrors
+`document-service/tests/test_per_document_rbac.py`'s isolation pattern — the actual point of this
+session — proving all three affected endpoints `403` once the document is isolated, then restoring
+access via a document-scoped role grant. Two existing synthetic-`document_id` retry tests needed a new
+`_ensure_document_resource` test helper (creates a bare `ResourceNode` via the idempotent, ungated
+`POST /resources`) added, since they bypass `document-service` entirely and would otherwise now `403`
+before reaching the state they actually test. New `conftest.py` fixture
+`_grant_role_admin_permission` (mirrors `document-service`'s own) since the isolation test creates its
+own throwaway role.
+
+`103`/`103` tests passing (was 101, +2 net — one test split into two, one new). `ruff check`/`ruff format
+--check` clean. Full suite re-run alongside `permission-service`/`document-service` surfaced one flaky,
+order-dependent failure (`test_run_retry_tick_processes_a_due_rendition`, the same already-documented
+"bound to a different event loop" class of pre-existing flake as `mail-connector`'s) — passed cleanly
+(103/103) when re-run in isolation immediately after, unrelated to this session's diff (that test file
+was never touched), not chased further.
+
+Docker image rebuilt and redeployed, started cleanly (background poll-loop errors in the logs
+immediately after are pre-existing, unrelated leftover test-pollution documents being retried, not
+caused by this session). Live-verified against the real running stack: uploaded a real document via
+`document-service`, confirmed `GET /renditions?document_id=...` succeeds for an unrelated principal
+(default access, unchanged), then isolated the document (`PATCH /resources/{id}` `{"inherit": false}`)
+and confirmed the SAME call now correctly `403`s for that same principal — closing the exact bypass this
+session fixed. Isolation reverted and the test document trashed afterward.
+
+`docs/services/rendering-service.md`: new "Per-Document Permission (Phase 50 Session 3)" section, four
+API table rows updated, matching Open Points bullet closed, Tests section updated.
+
+**Next session:** P50-S4 — `webdav-connector`'s root `PROPFIND` degrades with document volume, a genuine
+N+1 (one `GET /documents/{id}/versions/{version_number}` round-trip per document in
+`dms-connector-sdk`'s `DmsTreeClient.list_children`, not an unpaginated global fetch). Fix: a batch
+current-version-lookup endpoint on `document-service`, consumed once per folder listing instead of once
+per document — benefits `cmis-connector` too (same SDK, same N+1), worth confirming it isn't broken by
+the shared-client change even though it's out of this session's stated scope.
+
+---
+
+Immediately before P50-S3: **P50-S2** (`notification-service`/`signature-service`: replace the
+`users-admin` login with a narrow, service-only directory lookup — second session of Phase 50,
+"Remaining Lower-Priority Hardening"). No new ADR (polish/hardening — a real excess-privilege fix, but
+following an already-established gating pattern, not a new architecture decision, per the plan's own
+DoD).
 
 Both services previously authenticated as the `users-admin` technical account (`POST /login` on every
 call) purely to reach `admin.user_management`-gated `GET /users` for a read-only directory scan — a
