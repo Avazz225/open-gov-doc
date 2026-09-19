@@ -53,8 +53,29 @@ the admin-UI page. `docs/services/admin-ui.md`: new Backend Integration table ro
 **Phase 50 is now closed** (all five sessions done: `storage-service` `lock_until` propagation,
 `notification-service`/`signature-service` excess-privilege fix, `rendering-service` per-document
 permission inheritance, `webdav-connector`'s N+1 fix, and this session). Per the project's own
-`graphify update .` convention (phase-end only, not after every session), the graph is updated once this
-session's documentation is finalized. No next phase has been started or requested yet.
+`graphify update .` convention (phase-end only, not after every session), the graph was updated
+immediately afterward.
+
+**Fourth gap-analysis round completed afterward, on request** — four parallel research agents (ADR
+self-named open scope, `docs/services/*.md` Open Points, `Konzept.md` coverage re-check, staleness
+reassessment of every previously-deferred item across all three prior rounds). Result: zero stale
+deferred entries found (a first — every previous round found at least one), and a real but modest set of
+new findings, written up as **Phase 51 ("Security & Correctness Bugfixes"), Phase 52 ("Dependency-
+Resolved / Overdue Completions"), and Phase 53 ("Lower-Priority Hardening & Polish")** in
+`IMPLEMENTATION_PLAN.md` — full context, principle-of-ordering, and the "Deliberately Not Included"
+list are there, not duplicated here. Two of the six new sessions close bugs that were already found live
+during Phase 49/50 sessions but never actually scheduled (the cross-app `/me/preferences` `500`, and the
+`cmis-connector` authorization anomaly bundled with ADR 0149's related residual). One drive-by doc fix
+made directly during this round, not given its own session: `admin-ui.md`/`user-ui.md` each still had a
+stale "i18n only structurally prepared, no second language" Open Points bullet left un-struck since
+Phase 47 shipped exactly that — corrected in place.
+
+**Next session:** P51-S1 — investigate why `permission-service`'s ancestor-walk (`_collect_effective_
+roles`, breaks on a missing `ResourceNode`) produces two seemingly-opposite live symptoms: `cmis-
+connector`'s over-allow (`200` where a documented `403` is expected, found Phase 50 Session 1) and ADR
+0149's still-open over-deny residual (a trashed document orphaned by a later-hard-deleted parent folder).
+Determine whether the `cmis-connector` finding is a real authorization regression or a stale test
+assertion, and fix whichever is actually broken.
 
 ---
 

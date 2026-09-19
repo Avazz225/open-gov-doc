@@ -1044,6 +1044,90 @@ phase end only, backend regression (`scripts/run-tests.sh --build`) + frontend r
 every UI-visible change — non-negotiable for Phases 47/49 specifically, since their entire point is
 user-visible.
 
+## Phase 51+: Gap Analysis After Phase 50
+
+After Phase 50 completed, a fourth gap-analysis round (same methodology as Phases 32+/38+/44+ above) ran
+four parallel research agents: ADR self-named open scope (all 168 ADRs, focused on 0148+), `docs/
+services/*.md` Open Points (all ~50 files), `Konzept.md` coverage re-check, and staleness reassessment of
+every previously-deferred item across all three prior rounds' "not included" lists. Result: the staleness
+sweep found **zero** stale entries this time (everything deferred so far, including the two items a prior
+round already had to correct once, still has its blocking reason intact) — a sign the deferred list itself
+has stabilized. Real findings clustered into three groups: two live, already-found-but-never-scheduled
+bugs from Phase 49/50 sessions (finally getting a session here), a handful of ADRs' own self-named
+residual scope that a later session never circled back to, and one genuinely small Concept-document gap
+(§7.5's cross-installation compare has a complete backend/CLI path but never got its admin-UI half, per
+ADR 0040's own "Consequences"). Drive-by finding, fixed directly rather than given a session: `admin-ui.md`
+and `user-ui.md` each still carried an "i18n only structurally prepared, no second language" Open Points
+bullet — stale since Phase 47 shipped exactly that for both apps; corrected in place.
+
+### Phase 51 — Security & Correctness Bugfixes (highest priority)
+
+| Session | Deliverable |
+|---|---|
+| P51-S1 | `permission-service`'s ancestor-walk (`_collect_effective_roles`) breaks immediately when a resource's own `ResourceNode` is missing (`if node is None: break`) — found twice from two different angles without yet being explained: (a) `cmis-connector`'s live-verified `test_delete_tree_cascades_documents_and_subfolders` now gets `200` on `GET /documents/{id}` where a documented residual `403` is expected, for a document whose folder's `ResourceNode` was removed by a cascading delete (found Phase 50 Session 1); (b) ADR 0149's own still-open residual — a trashed document whose parent folder is later hard-deleted may become permanently unreadable via the same missing-node dead end, the opposite symptom (over-deny instead of over-allow). Session investigates why the SAME mechanism produces both an apparent over-allow and a known over-deny symptom, determines whether (a) is a real authorization regression or a stale test assertion, and fixes whichever is actually broken. |
+| P51-S2 | `auth-service`'s `GET`/`PUT /me/preferences` `500`s for the `users-admin` technical account (Keycloak `404 User not found` from `admin_users.get_theme_preference`/`set_theme_preference`/`get_locale_preference`/`set_locale_preference`, all calling `KeycloakAdmin.get_user(user_id)` directly) — found live in Phase 49 Session 3, confirmed pre-existing and cross-app, never yet fixed or even assigned to a session. Root cause is plausibly that `users-admin` has been a local `TechnicalAccount` row (not a real Keycloak account) since Phase 18 Session 3/ADR 0065, so a Keycloak admin-API lookup by that `sub` doesn't resolve. Fix the crash (a technical account has no theme/locale preference to look up — likely a graceful default instead of a raw Keycloak call) and backfill the finding into `docs/services/auth-service.md`'s (and `admin-ui.md`'s/`user-ui.md`'s, if still relevant after the fix) Open Points — it was never recorded there, only in `PROGRESS.md`. |
+| P51-S3 | `folder-service`'s `DELETE /folders/{id}` hard-delete path (`repository.delete_folder()`) checks for contained SUBFOLDERS before deleting, but never checks for contained DOCUMENTS — a real orphaning risk on the legacy hard-delete fallback path (the regular trash-based UI path is unaffected). `cmis-connector` already has to work around this gap itself with its own pre-check before calling through. Add the same document check the subfolder check already does. |
+| P51-S4 | Maintenance mode's "Category A" (request-triggered cascading writes, as opposed to Category B's poll loops which P44-S3/ADR 0164 already covered) remains explicitly unaddressed per ADR 0164's own Consequences — e.g. `document-service`'s cascades into `storage-service`/`virus-scan-service`/`rendering-service`, `folder-service`'s into `document-service`. Extend the same `is_maintenance_active()` check (`libs/dms-permission-client`, already built in P44-S3) to these request-triggered call sites. |
+
+**Definition of Done**: regression test per fix (especially one proving P51-S1's actual root cause is
+closed, not just the symptom); new ADR only if P51-S1 turns up a real design change (a symptom-level fix
+in an already-existing mechanism doesn't need one); docs and `PROGRESS.md` updated per session.
+
+### Phase 52 — Dependency-Resolved / Overdue Completions
+
+| Session | Deliverable |
+|---|---|
+| P52-S1 | Fine-grained user tracking (5.5, ADR 0157) has always been API/curl-only by design — no admin-UI page, explicitly deferred in `docs/services/auth-service.md`'s Open Points. Build one, following the exact pattern P50-S5 just established (`RequireAuth`→`RequireCapability`→`AdminShell`, per-row/per-setting CRUD) for the three existing endpoint groups (`/user-tracking-config`, `/user-tracking-sessions`, `/user-tracking-retention-config`). |
+| P52-S2 | Concept §7.5 requires the delta/compare function "available both via the admin UI and via the CLI tool" for comparing one installation's config against another's (drift detection) — the backend (`config-service`'s field-level diff, ADR 0040) and CLI path are complete, but the only admin-UI consumer of `compareConfig()` (`ConfigPackages.tsx`) uses it exclusively for a same-instance package-preview, not cross-installation. ADR 0040's own Consequences names this as needing "a later UI session" that never happened. Build the actual cross-installation comparison screen, reusing the `CategoryDelta`/`CompareResult` components `ConfigPackages.tsx` already has, on top of the existing `InstallationManager.tsx`/`InstallationSwitcher.tsx` multi-installation infrastructure. |
+| P52-S3 | The attribute-pseudonymization vault (5.2, ADR 0156) has no expiry/purge and no automatic trigger tied to retention expiry — the encrypted original persists indefinitely, leaving the GDPR "deletion obligation" framing the concept describes not fully discharged. ADR 0156 itself calls this "explicitly NOT solved by this session." Session decides and builds a genuine retention policy for vault entries, tied to the same retention-expiry mechanism `document-service` already has for the documents themselves. |
+| P52-S4 | `archival-service`'s `general_export.build_case_export_package` silently drops an OPEN case's document references (only closed cases get `snapshot_version_number` set, so exporting an open case produces a schema-valid but document-less ZIP with no error) — ADR 0159's own text calls this "a genuine, separate future-session candidate," still undecided per `docs/services/archival-service.md`. Session decides between a `current_version_number` fallback for open cases vs. enforcing "case must be closed first" as a precondition, and implements it. |
+
+**Definition of Done**: tests per fix; new ADR for P52-S3 (a real retention-policy design decision) and
+P52-S4 (the open-case-export decision); no new ADR expected for P52-S1/S2 (execution of already-decided
+backend/API surfaces); docs and `PROGRESS.md` updated per session; live browser verification for the two
+UI sessions (P52-S1/S2).
+
+### Phase 53 — Lower-Priority Hardening & Polish
+
+| Session | Deliverable |
+|---|---|
+| P53-S1 | Two small residuals from ADR 0153 (AD-group-mapping composite rules/default role), neither touched by P50-S5 (which only added the missing admin-UI CRUD, a third, separate item from the same ADR): the default-role setting has no four-eyes protection (explicitly "not attempted here" in the ADR), and the four-eyes approval path records the approver's raw Keycloak `sub` as `created_by` instead of a display name (cosmetic). Bundle both, same ADR, same service. |
+| P53-S2 | Two small residuals from ADR 0154 (per-document `ResourceNode`), neither touched since: the document-resource backfill re-runs on every `document-service` startup (~109s in this project's own dev DB — the ADR itself flags this as worth reconsidering "if this becomes disruptive"), and the newer `scope_case_resource_ids` delegation dimension has no UI in `user-ui`'s `DelegationsPane.tsx` (joining three pre-existing dimensions that already had no UI either — a pre-existing gap this ADR only added to, not created). |
+| P53-S3 | `reporting-service`'s scheduled-report `recipient_email` isn't validated upfront — a typo/bad address only surfaces at the next poll tick, logged only, with no status field communicating the failure back to the Admin UI. Add upfront validation plus a visible failure status. |
+| P53-S4 | `mail-connector`'s recurring, non-deterministic test flakiness in `_ingest()`-calling tests (`RuntimeError: ... bound to a different event loop`, `app.state.virus_scan`'s client reused across `pytest-asyncio` test functions) has been re-confirmed at least three times (Post-Roadmap Phase 31 Session 12, Phase 38 Session 4, Phase 44 Session 3) without ever being fixed at the root — each time noted as "would need restructuring `app.state.virus_scan`'s client lifecycle, out of scope for that session." This session is explicitly that restructuring, a maintenance-cost investment rather than a feature. |
+
+**Definition of Done**: tests per fix; no new ADR expected (polish/hardening of already-established
+patterns, except P53-S1 if the four-eyes extension is judged a real decision rather than a mechanical
+reuse of the existing generic mechanism); docs and `PROGRESS.md` updated per session.
+
+## Deliberately Not Included in Phase 51+
+
+- **Teamspace group invitation** (ADR 0160), **`mail-connector`'s Microsoft Graph/O365 backend** (ADR
+  0161), **`workflow-service`'s distributed lock for boundary timers across replicas**, **SAML 2.0, QES,
+  PKCS#11/HSM, OCSP/CRL, XAdES/CAdES, Excel/PowerPoint/Outlook for `office-addin`, Calc/Impress for
+  `libreoffice-addin`, CheckMK integration** — all re-checked this round via the dedicated staleness
+  sweep, every one's blocking reason confirmed still accurate, no new trigger found for any of them.
+- **ADR 0158's annotation-level `/StructParent` remapping** — deliberate narrow scope cut, "would only
+  become relevant if a future source of tagged form-field annotations enters the pipeline, which nothing
+  currently does" — still true.
+- **`document-service`'s duplicated `PermissionServiceClient` instead of the shared `dms-permission-
+  client` package** (ADR 0154) — named tech debt, no urgency, no new trigger.
+- **ADR 0151's `access_type` validation boundary** (only the `.read`/`.write` naming convention is
+  checked, not a capability-style permission) — framed by its own ADR as an accepted design boundary, not
+  a gap; closing it "would require a larger, not currently justified change."
+- **The broad UX/completeness backlog** across `admin-ui`/`user-ui`/`office-addin`/`process-designer`/
+  `object-type-service` (~200 total Open Points bullets swept this round, the large majority already
+  self-documented as deliberate scoping, stable and re-affirmed across multiple prior rounds) — not
+  itemized individually, none read as new or regressed.
+- **Backend error messages not locale-aware** (flagged, not resolved, at Phase 47's own close) — still
+  out of scope for "the frontends" as originally asked.
+
+**Definition of Done for Phase 51+** (unchanged, `CONTRIBUTING.md`): tests green per session, new ADR for
+non-trivial decisions (see per-phase notes above), `PROGRESS.md` updated, `graphify update .` at phase
+end only, backend regression (`scripts/run-tests.sh --build`) + frontend regression (`tsc`/`eslint`/
+`vitest`/`next build`) before completion, real browser verification (screenshots) for every UI-visible
+change.
+
 ## PROGRESS.md — Resume Mechanism
 
 `dms/PROGRESS.md` is created as the first order of business in P0-S1 and is the entry point for every new session:
