@@ -53,12 +53,13 @@ class Settings(BaseServiceSettings):
     object_type_service_base_url: str = "http://localhost:8007"
 
     # For checking the existence of `signer_principal_id` and reading the
-    # display name/email for the AES certificate (`GET /users`, gated since
-    # P6-S5) - same retrofit pattern as with notification-service (P6-S6):
-    # logs in via the technical `users-admin` account, no token caching.
+    # display name/email for the AES certificate, via the service-to-service
+    # `GET /users/service-directory` (capability `service.user_lookup`,
+    # `X-DMS-Principal: signature-service`, see `AuthServiceClient`). Since
+    # Phase 50 Session 2: no longer a `users-admin` login (that was a real
+    # excess-privilege exposure - see `docs/services/signature-service.md`
+    # "Open Points"), so no credential settings needed any more either.
     auth_service_base_url: str = "http://localhost:8003"
-    auth_service_admin_username: str = "users-admin"
-    auth_service_admin_password: str = "users-admin"
 
     monitoring_service_base_url: str = "http://localhost:8026"
 

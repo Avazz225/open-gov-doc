@@ -2,11 +2,85 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P50-S1 (`storage-service`: `lock_until` propagation on catch-up replication — first
-session of Phase 50, "Remaining Lower-Priority Hardening"). No new ADR (polish/hardening of an
-already-established pattern, per the plan's own DoD). Phase 50 has five sessions total, split at this
-session's kickoff since the original plan bundled all five findings into one paragraph with no
-sub-session numbering (unlike every phase before it) — see `IMPLEMENTATION_PLAN.md`.
+**Last completed:** P50-S2 (`notification-service`/`signature-service`: replace the `users-admin` login
+with a narrow, service-only directory lookup — second session of Phase 50, "Remaining Lower-Priority
+Hardening"). No new ADR (polish/hardening — a real excess-privilege fix, but following an already-
+established gating pattern, not a new architecture decision, per the plan's own DoD).
+
+Both services previously authenticated as the `users-admin` technical account (`POST /login` on every
+call) purely to reach `admin.user_management`-gated `GET /users` for a read-only directory scan — a
+genuine excess-privilege exposure: `users-admin` can create/delete arbitrary users and rewrite the
+AD-group→role mapping governing privilege assignment installation-wide, not merely read a directory.
+Fixed via a new, narrow, service-only capability: `service.user_lookup` (seeded role
+`service-user-lookup` in `permission-service`, same non-"domain-admin-..." naming convention as the
+existing `archival-service-callback`), checked in a new `auth-service` endpoint
+(`GET /users/service-directory`, `_require_service_user_lookup`, `X-DMS-Principal`-gated — deliberately
+NOT a reuse of `_require_service_user_management`/`admin.user_management`, which would have just moved
+the same over-privilege to a header instead of a login). Both services now assert their own fixed
+identity (`X-DMS-Principal: notification-service`/`signature-service` — the latter already used this
+exact identity against `document-service`) instead of sharing one, for auditability. No token/login
+round-trip, no credential settings (`auth_service_admin_username`/`_password` removed from both
+`settings.py`).
+
+Like `archival-service-callback` before it, the new role's **assignment** to the two service principals
+is a one-time, per-installation operator step (`POST /role-assignments`), not automated by any running
+service's own startup code — each service's own test suite grants it to its own fixed production
+identity via a new autouse `conftest.py` fixture (mirroring `document-service/tests/conftest.py`'s
+`_grant_disposal_callback_permission`), which — since these tests call the real, live
+`permission-service` container rather than an isolated instance — also performs the real production
+grant as a side effect of running the suite once, confirmed via `GET /role-assignments` against the live
+stack afterward.
+
+New test file `services/auth-service/tests/test_service_directory.py` (4 tests): `403` without a
+principal, `403` with an unauthorized principal, `403` for a real `admin.user_management`-holding bearer
+token (proving the JWT path `GET /users` uses is NOT also silently accepted here — a deliberately
+separate capability, not a reuse), and a full round-trip finding a real created user by id with the
+reduced `DirectoryEntryOut` shape (no `enabled`, matching `GET /users/directory`'s existing philosophy).
+`144`/`144` `auth-service` tests passing (was 140, +4), `181`/`181` `permission-service` (unchanged, new
+role tuple only), `92`/`92` `notification-service`, `25`/`25` `signature-service` — all four green
+together in sequence. `ruff check`/`ruff format --check` clean for all four services.
+
+**A pre-existing, unrelated one-test count drift found in `notification-service.md`**, not caused by
+this session (no test file touched besides `conftest.py`, which only gained a fixture): the doc's
+previously claimed "93 tests since Phase 44 Session 4" doesn't match the 92 test functions actually
+present in source (and actually passing) — corrected in the doc, not investigated further.
+
+**Also observed, confirmed unrelated, not chased**: `permission-service`'s
+`test_trigger_maintenance_mode_via_approval_flow_activates_after_second_approver` failed once when run
+back-to-back with `notification-service`/`signature-service` in the same invocation, but passed cleanly
+(181/181) when re-run in isolation immediately after — a pre-existing flake unrelated to this session's
+diff (no maintenance-mode code touched), not chased further.
+
+Docker images rebuilt and redeployed for `permission-service`, `auth-service`, `notification-service`,
+`signature-service`; all started cleanly. Live-verified: `GET /users/service-directory` with
+`X-DMS-Principal: notification-service`/`signature-service` against the real running `auth-service`
+container returns `200` with real directory data (18 real users found) — the exact call path
+`recipient_exists()`/`resolve_signer()` now use. Did not additionally trigger a full live
+`POST /notifications` send, since that endpoint's own OUTER authorization (`notification.write` for the
+caller, a P38-S2 concern unrelated to this fix) isn't granted to any principal in this particular dev
+stack instance — granting it just for this demo would have been scope creep; the real (non-mocked)
+pytest suite already exercises the full `POST /notifications` → `recipient_exists()` path end-to-end
+with a properly authorized test principal.
+
+`docs/services/auth-service.md`: new "Service-to-Service Directory Lookup" section, new API table row.
+`docs/services/notification-service.md`/`signature-service.md`: updated recipient/signer-check
+sections, closed the matching `users-admin` Open Points bullets.
+
+**Next session:** P50-S3 — `rendering-service`'s rendition endpoints all gate through one coarse,
+service-wide `rendering.read`/`rendering.write` check against `ROOT_RESOURCE_ID`, never the concrete
+originating document's own permission, despite `Rendition` already storing `document_id`. Fix: reuse
+the document's existing per-document `ResourceNode` (ADR 0144/0154) and check `document.read`/
+`document.write` with `resource_id=rendition.document_id`, mirroring `document-service`'s own
+already-fixed pattern — no new resource type needed.
+
+---
+
+Immediately before P50-S2: **P50-S1** (`storage-service`: `lock_until` propagation on catch-up
+replication — first session of Phase 50, "Remaining Lower-Priority Hardening"). No new ADR
+(polish/hardening of an already-established pattern, per the plan's own DoD). Phase 50 has five
+sessions total, split at this session's kickoff since the original plan bundled all five findings into
+one paragraph with no sub-session numbering (unlike every phase before it) — see
+`IMPLEMENTATION_PLAN.md`.
 
 `replication.py`'s catch-up path (`process_pending()`) previously never passed `lock_until` to the
 backend `write()` call — the code already carried a comment acknowledging this as an open point. Fixed:

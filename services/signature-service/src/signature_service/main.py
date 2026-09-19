@@ -141,11 +141,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     app.state.document_client = DocumentServiceClient(settings.document_service_base_url)
     app.state.object_type_client = ObjectTypeServiceClient(settings.object_type_service_base_url)
-    app.state.auth_client = AuthServiceClient(
-        settings.auth_service_base_url,
-        admin_username=settings.auth_service_admin_username,
-        admin_password=settings.auth_service_admin_password,
-    )
+    app.state.auth_client = AuthServiceClient(settings.auth_service_base_url)
     app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
 
     sensor_config_client = SensorConfigClient(settings.monitoring_service_base_url)

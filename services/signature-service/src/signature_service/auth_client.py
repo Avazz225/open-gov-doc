@@ -2,6 +2,8 @@ import httpx
 
 from signature_service.connectors.interface import SignerInfo
 
+_SYSTEM_PRINCIPAL_HEADERS = {"X-DMS-Principal": "signature-service"}
+
 
 class AuthServiceClient:
     """HTTP client against the Auth Service - `signer_principal_id` remains
@@ -10,25 +12,24 @@ class AuthServiceClient:
     retrofit pattern as with notification-service (P6-S6) - checked against
     a real `auth-service` account and returns the display name/email for
     the AES certificate (3.10: "uniquely attributable to a person").
-    `GET /users` has been gated since P6-S5 - logs in via the technical
-    `users-admin` account, no token caching (see notification-service.
-    auth_client for the same trade-off)."""
 
-    def __init__(self, base_url: str, *, admin_username: str, admin_password: str) -> None:
+    **Phase 50 Session 2**: previously logged in as the `users-admin`
+    technical account (full domain-admin - user CRUD + AD-group->role
+    mapping control) just for this read-only lookup, a real excess-privilege
+    exposure. Now asserts the same fixed `X-DMS-Principal: signature-service`
+    identity this service already uses against `document-service`
+    (`document_client.py`), against the new, narrow
+    `GET /users/service-directory` (capability `service.user_lookup`).
+    No token/header caching needed any more either, since there's no login
+    round-trip."""
+
+    def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=30.0)
-        self._admin_username = admin_username
-        self._admin_password = admin_password
-
-    async def _admin_headers(self) -> dict[str, str]:
-        response = await self._client.post(
-            "/login", json={"username": self._admin_username, "password": self._admin_password}
-        )
-        response.raise_for_status()
-        token = response.json()["access_token"]
-        return {"Authorization": f"Bearer {token}"}
 
     async def resolve_signer(self, principal_id: str) -> SignerInfo | None:
-        response = await self._client.get("/users", headers=await self._admin_headers())
+        response = await self._client.get(
+            "/users/service-directory", headers=_SYSTEM_PRINCIPAL_HEADERS
+        )
         response.raise_for_status()
         for user in response.json():
             if user["username"] == principal_id:

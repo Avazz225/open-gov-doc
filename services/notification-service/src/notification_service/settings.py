@@ -85,14 +85,14 @@ class Settings(BaseServiceSettings):
     license_admin_email: str = "license-admin@dms.local"
 
     # Retrofit P6-S6 (call authorization): recipient existence check for
-    # `POST /notifications` against real auth-service accounts. `GET /users`
-    # has itself been gated since P6-S5 (capability `admin.user_management`) -
-    # this service authenticates for that with the technical `users-admin`
-    # account from P6-S5 (domain "user/permission management"), exactly the
-    # intended use case for automated internal calls.
+    # `POST /notifications` against real auth-service accounts, via the
+    # service-to-service `GET /users/service-directory` (capability
+    # `service.user_lookup`, `X-DMS-Principal: notification-service`, see
+    # `AuthServiceClient`). Since Phase 50 Session 2: no longer a `users-admin`
+    # login (that was a real excess-privilege exposure - see
+    # `docs/services/notification-service.md` "Open Points"), so no
+    # credential settings needed any more either.
     auth_service_base_url: str = "http://localhost:8003"
-    auth_service_admin_username: str = "users-admin"
-    auth_service_admin_password: str = "users-admin"
 
     monitoring_service_base_url: str = "http://localhost:8026"
 

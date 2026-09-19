@@ -99,11 +99,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
-    app.state.auth_client = AuthServiceClient(
-        settings.auth_service_base_url,
-        admin_username=settings.auth_service_admin_username,
-        admin_password=settings.auth_service_admin_password,
-    )
+    app.state.auth_client = AuthServiceClient(settings.auth_service_base_url)
     app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
     app.state.notification_rate_limiter = RecipientRateLimiter(settings)
 

@@ -337,6 +337,23 @@ DOMAIN_ADMIN_ROLES: list[tuple[str, str, list[str]]] = [
         "Nutzer-Tracking einsehen",
         ["admin.user_tracking_view"],
     ),
+    # Phase 50 Session 2: `notification-service`/`signature-service` each
+    # independently authenticated as the `users-admin` technical account
+    # (full domain-admin: user CRUD + AD-group->role mapping control) just
+    # to do a read-only `GET /users` lookup - a real excess-privilege
+    # exposure, not merely inelegant (a credential leak of either service
+    # would grant full user-management control, not just directory-read).
+    # Same pattern as `archival-service-callback` above: a dedicated seeded
+    # role for a machine-to-machine identity, not named "domain-admin-...".
+    # Both services assert their own fixed identity (`X-DMS-Principal:
+    # notification-service`/`signature-service`) rather than sharing one -
+    # more auditable, and consistent with how `signature-service` already
+    # identifies itself to `document-service`.
+    (
+        "service-user-lookup",
+        "Nutzerverzeichnis-Abfrage (Service-zu-Service)",
+        ["service.user_lookup"],
+    ),
 ]
 
 

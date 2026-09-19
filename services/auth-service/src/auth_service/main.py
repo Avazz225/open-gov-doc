@@ -737,6 +737,42 @@ async def lookup_user(username: str, user: dict = Depends(get_current_user)) -> 
     return match
 
 
+async def _require_service_user_lookup(x_dms_principal: str) -> None:
+    """Phase 50 Session 2: `notification-service`/`signature-service` each
+    used to log in as the `users-admin` technical account (full
+    domain-admin: user CRUD + AD-group->role mapping control) just to do a
+    read-only `GET /users` lookup - a real excess-privilege exposure, not
+    merely inelegant. Narrow, service-to-service alternative: a dedicated
+    capability (`service.user_lookup`, seeded role `service-user-lookup`,
+    permission-service `repository.py`), gated via `X-DMS-Principal` like
+    `_require_service_user_management` above, but WITHOUT that function's
+    broad `admin.user_management` check - this is deliberately its own,
+    narrower capability, not a reuse."""
+    allowed = bool(x_dms_principal) and await app.state.permission_client.has_permission(
+        x_dms_principal, "service.user_lookup"
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Fehlende Berechtigung 'service.user_lookup'",
+        )
+
+
+@app.get("/users/service-directory", response_model=list[DirectoryEntryOut])
+async def service_directory(x_dms_principal: str = Header(default="")) -> list[dict]:
+    """Service-to-service counterpart to `GET /users` (Phase 50 Session 2):
+    the caller needs to scan the full directory (recipient existence check
+    by email/username, signer display-name/email resolution by username) -
+    neither `GET /users/lookup` (exact username only) nor
+    `GET /users/directory` (prefix search only) can answer either question
+    reliably, so a full list is genuinely needed, same as `GET /users`
+    itself provides to the admin UI. Deliberately returns `DirectoryEntryOut`
+    (no `enabled`) like `GET /users/directory` - an account's enabled status
+    remains an administrative matter, not directory information."""
+    await _require_service_user_lookup(x_dms_principal)
+    return admin_users.list_users(app.state.keycloak_admin)
+
+
 @app.get("/users/directory", response_model=list[DirectoryEntryOut])
 async def search_directory(q: str, user: dict = Depends(get_current_user)) -> list[dict]:
     """Directory for finding other employees (2.5/4.4, P15-S4) - no

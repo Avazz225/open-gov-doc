@@ -78,6 +78,38 @@ async def _grant_object_config_permission_for_test_setup():
         response.raise_for_status()
 
 
+SIGNATURE_SERVICE_PRINCIPAL_ID = "signature-service"
+
+
+@pytest.fixture(scope="session", autouse=True)
+async def _grant_service_user_lookup_permission():
+    """Phase 50 Session 2: `AuthServiceClient.resolve_signer()` calls
+    `GET /users/service-directory`, gated via `service.user_lookup`. Grants
+    the SAME fixed principal id this service asserts in production
+    (`auth_client._SYSTEM_PRINCIPAL_HEADERS`), not a separate test-only
+    principal - same pattern as the two fixtures above."""
+    async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL) as pc:
+        roles = (await pc.get("/roles")).json()
+        role_id = next(r["id"] for r in roles if r["name"] == "service-user-lookup")
+        existing = (
+            await pc.get(
+                "/role-assignments", params={"principal_id": SIGNATURE_SERVICE_PRINCIPAL_ID}
+            )
+        ).json()
+        if any(a["role_id"] == role_id for a in existing):
+            return
+        response = await pc.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": SIGNATURE_SERVICE_PRINCIPAL_ID,
+                "role_id": role_id,
+                "resource_id": "root",
+            },
+        )
+        response.raise_for_status()
+
+
 @pytest.fixture(autouse=True)
 async def _clean_tables():
     eng = build_engine(DSN)

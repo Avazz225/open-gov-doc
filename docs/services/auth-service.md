@@ -26,6 +26,7 @@
 | `GET` | `/users/count` | Internal call from `license-service` (9.1 "named accounts" model, since P9-S1) — ungated, since no service holds a real Keycloak bearer token for `Depends(get_current_user)` |
 | `GET` | `/sessions/count` | Internal call from `license-service` (9.1 "concurrent users" model, since P9-S1) — `KeycloakAdmin.get_client_sessions_stats()`, ungated |
 | `GET` | `/users/directory?q=` | Directory search (2.5/4.4, since P15-S4, Keycloak `search` parameter — prefix per field, no substring, see "Contacts" below) — no `admin.user_management` gate, but since P19-S3 (ADR 0068) checked via the "everyone" group from permission-service (`users.directory`) instead of merely requiring authentication |
+| `GET` | `/users/service-directory` | **New in Phase 50 Session 2**: service-to-service counterpart to `GET /users`, `X-DMS-Principal`-gated via the new, narrow `service.user_lookup` capability (seeded role `service-user-lookup`) instead of `admin.user_management` — for callers that need to scan the full directory (recipient existence by email/username, signer resolution by username) where neither `GET /users/lookup` (exact username only) nor `GET /users/directory` (prefix search only) can answer reliably. Returns `DirectoryEntryOut` (no `enabled`), same shape as `GET /users/directory`. Replaces `notification-service`/`signature-service`'s previous `users-admin` login for this exact purpose — see "Service-to-Service Directory Lookup" below |
 | `GET` | `/users/directory/federation-status` | Whether federated contact search is enabled on this installation (`{enabled, peer_installation_count}`) — ungated, controls the visibility of the corresponding frontend section |
 | `GET` | `/users/directory/federated?q=` | Federated search across all known peer installations that have opted in to contact search (2.5/7.4, since P15-S4) — `403` if not enabled on this installation |
 | `POST` | `/users/directory/federated-search-inbound` | Called by a peer installation (public route, no `X-DMS-Principal`) — authenticated via `X-Installation-Signature`/`X-Installation-Id`, see "Contacts" below |
@@ -78,6 +79,32 @@ That same ADR also fixed a real, pre-existing bug present since P4-S6: `set_them
 ## Domain-Separated Admin Roles (4.6, since P6-S5)
 
 Domain admin "roles" are deliberately **not Keycloak realm roles** (unlike `dms-admin`), but native `Role` rows in `permission-service` (see `docs/services/permission-service.md`) — `auth-service` only creates the associated **technical accounts** and assigns them the role via an HTTP call to `permission-service` (`permission_client.py`, `PermissionServiceClient.ensure_role_assignment`). Complete architecture rationale, see [ADR 0023](../adr/0023-superuser-breakglass-and-domain-admin-accounts.md). Currently actually created: `users-admin` (domain "user/permission management") and `config-admin` (domain "workflow configuration", since P6-S6) — **as `TechnicalAccount` rows instead of Keycloak accounts since Phase 18 Session 3** ([ADR 0065](../adr/0065-domain-admin-migration-lokale-technische-konten.md)), see "Auth Decoupling from Keycloak" below. Role assignment continues to run best-effort at lifespan startup — if `permission-service` is not yet reachable (or the assignment on this installation requires four-eyes approval and has not yet been approved), it is skipped and retried on the next restart (no retry loop).
+
+## Service-to-Service Directory Lookup (Phase 50 Session 2)
+
+`notification-service`'s recipient-existence check (`POST /notifications`, P6-S6) and
+`signature-service`'s signer-resolution check (same retrofit pattern) both need to scan the full user
+directory — neither `GET /users/lookup` (exact username only) nor `GET /users/directory` (prefix search
+only) can reliably answer "does any user have this email" or "resolve this username to a display name".
+Both services previously solved this by authenticating as the `users-admin` technical account
+(`POST /login` on every call) purely to reach the `admin.user_management`-gated `GET /users` — a real
+excess-privilege exposure: `users-admin` can create/delete arbitrary users and rewrite the AD-group→role
+mapping that governs privilege assignment installation-wide, not merely read a directory. A credential
+leak or compromise of either service would have granted full user-management control, not just
+directory-read.
+
+Fixed via a new, narrow, service-only capability instead of reusing the broad one: `GET
+/users/service-directory` (see the API table above), gated by `service.user_lookup` via
+`_require_service_user_lookup` — same `X-DMS-Principal`-trusted mechanism as
+`_require_service_user_management`/`POST /realm-roles` (see "Realm Role Management" below), but a
+distinct, narrower capability, not a reuse of `admin.user_management`. The seeded role
+`service-user-lookup` (`permission-service` `repository.py`, same non-"domain-admin-..." naming
+convention as `archival-service-callback`) is auto-created on every fresh installation, but — like
+`archival-service-callback` — its **assignment** to the `notification-service`/`signature-service`
+principals is a one-time, per-installation operator step (`POST /role-assignments`), not automated by
+any running service's own startup code; each service's own test suite grants it to its own fixed
+identity via an autouse `conftest.py` fixture (mirroring `document-service/tests/conftest.py`'s
+`_grant_disposal_callback_permission`), exercising the exact real caller identity used in production.
 
 ## Superuser Break-Glass (4.6, since P6-S5, local instead of Keycloak since Phase 18 Session 2)
 

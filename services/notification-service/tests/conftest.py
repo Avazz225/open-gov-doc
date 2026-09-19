@@ -65,6 +65,38 @@ def settings() -> Settings:
 
 
 AUTH_SERVICE_URL = os.environ.get("TEST_AUTH_SERVICE_URL", "http://localhost:8003")
+PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://localhost:8004")
+NOTIFICATION_SERVICE_PRINCIPAL_ID = "notification-service"
+
+
+@pytest.fixture(scope="session", autouse=True)
+async def _grant_service_user_lookup_permission():
+    """Phase 50 Session 2: `AuthServiceClient.recipient_exists()` calls
+    `GET /users/service-directory`, gated via `service.user_lookup`. Grants
+    the SAME fixed principal id this service asserts in production
+    (`auth_client._SYSTEM_PRINCIPAL_HEADERS`), not a separate test-only
+    principal - same pattern as `document-service/tests/conftest.py`'s
+    `_grant_disposal_callback_permission` for `archival-service-callback`."""
+    async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL) as pc:
+        roles = (await pc.get("/roles")).json()
+        role_id = next(r["id"] for r in roles if r["name"] == "service-user-lookup")
+        existing = (
+            await pc.get(
+                "/role-assignments", params={"principal_id": NOTIFICATION_SERVICE_PRINCIPAL_ID}
+            )
+        ).json()
+        if any(a["role_id"] == role_id for a in existing):
+            return
+        response = await pc.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": NOTIFICATION_SERVICE_PRINCIPAL_ID,
+                "role_id": role_id,
+                "resource_id": "root",
+            },
+        )
+        response.raise_for_status()
 
 
 @pytest.fixture
