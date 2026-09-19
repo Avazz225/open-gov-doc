@@ -257,6 +257,18 @@ session there was no translation layer at all for this, `/me` returned only Keyc
   unintended broad grant. `GET`/`PUT /ad-group-mappings/default-role`, gated on `admin.user_management`
   like the rest of this surface, deliberately WITHOUT four-eyes (a single scalar setting, not a mapping
   row - see ADR 0153 "Rationale").
+- **Admin UI, added Phase 50 Session 5** — this whole surface was API-only until this session despite
+  having full backend CRUD since P24-S2/ADR 0153. New `admin-ui` page (`/ad-group-mappings/`, `apps/
+  admin-ui/src/components/AdGroupMappings.tsx`), following the established `RequireAuth`→
+  `RequireCapability`→`AdminShell` pattern (ADR 0148, `capability="admin.user_management"`, matching
+  this surface's own gate exactly). Per-row CRUD (fetch list, add-row form posting immediately, per-row
+  delete calling `DELETE` immediately) rather than the batched-single-`PUT` style `RetentionSettings.tsx`
+  uses, since these ARE individually addressable rows with their own ids - mirrors `UserManagement.tsx`'s
+  "Role Assignments" section, including its `pending_approval` handling (all four mutating calls here
+  can optionally be four-eyes-gated per installation, same envelope shape). Three sections: simple
+  mappings, composite AND-rules (comma-separated AD-group-name input, deduplicated/trimmed client-side,
+  client-side ≥2-distinct-groups validation ahead of the backend's own `422`), and the default-role
+  setting (a plain save, no delete, matching it being a singleton not a list).
 - **Optional four-eyes on all four mutating mapping/rule endpoints, added Post-Roadmap Phase 39
   Session 3** (ADR 0153): mirrors `permission-service`'s own OPTIONAL, per-action-type-configurable
   pattern (ADR 0130/0151), not break-glass's mandatory one. `PermissionServiceClient` gained

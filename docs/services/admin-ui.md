@@ -295,6 +295,7 @@ Exclusively via the API gateway of the respective **active installation** (3.5, 
 | Teamspaces admin overview (since **Post-Roadmap Phase 22 Session 5**) | `GET /api/teamspace-service/admin/teamspaces` |
 | Groups (since **Post-Roadmap Phase 22 Session 2**) | `GET/POST /api/permission-service/groups`, `DELETE .../{id}`, `GET/POST /api/permission-service/groups/{id}/members`, `DELETE .../{id}/members/{principal_id}` |
 | Role assignments | `GET/POST /api/permission-service/role-assignments`, `DELETE .../{id}` |
+| AD group→role mapping (since **Phase 50 Session 5**) | `GET/POST /api/auth-service/ad-group-mappings`, `DELETE .../{id}`, `GET/POST /api/auth-service/ad-group-composite-rules`, `DELETE .../{id}`, `GET/PUT /api/auth-service/ad-group-mappings/default-role` |
 | Four-eyes settings (since **Post-Roadmap Phase 22 Session 3**) | `GET /api/permission-service/approval-config`, `PUT .../{action_type}` |
 | Object types | `GET/POST/PUT/DELETE /api/object-type-service/object-types`, `GET/PUT/DELETE .../object-types/{id}/layouts/{purpose}` (since P5b-S3) — since **P7-S3** additionally `default_archive_after_days`/`archive_encryption_enabled` in the create/update payload (5.6) |
 | Registry | `GET /api/registry-service/instances` |
@@ -345,7 +346,12 @@ Two-stage Docker image (`apps/admin-ui/Dockerfile`), identical to the User UI. `
 ## Tests
 
 - `npm run typecheck` / `npm run lint` / `npm run build`.
-- `npm test` (Vitest + Testing Library, **253 tests since Phase 47 Session 4** — +3: a new
+- `npm test` (Vitest + Testing Library, **263 tests since Phase 50 Session 5** — +10: a new
+  `ad-group-mappings.test.tsx` for the new `AdGroupMappings.tsx` component — empty states, listing,
+  create/reload for both the simple-mapping and composite-rule forms, the client-side ≥2-distinct-groups
+  validation ahead of the backend's own `422`, delete/reload for both, the `pending_approval` response
+  path (no reload, matching `UserManagement.tsx`'s established handling), the default-role load/save
+  round trip, and a create-error path. Before that, 253 tests since Phase 47 Session 4 — +3: a new
   `locale-context.test.tsx` (default/cache-after-mount/persistence, mirroring `theme-context.test.tsx`'s
   own structure, same `InstallationProvider > AuthProvider > LocaleProvider` wrapping order the
   restructured `layout.tsx` now uses). **One pre-existing, unrelated failure found during this

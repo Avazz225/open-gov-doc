@@ -209,6 +209,146 @@ export async function deleteUser(token: string, userId: string): Promise<void> {
   await request("auth-service", `users/${encodeURIComponent(userId)}`, { method: "DELETE" }, token);
 }
 
+// AD group -> role mapping (4.4, since P24-S2/ADR 0093; composite AND-rules
+// and the default-role setting since Post-Roadmap Phase 39 Session 3/ADR
+// 0153) - admin UI added in Phase 50 Session 5, backend already existed and
+// was API-only. All four mutating calls can optionally be gated by the
+// four-eyes principle (same wrapper shape as `RoleActionResult`/
+// `RoleAssignmentActionResult` above) - `mapping`/`rule` is only set when
+// `status === "created"`.
+export interface AdGroupRoleMapping {
+  id: number;
+  ad_group_name: string;
+  role_name: string;
+  created_at: string;
+  created_by: string | null;
+}
+
+export interface AdGroupRoleMappingActionResult {
+  status: "created" | "pending_approval";
+  mapping: AdGroupRoleMapping | null;
+  approval_request_id: string | null;
+}
+
+export interface AdGroupMappingApprovalStatus {
+  status: "deleted" | "pending_approval";
+  approval_request_id: string | null;
+}
+
+export async function listAdGroupMappings(token: string): Promise<AdGroupRoleMapping[]> {
+  const response = await request("auth-service", "ad-group-mappings", {}, token);
+  return response.json();
+}
+
+export async function createAdGroupMapping(
+  token: string,
+  params: { adGroupName: string; roleName: string }
+): Promise<AdGroupRoleMappingActionResult> {
+  const response = await request(
+    "auth-service",
+    "ad-group-mappings",
+    jsonInit({ ad_group_name: params.adGroupName, role_name: params.roleName }),
+    token
+  );
+  return response.json();
+}
+
+export async function deleteAdGroupMapping(
+  token: string,
+  mappingId: number
+): Promise<AdGroupMappingApprovalStatus> {
+  const response = await request(
+    "auth-service",
+    `ad-group-mappings/${mappingId}`,
+    { method: "DELETE" },
+    token
+  );
+  return response.json();
+}
+
+// Composite AND-rules (Post-Roadmap Phase 39 Session 3): several AD groups
+// must ALL be present on the principal for the role to apply - a separate
+// mechanism from the 1:1 mappings above, unioned together when resolving a
+// principal's effective roles (see `docs/services/auth-service.md`).
+export interface AdGroupCompositeRule {
+  id: number;
+  role_name: string;
+  ad_group_names: string[];
+  created_at: string;
+  created_by: string | null;
+}
+
+export interface AdGroupCompositeRuleActionResult {
+  status: "created" | "pending_approval";
+  rule: AdGroupCompositeRule | null;
+  approval_request_id: string | null;
+}
+
+export async function listAdGroupCompositeRules(token: string): Promise<AdGroupCompositeRule[]> {
+  const response = await request("auth-service", "ad-group-composite-rules", {}, token);
+  return response.json();
+}
+
+export async function createAdGroupCompositeRule(
+  token: string,
+  params: { roleName: string; adGroupNames: string[] }
+): Promise<AdGroupCompositeRuleActionResult> {
+  const response = await request(
+    "auth-service",
+    "ad-group-composite-rules",
+    jsonInit({ role_name: params.roleName, ad_group_names: params.adGroupNames }),
+    token
+  );
+  return response.json();
+}
+
+export async function deleteAdGroupCompositeRule(
+  token: string,
+  ruleId: number
+): Promise<AdGroupMappingApprovalStatus> {
+  const response = await request(
+    "auth-service",
+    `ad-group-composite-rules/${ruleId}`,
+    { method: "DELETE" },
+    token
+  );
+  return response.json();
+}
+
+// Default role for a principal with AD groups but no matching mapping/rule
+// (Post-Roadmap Phase 39 Session 3) - a single scalar setting, not a
+// mapping row, so deliberately NOT four-eyes-gated (see `docs/services/
+// auth-service.md`).
+export interface AdGroupMappingDefaultRole {
+  default_role_name: string | null;
+  updated_at: string;
+  updated_by: string | null;
+}
+
+export async function getAdGroupMappingDefaultRole(
+  token: string
+): Promise<AdGroupMappingDefaultRole> {
+  const response = await request("auth-service", "ad-group-mappings/default-role", {}, token);
+  return response.json();
+}
+
+export async function setAdGroupMappingDefaultRole(
+  token: string,
+  defaultRoleName: string | null
+): Promise<AdGroupMappingDefaultRole> {
+  const response = await request(
+    "auth-service",
+    "ad-group-mappings/default-role",
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ default_role_name: defaultRoleName }),
+    },
+    token
+  );
+  return response.json();
+}
+
 export interface Role {
   id: number;
   name: string;

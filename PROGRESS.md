@@ -2,10 +2,66 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P50-S4 (`webdav-connector`: batch endpoint fixes the root `PROPFIND` N+1 — fourth
-session of Phase 50, "Remaining Lower-Priority Hardening"). No new ADR (polish/hardening — a genuine
-N+1 fix following existing batch-endpoint conventions already established elsewhere, not a new
-architecture decision, per the plan's own DoD).
+**Last completed:** P50-S5 (`auth-service`'s AD-group→role mapping: new admin-UI CRUD page — fifth and
+last session of Phase 50, "Remaining Lower-Priority Hardening"). No new ADR (polish/hardening — a pure
+frontend CRUD page against already-existing, already-approved backend endpoints, not a new architecture
+decision, per the plan's own DoD). **This closes Phase 50.**
+
+The backend (1:1 mappings since P24-S2/ADR 0093, composite AND-rules + configurable default role +
+optional four-eyes since Post-Roadmap Phase 39 Session 3/ADR 0153) has had full CRUD the whole time but
+was API-only. New `admin-ui` page (`/ad-group-mappings/`, sidebar under "Sicherheit" next to
+`/delegations/`/`/approval-settings/`), following the established `RequireAuth`→`RequireCapability`→
+`AdminShell` wrapper (ADR 0148, `capability="admin.user_management"`, matching the backend's own
+`_require_user_management` gate on every one of the six endpoints exactly). Per-row CRUD (fetch list,
+add-row form posting immediately, per-row delete calling `DELETE` immediately) rather than the
+batched-single-`PUT` style `RetentionSettings.tsx` uses — these ARE individually addressable rows with
+their own ids, unlike that page's single config blob. Mirrors `UserManagement.tsx`'s "Role Assignments"
+section closely, including its `pending_approval` handling: all four mutating endpoints here can
+optionally be four-eyes-gated per installation, and the UI shows a hint instead of reloading (the list
+would stay unchanged anyway) exactly like that existing precedent already does.
+
+Three sections: simple mappings (AD group name + role dropdown, populated from `permission-service`'s
+real role list via the already-existing `listRoles`), composite AND-rules (comma-separated AD-group-name
+input, deduplicated and trimmed client-side, a client-side ≥2-distinct-groups check ahead of the
+backend's own `422` for a faster/friendlier error), and the default-role setting (a plain load/save, no
+delete — it's a singleton, not a list, matching the backend's own `GET`/`PUT` shape with no `DELETE`).
+
+New test file `ad-group-mappings.test.tsx` (10 tests, Vitest + Testing Library, same mocking pattern as
+`email-templates.test.tsx`): empty states, listing, create+reload for both forms, the client-side
+validation path (asserts the backend mock is never called), delete+reload for both, the
+`pending_approval` path (asserts NO reload happens), the default-role load/save round trip, and a
+create-error path. `262`/`263` tests passing (was 252, +10 — the one pre-existing failure is the
+already-documented, unrelated `processing-failures.test.tsx` handover-retry test from Phase 47 Session
+4). `tsc --noEmit`/`eslint .`/`next build` all clean, new `/ad-group-mappings` route confirmed in the
+build output.
+
+Docker images rebuilt and redeployed for `admin-ui` (`auth-service` already had the backend live since
+P50-S2). **Live-verified end-to-end against the real running stack** via Playwright: logged in as
+`users-admin`, navigated to the new page, created a real mapping (visible in the table immediately, no
+four-eyes configured for this action type on this dev installation), triggered the client-side
+composite-rule validation message, created a real composite rule with two real AD group names (visible
+in the table), deleted both, confirmed both gone via a direct backend check afterward. One earlier
+partial verification run's leftover mapping (created before the delete step was added to the script)
+found and cleaned up manually. The only console errors seen were the already-documented, pre-existing,
+cross-app `GET`/`PUT /me/preferences` `500` (Keycloak "User not found" for `users-admin`, first found in
+Phase 49 Session 3) — confirmed unrelated, not caused by this session. Throwaway verification script and
+screenshots cleaned up afterward.
+
+`docs/services/auth-service.md`: new closing paragraph in the "AD Group→Role Mapping" section recording
+the admin-UI page. `docs/services/admin-ui.md`: new Backend Integration table row, Tests section updated.
+
+**Phase 50 is now closed** (all five sessions done: `storage-service` `lock_until` propagation,
+`notification-service`/`signature-service` excess-privilege fix, `rendering-service` per-document
+permission inheritance, `webdav-connector`'s N+1 fix, and this session). Per the project's own
+`graphify update .` convention (phase-end only, not after every session), the graph is updated once this
+session's documentation is finalized. No next phase has been started or requested yet.
+
+---
+
+Immediately before P50-S5: **P50-S4** (`webdav-connector`: batch endpoint fixes the root `PROPFIND`
+N+1 — fourth session of Phase 50, "Remaining Lower-Priority Hardening"). No new ADR (polish/hardening —
+a genuine N+1 fix following existing batch-endpoint conventions already established elsewhere, not a
+new architecture decision, per the plan's own DoD).
 
 `dms-connector-sdk`'s `DmsTreeClient.list_children` (used by both `webdav-connector`'s root `PROPFIND`
 and `cmis-connector`) previously made one extra HTTP call to `document-service` PER document in a folder

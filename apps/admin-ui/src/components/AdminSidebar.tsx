@@ -139,6 +139,11 @@ const GROUPS: NavGroup[] = [
         requiresCapability: "admin.user_management",
       },
       {
+        href: "/ad-group-mappings/",
+        labelKey: "nav.adGroupMappings",
+        requiresCapability: "admin.user_management",
+      },
+      {
         href: "/email-templates/",
         labelKey: "nav.emailTemplates",
         requiresCapability: "admin.notification_config",
