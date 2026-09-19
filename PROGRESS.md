@@ -35,11 +35,35 @@ work). Fixed via an explicit `tool.uv.workspace.exclude = ["libs/dms-ui"]` in th
 ogdoc_addin.py`, from Phase 47 Session 5's i18n work, confirmed untouched by this session's diff — left
 as-is, out of scope). Full-repo backend regression (`scripts/run-tests.sh`, no `--build` since no
 Docker image changed) run afterward specifically to confirm the workspace-glob fix doesn't affect any
-OTHER service, given it touches the shared root config.
+OTHER service, given it touches the shared root config — every service collected and ran normally
+(confirming the fix itself is safe), with two pre-existing, unrelated failures surfaced along the way
+(neither caused by this session's diff, both out of scope):
+- `mail-connector`'s `test_route_already_confirmed_message_returns_409` — already documented as a
+  known, non-deterministic flaky-test class (`RuntimeError: ... bound to a different event loop`,
+  `app.state.virus_scan`'s client reused across pytest-asyncio test functions, tracked since
+  Post-Roadmap Phase 38 Session 4/ADR 0149, re-confirmed multiple times since). No new information.
+- `cmis-connector`'s `test_delete_tree_cascades_documents_and_subfolders` — **newly found, not
+  previously documented**: `GET /documents/{id}` for a document whose folder's `ResourceNode` was
+  removed by a cascading `deleteTree` now returns `200` where the test asserts the documented residual
+  `403` (ADR 0149 "Consequences"). Could not have been observed failing (or passing) at any point
+  between Phase 48 Session 1 and this session, since the `uv` workspace regression above blocked every
+  `uv run` for that entire window — no way to date when this actually broke. Documented in
+  `docs/services/cmis-connector.md` as worth a dedicated session to determine whether this is a real
+  authorization regression (ancestor-walk now defaulting to allow instead of deny on a missing resource
+  node) or merely a stale test assertion — not chased further here, well outside Phase 50's five
+  bundled items.
 
 `docs/services/storage-service.md`: closed the matching Open Points bullet, Tests section updated.
 `libs/README.md`: added a note on the workspace-glob regression and its fix, next to the existing
-`dms-ui` non-Python-exception note.
+`dms-ui` non-Python-exception note. `docs/services/cmis-connector.md`: new Tests-section note for the
+above finding. Docker image rebuilt and redeployed (`docker compose build storage-service` /
+`up -d storage-service`), container started cleanly, `POST /replication/process-pending` smoke-tested
+live against the running container (empty queue, `{"processed":0,...}`, confirming the new
+`lock_target_ids` parameter's default doesn't break the existing call path). Full S3-Object-Lock
+propagation itself verified via the real (non-mocked) `_LockRecordingBackend` pytest integration tests
+above, not via a live MinIO governance target — the dev compose stack's default targets are both
+`type=local` (no Object Lock equivalent to observe against), and standing this up would have meant a
+throwaway MinIO target dance out of proportion to this narrow, low-risk fix.
 
 **Next session:** P50-S2 — `notification-service`/`signature-service` both authenticate as the
 `users-admin` technical account (a real domain-admin login, full user CRUD + AD-group→role mapping
