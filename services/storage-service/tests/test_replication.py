@@ -30,6 +30,21 @@ class _AlwaysFailingBackend(StorageBackend):
         raise ObjectNotFoundError(key)
 
 
+class _LockRecordingBackend(LocalFilesystemBackend):
+    """Real filesystem backend that additionally records the `lock_until`
+    it was called with (Phase 50 Session 1) - `LocalFilesystemBackend`
+    itself deliberately ignores the value (no technical equivalent), so a
+    plain local backend can't be used to observe what was passed."""
+
+    def __init__(self, base_path: str) -> None:
+        super().__init__(base_path)
+        self.received_lock_until: list[datetime | None] = []
+
+    async def write(self, key: str, data: bytes, *, lock_until=None) -> None:
+        self.received_lock_until.append(lock_until)
+        await super().write(key, data, lock_until=lock_until)
+
+
 def _key() -> str:
     return f"test-{uuid.uuid4().hex[:8]}.txt"
 
@@ -294,6 +309,72 @@ async def test_process_pending_replicates_secondary(session, backend_a, backend_
     copy_b = await repository.get_copy(session, key, "b")
     assert copy_b.status == "ok"
     assert copy_b.checksum_sha256 == checksum
+
+
+async def test_process_pending_propagates_lock_until_for_a_lock_target(
+    session, backend_a, tmp_path
+):
+    """Phase 50 Session 1: catch-up replication onto a configured
+    `object_lock_mode` target must apply a real backend-level lock, not
+    just the application-layer `retention_until` guard - previously
+    `lock_until` was unconditionally omitted on this path (open point,
+    see docs/services/storage-service.md)."""
+    key = _key()
+    data = b"hello"
+    checksum = hashlib.sha256(data).hexdigest()
+    retention_until = datetime.now(UTC) + timedelta(days=30)
+    await _make_metadata(session, key, checksum)
+    backend_b = _LockRecordingBackend(str(tmp_path / "b"))
+    backends = {"a": backend_a, "b": backend_b}
+    await replication.write_with_redundancy(
+        session,
+        backends=backends,
+        targets=["a", "b"],
+        strategy="primary_async",
+        quorum_count=1,
+        key=key,
+        data=data,
+        checksum=checksum,
+        retention_until=retention_until,
+    )
+
+    result = await replication.process_pending(
+        session, backends=backends, max_attempts=5, limit=100, lock_target_ids={"b"}
+    )
+
+    assert result["succeeded"] == 1
+    assert backend_b.received_lock_until == [retention_until]
+
+
+async def test_process_pending_omits_lock_until_for_a_non_lock_target(session, backend_a, tmp_path):
+    """Same as above, but `b` is NOT in `lock_target_ids` - must stay
+    `None` (only `retention_until` on the `object_copy` row applies,
+    unchanged behavior for non-governance targets)."""
+    key = _key()
+    data = b"hello"
+    checksum = hashlib.sha256(data).hexdigest()
+    retention_until = datetime.now(UTC) + timedelta(days=30)
+    await _make_metadata(session, key, checksum)
+    backend_b = _LockRecordingBackend(str(tmp_path / "b"))
+    backends = {"a": backend_a, "b": backend_b}
+    await replication.write_with_redundancy(
+        session,
+        backends=backends,
+        targets=["a", "b"],
+        strategy="primary_async",
+        quorum_count=1,
+        key=key,
+        data=data,
+        checksum=checksum,
+        retention_until=retention_until,
+    )
+
+    result = await replication.process_pending(
+        session, backends=backends, max_attempts=5, limit=100, lock_target_ids=set()
+    )
+
+    assert result["succeeded"] == 1
+    assert backend_b.received_lock_until == [None]
 
 
 async def test_process_pending_marks_permanently_failed_after_max_attempts(session, backend_a):

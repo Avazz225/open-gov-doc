@@ -1007,14 +1007,17 @@ screenshots, both themes, for every session; docs and `PROGRESS.md` updated.
 ### Phase 50 — Remaining Lower-Priority Hardening
 
 Bundles the real-but-lower-value findings from this round's `docs/services/*.md` sweep that don't fit
-naturally into Phases 44–49: `storage-service`'s `replication.py` not propagating `lock_until` to the
-backend `write()` call on caught-up replication for governance targets; `rendering-service`'s rendition
-permission checks remaining coarse (service-wide) instead of inheriting the originating document's
-permission; `webdav-connector`'s root `PROPFIND` being O(N) and degrading with document volume;
-`auth-service`'s AD-group→role mapping rules having no admin-UI CRUD (API-only); `notification-service`/
-`signature-service` both independently reusing the `users-admin` technical account as an internal service
-identity (the same small architectural-debt item flagged twice, worth one shared fix rather than two
-separate patches).
+naturally into Phases 44–49. No sub-sessions were pre-defined in the original plan (unlike every phase
+above) — split into five sessions at P50-S1 kickoff, one per independent finding, following this
+project's established one-fix(-family)-per-session granularity.
+
+| Session | Deliverable |
+|---|---|
+| P50-S1 | ✅ ~~`storage-service`: `replication.py`'s catch-up path (`process_pending()`) doesn't propagate `lock_until` to the backend `write()` call — the code already has a comment acknowledging this open point. Fix: thread `lock_target_ids` through from `main.py`'s call site (mirroring `write_with_redundancy`'s existing conditional `lock_until=retention_until if target in lock_target_ids else None`), using the source copy's own `retention_until`.~~ **Done.** Exactly the fix described. Two new regression tests via a `_LockRecordingBackend` test double (`LocalFilesystemBackend` itself ignores `lock_until`, can't observe it). Found and fixed a real, previously-undetected regression along the way: the root `pyproject.toml`'s `tool.uv.workspace.members` glob had silently broken every `uv run`/unfrozen `uv sync` since Phase 48 Session 1 added the non-Python `libs/dms-ui/` — fixed via `tool.uv.workspace.exclude`. `156`/`156` tests passing (was 154), `ruff` clean for `storage-service`, full-repo backend regression run afterward to confirm the workspace-glob fix didn't affect any other service. No new ADR (polish/hardening of an already-established pattern). |
+| P50-S2 | `notification-service`/`signature-service`: both authenticate as the `users-admin` technical account (a real domain-admin login, full user CRUD + AD-group→role mapping control) just to do two read-only `GET /users` lookups — a genuine excess-privilege exposure, not merely inelegant. Fix: add an `X-DMS-Principal`-gated path to `auth-service`'s `GET /users` (mirroring the existing `_require_service_user_management` pattern already used for `POST /realm-roles`), grant both services their own dedicated principal a narrow capability, and replace both services' `POST /login` calls with the fixed-header pattern already used elsewhere in this codebase (e.g. `signature-service`'s own `document_client.py`, `archival-service`). |
+| P50-S3 | `rendering-service`: every rendition endpoint gates through one coarse, service-wide `rendering.read`/`rendering.write` check against `ROOT_RESOURCE_ID`, never the concrete originating document's own permission — despite `Rendition` already storing `document_id`. Fix: reuse the document's existing per-document `ResourceNode` (ADR 0144/0154) and check `document.read`/`document.write` with `resource_id=rendition.document_id`, mirroring `document-service`'s own already-fixed pattern. No new resource type needed. |
+| P50-S4 | `webdav-connector`: root `PROPFIND` degrades with document volume — a genuine N+1 (one `GET /documents/{id}/versions/{version_number}` round-trip per document in `dms-connector-sdk`'s `DmsTreeClient.list_children`, not an unpaginated global fetch). Fix: a batch current-version-lookup endpoint on `document-service`, consumed once per folder listing instead of once per document — benefits `cmis-connector` too (same SDK, same N+1, out of this session's stated scope but worth confirming it isn't broken by the shared-client change). |
+| P50-S5 | `auth-service`: AD-group→role mapping rules (1:1 mappings, Phase 39 S3's composite AND-rules, and the default-role-for-unmapped-groups setting) have full backend CRUD, four-eyes-aware, but no admin-UI page — API-only today. Fix: a new `admin-ui` page following the established `RequireAuth`→`RequireCapability`→`AdminShell` pattern (ADR 0148), capability `admin.user_management`, with per-row CRUD (fetch list, add-row form posting immediately, per-row delete, handling the existing `pending_approval` response envelope) rather than the batched-single-PUT style `RetentionSettings.tsx` uses. |
 
 **Definition of Done**: tests per fix; no new ADR expected (polish/hardening of already-established
 patterns); docs and `PROGRESS.md` updated per session.

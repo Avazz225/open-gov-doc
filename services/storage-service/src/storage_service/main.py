@@ -633,6 +633,7 @@ async def replication_process_pending(
         backends=app.state.backends,
         max_attempts=operational_config.max_replication_attempts,
         limit=limit,
+        lock_target_ids=app.state.lock_target_ids,
     )
     await session.commit()
     return result

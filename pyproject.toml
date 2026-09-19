@@ -6,6 +6,14 @@ requires-python = ">=3.12"
 
 [tool.uv.workspace]
 members = ["libs/*", "services/*", "tools/*"]
+# `libs/dms-ui` (Phase 48 Session 1, ADR 0168) is a plain CSS file, not a
+# Python package - it has no `pyproject.toml` and must not be discovered as
+# a workspace member, or every `uv run`/`uv sync` (without `--frozen`) fails
+# with "missing a pyproject.toml". Found live during Phase 50 Session 1
+# (this glob had silently broken every `uv run` invocation since it was
+# added - unnoticed because no session between P48-S1 and P50-S1 needed to
+# run a backend Python test).
+exclude = ["libs/dms-ui"]
 
 [tool.uv]
 package = false

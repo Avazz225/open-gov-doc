@@ -286,12 +286,21 @@ async def process_pending(
     backends: dict[str, StorageBackend],
     max_attempts: int,
     limit: int = 100,
+    lock_target_ids: set[str] | None = None,
 ) -> dict:
     """Retry queue for asynchronously caught-up copies (3.6). Reads the
     bytes from an already-confirmed copy of the same object and writes
     them to the pending target. After ``max_attempts`` unsuccessful
     attempts, a copy is considered permanently failed (logged instead of
-    alerted, see Settings.max_replication_attempts)."""
+    alerted, see Settings.max_replication_attempts).
+
+    ``lock_target_ids`` (Phase 50 Session 1, mirrors ``write_with_redundancy``'s
+    same-named parameter): a target that only gets populated via catch-up
+    replication used to receive no real S3 Object Lock at all, even when it
+    is a configured `object_lock_mode` target - the application-layer guard
+    (``retention_until`` on the `object_copy` row) still applied, but the
+    backend-level lock did not, an open point until now."""
+    lock_target_ids = lock_target_ids or set()
     processed = succeeded = failed = permanently_failed = 0
     for copy in await repository.list_pending_copies(session, limit=limit):
         processed += 1
@@ -312,13 +321,11 @@ async def process_pending(
 
         try:
             data = await backends[source.backend_id].read(copy.object_key)
-            # `lock_until` is deliberately NOT passed through to the
-            # backend here (open point, see docs/services/
-            # storage-service.md): a target that is only populated via
-            # re-replication after the original write would otherwise get
-            # no real S3 Object Lock - the application-layer guard
-            # (`retention_until` below) still applies regardless.
-            await backends[copy.backend_id].write(copy.object_key, data)
+            await backends[copy.backend_id].write(
+                copy.object_key,
+                data,
+                lock_until=source.retention_until if copy.backend_id in lock_target_ids else None,
+            )
         except Exception as exc:
             new_attempts = copy.attempts + 1
             if new_attempts >= max_attempts:

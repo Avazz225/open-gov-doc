@@ -193,7 +193,14 @@ One custom gauge, `storage.replication.backlog` (group `reliability`) — the su
 
 ## Tests
 
-- `uv run pytest services/storage-service/tests` (**154 tests since Phase 40 Session 4** — +2 over
+- `uv run pytest services/storage-service/tests` (**156 tests since Phase 50 Session 1** — +2 over
+  the previous 154: `test_process_pending_propagates_lock_until_for_a_lock_target`/
+  `test_process_pending_omits_lock_until_for_a_non_lock_target` (`test_replication.py`), proving
+  `lock_until` now reaches the backend `write()` call on catch-up replication exactly when the target
+  is a configured lock target, via a new `_LockRecordingBackend` test double that wraps
+  `LocalFilesystemBackend` and records every `lock_until` it receives — needed since
+  `LocalFilesystemBackend` itself deliberately ignores the value, so a plain local backend can't be
+  used to observe what was actually passed). Before that, 154 tests since Phase 40 Session 4 — +2 over
   the previous 152: `test_metrics_endpoint_exposes_replication_backlog_sensor` (presence in `/metrics`)
   and `test_metrics_endpoint_reports_the_live_replication_backlog` (before/after delta across a real
   upload that creates exactly one new `pending` copy row, gauge activation forced via `monkeypatch` -
@@ -254,7 +261,7 @@ One custom gauge, `storage.replication.backlog` (group `reliability`) — the su
 - **`local` backend without real WORM** (only an application-layer guard, see ADR 0030) — anyone needing tamper-proof WORM on local storage must use an S3-compatible target with `object_lock_mode=governance`.
 - **`azure` backend without real WORM** (Post-Roadmap Phase 24 Session 1, only an application-layer guard, see "Object Lock/WORM" above) — Azure Immutable Blob Storage would be technically possible but was deliberately not implemented, since Azurite (the reference test environment) does not support it; anyone needing real WORM must continue to use a `type="s3"` target with `object_lock_mode=governance`.
 - **Azurite emulator version drift**: the pinned `azurite` image (`3.30.0`) does not necessarily know the `x-ms-version` sent by whichever `azure-storage-blob` SDK version is current — caught via the Azurite CLI flag `--skipApiVersionCheck` (see `infra/docker-compose.yml`); on an SDK version jump with actually incompatible (not merely unknown) request fields, this flag would no longer help and Azurite would need to be updated.
-- **`replication.py`'s `process_pending` propagates `retention_until` to `record_copy`, but not `lock_until` to the backend `write()` call on caught-up replication** — relevant only once caught-up replication is regularly used for governance targets (documented in ADR 0030).
+- ~~**`replication.py`'s `process_pending` propagates `retention_until` to `record_copy`, but not `lock_until` to the backend `write()` call on caught-up replication**~~ — **closed in Phase 50 Session 1**: `process_pending()` now accepts `lock_target_ids` (mirroring `write_with_redundancy`'s existing parameter of the same name) and passes `lock_until=source.retention_until` to the backend `write()` call whenever the catch-up target is one of the configured `object_lock_mode` targets — `POST /replication/process-pending` now threads `app.state.lock_target_ids` through. A caught-up copy on a governance target now gets the same real S3 Object Lock a copy written on the primary/quorum path already got; the application-layer guard (`retention_guard.py`) continues to apply regardless, unchanged.
 - **No automatic bucket upgrade** for buckets already in production use without Object Lock (see ADR 0030) — only newly created buckets receive `ObjectLockEnabledForBucket=True`.
 - **`PUT /guard-status/{id}/config`'s live reload (Post-Roadmap Phase 22 Session 7, ADR 0092) affects only its own process instance** — with multiple horizontally scaled `storage-service` replicas, a replica without its own `PUT` call/restart does not see the change (no shared cache/pub-sub invalidation). Uncritical for the current single-replica deployment reality.
 - ~~**`PUT /guard-status/{id}/config` does NOT validate whether a `role` change makes the `quorum_count` already set via `PUT /operational-config` unsatisfiable**~~ — **closed in Phase 40 Session 1**: the same `1 <= quorum_count <= len(would_be_targets)` check `PUT /operational-config` already had (ADR 0091) is now also applied here, for both a `role` toggle and `decommissioned`.

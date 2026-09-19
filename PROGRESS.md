@@ -2,10 +2,59 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P49-S3 (`admin-ui` — its own session, given size, component count, and the
-`InstallationProvider` structural wrinkle already handled once in P47-S4 — third and last session of
-Phase 49, "Visual Modernization Rollout"). No new ADR (execution of the already-approved ADR 0168
-design, per the plan's own DoD). **This closes Phase 49.**
+**Last completed:** P50-S1 (`storage-service`: `lock_until` propagation on catch-up replication — first
+session of Phase 50, "Remaining Lower-Priority Hardening"). No new ADR (polish/hardening of an
+already-established pattern, per the plan's own DoD). Phase 50 has five sessions total, split at this
+session's kickoff since the original plan bundled all five findings into one paragraph with no
+sub-session numbering (unlike every phase before it) — see `IMPLEMENTATION_PLAN.md`.
+
+`replication.py`'s catch-up path (`process_pending()`) previously never passed `lock_until` to the
+backend `write()` call — the code already carried a comment acknowledging this as an open point. Fixed:
+`process_pending()` now accepts `lock_target_ids` (mirroring `write_with_redundancy`'s existing
+parameter of the same name) and passes `lock_until=source.retention_until` to the backend `write()`
+call whenever the catch-up target is one of the configured `object_lock_mode` targets;
+`POST /replication/process-pending` now threads `app.state.lock_target_ids` through. A caught-up copy
+on a governance target now gets the same real S3 Object Lock a copy written on the primary/quorum path
+already got — the application-layer guard (`retention_guard.py`) continues to apply regardless,
+unchanged. Two new regression tests (`test_process_pending_propagates_lock_until_for_a_lock_target`/
+`_omits_..._for_a_non_lock_target`) via a new `_LockRecordingBackend` test double that wraps
+`LocalFilesystemBackend` and records every `lock_until` it receives, since the real
+`LocalFilesystemBackend` deliberately ignores the value and can't be used to observe what was passed.
+
+**A real, previously-undetected regression found and fixed along the way, blocking this session's own
+test run**: the root `pyproject.toml`'s `tool.uv.workspace.members = ["libs/*", ...]` glob had been
+silently breaking every `uv run`/unfrozen `uv sync` invocation since **Phase 48 Session 1** added
+`libs/dms-ui/` (a plain CSS file, no `pyproject.toml`, ADR 0168) — `uv` refuses to start with "Workspace
+member `libs/dms-ui` is missing a `pyproject.toml`". Unnoticed for the whole of Phase 48-49 because no
+session between P48-S1 and P50-S1 needed to run a backend Python test (Phase 49 was pure frontend CSS
+work). Fixed via an explicit `tool.uv.workspace.exclude = ["libs/dms-ui"]` in the root `pyproject.toml`
+— confirmed this restores every `uv run`/`uv sync` invocation repo-wide, not just for `storage-service`.
+
+`156`/`156` `storage-service` tests passing (was 154, +2). `ruff check`/`ruff format --check` clean for
+`storage-service` (a pre-existing, unrelated `ruff` failure in `apps/libreoffice-addin/python/
+ogdoc_addin.py`, from Phase 47 Session 5's i18n work, confirmed untouched by this session's diff — left
+as-is, out of scope). Full-repo backend regression (`scripts/run-tests.sh`, no `--build` since no
+Docker image changed) run afterward specifically to confirm the workspace-glob fix doesn't affect any
+OTHER service, given it touches the shared root config.
+
+`docs/services/storage-service.md`: closed the matching Open Points bullet, Tests section updated.
+`libs/README.md`: added a note on the workspace-glob regression and its fix, next to the existing
+`dms-ui` non-Python-exception note.
+
+**Next session:** P50-S2 — `notification-service`/`signature-service` both authenticate as the
+`users-admin` technical account (a real domain-admin login, full user CRUD + AD-group→role mapping
+control) just to do two read-only `GET /users` lookups, a genuine excess-privilege exposure confirmed
+during this phase's research, not merely inelegant. Fix: an `X-DMS-Principal`-gated path on
+`auth-service`'s `GET /users` (mirroring the existing `_require_service_user_management` pattern),
+dedicated narrow-capability principals for both services, replacing both `POST /login` calls with the
+fixed-header pattern already used elsewhere in this codebase.
+
+---
+
+Immediately before P50-S1: **P49-S3** (`admin-ui` — its own session, given size, component count, and
+the `InstallationProvider` structural wrinkle already handled once in P47-S4 — third and last session
+of Phase 49, "Visual Modernization Rollout"). No new ADR (execution of the already-approved ADR 0168
+design, per the plan's own DoD). **This closed Phase 49.**
 
 `globals.css`'s own `--dms-*` color-token declarations removed, replaced by
 `@import "../../../../libs/dms-ui/tokens.css";`. This app was one of the three (with `user-ui`/
