@@ -154,6 +154,22 @@ class DmsTreeClient:
         )
         return _to_tree_document(body, version)
 
+    def _fetch_current_versions_batch(
+        self, document_ids: list[str], *, x_dms_principal: str = ""
+    ) -> dict[str, dict]:
+        """Phase 50 Session 4: batch counterpart to `_fetch_current_version`
+        above - one round trip for the whole list instead of one per
+        document, see `list_children` below (the actual N+1 this fixes)."""
+        if not document_ids:
+            return {}
+        response = self._documents.post(
+            "/documents/versions/current/batch",
+            json={"document_ids": document_ids},
+            headers=self._principal_headers(x_dms_principal),
+        )
+        response.raise_for_status()
+        return response.json()["versions"]
+
     def list_children(
         self, folder_id: str, *, x_dms_principal: str = ""
     ) -> tuple[list[TreeFolder], list[TreeDocument]]:
@@ -170,17 +186,22 @@ class DmsTreeClient:
         )
         documents_response.raise_for_status()
         folders = [_to_tree_folder(f) for f in folders_response.json() if f["deleted_at"] is None]
-        # An extra HTTP call per document (version metadata doesn't live on
-        # `DocumentOut`, see `_to_tree_document`) - deliberately accepted for
-        # a reference implementation: WebDAV clients (Windows Explorer/
-        # Finder) rely on correct Content-Length/ETag values in the
-        # directory listing; a wrong default value would be the worse
-        # alternative.
-        documents = [
-            self._to_tree_document_enriched(d, x_dms_principal=x_dms_principal)
-            for d in documents_response.json()
-            if d["deleted_at"] is None
-        ]
+        # Phase 50 Session 4: previously one extra HTTP call PER document
+        # (version metadata doesn't live on `DocumentOut`, see
+        # `_to_tree_document`) - a genuine N+1 that degraded root `PROPFIND`
+        # with document volume (see docs/services/webdav-connector.md). Now
+        # a single batched call for the whole folder - WebDAV clients
+        # (Windows Explorer/Finder) still get correct Content-Length/ETag
+        # values in the directory listing, just without the per-document
+        # round trip. A document whose version the batch endpoint omitted
+        # (deleted between the two calls above, or individually access-
+        # restricted) falls back to `_to_tree_document`'s existing
+        # `version=None` neutral defaults, same as before this session.
+        live_documents = [d for d in documents_response.json() if d["deleted_at"] is None]
+        versions = self._fetch_current_versions_batch(
+            [d["id"] for d in live_documents], x_dms_principal=x_dms_principal
+        )
+        documents = [_to_tree_document(d, versions.get(d["id"])) for d in live_documents]
         return folders, documents
 
     def resolve_path(self, path: str, *, x_dms_principal: str = "") -> TreeFolder | TreeDocument:

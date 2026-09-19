@@ -13,11 +13,23 @@ DOCUMENT_SERVICE_URL = os.environ.get("TEST_DOCUMENT_SERVICE_URL", "http://local
 FOLDER_SERVICE_URL = os.environ.get("TEST_FOLDER_SERVICE_URL", "http://localhost:8008")
 
 
+_TEST_PRINCIPAL_HEADERS = {"X-DMS-Principal": "connector-sdk-tests"}
+
+
 @pytest.fixture
 def sdk_client():
+    """`default_principal` (Phase 50 Session 4 fix - pre-existing gap, not
+    part of this session's actual scope, but required to verify it at all):
+    `folder-service`/`document-service`'s core endpoints have required a
+    valid `X-DMS-Principal` since ADR 0149 (Post-Roadmap Phase 38 Session
+    4), and this fixture never set one, so every test in this file was
+    already failing with `401` before this session touched anything - this
+    class's own `default_principal` parameter exists for exactly this
+    "no real per-request actor" case."""
     client = DmsTreeClient(
         document_service_base_url=DOCUMENT_SERVICE_URL,
         folder_service_base_url=FOLDER_SERVICE_URL,
+        default_principal="connector-sdk-tests",
     )
     try:
         yield client
@@ -33,6 +45,7 @@ def _create_folder(*, parent_id: str = "root", name: str | None = None) -> dict:
             "parent_id": parent_id,
             "created_by": "connector-sdk-tests",
         },
+        headers=_TEST_PRINCIPAL_HEADERS,
     )
     response.raise_for_status()
     return response.json()
@@ -50,6 +63,7 @@ def _upload_document(
             "folder_id": folder_id,
         },
         files={"file": (resolved_title, content, "text/plain")},
+        headers=_TEST_PRINCIPAL_HEADERS,
     )
     response.raise_for_status()
     return response.json()
@@ -65,6 +79,26 @@ def test_list_children_separates_folders_and_documents(sdk_client):
     assert [f.id for f in folders] == [subfolder["id"]]
     assert [d.id for d in documents] == [document["id"]]
     assert documents[0].title == "in-ordner.txt"
+
+
+def test_list_children_populates_version_metadata_for_every_document(sdk_client):
+    """Phase 50 Session 4: `list_children` fetches version metadata
+    (size/content-type/checksum) via one batched call instead of one HTTP
+    round trip per document (the N+1 root `PROPFIND` used to have) - proves
+    the batching still actually delivers correct, per-document data for
+    MULTIPLE documents in one folder, not just a degenerate single-item
+    case."""
+    folder = _create_folder()
+    first = _upload_document(folder_id=folder["id"], title="eins.txt", content=b"eins")
+    second = _upload_document(folder_id=folder["id"], title="zwei.txt", content=b"zwei-zwei")
+
+    _, documents = sdk_client.list_children(folder["id"])
+
+    by_id = {d.id: d for d in documents}
+    assert by_id[first["id"]].size_bytes == len(b"eins")
+    assert by_id[first["id"]].checksum_sha256
+    assert by_id[second["id"]].size_bytes == len(b"zwei-zwei")
+    assert by_id[second["id"]].checksum_sha256 != by_id[first["id"]].checksum_sha256
 
 
 def test_get_folder_returns_folder_by_id(sdk_client):

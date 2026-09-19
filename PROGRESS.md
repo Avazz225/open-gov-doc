@@ -2,10 +2,71 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P50-S3 (`rendering-service`: per-document permission inheritance for renditions —
-third session of Phase 50, "Remaining Lower-Priority Hardening"). No new ADR (polish/hardening — a real
-bypass fix, but reusing document-service's already-established per-document `ResourceNode` pattern, not
-a new architecture decision, per the plan's own DoD).
+**Last completed:** P50-S4 (`webdav-connector`: batch endpoint fixes the root `PROPFIND` N+1 — fourth
+session of Phase 50, "Remaining Lower-Priority Hardening"). No new ADR (polish/hardening — a genuine
+N+1 fix following existing batch-endpoint conventions already established elsewhere, not a new
+architecture decision, per the plan's own DoD).
+
+`dms-connector-sdk`'s `DmsTreeClient.list_children` (used by both `webdav-connector`'s root `PROPFIND`
+and `cmis-connector`) previously made one extra HTTP call to `document-service` PER document in a folder
+(`_fetch_current_version`, since version metadata — size/content-type/checksum — doesn't live on
+`DocumentOut`), confirmed a real N+1 against a folder-scoped call, not an unpaginated global fetch. Fixed
+via a new batch endpoint, `POST /documents/versions/current/batch` (`document-service`), consumed once
+per folder listing instead of once per document. Per-document `document.read` still checked (a document
+that doesn't exist, has no current version, or the caller individually can't read is simply omitted from
+the result, not an error) via a new `PermissionServiceClient.check_read_batch` — one `POST /check/batch`
+round trip against `permission-service` instead of one `/check` per document, so the fix doesn't just
+move the N+1 one layer down.
+
+`cmis-connector` benefits automatically via the shared SDK — confirmed via its own test suite (still one
+pre-existing, unrelated failure from Phase 50 Session 1, `test_delete_tree_cascades_documents_and_
+subfolders`, untouched by this session).
+
+**A pre-existing, unrelated gap found and fixed as a verification prerequisite**: `dms-connector-sdk`'s
+own test suite (`libs/dms-connector-sdk/tests/`) was entirely broken with `401 Unauthorized` before this
+session touched anything — its `sdk_client` fixture and raw `httpx` setup helpers never set an
+`X-DMS-Principal`, a gap dating back to ADR 0149 (Post-Roadmap Phase 38 Session 4) that requires one on
+`folder-service`'s/`document-service`'s core endpoints. Since `libs/*/tests` isn't covered by
+`scripts/run-tests.sh` (only `services/*/tests` is), this had gone undetected — and blocked verifying
+this session's own new test without a fix. Fixed by setting `default_principal` on the fixture (the
+`DmsTreeClient` parameter that exists for exactly this "no real per-request actor" case) and a header on
+the two raw setup helpers.
+
+`381`/`381` `document-service` tests passing (was 376, +5): `401` without a
+principal, empty-list handling, a stale/unknown id omitted (not erroring) from an otherwise-valid batch,
+several documents' CURRENT versions correctly returned in one call (not a degenerate single-item case),
+and the same per-document isolation mechanism P50-S3 proved for `rendering-service` applied here. `15`
+(now correctly running, was `0` due to the pre-existing gap above) `dms-connector-sdk` tests passing,
+`+1` new (multiple documents' version metadata via `list_children`, proving the batching itself).
+`webdav-connector`: `16`/`16` unchanged. `ruff check`/`ruff format --check` clean across all four
+touched packages.
+
+Docker images rebuilt and redeployed for `document-service`, `webdav-connector`, `cmis-connector`, all
+started cleanly. **Live-verified end-to-end against the real running stack**: uploaded a real folder
+with 5 real documents, marked the `document-service` access log position, ran a real WebDAV `PROPFIND`
+against the live `webdav-connector` container (`webdav4`-style Basic Auth) — confirmed exactly ONE
+`POST /documents/versions/current/batch` call per folder listing (zero individual `/versions/{n}` calls
+for the 5 documents), and confirmed the returned `Content-Length` values in the actual PROPFIND XML
+response matched the real uploaded file sizes exactly. Test folder and documents cleaned up afterward.
+
+`docs/services/webdav-connector.md`: closed the root-`PROPFIND`-N+1 Open Points bullet with the full fix
+writeup. `docs/services/document-service.md`: new API table row. `docs/services/cmis-connector.md`:
+closing note cross-referencing the fix, next to its own historical account of the same underlying issue.
+
+**Next session:** P50-S5 — `auth-service`'s AD-group→role mapping rules (1:1 mappings, Phase 39 S3's
+composite AND-rules, and the default-role-for-unmapped-groups setting) have full backend CRUD,
+four-eyes-aware, but no admin-UI page — API-only today. Fix: a new `admin-ui` page following the
+established `RequireAuth`→`RequireCapability`→`AdminShell` pattern (ADR 0148), capability
+`admin.user_management`, with per-row CRUD (fetch list, add-row form posting immediately, per-row
+delete, handling the existing `pending_approval` response envelope) rather than the batched-single-PUT
+style `RetentionSettings.tsx` uses. This is Phase 50's fifth and last session — closes the phase.
+
+---
+
+Immediately before P50-S4: **P50-S3** (`rendering-service`: per-document permission inheritance for
+renditions — third session of Phase 50, "Remaining Lower-Priority Hardening"). No new ADR
+(polish/hardening — a real bypass fix, but reusing document-service's already-established per-document
+`ResourceNode` pattern, not a new architecture decision, per the plan's own DoD).
 
 Every rendition endpoint used to gate through one coarse, service-wide `rendering.read`/`.write` check
 (granted to "everyone" by default, ADR 0073 — in practice a near-no-op) instead of the concrete

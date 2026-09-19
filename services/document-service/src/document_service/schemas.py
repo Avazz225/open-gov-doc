@@ -66,6 +66,25 @@ class DocumentVersionOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class DocumentVersionsBatchRequest(BaseModel):
+    """Phase 50 Session 4: `document_ids` to fetch the CURRENT version of
+    each for - the batch counterpart to `GET /documents/{id}/versions/
+    {version_number}`, always the current one (the only thing a directory
+    listing needs, see `DmsTreeClient.list_children`)."""
+
+    document_ids: list[str]
+
+
+class DocumentVersionsBatchResult(BaseModel):
+    """Keyed by `document_id`; an id that doesn't exist, has no current
+    version, or the caller can't read is simply OMITTED, not an error -
+    same "return what you can" resilience already established by
+    `permission-service`'s `POST /check/batch` (a single bad id in a large
+    folder listing shouldn't fail the whole batch)."""
+
+    versions: dict[str, DocumentVersionOut]
+
+
 class CheckinResult(BaseModel):
     version: DocumentVersionOut
     is_conflict: bool

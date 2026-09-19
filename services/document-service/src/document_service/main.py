@@ -65,6 +65,8 @@ from document_service.schemas import (
     DocumentRegisterRequest,
     DocumentUpdate,
     DocumentVersionOut,
+    DocumentVersionsBatchRequest,
+    DocumentVersionsBatchResult,
     ExportConfigIn,
     ExportConfigOut,
     FolderExportJobOut,
@@ -3549,6 +3551,43 @@ async def get_version(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     await _require_document_permission(x_dms_principal, document.id, access_type="read")
     return version
+
+
+@app.post("/documents/versions/current/batch", response_model=DocumentVersionsBatchResult)
+async def get_current_versions_batch(
+    payload: DocumentVersionsBatchRequest,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> DocumentVersionsBatchResult:
+    """Batch form of `GET /documents/{id}/versions/{version_number}`, always
+    the CURRENT version (Phase 50 Session 4) - `webdav-connector`'s root
+    `PROPFIND` used to make one call to this per document in a folder
+    listing (a genuine N+1, `DmsTreeClient._fetch_current_version`), the
+    exact gap this endpoint closes; `cmis-connector` shares the same SDK
+    and the same N+1, so it benefits too. Per-document `document.read`
+    checked the same way the single-item endpoint above already does (one
+    `POST /check/batch` round trip instead of one `/check` per document,
+    see `PermissionServiceClient.check_read_batch`) - a document that
+    doesn't exist, has no current version, or the caller can't read is
+    simply OMITTED from the result, not an error, so one stale/inaccessible
+    id in a large folder listing doesn't fail the whole batch."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    document_ids = list(dict.fromkeys(payload.document_ids))
+    if not document_ids:
+        return DocumentVersionsBatchResult(versions={})
+    allowed = await app.state.permission_client.check_read_batch(
+        principal_id=x_dms_principal, resource_ids=document_ids
+    )
+    versions: dict[str, DocumentVersionOut] = {}
+    for document_id in document_ids:
+        if not allowed.get(document_id):
+            continue
+        try:
+            versions[document_id] = await repository.get_current_version(session, document_id)
+        except repository.NotFoundError:
+            continue
+    return DocumentVersionsBatchResult(versions=versions)
 
 
 @app.get("/documents/{document_id}/content")

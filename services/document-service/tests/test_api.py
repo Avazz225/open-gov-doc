@@ -293,6 +293,88 @@ def test_download_content_returns_404_instead_of_crashing_if_object_missing(clie
     assert response_by_version.status_code == 404
 
 
+def test_versions_batch_without_principal_returns_401(client):
+    response = client.post(
+        "/documents/versions/current/batch",
+        json={"document_ids": []},
+        headers={"X-DMS-Principal": ""},
+    )
+    assert response.status_code == 401
+
+
+def test_versions_batch_empty_list_returns_empty_dict(client):
+    response = client.post("/documents/versions/current/batch", json={"document_ids": []})
+    assert response.status_code == 200
+    assert response.json() == {"versions": {}}
+
+
+def test_versions_batch_omits_unknown_and_deleted_document_ids(client):
+    """Phase 50 Session 4: a stale/nonexistent id in the batch is simply
+    omitted from the result, not an error - the point being that a single
+    bad id in a large folder listing (e.g. a document deleted between the
+    folder-children call and this one) shouldn't fail the whole batch."""
+    real = upload(client, content=b"echt").json()
+
+    response = client.post(
+        "/documents/versions/current/batch",
+        json={"document_ids": [real["id"], "unbekannt", real["id"]]},
+    )
+
+    assert response.status_code == 200
+    versions = response.json()["versions"]
+    assert set(versions.keys()) == {real["id"]}
+    assert versions[real["id"]]["checksum_sha256"]
+
+
+def test_versions_batch_returns_current_version_for_each_of_several_documents(client):
+    """The actual point of this session: several documents' CURRENT version
+    metadata in a single call, matching what a folder listing needs -
+    proves the batch isn't just a degenerate single-item wrapper."""
+    first = upload(client, content=b"eins", title="a.pdf").json()
+    second = upload(client, content=b"zwei-zwei", title="b.pdf").json()
+    # A second version on `second` - the batch must return the CURRENT one
+    # (version 2), not the first.
+    client.post(
+        f"/documents/{second['id']}/versions",
+        data={"expected_base_version_number": 1, "created_by": "alice"},
+        files={"file": ("b.pdf", b"zwei-zwei-neu", "application/pdf")},
+    )
+
+    response = client.post(
+        "/documents/versions/current/batch",
+        json={"document_ids": [first["id"], second["id"]]},
+    )
+
+    assert response.status_code == 200
+    versions = response.json()["versions"]
+    assert versions[first["id"]]["size_bytes"] == len(b"eins")
+    assert versions[second["id"]]["version_number"] == 2
+    assert versions[second["id"]]["size_bytes"] == len(b"zwei-zwei-neu")
+
+
+def test_versions_batch_omits_a_document_the_caller_cannot_read(client):
+    """Same isolation mechanism P50-S3 proved for `rendering-service`,
+    applied here: an individually isolated document is omitted from the
+    batch result for a principal without an explicit grant, even though it
+    exists and has a current version."""
+    isolated = upload(client, content=b"isoliert").json()
+    httpx.patch(
+        f"{PERMISSION_SERVICE_URL}/resources/{isolated['id']}",
+        json={"inherit": False},
+        timeout=10.0,
+    ).raise_for_status()
+
+    scoped_principal = "document-service-tests-versions-batch-scoped"
+    response = client.post(
+        "/documents/versions/current/batch",
+        json={"document_ids": [isolated["id"]]},
+        headers={"X-DMS-Principal": scoped_principal},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["versions"] == {}
+
+
 def test_download_content_returns_409_if_dehydrated(client):
     """Post-Roadmap Phase 19 Session 11: ein ausgesonderter Dokumentinhalt
     liegt nicht mehr im Storage Service (archival-service hat ihn entfernt) -

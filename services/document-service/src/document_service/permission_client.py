@@ -38,6 +38,26 @@ class PermissionServiceClient:
         response.raise_for_status()
         return bool(response.json()["allowed"])
 
+    async def check_read_batch(
+        self, *, principal_id: str, resource_ids: list[str], permission: str = "document.read"
+    ) -> dict[str, bool]:
+        """Batch form of `check_read` (Phase 50 Session 4) - one round trip
+        to `permission-service`'s already-existing `POST /check/batch`
+        instead of one per resource, the same "N HTTP calls collapsed into
+        one" fix this session applies one layer up (webdav-connector's own
+        N+1 against THIS service, see `DocumentVersionsBatchRequest`)."""
+        response = await self._client.post(
+            "/check/batch",
+            json={
+                "principal_id": principal_id,
+                "resource_ids": resource_ids,
+                "permission": permission,
+                "access_type": "read",
+            },
+        )
+        response.raise_for_status()
+        return response.json()["results"]
+
     async def check_write(
         self, *, principal_id: str, resource_id: str, permission: str = "document.write"
     ) -> bool:

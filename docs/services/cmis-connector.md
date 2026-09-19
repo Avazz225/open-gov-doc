@@ -139,7 +139,13 @@ recorded in ADR 0034 as a future precedent for exactly this case).
   leaking real folder-service folders on every run, since it deliberately tests against the
   real neighbor services) and fixed the actual source with a teardown fixture, not just another
   one-off cleanup — see [ADR 0149](../adr/0149-teamspace-permission-anchoring-broad-rbac-retrofit.md).
-  `x_dms_principal` (below) was added to `DmsTreeClient` in the same session.
+  `x_dms_principal` (below) was added to `DmsTreeClient` in the same session. **The underlying N+1
+  itself (`list_children()`'s "extra HTTP call per document") is fixed as of Phase 50 Session 4** —
+  a new batch endpoint on `document-service` (`POST /documents/versions/current/batch`) replaces the
+  per-document loop with one call per folder listing; `cmis-connector` gets the fix automatically via
+  the shared `dms-connector-sdk`, confirmed via its own test suite (still-open, unrelated finding: see
+  the Phase 50 Session 1 note above about `test_delete_tree_cascades_documents_and_subfolders`). See
+  `docs/services/webdav-connector.md`'s Open Points for the full writeup.
 
 ## Licensing (3.3/9.1, P9-S2 pattern)
 
