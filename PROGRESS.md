@@ -58,8 +58,26 @@ rejected (cleanup) and confirmed removed from the active listing afterward.
 long-standing flakiness bullet), and the live-verification note all updated.
 
 **Phase 53 ("Lower-Priority Hardening & Polish") is now closed** (P53-S1 through S4, all four sessions
-done). `graphify update .` to run next per the established phase-end convention, then continue per the
-standing "weiter selbstständig" instruction to whatever comes after Phase 53 in `IMPLEMENTATION_PLAN.md`.
+done). `graphify update .` run to close out the phase.
+
+**Fifth gap-analysis round completed** (same four-parallel-research-agent methodology as after Phases 37/43/50):
+ADR self-named open-scope sweep, `docs/services/*.md` Open Points sweep, `Konzept.md` coverage +
+staleness re-check, and — new this round — a live-code-only security/correctness sweep (not relying on
+any doc already flagging something). Result written into `IMPLEMENTATION_PLAN.md` as "## Phase 54+: Gap
+Analysis After Phase 53" (Phases 54–58, 10 sessions total). Headline finding: **three genuinely
+exploitable authorization bypasses**, none previously documented — `fleet-management-service` has zero
+authentication on its entire API (including the endpoint that mints a real installation's plaintext
+agent API key), `migration-service`'s six step-callback endpoints are both unauthenticated AND
+`step_delete_source` impersonates the trusted `migration-service` identity via a hardcoded
+`X-DMS-Principal` header instead of forwarding the real caller's, and `favorite-service` never reads
+`X-DMS-Principal` at all (any authenticated user can view/add/delete any other user's favorites via a
+client-supplied `user_id`). These are Phase 54, highest priority, ahead of everything else found this
+round.
+
+**Next session:** P54-S1 — `fleet-management-service`: add a real auth gate to its entire API (currently
+none at all), most likely reusing the P44-S1 `hub_operator_key` pattern but confirming it fits this
+service's need to also distinguish "console/admin caller" from "the managed installation's own agent"
+callbacks. First session of Phase 54, "Critical Authorization Bugs."
 
 ---
 

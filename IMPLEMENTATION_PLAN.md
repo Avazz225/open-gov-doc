@@ -1128,6 +1128,130 @@ end only, backend regression (`scripts/run-tests.sh --build`) + frontend regress
 `vitest`/`next build`) before completion, real browser verification (screenshots) for every UI-visible
 change.
 
+## Phase 54+: Gap Analysis After Phase 53
+
+After Phase 53 completed, a fifth gap-analysis round (same methodology as Phases 32+/38+/44+/51+ above)
+ran four parallel research agents: ADR self-named open scope (all 171 ADRs, focused on 0148+), `docs/
+services/*.md` Open Points (all 40 files with such a section), `Konzept.md` coverage re-check plus
+staleness reassessment of every previously-deferred item across all four prior rounds' "not included"
+lists, and — new this round, since the system is mature enough that doc-mined gaps are thinning out — a
+**fresh live-code-only security/correctness sweep** that did not rely on any doc already flagging
+something (ungated mutating endpoints, unprotected background loops, delete paths that leave orphaned
+rows in another service).
+
+Results: the Concept-coverage and staleness-reassessment agent found **nothing** — every `Konzept.md`
+section traces to real implementation (two apparent zero-hit outliers, §5.1 and §10.2, turned out to be
+fully built but conventionally cited under sibling section numbers), and every "Deliberately Not
+Included" item's blocking reason still holds. The ADR-sweep agent mostly reconfirmed the existing
+"Deliberately Not Included in Phase 51+" backlog, plus two items that look like genuine misses rather
+than deliberate defers (now P56-S1/S2 below). The docs/services sweep found a large batch of **18
+confirmed stale "still open" bullets** — items already closed by a later, ✅-marked session but whose
+Open Points entry was simply never struck through (now P57-S1) — plus a long tail of smaller items, the
+large majority of which are correctly-scoped, low-value, or blocked on an external dependency and are not
+individually itemized below (see "Deliberately Not Included in Phase 54+").
+
+The most consequential result came from the new live-code sweep: **three genuinely exploitable
+authorization bypasses**, none previously documented anywhere, none caught by any prior doc-mining round
+because there was no stale doc text to find — the code was simply never gated in the first place. These
+are Phase 54's entire content and take priority over everything else found this round.
+
+### Phase 54 — Critical Authorization Bugs (highest priority, real exploitable bypasses)
+
+| Session | Deliverable |
+|---|---|
+| P54-S1 | `fleet-management-service`'s entire API has **zero authentication** — every endpoint (`create_installation`, `delete_installation`, `rotate_installation_key`, `push_license`, `approve_installation_run`, ...) has no `Depends()`-based auth, header check, or API-key gate at all, confirmed by grepping the whole file. This is structurally the same gap `federation-hub-service` had before P44-S1 gave it a `hub_operator_key` — except more dangerous here: `rotate_installation_key` mints and returns the plaintext `fleet_agent_api_key` a real managed installation trusts, and the four-eyes `approve`/`reject` rollout check compares a client-supplied `payload.actor` string against `run.proposed_by` (trivially spoofable, not an identity check at all). Session designs and adds a real auth gate — most likely reusing the P44-S1 operator-key pattern rather than inventing a second secret, but confirm that's still the right shape given this service also needs to distinguish "console/admin caller" from "the managed installation's own agent" callbacks, which `federation-hub-service` didn't have to. |
+| P54-S2 | `migration-service`'s six `/transfers/{id}/steps/*` endpoints (`step_lock`, `step_copy`, `step_verify`, `step_release`, `step_delete_source`, `step_dry_run_check`) have no gate at all, unlike every sibling `/transfers`/`/paired-installations` endpoint in the same file (all carry a `license_gate(...)` dependency). These are meant only as `connector_call` BPMN-service-task callback targets, but the service is registered with `registry-service` and reachable through the gateway by any authenticated user. Worse: `step_delete_source` calls `folder-service`'s trash endpoint with a **hardcoded** `X-DMS-Principal: migration-service` header — i.e. it impersonates the trusted service identity rather than forwarding the real caller's — so any authenticated user who knows or guesses a `transfer_id` can trigger a real folder trash action, bypassing the BPMN process, the transfer's own approval gate, and their own permissions on the source folder entirely. Session designs how a BPMN-service-task-only endpoint should authenticate its caller (likely: verify the request actually originates from `workflow-service`'s own service identity, not merely "any authenticated principal") and fixes both the missing gate and the impersonation. |
+| P54-S3 | `favorite-service` never reads `X-DMS-Principal` anywhere (confirmed via grep — zero hits) — `create_favorite`/`list_favorites`/`delete_favorite` take `user_id` as a client-supplied field and use it directly for all DB filtering with no check that it matches the caller's own verified identity. Any authenticated user can view, add, or delete any OTHER user's favorites by passing a different `user_id`. Fix: read `X-DMS-Principal`, reject (or ignore and use the header instead of) a `user_id` that doesn't match the caller — same pattern `document-service`'s `"personal"` scope already uses. Small, mechanical, no design decision needed. |
+
+**Definition of Done**: a regression test per fix that proves the specific bypass is closed (cross-user
+access denied for P54-S3, an unauthenticated/wrongly-authenticated caller rejected for P54-S1/S2); new
+ADR for P54-S1 and P54-S2 (real authentication-model decisions); no new ADR for P54-S3 (mechanical
+identity check, same established pattern); docs and `PROGRESS.md` updated per session.
+
+### Phase 55 — Correctness: Cross-Service Cleanup on Delete Paths
+
+| Session | Deliverable |
+|---|---|
+| P55-S1 | `teamspace-service` has **no `consumer.py` at all** — it never subscribes to `folder.resource.deleted`/`folder.trashed`. Per ADR 0163/P44-S2, a `teamspace-manager` legitimately holds `folder.delete` on a teamspace's root folder, so they CAN delete/trash it directly via `folder-service`, entirely bypassing `teamspace-service`'s own `DELETE /teamspaces/{id}` (whose docstring explicitly says the intended path deliberately preserves the root folder). The result: the `Teamspace` row, its members, and their `permission-service` role assignments all keep existing forever, permanently pointing at a `root_folder_id` that 404s — a silently broken teamspace with no cleanup path and no visible error until members try to use it. ADR 0163 itself already acknowledged "`folder-service` has no concept of 'teamspace' ... and none is added here" — it fixed *who* could trigger this, not the orphan it creates. Session designs the cleanup mechanism (a new consumer subscribing to the deletion events, keyed on `root_folder_id`) and decides its actual behavior — mark-orphaned-and-surface-in-admin-UI vs. actually tear down the teamspace and its role assignments — a real design decision either way. |
+| P55-S2 | `auth-service`'s `DELETE /users/{id}` only calls Keycloak's `delete_user` — it never notifies or calls `permission-service` (to revoke that principal's `RoleAssignment` rows) or `teamspace-service` (to remove their `TeamspaceMember` rows). Unlike `permission-service`'s own `delete_group`, which explicitly documents and justifies leaving `RoleAssignment` rows behind as harmless, there's no equivalent design note here and no code path that reacts to a user's removal at all. Lower severity than P54's findings (Keycloak UUIDs aren't realistically reused, so there's no privilege-escalation vector), but a real, unaddressed data-hygiene gap: stale grants accumulate indefinitely, teamspace member lists silently reference accounts that can never authenticate again, and `GET /users/lookup` resolution breaks for admin/UI display of those stale references. Fix: on user deletion, revoke the principal's role assignments and teamspace memberships — same "resource deletion cleans up its dependents in another service" shape already fixed several times elsewhere in this project (e.g. ADR 0169's pseudonymization-vault cleanup). |
+
+**Definition of Done**: a regression test per fix proving the orphan is actually closed (a deleted-user's
+grants are gone, a teamspace whose root folder was deleted directly no longer shows as active); new ADR
+for P55-S1 (the mark-vs-teardown design decision); no new ADR for P55-S2 (mechanical extension of an
+already-established cleanup-on-delete pattern); docs and `PROGRESS.md` updated per session.
+
+### Phase 56 — RBAC / Maintenance-Mode Completion
+
+| Session | Deliverable |
+|---|---|
+| P56-S1 | Maintenance-mode "Category A" coverage (P51-S4/ADR 0152) was extended to `document-service`/`folder-service` only — ADR 0152's own Consequences names `case-service`→`workflow-service`, `migration-service`→`permission-service`/peer-installations/`folder-service`, and `signature-service`→`document-service` as the remaining request-triggered cascading-write call sites, and P51-S4's own writeup explicitly left them "out of this session's scope." This looks like a genuine miss in the project's own last self-audit rather than a deliberate defer — it's absent from the "Deliberately Not Included in Phase 51+" list. Extend the same header-based `_reject_during_maintenance` pattern (already built, already proven) to these remaining call sites. Small, mechanical, no design decision. |
+| P56-S2 | `document-service`'s `list_documents_by_kennzeichen` (used by `mail-connector`'s cross-folder candidate matching, and possibly other cross-folder lookups) has **no row-level RBAC filtering at all** — ADR 0149 itself names this as "a separate, larger effort, out of scope" when it retrofitted row-level filtering onto every other cross-folder read path in that same session. A caller with `document.read` on nothing in particular can still resolve arbitrary documents by Kennzeichen across every folder in the installation. Session designs how to filter a Kennzeichen lookup efficiently by permission without turning it into an unbounded per-candidate fan-out (the same connection-pool-exhaustion shape already fixed once in `reporting-service`/`query-service`'s `filtering.py` — reuse that established batching pattern if it fits). Real feature, needs a design decision. |
+
+**Definition of Done**: regression test per fix (in particular one proving P56-S2's filtering actually
+denies a caller without read access to the resolved document); new ADR for P56-S2; no new ADR for P56-S1
+(extends an already-designed mechanism to its originally-intended remaining call sites); docs and
+`PROGRESS.md` updated per session.
+
+### Phase 57 — Documentation Drift Cleanup
+
+| Session | Deliverable |
+|---|---|
+| P57-S1 | The docs/services sweep found **18 confirmed-stale "still open" Open Points bullets** — each one describes a gap that a LATER, ✅-marked `IMPLEMENTATION_PLAN.md` session already closed, but whose doc entry was simply never struck through (the classic "forward reference written early, never revisited once the referenced session shipped" pattern this project has hit and self-corrected several times before). Confirmed instances span `admin-ui.md` (embedded license/audit/config views claimed nonexistent, all exist), `audit-service.md` (export + forensic-trace UI both claimed pending, both shipped at P7-S2b/c), `case-service.md` (mail-room cross-link claimed unwired, built at P15-S3), `license-service.md` (enforcement claimed CMIS/migration-service-incomplete, both now covered), `document-service.md`/`folder-service.md` (backup differentiation claimed pending, closed at P11-S4), `object-type-service.md` (two GUI-editor claims, both shipped at P5b-S3/P5e-S3; a "resolved display" duplication concern already investigated and declined at P42-S3), `user-ui.md` (the mirrored duplication claim, plus an installation-wide trash view claimed missing, built at P15-S1), `plugin-orchestration-service.md` (rolling updates claimed pending, closed at P10-S3), `signature-service.md` (a process-designer palette entry claimed missing — directly self-contradicted by `workflow-service.md`'s own text confirming it shipped at P6-S8, the single highest-confidence finding of this whole round), `process-designer.md` (a version-assignment race claimed open, the underlying backend race already fixed at P25-S1/ADR 0096), and `workflow-service.md` (a federation-hub retry-queue claim already closed via ADR 0081, plus a business-calendar-templates claim closed at P17-S3). Fix: strike through each one with the same `~~...~~` **closed at &lt;session&gt;** convention already used everywhere else in this project's docs, pointing at the session that actually closed it. Doc-only, no code changes, no tests beyond confirming the doc now matches reality. |
+
+**Definition of Done**: no new ADR (pure documentation correction); no tests beyond a final grep
+confirming every listed claim now reads as closed; `PROGRESS.md` updated noting the correction.
+
+### Phase 58 — Pseudonymization Completion & Small Polish Bundle
+
+| Session | Deliverable |
+|---|---|
+| P58-S1 | ADR 0169 (P52-S3) tied a pseudonymization vault entry's lifetime to its document's own hard-delete, but ADR 0156's two other residual gaps remain: (a) there's still no automatic trigger to actually *pseudonymize* an attribute on retention expiry — only a manual/admin-invoked path exists; (b) `folder-service`/`case-service` have **no equivalent pseudonymization mechanism at all** — the whole vault mechanism exists only for `document-service`'s own attributes. Session decides and builds the retention-expiry auto-trigger, and scopes (and ideally builds, if the design turns out small enough) the folder/case-service equivalent. Real feature, needs a design decision — likely the largest single item in this round outside Phase 54. |
+| P58-S2 | Small polish bundle, three independent, cheap, already-scoped items bundled into one session since none individually justifies its own: (a) `admin-ui`'s `/config-compare/` page (P52-S2) still lacks the expandable per-field diff view and an ignore-regex input field, even though the backend (`POST /config/compare`) already returns/accepts both — ADR 0040's own self-documented "smaller, still-open follow-up" after the main page shipped; (b) `user-ui`'s `RetentionPanel`/`FolderRetentionModal` have no client-side role restriction for legal hold, even though the backend already gates the action via `domain-admin-legal-hold` — a UI-consistency fix (a non-privileged user currently sees the control and only gets denied server-side), not a new backend permission; (c) `registry-service` has no periodic cleanup of permanently-unreachable instance rows — cosmetic (dead rows are already filtered from `GET /instances`, so routing correctness is unaffected), but worth closing opportunistically alongside the other two. |
+
+**Definition of Done**: tests per fix; no new ADR expected (pure completion/polish of already-established
+patterns and already-existing backend surfaces); docs and `PROGRESS.md` updated per session; live browser
+verification for P58-S2's two UI-visible items.
+
+## Deliberately Not Included in Phase 54+
+
+- **Teamspace group invitation** (ADR 0160) — re-confirmed still blocked: no Keycloak/AD
+  group-membership-listing endpoint exists in `auth-service` (grepped for `get_group_members`/
+  `get_group_by_path`/any such endpoint — none found), and `permission-service`'s own admin-creatable
+  `Group`/`GroupMembership` model is confirmed a separate, unrelated concept.
+- **`mail-connector`'s Microsoft Graph/O365 backend** (ADR 0161) — re-confirmed still blocked: needs a
+  real Azure AD tenant to build/test against, no operator need identified.
+- **`workflow-service`'s distributed lock for boundary/SLA timers across replicas** — re-confirmed still
+  correctly deferred: `infra/k8s/dms/values.yaml` still configures `workflow-service` at `replicas: 1`,
+  `autoscaling.enabled: false`, so the premise this gap depends on still doesn't hold.
+- **SAML 2.0, QES, PKCS#11/HSM, OCSP/CRL, XAdES/CAdES, Excel/PowerPoint/Outlook for `office-addin`,
+  Calc/Impress for `libreoffice-addin`, CheckMK integration** — all re-checked this round, all still valid,
+  no new trigger found for any of them.
+- **`federation-hub-service`'s in-memory retry-cache** (ADR 0147/0159) — externalizing it beyond the
+  already-added size ceiling (ADR 0159) stays deliberately low-priority per that ADR's own judgment, until
+  real concurrent handoff volume makes it necessary.
+- **`document-service`'s duplicated `PermissionServiceClient`** instead of the shared `dms-permission-
+  client` package (ADR 0154) — named tech debt, no urgency, no new trigger.
+- **ADR 0158's annotation-level `/StructParent` remapping** — still true: "would only become relevant if a
+  future source of tagged form-field annotations enters the pipeline, which nothing currently does."
+- **ADR 0151's `access_type` validation boundary** — still framed by its own ADR as an accepted design
+  boundary, not a gap.
+- **Backend error messages not locale-aware** — still out of scope for "the frontends" as originally
+  asked (Phase 47).
+- **The remaining long tail of `docs/services/*.md` Open Points** beyond what's itemized above (the docs
+  sweep this round covered ~35 services and found dozens more bullets) — the large majority are either
+  deliberately-scoped-forever design boundaries, blocked on a genuine external dependency (a real
+  ClamAV/LibreOffice/Office host to test against, a real second XDOMEA-speaking installation, etc.), or
+  individually too low-value for their own session; not itemized bullet-by-bullet, not forgotten.
+- **False positive discarded this round**: ADR 0116's "search-service is NOT quarantine-aware" reads as
+  open in its own text but was fully closed at Post-Roadmap Phase 36 Session 2 — a prior round already
+  flagged this exact same false positive, and this round independently reached the same conclusion.
+
+**Definition of Done for Phase 54+** (unchanged, `CONTRIBUTING.md`): tests green per session, new ADR for
+non-trivial decisions (see per-phase notes above), `PROGRESS.md` updated, `graphify update .` at phase
+end only, backend regression (`scripts/run-tests.sh --build`) + frontend regression (`tsc`/`eslint`/
+`vitest`/`next build`) before completion, real browser verification (screenshots) for every UI-visible
+change.
+
 ## PROGRESS.md — Resume Mechanism
 
 `dms/PROGRESS.md` is created as the first order of business in P0-S1 and is the entry point for every new session:
