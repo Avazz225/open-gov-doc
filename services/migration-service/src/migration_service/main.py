@@ -292,6 +292,30 @@ async def get_session() -> AsyncIterator[AsyncSession]:
         yield session
 
 
+async def _reject_during_maintenance(x_dms_maintenance_active: str) -> None:
+    """Maintenance mode (4.8), Category A request-triggered cascading writes
+    (Phase 56 Session 1, ADR 0152) - same helper shape and message as
+    `workflow-service`'s own `_reject_during_maintenance` (P6-S6), reading
+    the header the gateway already forwards rather than an extra
+    `permission-service` round trip. Guards `create_transfer` specifically -
+    the one endpoint here reached via the gateway that starts a whole
+    cascading write chain (a real `permission-service` scope lock, then,
+    across the transfer's own BPMN-driven steps, writes into the peer
+    installation and - on eventual source deletion - `folder-service`).
+    The step endpoints themselves (already gated to `workflow-service` only,
+    P54-S2/ADR 0173) don't need their own separate check - blocking only the
+    entry point prevents a NEW transfer from starting during maintenance,
+    while letting an already-approved, already-running transfer's own steps
+    complete matches the same "don't hard-kill in-flight work" precedent
+    `document-service`/`folder-service`'s own Category A gates already
+    established."""
+    if x_dms_maintenance_active.lower() == "true":
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Systemweite Notfallsperre aktiv - Wartungsmodus",
+        )
+
+
 def _make_peer_client(installation) -> PeerClient:
     return PeerClient(
         base_url=installation.base_url,
@@ -372,8 +396,11 @@ async def delete_paired_installation(
     "/transfers", response_model=TransferStartResult, dependencies=[Depends(license_gate("write"))]
 )
 async def create_transfer(
-    payload: TransferCreate, session: AsyncSession = Depends(get_session)
+    payload: TransferCreate,
+    session: AsyncSession = Depends(get_session),
+    x_dms_maintenance_active: str = Header(default="false"),
 ) -> TransferStartResult:
+    await _reject_during_maintenance(x_dms_maintenance_active)
     if await app.state.approval_client.requires_approval(settings.approval_action_type):
         request = await app.state.approval_client.create_request(
             action_type=settings.approval_action_type,

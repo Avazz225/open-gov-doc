@@ -106,8 +106,22 @@ service's own handler achieves the same protection (the cascade never starts) wi
 `storage-service`/`virus-scan-service`/`rendering-service` themselves to check an inbound header from
 internal callers - fewer moving parts, same residual race window this ADR already accepted (a
 maintenance-mode toggle mid-cascade, narrower than Category B's permanent exposure).
-**Still open**: `case-service`→`workflow-service`, `migration-service`→`permission-service`/peer
+~~**Still open**: `case-service`→`workflow-service`, `migration-service`→`permission-service`/peer
 installations/`folder-service`, and `signature-service`→`document-service` — named in this ADR's
 "Findings" but not part of the Phase 51 Session 4 plan item, which scoped only the two services above.
 Same pattern (`_reject_during_maintenance` reading `X-DMS-Maintenance-Active`) applies directly if a
-future session picks these up.
+future session picks these up.~~
+
+**Update, Phase 56 Session 1**: closed all three remaining call sites, exactly the pattern named above —
+`case-service`'s `create_case` (guards the `workflow_client.start_instance` cascade), `migration-service`'s
+`create_transfer` (guards the scope-lock/peer-installation/eventual-`folder-service`-deletion cascade
+across the transfer's own subsequent steps — the step endpoints themselves need no separate check, since
+they're already gated to `workflow-service` only, P54-S2/ADR 0173, and letting an already-approved,
+already-running transfer's own steps complete during a maintenance toggle matches the same narrow,
+accepted residual race window this ADR's own Consequences already named), and `signature-service`'s
+`create_signature` (guards the `document_client.checkin_signed_version` cascade — found and corrected a
+stale claim in `docs/services/signature-service.md` while closing this: the gateway's own default-deny
+already blocks an external caller reaching this endpoint during maintenance, but that check only covers
+gateway-*proxied* traffic, not a direct, gateway-bypassing internal network call — ADR 0005's own
+"services implicitly trust their internal network position" is exactly the gap a local check closes).
+**Category A is now fully closed** for every call site this ADR's own "Findings" section named.

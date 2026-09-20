@@ -199,6 +199,22 @@ async def get_session() -> AsyncIterator[AsyncSession]:
         yield session
 
 
+async def _reject_during_maintenance(x_dms_maintenance_active: str) -> None:
+    """Maintenance mode (4.8), Category A request-triggered cascading writes
+    (Phase 56 Session 1, ADR 0152) - same helper shape and message as
+    `workflow-service`'s own `_reject_during_maintenance` (P6-S6), reading
+    the header the gateway already forwards rather than an extra
+    `permission-service` round trip. Guards `create_signature` specifically -
+    the one endpoint here that cascades into another service's write path
+    (`document_client.checkin_signed_version`, a real new document version
+    in `document-service`)."""
+    if x_dms_maintenance_active.lower() == "true":
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Systemweite Notfallsperre aktiv - Wartungsmodus",
+        )
+
+
 def _default_provider_levels() -> dict[str, list[str]]:
     return {config.id: list(config.levels) for config in settings.signature_providers}
 
@@ -247,8 +263,11 @@ def get_metrics() -> Response:
 
 @app.post("/signatures", response_model=SignatureOut, status_code=status.HTTP_201_CREATED)
 async def create_signature(
-    payload: SignatureCreate, session: AsyncSession = Depends(get_session)
+    payload: SignatureCreate,
+    session: AsyncSession = Depends(get_session),
+    x_dms_maintenance_active: str = Header(default="false"),
 ) -> SignatureOut:
+    await _reject_during_maintenance(x_dms_maintenance_active)
     try:
         document = await app.state.document_client.get_document(payload.document_id)
     except DocumentNotFoundError as exc:

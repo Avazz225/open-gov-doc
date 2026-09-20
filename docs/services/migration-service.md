@@ -19,7 +19,7 @@ this service can be both the source and the target of a transfer.
 |---|---|---|
 | `POST` | `/paired-installations` | Pair a target/source installation — leave `api_key` empty to generate a new one (returned once), or enter the key already issued by the counterpart |
 | `GET`/`DELETE` | `/paired-installations[/{id}]` | List (never with `api_key`) / remove |
-| `POST` | `/transfers` | Start a transfer — four-eyes-capable (4.3, `action_type=migration.transfer.start`), `404` for an unknown target, `dry_run`/`retention_days` optional |
+| `POST` | `/transfers` | Start a transfer — four-eyes-capable (4.3, `action_type=migration.transfer.start`), `404` for an unknown target, `dry_run`/`retention_days` optional. **Since P56-S1** ([ADR 0152](../adr/0152-maintenance-mode-service-to-service-enforcement-scoping.md) "Category A"): `503` while system-wide maintenance mode is active, checked first |
 | `GET` | `/transfers[/{id}]` | Status/list, optionally filtered by `status` |
 | `POST` | `/transfers/{id}/steps/{lock\|copy\|verify\|release\|delete-source\|dry-run-check}` | Internal — target of the `connector_call` service tasks in `resources/*.bpmn`. **Since P54-S2** ([ADR 0173](../adr/0173-migration-service-step-endpoints-workflow-service-caller-gate.md)), actually enforced, not just documented as "not intended for external callers": requires `X-DMS-Principal: workflow-service`, `403` otherwise |
 | `POST` | `/inbound/transfers[/...]` | Target side — called by a paired source, `Authorization: Bearer <api_key>` |
@@ -143,7 +143,14 @@ covers the complete flow including deletion after a `retention_days=0` period ex
 this drives a real BPMN instance through a real, separately running `workflow-service` container,
 it also doubles as the live regression proof that `workflow-service`'s `connector_call` dispatcher
 correctly sends the new `X-DMS-Principal: workflow-service` header (P54-S2, see below): the whole
-lifecycle would 403 at the very first step otherwise. **10 tests since P54-S2** (+2:
+lifecycle would 403 at the very first step otherwise. **11 tests since P56-S1** (+1:
+`test_create_transfer_rejected_during_maintenance_mode` — `X-DMS-Maintenance-Active: true` → `503`,
+fires before any validation, a nonexistent source folder still gets `503` not `404`, see
+[ADR 0152](../adr/0152-maintenance-mode-service-to-service-enforcement-scoping.md) "Category A". The
+step endpoints themselves need no separate check — blocking only `POST /transfers` prevents a NEW
+transfer from starting during maintenance, while an already-running transfer's own already-approved
+steps are deliberately allowed to complete, same precedent `document-service`/`folder-service`'s own
+Category A gates already established). Before that, 10 tests since P54-S2 (+2:
 `test_step_endpoint_requires_workflow_service_caller`/`test_step_endpoint_with_wrong_principal_returns_403`,
 the new gate's regression proof — both call a step endpoint directly with a made-up `transfer_id`,
 since the gate runs before the transfer lookup).

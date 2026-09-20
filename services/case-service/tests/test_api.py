@@ -209,6 +209,22 @@ def test_create_case_with_unknown_process_definition_returns_400(client, case_he
     assert response.status_code == 400
 
 
+def test_create_case_rejected_during_maintenance_mode(client):
+    """Maintenance mode (4.8), Category A (Phase 56 Session 1, ADR 0152) -
+    reads the gateway-forwarded `X-DMS-Maintenance-Active` header (no
+    gateway in this test run, simulated directly), same pattern as
+    `document-service`'s `test_create_document_rejected_during_maintenance_
+    mode`. Fires before the `workflow_client.start_instance` cascade this
+    check exists to guard - also before authentication, since it's checked
+    first."""
+    response = client.post(
+        "/cases",
+        json={"name": "X", "process_definition_id": 999999, "created_by": "alice"},
+        headers={"X-DMS-Maintenance-Active": "true"},
+    )
+    assert response.status_code == 503
+
+
 def test_create_case_requires_authentication(client):
     response = client.post(
         "/cases",

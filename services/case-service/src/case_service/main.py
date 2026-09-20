@@ -187,6 +187,24 @@ async def get_session() -> AsyncIterator[AsyncSession]:
         yield session
 
 
+async def _reject_during_maintenance(x_dms_maintenance_active: str) -> None:
+    """Maintenance mode (4.8), Category A request-triggered cascading writes
+    (Phase 56 Session 1, ADR 0152) - same helper shape and message as
+    `workflow-service`'s own `_reject_during_maintenance` (P6-S6), reading
+    the header the gateway already forwards rather than an extra
+    `permission-service` round trip. Guards `create_case` specifically -
+    the one endpoint here that cascades into another service's write path
+    (`workflow_client.start_instance`, a real `workflow-service` process
+    instance) - ADR 0152's own Consequences named this exact call site as
+    one of the remaining, unaddressed Category A cascades after P51-S4
+    only covered `document-service`/`folder-service`."""
+    if x_dms_maintenance_active.lower() == "true":
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Systemweite Notfallsperre aktiv - Wartungsmodus",
+        )
+
+
 async def publish_event(
     event_type: str, subject: str, payload: dict, actor: str | None = None
 ) -> None:
@@ -328,8 +346,10 @@ def get_metrics() -> Response:
 async def create_case(
     payload: CaseCreate,
     x_dms_principal: str = Header(default=""),
+    x_dms_maintenance_active: str = Header(default="false"),
     session: AsyncSession = Depends(get_session),
 ) -> CaseOut:
+    await _reject_during_maintenance(x_dms_maintenance_active)
     await _require_case_permission(x_dms_principal, access_type="write")
     if payload.object_type_id is not None:
         errors = await app.state.object_type_client.validate(

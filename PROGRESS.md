@@ -2,10 +2,79 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P55-S2 (`auth-service`'s `DELETE /users/{id}` cross-service cleanup, previously only
-deleting the Keycloak account — second and last session of Phase 55, "Correctness: Cross-Service Cleanup
-on Delete Paths". **Closes Phase 55.**). No new ADR — mechanical extension of an already-established
-cleanup-on-delete pattern, per the plan's own DoD.
+**Last completed:** P56-S1 (maintenance-mode "Category A" coverage extended to the last three remaining
+call sites — first session of Phase 56, "RBAC / Maintenance-Mode Completion"). No new ADR — mechanical
+extension of an already-proven, already-designed pattern (ADR 0152 amended in place instead), per the
+plan's own DoD.
+
+**The gap.** ADR 0152's own "Findings" named six Category A (request-triggered cascading write) call
+sites; P51-S4 closed only two (`document-service`/`folder-service`). The remaining three, all still
+completely ungated: `case-service`'s `create_case` (cascades into `workflow-service` via
+`workflow_client.start_instance`), `migration-service`'s `create_transfer` (cascades into
+`permission-service`'s scope lock, then, across the transfer's own BPMN-driven steps, the peer
+installation and eventually `folder-service`), and `signature-service`'s `create_signature` (cascades
+into `document-service` via `document_client.checkin_signed_version`).
+
+**The fix.** Exactly ADR 0152's own already-designed pattern, copied verbatim into all three: a local
+`_reject_during_maintenance(x_dms_maintenance_active)` helper reading the gateway-forwarded
+`X-DMS-Maintenance-Active` header (no extra `permission-service` round trip), called first thing in each
+entry-point handler. `migration-service`'s step endpoints (already gated to `workflow-service` only,
+P54-S2/ADR 0173) deliberately got no separate check — blocking only the entry point stops a NEW transfer
+from starting during maintenance, while letting an already-approved, already-running transfer's own
+steps complete matches the same "don't hard-kill in-flight work" precedent the original P51-S4 gates
+already established.
+
+**A stale doc claim found and corrected while closing `signature-service`'s gap**:
+`docs/services/signature-service.md` claimed "`POST /signatures` is not on the gateway allow-list... No
+special handling needed" — true for gateway-*proxied* traffic (the gateway's own default-deny already
+blocks it there), but the claim missed that this only covers requests reaching the service *through* the
+gateway — a direct, gateway-bypassing internal network call (every service on the same Docker network
+implicitly trusts its own network position, ADR 0005) was never covered by that mechanism at all, which
+is exactly the gap ADR 0152's Category A protection targets. Corrected in place, not just the new check
+documented.
+
+New/updated tests, one per service, same shape (`X-DMS-Maintenance-Active: true` → `503`, fires before
+any other validation): `test_create_case_rejected_during_maintenance_mode` (case-service, 73/73, was
+72, +1), `test_create_transfer_rejected_during_maintenance_mode` (migration-service, 11/11, was 10, +1),
+`test_create_signature_rejected_during_maintenance_mode` (signature-service, 26/26, was 25, +1). `ruff
+check`/`ruff format --check` clean for all three.
+
+**A genuine transient test-infrastructure hang hit and diagnosed along the way, NOT a real bug**: running
+all three services' suites together via `scripts/run-tests.sh` once produced an apparent hang in
+`signature-service`'s own test run (stuck mid-suite for several minutes, `ep_poll`-blocked per
+`/proc/<pid>/wchan`). Investigated properly rather than assumed: killed the hung run, confirmed via
+`PYTHONFAULTHANDLER=1`/`timeout --signal=ABRT` that `signature-service`'s full suite (26 tests, incl. the
+new one) runs cleanly and quickly (10-14s) in complete isolation, twice — then re-ran the original
+combined three-service invocation once more, which also completed cleanly and quickly the second time.
+Concluded this was a one-off transient resource-contention fluke (likely from the immediately-preceding
+`migration-service` Docker rebuild/redeploy competing for resources) rather than a reproducible bug — no
+code change made for it, unlike P55-S2's own similarly-shaped but genuinely reproducible NATS
+durable-consumer finding.
+
+Docker images rebuilt and redeployed for `case-service`, `migration-service`, and `signature-service`.
+**Live-verified against the real running stack, all three containers**: `curl` confirmed `X-DMS-
+Maintenance-Active: true` → `503` for `POST /cases`, `POST /transfers`, and `POST /signatures` each, while
+the identical request without the header reaches real downstream logic (`401`/`404`) instead.
+
+`docs/adr/0152-...md` amended in place — the "Still open" bullet struck through, Category A now marked
+fully closed for every call site the ADR's own Findings named. `docs/services/case-service.md`,
+`docs/services/migration-service.md`, `docs/services/signature-service.md`: endpoint tables and Tests
+updated; the latter's stale gateway-allow-list claim corrected.
+
+**Next session:** P56-S2 — `document-service`'s `list_documents_by_kennzeichen` (used by
+`mail-connector`'s cross-folder candidate matching) has no row-level RBAC filtering at all — ADR 0149
+itself names this as "a separate, larger effort, out of scope" when it retrofitted row-level filtering
+onto every other cross-folder read path in that same session. Session designs how to filter a
+Kennzeichen lookup efficiently by permission without an unbounded per-candidate fan-out (reuse the
+established `filtering.py` batching pattern if it fits). Real feature, needs a design decision — new ADR
+expected. Second and last session of Phase 56.
+
+---
+
+Immediately before P56-S1: **P55-S2** (`auth-service`'s `DELETE /users/{id}` cross-service cleanup,
+previously only deleting the Keycloak account — second and last session of Phase 55, "Correctness:
+Cross-Service Cleanup on Delete Paths". **Closes Phase 55.**). No new ADR — mechanical extension of an
+already-established cleanup-on-delete pattern, per the plan's own DoD.
 
 **The gap.** Also found by this round's live-code security sweep. `DELETE /users/{id}` only called
 Keycloak's `delete_user` — never notified or called `permission-service` (to revoke the deleted

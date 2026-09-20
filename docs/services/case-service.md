@@ -11,7 +11,7 @@
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/cases` | Create (`name`, optional `object_type_id`/`attributes`, `process_definition_id`, `created_by`, optional `initial_data`) — validates `object_type_id` (if set) against the Object-Type Service (always as a root object, no folder parentage), then starts a process instance in workflow-service with `business_key = case_id`. `400` for an unknown `process_definition_id`. Since **P15-S3**, also automatically assigns a `vorgangsnummer` (case reference number, 2.3/2.5), see below. Since **Post-Roadmap Phase 31 Session 2**: optional `draft` field skips that assignment, see "Draft / Pre-Registration Lifecycle" below |
+| `POST` | `/cases` | Create (`name`, optional `object_type_id`/`attributes`, `process_definition_id`, `created_by`, optional `initial_data`) — validates `object_type_id` (if set) against the Object-Type Service (always as a root object, no folder parentage), then starts a process instance in workflow-service with `business_key = case_id`. `400` for an unknown `process_definition_id`. Since **P15-S3**, also automatically assigns a `vorgangsnummer` (case reference number, 2.3/2.5), see below. Since **Post-Roadmap Phase 31 Session 2**: optional `draft` field skips that assignment, see "Draft / Pre-Registration Lifecycle" below. **Since P56-S1** ([ADR 0152](../adr/0152-maintenance-mode-service-to-service-enforcement-scoping.md) "Category A"): `503` while system-wide maintenance mode is active, checked before authentication |
 | `POST` | `/cases/{id}/register` | Draft → registered transition (Post-Roadmap Phase 31 Session 2, ADR 0113) — assigns the Vorgangsnummer deferred by `draft=true` above. `409` if already registered, see below |
 | `GET` | `/cases` | List, filter by `status`/`object_type_id` |
 | `GET` | `/cases/by-vorgangsnummer?value=...` | Case reference number lookup (2.5/3.3, since P15-S3) — registered before `/cases/{id}`. Returns a list (consistent with document-service's file reference number lookup), even though `vorgangsnummer` is globally unique by construction. For the new `mail-connector` |
@@ -119,7 +119,11 @@ None yet — follows in Phase 11.
 
 ## Tests
 
-`uv run pytest services/case-service/tests` (**72 tests since Phase 45 Session 4**, +4: two new
+`uv run pytest services/case-service/tests` (**73 tests since P56-S1**, +1:
+`test_create_case_rejected_during_maintenance_mode` — `X-DMS-Maintenance-Active: true` → `503`, fires
+before authentication and before the `workflow_client.start_instance` cascade this check exists to
+guard, see [ADR 0152](../adr/0152-maintenance-mode-service-to-service-enforcement-scoping.md) "Category
+A". Before that, 72 tests since Phase 45 Session 4, +4: two new
 `test_api.py` cases (`object_type_with_close_requirement` fixture, a real object type with a
 `status_transitions` rule against the real running object-type-service) proving a fully-automated
 process leaves the case `"open"` when the required attribute is missing and closes it immediately

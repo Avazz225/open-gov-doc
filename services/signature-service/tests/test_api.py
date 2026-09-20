@@ -21,6 +21,21 @@ def test_healthz(client):
     assert response.json()["service"] == "signature-service"
 
 
+def test_create_signature_rejected_during_maintenance_mode(client):
+    """Maintenance mode (4.8), Category A (Phase 56 Session 1, ADR 0152) -
+    reads the gateway-forwarded `X-DMS-Maintenance-Active` header (no
+    gateway in this test run, simulated directly), same pattern as
+    `document-service`'s `test_create_document_rejected_during_maintenance_
+    mode`. Fires before the `document_client.get_document` lookup - an
+    unknown `document_id` still gets `503`, not `404`."""
+    response = client.post(
+        "/signatures",
+        json={"document_id": "does-not-exist", "level": "ses", "signer_principal_id": "alice"},
+        headers={"X-DMS-Maintenance-Active": "true"},
+    )
+    assert response.status_code == 503
+
+
 def test_sign_ses_with_real_signer_creates_new_document_version_and_verifies(
     client, pdf_document, real_signer
 ):

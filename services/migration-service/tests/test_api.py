@@ -163,6 +163,26 @@ def test_delete_paired_installation():
         assert client.delete(f"/paired-installations/{created['id']}").status_code == 404
 
 
+def test_create_transfer_rejected_during_maintenance_mode():
+    """Maintenance mode (4.8), Category A (Phase 56 Session 1, ADR 0152) -
+    reads the gateway-forwarded `X-DMS-Maintenance-Active` header (no
+    gateway in this test run, simulated directly), same pattern as
+    `document-service`'s `test_create_document_rejected_during_maintenance_
+    mode`. Fires before any validation - a nonexistent source folder still
+    gets `503`, not `404`."""
+    with _client() as client:
+        response = client.post(
+            "/transfers",
+            json={
+                "source_folder_id": "does-not-exist",
+                "target_installation_id": "does-not-exist",
+                "created_by": "tester",
+            },
+            headers={"X-DMS-Maintenance-Active": "true"},
+        )
+    assert response.status_code == 503
+
+
 def test_transfer_to_unknown_target_returns_404():
     folder = _create_folder(name=f"quelle-{uuid.uuid4().hex[:8]}")
     with _client() as client:
