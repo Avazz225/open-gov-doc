@@ -2,9 +2,95 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P57-S1 (Documentation Drift Cleanup — first and only session of Phase 57. **Closes
-Phase 57.**). No new ADR — doc-only, per the plan's own DoD ("no new ADR, no tests beyond a final grep
-confirming every listed claim now reads as closed").
+**Last completed:** P58-S1 (Pseudonymization Completion — first session of Phase 58, "Pseudonymization
+Completion & Small Polish Bundle"). **New ADR**
+([0177](docs/adr/0177-pseudonymization-retention-trigger-and-folder-case-mirroring.md)) — closes both
+of ADR 0156's own named residual gaps.
+
+**The gap.** ADR 0156 (P41-S2) built reversible attribute-level pseudonymization for `document-service`
+only, and left two Open Points explicit: (a) no automatic trigger to pseudonymize an attribute on
+retention expiry — only a manual, admin-invoked path existed; (b) `folder-service`/`case-service` had no
+equivalent mechanism at all.
+
+**Part A — `document-service` auto-trigger.** New `Document.retention_pseudonymize` boolean, mutually
+exclusive with `full_deletion` (`PUT .../retention` now rejects setting both, `422`). When retention
+expires, `_retention_poll_loop`'s existing "due retention action" phase checks this flag first: if set,
+a new `_pseudonymize_eligible_attributes` helper pseudonymizes every `personal_data: true` attribute
+with a live value (reusing the exact crypto/vault primitives the manual endpoint already uses,
+`pseudonymized_by="system:retention-poll"`), then `retention_until`/`retention_pseudonymize` are cleared
+so the document isn't reprocessed. Publishes `document.retention.pseudonymized` when at least one
+attribute was actually pseudonymized.
+
+**Part B — `folder-service` full mirror.** Since `folder-service` already has the identical
+`retention_until`/`full_deletion`/`_retention_poll_loop` shape (P7-S1b), it got the complete mirror: own
+`PseudonymizedAttribute` vault table, own `crypto.py`, own `DMS_ATTRIBUTE_PSEUDONYMIZATION_KEY` (a
+SEPARATE key — no shared trust relationship between services), the same three endpoints
+(pseudonymize/reveal/list), the same `retention_pseudonymize` field/poll-loop branch, and
+`hard_delete_folder` gained the same vault-cleanup fix ADR 0169 already gave `document-service` (no
+`ondelete=` on the FK — a folder with vault entries would otherwise hit a real Postgres FK violation on
+forced deletion/trash-purge).
+
+**Part C — `case-service` manual-only mirror.** Same vault table/crypto module/three endpoints, reusing
+the identical two global RBAC capabilities. Deliberately NO auto-trigger and NO `retention_pseudonymize`
+field: `case-service` has no `retention_until`/`full_deletion` mechanism at all (confirmed via grep —
+only records disposal via `archive_after`, a conceptually different, already-built mechanism), so there
+is no poll-loop phase to hook a trigger into. Also needs no hard-delete FK cleanup — a `Case` row is
+never physically removed in this codebase.
+
+**A real bug found and fixed mid-session**: `_pseudonymize_eligible_attributes` initially reached into
+`app.state.object_type_client` directly (mirroring the manual endpoint's own style) — but a plain
+`async def` test function does not share `TestClient`'s internal event loop, so calling it from a
+separately-scoped test raised a genuine `RuntimeError: ... bound to a different event loop`. Fixed by
+making `object_type_client` an explicit parameter instead (matching the already-established
+`retention_actions.py` convention of passing dependencies explicitly rather than reaching into
+`app.state`), mirrored identically in `folder-service`'s own copy.
+
+**A second real bug found and fixed during live verification**: `case-service`'s docker-compose block
+was missing `DMS_ATTRIBUTE_PSEUDONYMIZATION_KEY` entirely (added it for `folder-service` but forgot
+`case-service`'s block) — the real deployed container would have failed every pseudonymize/reveal call
+with `503` in production. Found via a real `POST .../pseudonymize` call against the live container
+returning exactly that error; fixed by adding the missing env var block.
+
+**A third issue found and fixed during doc-writing/review**: the new `GET .../attributes/pseudonymized`
+list endpoints on `folder-service`/`case-service` were initially built with NO permission check beyond
+the resource's own existence (mirroring what the docstring claimed `document-service`'s own endpoint
+does) — but `document-service`'s real code actually DOES call `_require_document_permission(...,
+access_type="read")` after the existence check; the docstring I wrote for the mirrors was simply wrong
+about the precedent. Fixed by adding the equivalent `_require_folder_permission`/`_require_case_permission`
+read-gate to both, matching the RBAC pattern every other read endpoint in each service already follows
+(`folder.read`/`case.read`) — caught and fixed before this session's commit, not left as a live gap.
+
+New/updated tests: `document-service` +9 (`test_attribute_pseudonymization.py` — mutual-exclusivity
+`422`, field round-trip, 3 direct unit tests of the poll-loop helper), 398 total. `folder-service` new
+`test_attribute_pseudonymization.py`, +21, 164 total. `case-service` new
+`test_attribute_pseudonymization.py`, +14 (including a regression test for the RBAC fix above), 87
+total. All ruff-clean (pre-existing, unrelated ruff failures elsewhere in the repo — `libreoffice-addin`,
+`loadtest/notebook`, `federation-hub-service` — confirmed out of scope for this session).
+
+Docker images for all three rebuilt/redeployed twice (once before the RBAC fix, once after). **Live-verified
+against the real running stack**: created a real document/folder/case each with a `personal_data`
+attribute, pseudonymized manually, confirmed the placeholder, revealed, confirmed the original value,
+for all three services; separately live-verified BOTH auto-triggers end-to-end (`document-service` and
+`folder-service`) by setting `retention_pseudonymize=true` with a past `retention_until`, restarting the
+container to force an immediate poll tick, and confirming the attribute was pseudonymized and
+`retention_until`/`retention_pseudonymize` were cleared automatically. All test data (documents, folders,
+object types, role assignments) cleaned up afterward.
+
+`docs/adr/0156-attribute-pseudonymization-reversible-vault.md`: both named Open Points struck through,
+pointing to ADR 0177. `docs/services/document-service.md`/`folder-service.md`/`case-service.md`: new
+endpoints, RBAC, `retention_pseudonymize` field, new "Attribute-Level Pseudonymization" sections on
+folder-service/case-service, test counts updated.
+
+**Next session**: **P58-S2** (small polish bundle — `admin-ui`'s `/config-compare/` expandable per-field
+diff view + ignore-regex input, `user-ui`'s `RetentionPanel`/`FolderRetentionModal` client-side role
+restriction for legal hold, `registry-service`'s periodic cleanup of permanently-unreachable instance
+rows).
+
+---
+
+Immediately before P58-S1: **P57-S1** (Documentation Drift Cleanup — first and only session of Phase
+57. **Closed Phase 57.**). No new ADR — doc-only, per the plan's own DoD ("no new ADR, no tests beyond a
+final grep confirming every listed claim now reads as closed").
 
 **The task.** The "Planning P54-P58" gap-analysis round's docs-sweep agent had flagged 18 stale "still
 open"/"not yet built" claims across `docs/services/*.md` — cases where a LATER session actually closed

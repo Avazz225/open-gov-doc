@@ -881,10 +881,12 @@ async def set_retention(
     full_deletion: bool,
     reason: str | None,
     notify_email: str | None = None,
+    retention_pseudonymize: bool = False,
 ) -> Document:
     document = await get_document(session, document_id)
     document.retention_until = retention_until
     document.full_deletion = full_deletion
+    document.retention_pseudonymize = retention_pseudonymize
     document.pending_deletion_reason = reason
     document.reminder_notify_email = notify_email
     # Newly scheduled (or date changed) - a reminder already sent for the
@@ -893,6 +895,19 @@ async def set_retention(
     # automatically.
     document.deletion_reminder_sent_at = None
     document.force_delete_approval_requested_at = None
+    document.updated_at = datetime.now(UTC)
+    await session.flush()
+    return document
+
+
+async def mark_retention_pseudonymized(session: AsyncSession, document_id: str) -> Document:
+    """Clears `retention_until`/`retention_pseudonymize` once the automatic
+    trigger has run (5.2, Phase 58 Session 1) - the document itself is not
+    removed (unlike the `full_deletion` branch), so without this the same
+    due document would be reprocessed on every subsequent poll tick."""
+    document = await get_document(session, document_id)
+    document.retention_until = None
+    document.retention_pseudonymize = False
     document.updated_at = datetime.now(UTC)
     await session.flush()
     return document

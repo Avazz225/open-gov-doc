@@ -3,7 +3,7 @@
 **Responsibility:** Cases (Concept 2.3) — bundle references (not their own copies) to documents belonging to a matter. Own lifecycle via a process instance in [workflow-service](../adr/0018-spiffworkflow-lgpl-license.md) (7.1, P6-S1): while the case is open, the current version of each referenced document is resolved dynamically; upon reaching the BPMN end state, the reference structure is fixed as a **closure snapshot**. UI: `user-ui`'s "Umlaufmappen" pane (Post-Roadmap Phase 34 Session 3, ADR 0141). Since Post-Roadmap Phase 19 Session 5 (ADR 0070), gated by `case.read`/`case.write` RBAC — since Post-Roadmap Phase 35 Session 2 ([ADR 0144](../adr/0144-case-per-case-resource-type.md)), against a REAL per-case `permission-service` resource, not just the installation-wide root (see "Open Points").
 
 **Concept Reference:** 2.3, 5.6 (records disposal, since P7-S3b)
-**Own Postgres Schema:** `case` (tables `cases`, `case_document_reference`, `case_archival_config`) — `"case"` is a reserved SQL keyword (`CASE WHEN`); SQLAlchemy quotes it automatically in generated DDL statements, but raw SQL strings (`main.py`, `tests/conftest.py`) must quote it themselves as `"case"`. The table for cases is therefore deliberately named `cases` (plural), not `case`, to avoid needing this quoting requirement twice.
+**Own Postgres Schema:** `case` (tables `cases`, `case_document_reference`, `case_archival_config`, `pseudonymized_attribute` since Phase 58 Session 1) — `"case"` is a reserved SQL keyword (`CASE WHEN`); SQLAlchemy quotes it automatically in generated DDL statements, but raw SQL strings (`main.py`, `tests/conftest.py`) must quote it themselves as `"case"`. The table for cases is therefore deliberately named `cases` (plural), not `case`, to avoid needing this quoting requirement twice.
 
 ## API
 
@@ -25,6 +25,9 @@
 | `PUT` | `/cases/{id}/archived` | Internal callback from `archival-service`, once the XDOMEA package is verified (since P7-S3b) — publishes `case.archived` |
 | `GET`/`PUT` | `/case-archival-config` | Installation-wide disposal configuration (`default_archive_after_days_closed`, `archive_encryption_enabled`, since P7-S3b) |
 | `GET`/`PUT` | `/case-number-config` | Case reference number format string (2.5, since P15-S3, default `{YYYY}-{Laufende_Nummer}`) — `400` on an unknown placeholder or missing `{Laufende_Nummer}` |
+| `POST` | `/cases/{id}/attributes/{name}/pseudonymize` | Pseudonymize one `personal_data: true` attribute (5.2, Phase 58 Session 1) — gated by `admin.attribute_pseudonymization`, see "Attribute-Level Pseudonymization" below |
+| `POST` | `/cases/{id}/attributes/{name}/reveal` | Decrypt and transiently return the original value (5.2, Phase 58 Session 1) — gated by `admin.attribute_reveal` |
+| `GET` | `/cases/{id}/attributes/pseudonymized` | Which attributes are currently pseudonymized (5.2, Phase 58 Session 1) — gated by `case.read`, no plaintext exposed |
 | `GET` | `/healthz` | Health check |
 
 ## Data Model
@@ -33,6 +36,7 @@
 - `case_document_reference`: `id`, `case_id` (FK), `document_id` (opaque reference to document-service), `added_by`/`added_at`, `removed_by`/`removed_at` (both nullable — soft deletion instead of hard delete), `snapshot_version_number` (nullable, only set after closure).
 - `case_archival_config` (5.6, since P7-S3b): single row (`id=1`, same singleton pattern as document-service's `RetentionConfig`) — `default_archive_after_days_closed` (integer, nullable), `archive_encryption_enabled` (boolean), `updated_at`.
 - `case_number_config`/`case_sequence` (2.5, since P15-S3): see "Case Reference Number" below.
+- `pseudonymized_attribute` (5.2, since Phase 58 Session 1): see "Attribute-Level Pseudonymization" below.
 
 The `business_key` of the started process instance is deliberately **identical to the case ID** (no separate field) — the sole basis on which `consumer.py` matches a later instance completion to the right case (see "Closure Snapshot" below).
 
@@ -65,6 +69,14 @@ Only **closed** cases are eligible for records disposal — the actual transfer 
 - **Encryption**: also installation-wide (`CaseArchivalConfig.archive_encryption_enabled`), for the same reason there is no counterpart to `ObjectType.archive_encryption_enabled`.
 - **No dehydration for cases themselves** — a case has no own live content (only references); only the referenced documents go through their own, independent P7-S3 archiving/dehydration cycle.
 - **`GET /cases/due-for-archival`** filters on `status="closed" AND archive_after <= now AND archived_at IS NULL` — registered before `/cases/{id}` (route ordering, see above).
+
+## Attribute-Level Pseudonymization (5.2, Phase 58 Session 1, [ADR 0177](../adr/0177-pseudonymization-retention-trigger-and-folder-case-mirroring.md))
+
+Manual-only mirror of `document-service`'s own mechanism ([ADR 0156](../adr/0156-attribute-pseudonymization-reversible-vault.md)) — same eligibility rule (`personal_data: true` in the object-type schema, non-empty live value), same reversible AES-256-GCM vault (`crypto.py`, its own copy, not shared with `document-service`'s/`folder-service`'s), same RBAC (`admin.attribute_pseudonymization`/`admin.attribute_reveal`, the identical GLOBAL capabilities those two services already use). `GET .../pseudonymized` is gated by `case.read`, same existence-before-permission ordering every other per-case endpoint uses (ADR 0144).
+
+- **Key**: `DMS_ATTRIBUTE_PSEUDONYMIZATION_KEY` — a SEPARATE key from `document-service`'s/`folder-service`'s own.
+- **No automatic retention-expiry trigger** — deliberately not built. Unlike `document-service`/`folder-service`, `case-service` has no `retention_until`/`full_deletion` mechanism or `_retention_poll_loop` at all (cases are only ever open → closed → optionally archived via records disposal above, a conceptually different mechanism), so there is no poll-loop phase to hook an automatic trigger into.
+- **No vault-entry cleanup on hard delete needed** — unlike documents/folders, a `Case` row is never physically removed in this codebase (only closed/archived), so the FK-violation risk [ADR 0169](../adr/0169-pseudonymization-vault-retention-tied-to-document-lifecycle.md) fixed for `document-service`/`folder-service` does not exist here.
 
 ## Case Reference Number (2.3/2.5, since P15-S3)
 
@@ -119,7 +131,11 @@ None yet — follows in Phase 11.
 
 ## Tests
 
-`uv run pytest services/case-service/tests` (**73 tests since P56-S1**, +1:
+`uv run pytest services/case-service/tests` (**87 tests since Phase 58 Session 1**, +14: new
+`test_attribute_pseudonymization.py` — RBAC/eligibility/round-trip/409 for the manual pseudonymize/
+reveal/list endpoints, mirroring `document-service`'s/`folder-service`'s own test files).
+
+Older history: 73 tests since P56-S1, +1:
 `test_create_case_rejected_during_maintenance_mode` — `X-DMS-Maintenance-Active: true` → `503`, fires
 before authentication and before the `workflow_client.start_instance` cascade this check exists to
 guard, see [ADR 0152](../adr/0152-maintenance-mode-service-to-service-enforcement-scoping.md) "Category

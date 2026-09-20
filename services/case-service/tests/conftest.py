@@ -14,6 +14,13 @@ DSN = os.environ.get(
 # Test-Fixtures oben - sonst testet TestClient(app) unbemerkt gegen die Live-DB,
 # siehe PROGRESS.md "Tooling & Testing".
 os.environ["DMS_POSTGRES_DSN"] = DSN
+# Attribute-level pseudonymization vault (5.2, Phase 58 Session 1) - a
+# dev-only placeholder key distinct from document-service's/folder-
+# service's own (see `settings.py`'s docstring for why a separate key),
+# `setdefault` so a real CI-provided key still takes precedence.
+os.environ.setdefault(
+    "DMS_ATTRIBUTE_PSEUDONYMIZATION_KEY", "Y2FzZS1zZXJ2aWNlLXBzZXVkb255bS1rZXktMzIxMTI="
+)
 NATS_URL = os.environ.get("TEST_NATS_URL", "nats://localhost:4222")
 os.environ["DMS_NATS_URL"] = NATS_URL
 
@@ -134,6 +141,66 @@ async def _grant_config_admin_permission():
             json={
                 "principal_type": "user",
                 "principal_id": CONFIG_ADMIN_PRINCIPAL_ID,
+                "role_id": role_id,
+                "resource_id": "root",
+            },
+        )
+        response.raise_for_status()
+
+
+PSEUDONYMIZATION_ADMIN_PRINCIPAL_ID = "case-service-test-pseudonymization-admin"
+
+
+@pytest.fixture(scope="session", autouse=True)
+async def _grant_pseudonymization_permission():
+    """Phase 58 Session 1 (mirrors document-service's ADR 0156): `POST
+    .../attributes/{name}/pseudonymize` requires `admin.attribute_
+    pseudonymization` - same global role, reused across services."""
+    async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL) as client:
+        roles = (await client.get("/roles")).json()
+        role_id = next(r["id"] for r in roles if r["name"] == "domain-admin-pseudonymization")
+        existing = (
+            await client.get(
+                "/role-assignments", params={"principal_id": PSEUDONYMIZATION_ADMIN_PRINCIPAL_ID}
+            )
+        ).json()
+        if any(a["role_id"] == role_id for a in existing):
+            return
+        response = await client.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": PSEUDONYMIZATION_ADMIN_PRINCIPAL_ID,
+                "role_id": role_id,
+                "resource_id": "root",
+            },
+        )
+        response.raise_for_status()
+
+
+PII_REVEAL_ADMIN_PRINCIPAL_ID = "case-service-test-pii-reveal-admin"
+
+
+@pytest.fixture(scope="session", autouse=True)
+async def _grant_pii_reveal_permission():
+    """Phase 58 Session 1: `POST .../attributes/{name}/reveal` requires
+    `admin.attribute_reveal` - deliberately a separate capability/principal
+    from pseudonymization above, same reasoning as document-service."""
+    async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL) as client:
+        roles = (await client.get("/roles")).json()
+        role_id = next(r["id"] for r in roles if r["name"] == "domain-admin-pii-reveal")
+        existing = (
+            await client.get(
+                "/role-assignments", params={"principal_id": PII_REVEAL_ADMIN_PRINCIPAL_ID}
+            )
+        ).json()
+        if any(a["role_id"] == role_id for a in existing):
+            return
+        response = await client.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": PII_REVEAL_ADMIN_PRINCIPAL_ID,
                 "role_id": role_id,
                 "resource_id": "root",
             },

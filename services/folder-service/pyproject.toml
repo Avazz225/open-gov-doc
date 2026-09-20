@@ -13,6 +13,7 @@ dependencies = [
     "dms-registry-client",
     "dms-permission-client",
     "dms-metrics-client",
+    "cryptography>=42",
 ]
 
 [tool.uv.sources]

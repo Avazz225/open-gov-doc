@@ -1,4 +1,6 @@
 import asyncio
+import base64
+import json
 import logging
 import time
 from collections.abc import AsyncIterator
@@ -20,7 +22,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from folder_service import repository, retention_actions
+from folder_service import crypto, repository, retention_actions
 from folder_service.approval_client import ApprovalClient
 from folder_service.consumer import start_consuming
 from folder_service.document_client import DocumentClient
@@ -42,10 +44,14 @@ from folder_service.schemas import (
     LegalHoldCreate,
     LegalHoldOut,
     LegalHoldReleaseRequest,
+    PseudonymizeAttributeRequest,
+    PseudonymizedAttributeOut,
     ReconcileRestoreDeletionRequest,
     RetentionConfigIn,
     RetentionConfigOut,
     RetentionUpdate,
+    RevealAttributeRequest,
+    RevealedAttributeOut,
     TrashConfigIn,
     TrashConfigOut,
     TrashRequest,
@@ -184,6 +190,24 @@ async def _retention_poll_loop(session_factory) -> None:
 
             async with session_factory() as session:
                 for folder in await repository.list_due_for_retention_action(session):
+                    if folder.retention_pseudonymize:
+                        pseudonymized_names = await _pseudonymize_eligible_attributes(
+                            session,
+                            folder,
+                            app.state.object_type_client,
+                            triggered_by="system:retention-poll",
+                            reason="Automatische Pseudonymisierung bei Fristablauf (5.2)",
+                        )
+                        await repository.mark_retention_pseudonymized(session, folder.id)
+                        await session.commit()
+                        if pseudonymized_names:
+                            await publish_event(
+                                "folder.retention.pseudonymized",
+                                folder.id,
+                                {"attribute_names": pseudonymized_names},
+                                actor="system:retention-poll",
+                            )
+                        continue
                     if folder.full_deletion:
                         await _execute_or_defer_forced_deletion(session, folder)
                         continue
@@ -257,6 +281,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             text(
                 "ALTER TABLE folder.folder "
                 "ADD COLUMN IF NOT EXISTS full_deletion BOOLEAN DEFAULT FALSE NOT NULL"
+            )
+        )
+        # Automatic retention-expiry pseudonymization (5.2, Phase 58 Session 1).
+        await conn.execute(
+            text(
+                "ALTER TABLE folder.folder "
+                "ADD COLUMN IF NOT EXISTS retention_pseudonymize BOOLEAN DEFAULT FALSE NOT NULL"
             )
         )
         await conn.execute(
@@ -876,6 +907,14 @@ async def put_retention(
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    if payload.full_deletion and payload.retention_pseudonymize:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "full_deletion und retention_pseudonymize schließen sich gegenseitig aus - "
+                "nur eine Aktion kann bei Fristablauf ausgelöst werden"
+            ),
+        )
     if payload.full_deletion:
         reason_required = await _resolve_deletion_reason_required(session, folder.object_type_id)
         if reason_required and not payload.reason:
@@ -891,6 +930,7 @@ async def put_retention(
         full_deletion=payload.full_deletion,
         reason=payload.reason,
         notify_email=payload.notify_email,
+        retention_pseudonymize=payload.retention_pseudonymize,
     )
     await session.commit()
     # No actor known - RetentionUpdate does not yet track who changed the
@@ -903,9 +943,230 @@ async def put_retention(
             if payload.retention_until
             else None,
             "full_deletion": payload.full_deletion,
+            "retention_pseudonymize": payload.retention_pseudonymize,
         },
     )
     return updated
+
+
+def _get_pseudonymization_key() -> bytes:
+    """Mirrors `document_service.main._get_pseudonymization_key` (5.2,
+    Phase 58 Session 1) - deliberately no fallback to a randomly generated
+    key, same rationale."""
+    if not settings.attribute_pseudonymization_key:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Kein Verschlüsselungsschlüssel für Attribut-Pseudonymisierung "
+                "konfiguriert (DMS_ATTRIBUTE_PSEUDONYMIZATION_KEY)"
+            ),
+        )
+    return base64.b64decode(settings.attribute_pseudonymization_key)
+
+
+async def _require_pseudonymization_permission(x_dms_principal: str) -> None:
+    """Reuses the same global domain-admin capability document-service's
+    identically-named endpoint already established (`admin.attribute_
+    pseudonymization`) - no `permission-service` change needed, same
+    reuse-across-services precedent as `admin.retention`/`admin.legal_hold`
+    above."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    if not await app.state.permission_client.has_permission(
+        x_dms_principal, "admin.attribute_pseudonymization"
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Fehlende Domain-Admin-Rolle 'Attribut-Pseudonymisierung'",
+        )
+
+
+async def _require_reveal_permission(x_dms_principal: str) -> None:
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    if not await app.state.permission_client.has_permission(
+        x_dms_principal, "admin.attribute_reveal"
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Fehlende Domain-Admin-Rolle 'Pseudonymisierte Attribute aufdecken'",
+        )
+
+
+@app.post(
+    "/folders/{folder_id}/attributes/{attribute_name}/pseudonymize",
+    response_model=PseudonymizedAttributeOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def pseudonymize_folder_attribute(
+    folder_id: str,
+    attribute_name: str,
+    payload: PseudonymizeAttributeRequest,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> PseudonymizedAttributeOut:
+    """Mirrors `document_service.main.pseudonymize_document_attribute`
+    exactly (5.2, Phase 58 Session 1, ADR 0156's own named Open Point)."""
+    await _require_pseudonymization_permission(x_dms_principal)
+    try:
+        folder = await repository.get_folder(session, folder_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    if folder.object_type_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Ordner hat keinen Objekttyp - kein Attributschema bekannt",
+        )
+    object_type = await app.state.object_type_client.get(folder.object_type_id)
+    if object_type is None:
+        raise HTTPException(status_code=400, detail="Objekttyp des Ordners nicht gefunden")
+    attribute_definition = next(
+        (a for a in object_type["attributes"] if a.get("name") == attribute_name), None
+    )
+    if attribute_definition is None or not attribute_definition.get("personal_data"):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Attribut {attribute_name!r} ist im Objekttyp nicht als "
+                "personenbezogen markiert (personal_data)"
+            ),
+        )
+
+    value = folder.attributes.get(attribute_name)
+    if value is None or value == "":
+        raise HTTPException(status_code=400, detail=f"Attribut {attribute_name!r} hat keinen Wert")
+
+    key = _get_pseudonymization_key()
+    encrypted_value = crypto.encrypt(json.dumps(value).encode("utf-8"), key)
+
+    try:
+        vault_entry = await repository.pseudonymize_attribute(
+            session,
+            folder_id,
+            attribute_name,
+            encrypted_value=encrypted_value,
+            pseudonymized_by=payload.pseudonymized_by,
+            reason=payload.reason,
+        )
+    except repository.AlreadyPseudonymizedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await session.commit()
+    await publish_event(
+        "folder.attribute.pseudonymized",
+        subject=folder_id,
+        payload={"attribute_name": attribute_name},
+        actor=payload.pseudonymized_by,
+    )
+    return vault_entry
+
+
+async def _pseudonymize_eligible_attributes(
+    session: AsyncSession,
+    folder: Folder,
+    object_type_client: ObjectTypeClient,
+    *,
+    triggered_by: str,
+    reason: str,
+) -> list[str]:
+    """Automatic retention-expiry trigger (5.2, Phase 58 Session 1) -
+    mirrors `document_service.main._pseudonymize_eligible_attributes`
+    exactly, including taking `object_type_client` as an explicit
+    parameter rather than reaching into `app.state` (see that function's
+    docstring for why)."""
+    if folder.object_type_id is None:
+        return []
+    object_type = await object_type_client.get(folder.object_type_id)
+    if object_type is None:
+        return []
+    key = _get_pseudonymization_key()
+    pseudonymized: list[str] = []
+    for attribute_definition in object_type["attributes"]:
+        if not attribute_definition.get("personal_data"):
+            continue
+        attribute_name = attribute_definition["name"]
+        value = folder.attributes.get(attribute_name)
+        if value is None or value == "" or value == repository.PSEUDONYMIZED_ATTRIBUTE_PLACEHOLDER:
+            continue
+        encrypted_value = crypto.encrypt(json.dumps(value).encode("utf-8"), key)
+        try:
+            await repository.pseudonymize_attribute(
+                session,
+                folder.id,
+                attribute_name,
+                encrypted_value=encrypted_value,
+                pseudonymized_by=triggered_by,
+                reason=reason,
+            )
+        except repository.AlreadyPseudonymizedError:
+            continue
+        pseudonymized.append(attribute_name)
+    return pseudonymized
+
+
+@app.post(
+    "/folders/{folder_id}/attributes/{attribute_name}/reveal",
+    response_model=RevealedAttributeOut,
+)
+async def reveal_folder_attribute(
+    folder_id: str,
+    attribute_name: str,
+    payload: RevealAttributeRequest,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> RevealedAttributeOut:
+    """Mirrors `document_service.main.reveal_document_attribute` exactly
+    (5.2, Phase 58 Session 1)."""
+    await _require_reveal_permission(x_dms_principal)
+    try:
+        vault_entry = await repository.get_pseudonymized_attribute(
+            session, folder_id, attribute_name
+        )
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    key = _get_pseudonymization_key()
+    try:
+        original_value = json.loads(crypto.decrypt(vault_entry.encrypted_value, key))
+    except crypto.DecryptionError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    await repository.mark_revealed(session, vault_entry.id, revealed_by=payload.revealed_by)
+    await session.commit()
+    await publish_event(
+        "folder.attribute.revealed",
+        subject=folder_id,
+        payload={"attribute_name": attribute_name},
+        actor=payload.revealed_by,
+    )
+    return RevealedAttributeOut(
+        folder_id=folder_id,
+        attribute_name=attribute_name,
+        value=original_value,
+        reason=vault_entry.reason,
+        pseudonymized_by=vault_entry.pseudonymized_by,
+        pseudonymized_at=vault_entry.pseudonymized_at,
+    )
+
+
+@app.get(
+    "/folders/{folder_id}/attributes/pseudonymized",
+    response_model=list[PseudonymizedAttributeOut],
+)
+async def list_pseudonymized_folder_attributes(
+    folder_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> list[PseudonymizedAttributeOut]:
+    """Mirrors `document_service.main.list_pseudonymized_document_
+    attributes` - gated like any other regular folder read (`folder.read`),
+    NOT the admin-only reveal capability (5.2, Phase 58 Session 1)."""
+    try:
+        await repository.get_folder(session, folder_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await _require_folder_permission(x_dms_principal, folder_id, access_type="read")
+    return await repository.list_pseudonymized_attributes(session, folder_id)
 
 
 async def _reject_during_maintenance(x_dms_maintenance_active: str) -> None:

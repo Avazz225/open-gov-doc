@@ -74,6 +74,15 @@ class Document(Base):
     # manually or copied once from `ObjectType.default_retention_days`.
     retention_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     full_deletion: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Automatic retention-expiry pseudonymization (5.2, Phase 58 Session 1,
+    # ADR 0156's own named Open Point) - a third, mutually exclusive
+    # alternative to `full_deletion` at `retention_until`: instead of
+    # soft-deleting or physically deleting the whole document, every
+    # attribute the object-type schema marks `personal_data: true` is
+    # automatically pseudonymized (same vault mechanism as the manual
+    # `POST .../pseudonymize` endpoint), and `retention_until`/this flag are
+    # then cleared so the document is not repeatedly reprocessed.
+    retention_pseudonymize: Mapped[bool] = mapped_column(Boolean, default=False)
     # Deletion reason (5.2a) - held on the document only during the
     # planning phase (necessary because execution happens days/weeks later).
     # On actual physical deletion, the reason migrates into

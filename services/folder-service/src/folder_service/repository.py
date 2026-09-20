@@ -11,6 +11,7 @@ from folder_service.models import (
     FolderDocumentReference,
     FolderTemplate,
     LegalHold,
+    PseudonymizedAttribute,
     RetentionConfig,
     TrashConfig,
 )
@@ -19,6 +20,10 @@ from folder_service.settings import INBOX_FOLDER_ID, OUTBOX_FOLDER_ID, ROOT_FOLD
 _RETENTION_CONFIG_ID = 1
 _TRASH_CONFIG_ID = 1
 
+# Attribute-level pseudonymization vault (5.2, Phase 58 Session 1, mirrors
+# document-service's ADR 0156).
+PSEUDONYMIZED_ATTRIBUTE_PLACEHOLDER = "[PSEUDONYMISIERT]"
+
 
 class NotFoundError(Exception):
     pass
@@ -26,6 +31,11 @@ class NotFoundError(Exception):
 
 class FolderNotEmptyError(Exception):
     pass
+
+
+class AlreadyPseudonymizedError(Exception):
+    """An attribute already has an active vault entry (5.2, Phase 58
+    Session 1) - mirrors document-service's identically-named error."""
 
 
 class NotDeletedError(Exception):
@@ -334,12 +344,18 @@ async def hard_delete_folder(session: AsyncSession, folder_id: str) -> None:
     interim-flush pattern as
     `document_service.repository.hard_delete_document`). Since post-roadmap
     phase 31 session 7 (ADR 0118), also removes hand-folder reference rows
-    the same way - see `delete_folder` above for how this was found."""
+    the same way - see `delete_folder` above for how this was found. Since
+    Phase 58 Session 1, also removes the pseudonymization vault the same
+    way (mirrors document-service's own ADR 0169 fix for the identical FK
+    shape - no `ondelete=` clause, so a folder with vault entries would
+    otherwise hit a real Postgres FK violation right here)."""
     folder = await _get_folder_row(session, folder_id)
     for hold in await list_holds(session, folder_id):
         await session.delete(hold)
     for reference in await _list_document_references_raw(session, folder_id):
         await session.delete(reference)
+    for vault_entry in await list_pseudonymized_attributes(session, folder_id):
+        await session.delete(vault_entry)
     await session.flush()
     await session.delete(folder)
     await session.flush()
@@ -353,10 +369,12 @@ async def set_retention(
     full_deletion: bool,
     reason: str | None,
     notify_email: str | None = None,
+    retention_pseudonymize: bool = False,
 ) -> Folder:
     folder = await _get_folder_row(session, folder_id)
     folder.retention_until = retention_until
     folder.full_deletion = full_deletion
+    folder.retention_pseudonymize = retention_pseudonymize
     folder.pending_deletion_reason = reason
     folder.reminder_notify_email = notify_email
     folder.deletion_reminder_sent_at = None
@@ -364,6 +382,96 @@ async def set_retention(
     folder.updated_at = datetime.now(UTC)
     await session.flush()
     return folder
+
+
+async def mark_retention_pseudonymized(session: AsyncSession, folder_id: str) -> Folder:
+    """Clears `retention_until`/`retention_pseudonymize` once the automatic
+    trigger has run (5.2, Phase 58 Session 1) - mirrors
+    `document_service.repository.mark_retention_pseudonymized`."""
+    folder = await _get_folder_row(session, folder_id)
+    folder.retention_until = None
+    folder.retention_pseudonymize = False
+    folder.updated_at = datetime.now(UTC)
+    await session.flush()
+    return folder
+
+
+async def pseudonymize_attribute(
+    session: AsyncSession,
+    folder_id: str,
+    attribute_name: str,
+    *,
+    encrypted_value: bytes,
+    pseudonymized_by: str,
+    reason: str | None,
+) -> PseudonymizedAttribute:
+    """Mirrors `document_service.repository.pseudonymize_attribute`
+    exactly (5.2, Phase 58 Session 1)."""
+    folder = await _get_folder_row(session, folder_id)
+    existing = await session.execute(
+        select(PseudonymizedAttribute.id).where(
+            PseudonymizedAttribute.folder_id == folder_id,
+            PseudonymizedAttribute.attribute_name == attribute_name,
+        )
+    )
+    if existing.scalar_one_or_none() is not None:
+        raise AlreadyPseudonymizedError(
+            f"Attribut {attribute_name!r} von Ordner {folder_id!r} ist bereits pseudonymisiert"
+        )
+    vault_entry = PseudonymizedAttribute(
+        id=str(uuid.uuid4()),
+        folder_id=folder_id,
+        attribute_name=attribute_name,
+        encrypted_value=encrypted_value,
+        reason=reason,
+        pseudonymized_by=pseudonymized_by,
+        pseudonymized_at=datetime.now(UTC),
+    )
+    session.add(vault_entry)
+    folder.attributes = {
+        **folder.attributes,
+        attribute_name: PSEUDONYMIZED_ATTRIBUTE_PLACEHOLDER,
+    }
+    folder.updated_at = datetime.now(UTC)
+    await session.flush()
+    return vault_entry
+
+
+async def get_pseudonymized_attribute(
+    session: AsyncSession, folder_id: str, attribute_name: str
+) -> PseudonymizedAttribute:
+    result = await session.execute(
+        select(PseudonymizedAttribute).where(
+            PseudonymizedAttribute.folder_id == folder_id,
+            PseudonymizedAttribute.attribute_name == attribute_name,
+        )
+    )
+    vault_entry = result.scalar_one_or_none()
+    if vault_entry is None:
+        raise NotFoundError(
+            f"Attribut {attribute_name!r} von Ordner {folder_id!r} ist nicht pseudonymisiert"
+        )
+    return vault_entry
+
+
+async def mark_revealed(session: AsyncSession, vault_entry_id: str, *, revealed_by: str) -> None:
+    vault_entry = await session.get(PseudonymizedAttribute, vault_entry_id)
+    if vault_entry is None:
+        raise NotFoundError(f"Vault-Eintrag {vault_entry_id!r} unbekannt")
+    vault_entry.last_revealed_by = revealed_by
+    vault_entry.last_revealed_at = datetime.now(UTC)
+    await session.flush()
+
+
+async def list_pseudonymized_attributes(
+    session: AsyncSession, folder_id: str
+) -> list[PseudonymizedAttribute]:
+    result = await session.execute(
+        select(PseudonymizedAttribute)
+        .where(PseudonymizedAttribute.folder_id == folder_id)
+        .order_by(PseudonymizedAttribute.pseudonymized_at)
+    )
+    return list(result.scalars().all())
 
 
 async def add_document_reference(

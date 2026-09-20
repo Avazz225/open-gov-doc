@@ -1,7 +1,8 @@
+import uuid
 from datetime import datetime
 
 from dms_db_base import make_declarative_base
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, LargeBinary, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 # Schema name "case" is a reserved SQL keyword (CASE WHEN) - SQLAlchemy
@@ -128,3 +129,28 @@ class CaseSequence(Base):
 
     jahr: Mapped[int] = mapped_column(primary_key=True)
     naechste_nummer: Mapped[int] = mapped_column(default=1)
+
+
+class PseudonymizedAttribute(Base):
+    """Reversible attribute-level pseudonymization vault for circulation
+    folders (5.2, Phase 58 Session 1) - mirrors `document_service.
+    PseudonymizedAttribute`/`folder_service.PseudonymizedAttribute`
+    exactly (ADR 0156's own named Open Point). No auto-purge-on-hard-
+    delete cleanup needed here - unlike documents/folders, a `Case` row is
+    never physically removed (only closed/archived, see `docs/services/
+    case-service.md`), so there is no `hard_delete_case` FK-violation risk
+    to mirror ADR 0169 for."""
+
+    __tablename__ = "pseudonymized_attribute"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    case_id: Mapped[str] = mapped_column(String(128), ForeignKey("case.cases.id"), index=True)
+    attribute_name: Mapped[str] = mapped_column(String(256))
+    encrypted_value: Mapped[bytes] = mapped_column(LargeBinary)
+    reason: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    pseudonymized_by: Mapped[str] = mapped_column(String(128))
+    pseudonymized_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_revealed_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    last_revealed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )

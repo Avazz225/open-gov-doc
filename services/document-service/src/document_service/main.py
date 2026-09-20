@@ -272,6 +272,24 @@ async def _retention_poll_loop(session_factory) -> None:
 
             async with session_factory() as session:
                 for document in await repository.list_due_for_retention_action(session):
+                    if document.retention_pseudonymize:
+                        pseudonymized_names = await _pseudonymize_eligible_attributes(
+                            session,
+                            document,
+                            app.state.object_type_client,
+                            triggered_by="system:retention-poll",
+                            reason="Automatische Pseudonymisierung bei Fristablauf (5.2)",
+                        )
+                        await repository.mark_retention_pseudonymized(session, document.id)
+                        await session.commit()
+                        if pseudonymized_names:
+                            await publish_event(
+                                "document.retention.pseudonymized",
+                                document.id,
+                                {"attribute_names": pseudonymized_names},
+                                actor="system:retention-poll",
+                            )
+                        continue
                     if document.full_deletion:
                         await _execute_or_defer_forced_deletion(session, document)
                         continue
@@ -612,6 +630,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             text(
                 "ALTER TABLE document.document "
                 "ADD COLUMN IF NOT EXISTS full_deletion BOOLEAN DEFAULT FALSE NOT NULL"
+            )
+        )
+        # Automatic retention-expiry pseudonymization (5.2, Phase 58 Session 1).
+        await conn.execute(
+            text(
+                "ALTER TABLE document.document "
+                "ADD COLUMN IF NOT EXISTS retention_pseudonymize BOOLEAN DEFAULT FALSE NOT NULL"
             )
         )
         await conn.execute(
@@ -2518,6 +2543,60 @@ async def pseudonymize_document_attribute(
     return vault_entry
 
 
+async def _pseudonymize_eligible_attributes(
+    session: AsyncSession,
+    document: Document,
+    object_type_client: ObjectTypeClient,
+    *,
+    triggered_by: str,
+    reason: str,
+) -> list[str]:
+    """Automatic retention-expiry trigger (5.2, ADR 0156's own named Open
+    Point, closed in Phase 58 Session 1) - pseudonymizes every attribute
+    marked `personal_data: true` in the document's object-type schema that
+    still carries a live value, reusing exactly the same crypto/vault
+    primitives as the manual `pseudonymize_document_attribute` endpoint
+    above. Already-pseudonymized attributes and attributes with no value
+    are silently skipped, not an error - this runs unattended from the poll
+    loop, so a document that's only partially eligible must not block the
+    attributes that are. Returns the attribute names actually pseudonymized
+    this call, for the caller's event payload. `object_type_client` is
+    deliberately an explicit parameter rather than reaching into
+    `app.state` (same convention as `retention_actions.py`'s functions
+    taking `storage` explicitly) - lets a test bind its own client to its
+    own event loop instead of reusing the `TestClient` lifespan's, which a
+    plain `async def` test function does not share (a real, hit-during-
+    this-session `RuntimeError: ... bound to a different event loop`)."""
+    if document.object_type_id is None:
+        return []
+    object_type = await object_type_client.get(document.object_type_id)
+    if object_type is None:
+        return []
+    key = _get_pseudonymization_key()
+    pseudonymized: list[str] = []
+    for attribute_definition in object_type["attributes"]:
+        if not attribute_definition.get("personal_data"):
+            continue
+        attribute_name = attribute_definition["name"]
+        value = document.attributes.get(attribute_name)
+        if value is None or value == "" or value == repository.PSEUDONYMIZED_ATTRIBUTE_PLACEHOLDER:
+            continue
+        encrypted_value = crypto.encrypt(json.dumps(value).encode("utf-8"), key)
+        try:
+            await repository.pseudonymize_attribute(
+                session,
+                document.id,
+                attribute_name,
+                encrypted_value=encrypted_value,
+                pseudonymized_by=triggered_by,
+                reason=reason,
+            )
+        except repository.AlreadyPseudonymizedError:
+            continue
+        pseudonymized.append(attribute_name)
+    return pseudonymized
+
+
 @app.post(
     "/documents/{document_id}/attributes/{attribute_name}/reveal",
     response_model=RevealedAttributeOut,
@@ -2942,6 +3021,14 @@ async def put_retention(
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    if payload.full_deletion and payload.retention_pseudonymize:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "full_deletion und retention_pseudonymize schließen sich gegenseitig aus - "
+                "nur eine Aktion kann bei Fristablauf ausgelöst werden"
+            ),
+        )
     if payload.full_deletion:
         reason_required = await _resolve_deletion_reason_required(session, document.object_type_id)
         if reason_required and not payload.reason:
@@ -2957,6 +3044,7 @@ async def put_retention(
         full_deletion=payload.full_deletion,
         reason=payload.reason,
         notify_email=payload.notify_email,
+        retention_pseudonymize=payload.retention_pseudonymize,
     )
     await session.commit()
     # No actor known - RetentionUpdate doesn't yet track who changed the
@@ -2969,6 +3057,7 @@ async def put_retention(
             if payload.retention_until
             else None,
             "full_deletion": payload.full_deletion,
+            "retention_pseudonymize": payload.retention_pseudonymize,
         },
     )
     return updated

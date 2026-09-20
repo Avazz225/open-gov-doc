@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -28,6 +28,7 @@ class FolderOut(BaseModel):
     deleted_by: str | None
     retention_until: datetime | None
     full_deletion: bool
+    retention_pseudonymize: bool
     pending_deletion_reason: str | None
     reminder_notify_email: str | None
     created_by: str
@@ -60,8 +61,45 @@ class TrashResult(BaseModel):
 class RetentionUpdate(BaseModel):
     retention_until: datetime | None = None
     full_deletion: bool = False
+    # Automatic retention-expiry pseudonymization (5.2, Phase 58 Session 1) -
+    # mutually exclusive with `full_deletion`, enforced in main.py.put_retention.
+    retention_pseudonymize: bool = False
     reason: str | None = None
     notify_email: str | None = None
+
+
+class PseudonymizeAttributeRequest(BaseModel):
+    """Trigger pseudonymization of one personal-data attribute (5.2, Phase
+    58 Session 1, mirrors document-service's ADR 0156)."""
+
+    pseudonymized_by: str
+    reason: str | None = None
+
+
+class RevealAttributeRequest(BaseModel):
+    revealed_by: str
+
+
+class PseudonymizedAttributeOut(BaseModel):
+    id: str
+    folder_id: str
+    attribute_name: str
+    reason: str | None
+    pseudonymized_by: str
+    pseudonymized_at: datetime
+    last_revealed_by: str | None
+    last_revealed_at: datetime | None
+
+    model_config = {"from_attributes": True}
+
+
+class RevealedAttributeOut(BaseModel):
+    folder_id: str
+    attribute_name: str
+    value: Any
+    reason: str | None
+    pseudonymized_by: str
+    pseudonymized_at: datetime
 
 
 class FolderDocumentReferenceAdd(BaseModel):

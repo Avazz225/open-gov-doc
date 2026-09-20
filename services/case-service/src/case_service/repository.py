@@ -1,4 +1,5 @@
 import re
+import uuid
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
@@ -11,6 +12,7 @@ from case_service.models import (
     CaseDocumentReference,
     CaseNumberConfig,
     CaseSequence,
+    PseudonymizedAttribute,
 )
 
 _ARCHIVAL_CONFIG_ID = 1
@@ -18,9 +20,19 @@ _NUMBER_CONFIG_ID = 1
 _VORGANGSNUMMER_PLACEHOLDERS = {"YYYY", "YY", "Laufende_Nummer"}
 _PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_]+)\}")
 
+# Attribute-level pseudonymization vault (5.2, Phase 58 Session 1, mirrors
+# document-service's ADR 0156).
+PSEUDONYMIZED_ATTRIBUTE_PLACEHOLDER = "[PSEUDONYMISIERT]"
+
 
 class NotFoundError(Exception):
     pass
+
+
+class AlreadyPseudonymizedError(Exception):
+    """An attribute already has an active vault entry (5.2, Phase 58
+    Session 1) - mirrors document-service's/folder-service's identically-
+    named error."""
 
 
 class InvalidFieldError(Exception):
@@ -346,3 +358,83 @@ async def mark_archived(session: AsyncSession, case_id: str) -> Case:
     case.archived_at = datetime.now(UTC)
     await session.flush()
     return case
+
+
+# --- Attribute-level pseudonymization vault (5.2, Phase 58 Session 1) ------
+
+
+async def pseudonymize_attribute(
+    session: AsyncSession,
+    case_id: str,
+    attribute_name: str,
+    *,
+    encrypted_value: bytes,
+    pseudonymized_by: str,
+    reason: str | None,
+) -> PseudonymizedAttribute:
+    """Mirrors `document_service.repository.pseudonymize_attribute`/
+    `folder_service.repository.pseudonymize_attribute` exactly."""
+    case = await get_case(session, case_id)
+    existing = await session.execute(
+        select(PseudonymizedAttribute.id).where(
+            PseudonymizedAttribute.case_id == case_id,
+            PseudonymizedAttribute.attribute_name == attribute_name,
+        )
+    )
+    if existing.scalar_one_or_none() is not None:
+        raise AlreadyPseudonymizedError(
+            f"Attribut {attribute_name!r} von Umlaufmappe {case_id!r} ist bereits pseudonymisiert"
+        )
+    vault_entry = PseudonymizedAttribute(
+        id=str(uuid.uuid4()),
+        case_id=case_id,
+        attribute_name=attribute_name,
+        encrypted_value=encrypted_value,
+        reason=reason,
+        pseudonymized_by=pseudonymized_by,
+        pseudonymized_at=datetime.now(UTC),
+    )
+    session.add(vault_entry)
+    case.attributes = {
+        **case.attributes,
+        attribute_name: PSEUDONYMIZED_ATTRIBUTE_PLACEHOLDER,
+    }
+    await session.flush()
+    return vault_entry
+
+
+async def get_pseudonymized_attribute(
+    session: AsyncSession, case_id: str, attribute_name: str
+) -> PseudonymizedAttribute:
+    result = await session.execute(
+        select(PseudonymizedAttribute).where(
+            PseudonymizedAttribute.case_id == case_id,
+            PseudonymizedAttribute.attribute_name == attribute_name,
+        )
+    )
+    vault_entry = result.scalar_one_or_none()
+    if vault_entry is None:
+        raise NotFoundError(
+            f"Attribut {attribute_name!r} von Umlaufmappe {case_id!r} ist nicht pseudonymisiert"
+        )
+    return vault_entry
+
+
+async def mark_revealed(session: AsyncSession, vault_entry_id: str, *, revealed_by: str) -> None:
+    vault_entry = await session.get(PseudonymizedAttribute, vault_entry_id)
+    if vault_entry is None:
+        raise NotFoundError(f"Vault-Eintrag {vault_entry_id!r} unbekannt")
+    vault_entry.last_revealed_by = revealed_by
+    vault_entry.last_revealed_at = datetime.now(UTC)
+    await session.flush()
+
+
+async def list_pseudonymized_attributes(
+    session: AsyncSession, case_id: str
+) -> list[PseudonymizedAttribute]:
+    result = await session.execute(
+        select(PseudonymizedAttribute)
+        .where(PseudonymizedAttribute.case_id == case_id)
+        .order_by(PseudonymizedAttribute.pseudonymized_at)
+    )
+    return list(result.scalars().all())

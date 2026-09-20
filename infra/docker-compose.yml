@@ -817,6 +817,11 @@ services:
       # Sensor concept (10.1, full rollout) - same fail-open pattern as
       # document-service/registry-service.
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
+      # Attribute-level pseudonymization vault (5.2, Phase 58 Session 1,
+      # mirrors document-service's ADR 0156) - a SEPARATE key from
+      # document-service's/folder-service's own, see case_service/settings.py's
+      # docstring.
+      DMS_ATTRIBUTE_PSEUDONYMIZATION_KEY: ${CASE_SERVICE_PSEUDONYMIZATION_KEY:-Y2FzZS1zZXJ2aWNlLXBzZXVkb255bS1rZXktMzIxMTI=}
     ports:
       - "${CASE_SERVICE_PORT:-8016}:8000"
     depends_on:
@@ -1575,6 +1580,10 @@ services:
       DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
       DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
       DMS_RETENTION_POLL_INTERVAL_SECONDS: ${FOLDER_SERVICE_RETENTION_POLL_INTERVAL_SECONDS:-3600}
+      # Attribute-level pseudonymization vault (5.2, Phase 58 Session 1,
+      # mirrors document-service's ADR 0156) - a SEPARATE key from
+      # document-service's own, see folder_service/settings.py's docstring.
+      DMS_ATTRIBUTE_PSEUDONYMIZATION_KEY: ${FOLDER_SERVICE_PSEUDONYMIZATION_KEY:-Zm9sZGVyLXNlcnZpY2UtcHNldWRvbnltLWtleS0zMjE=}
     ports:
       - "${FOLDER_SERVICE_PORT:-8008}:8000"
     depends_on:

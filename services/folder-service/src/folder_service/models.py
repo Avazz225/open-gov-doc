@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from dms_db_base import make_declarative_base
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, LargeBinary, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 Base = make_declarative_base("folder")
@@ -40,6 +40,10 @@ class Folder(Base):
     deleted_via_folder_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     retention_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     full_deletion: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Automatic retention-expiry pseudonymization (5.2, Phase 58 Session 1) -
+    # mirrors `document_service.Document.retention_pseudonymize` exactly,
+    # see that model's docstring.
+    retention_pseudonymize: Mapped[bool] = mapped_column(Boolean, default=False)
     pending_deletion_reason: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     deletion_reminder_sent_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -149,6 +153,28 @@ class RetentionConfig(Base):
     # UX-only mechanism as document-service's own copy of this field.
     deletion_reason_catalog: Mapped[list] = mapped_column(JSON, default=list)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class PseudonymizedAttribute(Base):
+    """Reversible attribute-level pseudonymization vault for folders (5.2,
+    Phase 58 Session 1) - mirrors `document_service.PseudonymizedAttribute`
+    exactly (ADR 0156's own named Open Point: "a future mirroring session
+    would reuse the same vault-table/crypto/RBAC shape"), a standalone
+    table in the `folder` schema, no FK across service boundaries."""
+
+    __tablename__ = "pseudonymized_attribute"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    folder_id: Mapped[str] = mapped_column(String(128), ForeignKey("folder.folder.id"), index=True)
+    attribute_name: Mapped[str] = mapped_column(String(256))
+    encrypted_value: Mapped[bytes] = mapped_column(LargeBinary)
+    reason: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    pseudonymized_by: Mapped[str] = mapped_column(String(128))
+    pseudonymized_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_revealed_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    last_revealed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class TrashConfig(Base):

@@ -103,19 +103,26 @@ Three further decisions followed, all resolved via research/precedent without a 
   paragraph itself named as the intended option. Also fixed a real, latent FK-violation bug found while
   building this: `hard_delete_document` never cleaned up vault rows before, and their FK to `Document.id`
   has no `ondelete=` clause.
-- **No automatic trigger on retention expiry** - only a manual, admin-invoked action this session. The
+- ~~**No automatic trigger on retention expiry** - only a manual, admin-invoked action this session. The
   concept's own sibling section (5.2a) explicitly permits a purely manual/direct-configuration mechanism
   ("BPMN-modelable OR direct object/object-type configuration"), so this is a legitimate, deliberately
   narrower scope, not a gap accidentally left open - but a genuinely complete implementation of the
   concept's framing ("instead of hard-deleting... wherever a retention obligation exists") would
   eventually want an automatic path too (e.g. a new per-object-type/per-document flag, checked in
   `document_service.main._retention_poll_loop` alongside the existing soft-delete/forced-deletion
-  branches). Deferred as an explicit Open Point, not built speculatively. **Note (Phase 52 Session 3)**:
+  branches). Deferred as an explicit Open Point, not built speculatively.~~ **Note (Phase 52 Session 3)**:
   this bullet is about triggering pseudonymization itself automatically (still not built, still open) -
-  a DIFFERENT question from vault-entry retention/purge above, which ADR 0169 does now close.
-- **`folder-service`/`case-service` have no equivalent mechanism** - their own `attributes` JSON columns
+  a DIFFERENT question from vault-entry retention/purge above, which ADR 0169 does now close. —
+  **closed in Phase 58 Session 1** ([ADR 0177](0177-pseudonymization-retention-trigger-and-folder-case-mirroring.md)):
+  `document-service`'s new `retention_pseudonymize` flag, checked in `_retention_poll_loop` exactly as
+  this bullet itself anticipated.
+- ~~**`folder-service`/`case-service` have no equivalent mechanism** - their own `attributes` JSON columns
   remain unaffected by this session. A future mirroring session would reuse the same vault-table/crypto/
-  RBAC shape.
+  RBAC shape.~~ — **closed in Phase 58 Session 1** ([ADR 0177](0177-pseudonymization-retention-trigger-and-folder-case-mirroring.md)):
+  `folder-service` got the full mirror including its own automatic retention-expiry trigger (it already
+  has the same `retention_until`/`full_deletion`/poll-loop shape as `document-service`); `case-service`
+  got a manual-only mirror (no auto-trigger, since it has no retention concept at all to hook one into) -
+  both reusing the exact vault-table/crypto/RBAC shape this bullet itself named.
 - **Tests**: `services/document-service/tests/test_attribute_pseudonymization.py` (new, 13 tests) covers
   RBAC (401/403 split between the two capabilities), eligibility (400 for a non-personal_data attribute,
   an unknown attribute, and a missing value), the full pseudonymize→reveal round trip (value integrity,

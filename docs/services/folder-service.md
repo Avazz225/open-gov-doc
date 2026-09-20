@@ -3,7 +3,7 @@
 **Responsibility:** Folders as hierarchical containers (concept 2.1) — create, rename, move, delete (only when empty, or cascaded via the trash), optional object-type validation. Owns the folder hierarchy and publishes structure events, through which the Permission Service keeps its permission inheritance in sync. Since P7-S1b, additionally retention/legal hold/forced deletion including the deletion register (5.2/5.2a), a 1:1 match of the same pattern as `document-service` (P7-S1) — cascading in the process to contained documents.
 
 **Concept Reference:** 2.1, 5.2/5.2a (since P7-S1b), 14.2 (hand folders, Post-Roadmap Phase 31 Session 7)
-**Own Postgres Schema:** `folder` (tables `folder`, `legal_hold`, `deletion_register_entry`, `retention_config`, `trash_config`, `folder_document_reference`)
+**Own Postgres Schema:** `folder` (tables `folder`, `legal_hold`, `deletion_register_entry`, `retention_config`, `trash_config`, `folder_document_reference`, `pseudonymized_attribute` since Phase 58 Session 1)
 
 ## API
 
@@ -18,7 +18,10 @@
 | `POST` | `/folders/{id}/purge` | Manual, immediate permanent deletion of a folder already in the trash (2.5, since P15-S1) — `409` if not in trash or subtree not empty, `403` without the `admin.deletion` capability (ADR 0150), see "Trash Family" below |
 | `POST` | `/folders/{id}/trash` | Trash path (5.2, since P7-S1b) — cascades across the entire active subtree. Since **P7-S1c** optionally gated by the four-eyes principle (action type `folder.delete`, deletion-request workflow for regular users) — response `TrashResult{status: "trashed"\|"pending_approval", folder, approval_request_id}`. `409` for `inbox`/`outbox` (since P15-S3) |
 | `POST` | `/folders/{id}/restore` | Trash restoration including cascaded subfolders/documents (5.2, since P7-S1b) |
-| `PUT` | `/folders/{id}/retention` | Schedule retention period/forced deletion (5.2/5.2a, since P7-S1b) |
+| `PUT` | `/folders/{id}/retention` | Schedule retention period/forced deletion (5.2/5.2a, since P7-S1b) — since **Phase 58 Session 1** additionally `retention_pseudonymize` (mutually exclusive with `full_deletion`, `422` if both set), see "Attribute-Level Pseudonymization" below |
+| `POST` | `/folders/{id}/attributes/{name}/pseudonymize` | Pseudonymize one `personal_data: true` attribute (5.2, Phase 58 Session 1) — gated by `admin.attribute_pseudonymization`, see "Attribute-Level Pseudonymization" below |
+| `POST` | `/folders/{id}/attributes/{name}/reveal` | Decrypt and transiently return the original value (5.2, Phase 58 Session 1) — gated by `admin.attribute_reveal` |
+| `GET` | `/folders/{id}/attributes/pseudonymized` | Which attributes are currently pseudonymized (5.2, Phase 58 Session 1) — no plaintext exposed |
 | `POST` | `/legal-holds` | Set legal hold (5.2, since P7-S1b) — since **Post-Roadmap Phase 19 Session 10** ([ADR 0075](../adr/0075-legal-hold-rbac.md)) gated by `admin.legal_hold` |
 | `POST` | `/legal-holds/{id}/release` | Release legal hold — since **P19-S10** likewise gated by `admin.legal_hold` |
 | `GET` | `/legal-holds?folder_id=&active_only=` | Legal holds of a folder |
@@ -40,7 +43,7 @@ A root folder (`id: "root"`) is created idempotently at startup — analogous to
 
 ## Data Model
 
-`folder`: `id`, `name`, `parent_id` (self-FK, nullable only for `root`), `object_type_id` (opaque reference to the Object-Type Service, integer), `attributes` (JSON), `created_by/at`, `updated_at`. Since P7-S1b, additionally: `deleted_at`, `deleted_via_folder_id` (cascade origin, see below), `retention_until`, `full_deletion`, `pending_deletion_reason`, `deletion_reminder_sent_at`, `reminder_notify_email`, `force_delete_approval_requested_at` — structurally identical to `document_service.Document`'s corresponding fields (P7-S1). Since P15-S1, additionally `deleted_by` (prerequisite for the personal trash, 2.5).
+`folder`: `id`, `name`, `parent_id` (self-FK, nullable only for `root`), `object_type_id` (opaque reference to the Object-Type Service, integer), `attributes` (JSON), `created_by/at`, `updated_at`. Since P7-S1b, additionally: `deleted_at`, `deleted_via_folder_id` (cascade origin, see below), `retention_until`, `full_deletion`, `pending_deletion_reason`, `deletion_reminder_sent_at`, `reminder_notify_email`, `force_delete_approval_requested_at` — structurally identical to `document_service.Document`'s corresponding fields (P7-S1). Since P15-S1, additionally `deleted_by` (prerequisite for the personal trash, 2.5). Since **Phase 58 Session 1**, additionally `retention_pseudonymize` (boolean, mutually exclusive with `full_deletion`), see "Attribute-Level Pseudonymization" below.
 
 `legal_hold`/`deletion_register_entry`/`retention_config`/`trash_config`: structurally identical to the `document-service` counterparts (see there), but standalone tables with `folder_id` instead of `document_id` — **no** reuse of `document-service` tables across service boundaries (no cross-schema FK, no premature centralization into a compliance service, same rationale as in P7-S1). This allows an installation operator to configure different requirements (restoration period, deletion-reason requirement) for folders than for documents.
 
@@ -121,6 +124,14 @@ Carries over the pattern built in P7-S1 for documents (see `docs/services/docume
 - Storage relevance: none — folders have no content of their own, `hard_delete_folder` is a pure DB row removal (after cleaning up the legal-hold history, same intermediate-flush pattern as `document_service.repository.hard_delete_document`).
 - **Authorization (Post-Roadmap Phase 38 Session 3)**: `PUT /folders/{id}/retention`, `PUT /retention-config`, and `PUT /trash-config` previously had no permission check at all. All three now require `X-DMS-Principal` + the capability `admin.retention` (role `domain-admin-retention`), shared with the identical three endpoints on `document-service` — the same retention/disposal-policy concern for both resource types. See `docs/services/document-service.md` "Retention & Legal Hold" and [ADR 0148](../adr/0148-admin-ui-authorization-full-alignment.md).
 
+## Attribute-Level Pseudonymization (5.2, Phase 58 Session 1, [ADR 0177](../adr/0177-pseudonymization-retention-trigger-and-folder-case-mirroring.md))
+
+Full mirror of `document-service`'s own mechanism ([ADR 0156](../adr/0156-attribute-pseudonymization-reversible-vault.md)) — same eligibility rule (`personal_data: true` in the object-type schema, non-empty live value), same reversible AES-256-GCM vault (`crypto.py`, deliberately its own copy per this project's established per-service crypto convention, not shared with `document-service`'s), same RBAC (`admin.attribute_pseudonymization`/`admin.attribute_reveal`, the identical GLOBAL capabilities `document-service` already uses — no `permission-service` change needed), same three endpoints (`POST .../pseudonymize`, `POST .../reveal`, `GET .../pseudonymized`).
+
+- **Key**: `DMS_ATTRIBUTE_PSEUDONYMIZATION_KEY` — a SEPARATE key from `document-service`'s own (no shared trust relationship between the two services' key material). A pseudonymize/reveal call without this configured fails `503`.
+- **Automatic retention-expiry trigger**: `Folder.retention_pseudonymize` (mutually exclusive with `full_deletion`) makes `_retention_poll_loop`'s "due retention action" phase automatically pseudonymize every eligible attribute instead of soft-/force-deleting the folder, then clears `retention_until`/`retention_pseudonymize`. Publishes `folder.retention.pseudonymized` (attribute names) when at least one attribute was actually pseudonymized. Identical mechanism to `document-service`'s own, since `folder-service` already has the same `retention_until`/`full_deletion`/poll-loop shape.
+- **Vault-entry cleanup on hard delete**: `hard_delete_folder` now also removes `pseudonymized_attribute` rows before deleting the folder itself — mirrors the FK-violation fix [ADR 0169](../adr/0169-pseudonymization-vault-retention-tied-to-document-lifecycle.md) already gave `document-service` (the FK has no `ondelete=`).
+
 ## Deletion-Request Workflow for Regular Users (5.2, since P7-S1c)
 
 Its own action type `folder.delete`, separate from `folder.force_delete` — the latter remains for retention-triggered forced deletion, `folder.delete` gates the manual, user-triggered `POST /folders/{id}/trash` (gate check directly in the endpoint, `TrashResult` wrapper). On approval, a new `consumer.py` branch (`_handle_delete_approved`) executes `repository.soft_delete_folder` — identical cascade to subfolders/documents as with a direct call. No new self-approval logic needed (`permission-service` already generically prevents initiator == approver). See `docs/services/document-service.md` for the detailed architecture rationale (identical pattern) and `docs/services/user-ui.md` for the new approval inbox.
@@ -179,7 +190,11 @@ None yet — to follow in Phase 11.
 
 ## Tests
 
-**143 tests since Phase 44 Session 2** (previously 140, +3: `test_manual_purge_publishes_resource_
+**164 tests since Phase 58 Session 1** (previously 143, +21: new `test_attribute_pseudonymization.py`,
+mirroring `document-service`'s own test file 1:1 — RBAC/eligibility/round-trip/409 for the manual
+endpoints, plus direct unit tests of the retention-poll-loop auto-trigger helper).
+
+Older history: **143 tests since Phase 44 Session 2** (previously 140, +3: `test_manual_purge_publishes_resource_
 deleted`/`test_reconcile_restore_deletion_publishes_resource_deleted`/`test_execute_or_defer_forced_
 deletion_publishes_resource_deleted` in `test_events.py`, proving the new `folder.resource.deleted`
 publish at three of the four newly-fixed call sites — the fourth, the retention poll loop's own

@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -102,3 +103,40 @@ class CaseArchivalConfigOut(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class PseudonymizeAttributeRequest(BaseModel):
+    """Trigger pseudonymization of one personal-data attribute (5.2, Phase
+    58 Session 1, mirrors document-service's ADR 0156). Manual-only for
+    case-service - no automatic retention-expiry trigger, since case-
+    service has no `retention_until`/`full_deletion` mechanism at all
+    (see `docs/adr/0156-...md`'s Phase 58 Session 1 addendum)."""
+
+    pseudonymized_by: str
+    reason: str | None = None
+
+
+class RevealAttributeRequest(BaseModel):
+    revealed_by: str
+
+
+class PseudonymizedAttributeOut(BaseModel):
+    id: str
+    case_id: str
+    attribute_name: str
+    reason: str | None
+    pseudonymized_by: str
+    pseudonymized_at: datetime
+    last_revealed_by: str | None
+    last_revealed_at: datetime | None
+
+    model_config = {"from_attributes": True}
+
+
+class RevealedAttributeOut(BaseModel):
+    case_id: str
+    attribute_name: str
+    value: Any
+    reason: str | None
+    pseudonymized_by: str
+    pseudonymized_at: datetime

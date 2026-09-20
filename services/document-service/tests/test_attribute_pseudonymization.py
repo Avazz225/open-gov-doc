@@ -54,6 +54,19 @@ def object_type_id():
 
 
 @pytest.fixture
+async def poll_object_type_client():
+    """A test-local `ObjectTypeClient`, separate from `app.state`'s own
+    (which is bound to `TestClient`'s internal event loop, not a plain
+    `async def` test function's - see `_pseudonymize_eligible_attributes`'s
+    docstring)."""
+    from document_service.object_type_client import ObjectTypeClient
+
+    oc = ObjectTypeClient(settings.object_type_service_base_url)
+    yield oc
+    await oc.close()
+
+
+@pytest.fixture
 def document_id(client, object_type_id):
     response = client.post(
         "/documents",
@@ -209,3 +222,108 @@ def test_list_pseudonymized_attributes_empty_for_a_document_with_none(client, do
     response = client.get(f"/documents/{document_id}/attributes/pseudonymized")
     assert response.status_code == 200
     assert response.json() == []
+
+
+# --- Automatic retention-expiry trigger (5.2, Phase 58 Session 1) ---------
+
+
+def test_put_retention_rejects_both_full_deletion_and_retention_pseudonymize(client, document_id):
+    response = client.put(
+        f"/documents/{document_id}/retention",
+        json={
+            "retention_until": "2030-01-01T00:00:00Z",
+            "full_deletion": True,
+            "retention_pseudonymize": True,
+        },
+        headers=PSEUDONYMIZATION_ADMIN_HEADERS
+        | {"X-DMS-Principal": "document-service-test-retention-admin"},
+    )
+    assert response.status_code == 422
+
+
+def test_put_retention_sets_retention_pseudonymize_field(client, document_id):
+    response = client.put(
+        f"/documents/{document_id}/retention",
+        json={"retention_until": "2030-01-01T00:00:00Z", "retention_pseudonymize": True},
+        headers={"X-DMS-Principal": "document-service-test-retention-admin"},
+    )
+    assert response.status_code == 200
+    assert response.json()["retention_pseudonymize"] is True
+    assert response.json()["full_deletion"] is False
+
+
+async def test_pseudonymize_eligible_attributes_pseudonymizes_only_personal_data_with_a_value(
+    client, session, document_id, poll_object_type_client
+):
+    """Direct unit test of the retention-poll-loop helper (same style as
+    `test_retention_actions.py`'s direct calls into poll-loop-adjacent
+    functions) - `SVNR` is `personal_data: true` and has a value, `Betreff`
+    is not marked `personal_data` and must stay untouched."""
+    from document_service import main, repository
+
+    document = await repository.get_document(session, document_id)
+    pseudonymized = await main._pseudonymize_eligible_attributes(
+        session,
+        document,
+        poll_object_type_client,
+        triggered_by="system:retention-poll",
+        reason="Test",
+    )
+    await session.commit()
+
+    assert pseudonymized == ["SVNR"]
+    updated = await repository.get_document(session, document_id)
+    assert updated.attributes["SVNR"] == "[PSEUDONYMISIERT]"
+    assert updated.attributes["Betreff"] == "Testfall"
+    vault_entries = await repository.list_pseudonymized_attributes(session, document_id)
+    assert len(vault_entries) == 1
+    assert vault_entries[0].pseudonymized_by == "system:retention-poll"
+
+
+async def test_pseudonymize_eligible_attributes_skips_an_already_pseudonymized_attribute(
+    client, session, document_id, poll_object_type_client
+):
+    from document_service import main, repository
+
+    document = await repository.get_document(session, document_id)
+    first = await main._pseudonymize_eligible_attributes(
+        session,
+        document,
+        poll_object_type_client,
+        triggered_by="system:retention-poll",
+        reason="Test",
+    )
+    await session.commit()
+    assert first == ["SVNR"]
+
+    document = await repository.get_document(session, document_id)
+    second = await main._pseudonymize_eligible_attributes(
+        session,
+        document,
+        poll_object_type_client,
+        triggered_by="system:retention-poll",
+        reason="Test",
+    )
+    assert second == []
+
+
+async def test_pseudonymize_eligible_attributes_returns_empty_for_a_document_without_object_type(
+    client, session, poll_object_type_client
+):
+    from document_service import main, repository
+
+    document_id = client.post(
+        "/documents",
+        data={"title": "Ohne Objekttyp", "created_by": "alice"},
+        files={"file": ("x.pdf", b"%PDF-1.4 test", "application/pdf")},
+    ).json()["id"]
+
+    document = await repository.get_document(session, document_id)
+    pseudonymized = await main._pseudonymize_eligible_attributes(
+        session,
+        document,
+        poll_object_type_client,
+        triggered_by="system:retention-poll",
+        reason="Test",
+    )
+    assert pseudonymized == []

@@ -1,3 +1,5 @@
+import base64
+import json
 import logging
 import time
 import uuid
@@ -19,7 +21,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from case_service import repository, status_transitions
+from case_service import crypto, repository, status_transitions
 from case_service.consumer import start_consuming
 from case_service.document_client import DocumentClient
 from case_service.models import Base
@@ -36,6 +38,10 @@ from case_service.schemas import (
     CaseNumberConfigOut,
     CaseOut,
     CaseRegisterRequest,
+    PseudonymizeAttributeRequest,
+    PseudonymizedAttributeOut,
+    RevealAttributeRequest,
+    RevealedAttributeOut,
 )
 from case_service.settings import Settings
 from case_service.workflow_client import ProcessDefinitionUnknownError, WorkflowClient
@@ -717,3 +723,184 @@ async def update_case_number_config(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     await session.commit()
     return config
+
+
+# --- Attribute-level pseudonymization vault (5.2, Phase 58 Session 1) ------
+#
+# Mirrors document-service's ADR 0156/folder-service's Phase 58 Session 1
+# mechanism exactly - manual-only here, no automatic retention-expiry
+# trigger: case-service has no `retention_until`/`full_deletion` mechanism
+# at all (unlike Document/Folder), so there is no poll-loop phase to hook
+# an auto-trigger into. A future session could add one if case-service
+# ever gains its own retention concept.
+
+
+def _get_pseudonymization_key() -> bytes:
+    if not settings.attribute_pseudonymization_key:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Kein Verschlüsselungsschlüssel für Attribut-Pseudonymisierung "
+                "konfiguriert (DMS_ATTRIBUTE_PSEUDONYMIZATION_KEY)"
+            ),
+        )
+    return base64.b64decode(settings.attribute_pseudonymization_key)
+
+
+async def _require_pseudonymization_permission(x_dms_principal: str) -> None:
+    """Reuses the same global domain-admin capability document-service's/
+    folder-service's identically-named endpoints already established
+    (`admin.attribute_pseudonymization`) - no `permission-service` change
+    needed."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    if not await app.state.permission_client.has_permission(
+        x_dms_principal, "admin.attribute_pseudonymization"
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Fehlende Domain-Admin-Rolle 'Attribut-Pseudonymisierung'",
+        )
+
+
+async def _require_reveal_permission(x_dms_principal: str) -> None:
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    if not await app.state.permission_client.has_permission(
+        x_dms_principal, "admin.attribute_reveal"
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Fehlende Domain-Admin-Rolle 'Pseudonymisierte Attribute aufdecken'",
+        )
+
+
+@app.post(
+    "/cases/{case_id}/attributes/{attribute_name}/pseudonymize",
+    response_model=PseudonymizedAttributeOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def pseudonymize_case_attribute(
+    case_id: str,
+    attribute_name: str,
+    payload: PseudonymizeAttributeRequest,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> PseudonymizedAttributeOut:
+    """Mirrors `document_service.main.pseudonymize_document_attribute`/
+    `folder_service.main.pseudonymize_folder_attribute` exactly."""
+    await _require_pseudonymization_permission(x_dms_principal)
+    try:
+        case = await repository.get_case(session, case_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    if case.object_type_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Umlaufmappe hat keinen Objekttyp - kein Attributschema bekannt",
+        )
+    object_type = await app.state.object_type_client.get(case.object_type_id)
+    if object_type is None:
+        raise HTTPException(status_code=400, detail="Objekttyp der Umlaufmappe nicht gefunden")
+    attribute_definition = next(
+        (a for a in object_type["attributes"] if a.get("name") == attribute_name), None
+    )
+    if attribute_definition is None or not attribute_definition.get("personal_data"):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Attribut {attribute_name!r} ist im Objekttyp nicht als "
+                "personenbezogen markiert (personal_data)"
+            ),
+        )
+
+    value = case.attributes.get(attribute_name)
+    if value is None or value == "":
+        raise HTTPException(status_code=400, detail=f"Attribut {attribute_name!r} hat keinen Wert")
+
+    key = _get_pseudonymization_key()
+    encrypted_value = crypto.encrypt(json.dumps(value).encode("utf-8"), key)
+
+    try:
+        vault_entry = await repository.pseudonymize_attribute(
+            session,
+            case_id,
+            attribute_name,
+            encrypted_value=encrypted_value,
+            pseudonymized_by=payload.pseudonymized_by,
+            reason=payload.reason,
+        )
+    except repository.AlreadyPseudonymizedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await session.commit()
+    await publish_event(
+        "case.attribute.pseudonymized",
+        subject=case_id,
+        payload={"attribute_name": attribute_name},
+        actor=payload.pseudonymized_by,
+    )
+    return vault_entry
+
+
+@app.post(
+    "/cases/{case_id}/attributes/{attribute_name}/reveal",
+    response_model=RevealedAttributeOut,
+)
+async def reveal_case_attribute(
+    case_id: str,
+    attribute_name: str,
+    payload: RevealAttributeRequest,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> RevealedAttributeOut:
+    """Mirrors `document_service.main.reveal_document_attribute` exactly."""
+    await _require_reveal_permission(x_dms_principal)
+    try:
+        vault_entry = await repository.get_pseudonymized_attribute(session, case_id, attribute_name)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    key = _get_pseudonymization_key()
+    try:
+        original_value = json.loads(crypto.decrypt(vault_entry.encrypted_value, key))
+    except crypto.DecryptionError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    await repository.mark_revealed(session, vault_entry.id, revealed_by=payload.revealed_by)
+    await session.commit()
+    await publish_event(
+        "case.attribute.revealed",
+        subject=case_id,
+        payload={"attribute_name": attribute_name},
+        actor=payload.revealed_by,
+    )
+    return RevealedAttributeOut(
+        case_id=case_id,
+        attribute_name=attribute_name,
+        value=original_value,
+        reason=vault_entry.reason,
+        pseudonymized_by=vault_entry.pseudonymized_by,
+        pseudonymized_at=vault_entry.pseudonymized_at,
+    )
+
+
+@app.get(
+    "/cases/{case_id}/attributes/pseudonymized",
+    response_model=list[PseudonymizedAttributeOut],
+)
+async def list_pseudonymized_case_attributes(
+    case_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> list[PseudonymizedAttributeOut]:
+    """Mirrors `document_service.main.list_pseudonymized_document_
+    attributes` - gated like any other regular case read (`case.read`),
+    NOT the admin-only reveal capability, same existence-before-permission
+    order every other per-case endpoint already uses (ADR 0144)."""
+    try:
+        await repository.get_case(session, case_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await _require_case_permission(x_dms_principal, access_type="read", resource_id=case_id)
+    return await repository.list_pseudonymized_attributes(session, case_id)

@@ -32,6 +32,7 @@ class DocumentOut(BaseModel):
     originating_case_id: str | None
     retention_until: datetime | None
     full_deletion: bool
+    retention_pseudonymize: bool
     pending_deletion_reason: str | None
     reminder_notify_email: str | None
     archive_after: datetime | None
@@ -184,6 +185,9 @@ class RetentionUpdate(BaseModel):
 
     retention_until: datetime | None = None
     full_deletion: bool = False
+    # Automatic retention-expiry pseudonymization (5.2, Phase 58 Session 1) -
+    # mutually exclusive with `full_deletion`, enforced in main.py.put_retention.
+    retention_pseudonymize: bool = False
     reason: str | None = None
     notify_email: str | None = None
 

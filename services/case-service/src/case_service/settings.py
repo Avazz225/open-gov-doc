@@ -24,3 +24,9 @@ class Settings(BaseServiceSettings):
     # irrelevant for this. First consumer of this event at all - workflow-service
     # was previously a pure producer, see docs/services/workflow-service.md "Events".
     subjects: list[str] = ["workflow.instance.completed"]
+
+    # Attribute-level pseudonymization vault (5.2, Phase 58 Session 1,
+    # mirrors ADR 0156) - deliberately a SEPARATE key from document-
+    # service's/folder-service's own (no shared trust relationship between
+    # services' key material, same rationale ADR 0156 itself used).
+    attribute_pseudonymization_key: str | None = None

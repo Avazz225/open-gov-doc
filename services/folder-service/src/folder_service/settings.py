@@ -53,3 +53,10 @@ class Settings(BaseServiceSettings):
     # document-service's `kennzeichen_admin_role`, here for the new
     # `POST /folders/{id}/reconcile-restore-deletion` endpoint.
     admin_role: str = "dms-admin"
+
+    # Attribute-level pseudonymization vault (5.2, Phase 58 Session 1,
+    # mirrors ADR 0156) - deliberately a SEPARATE key from
+    # `document-service`'s own `attribute_pseudonymization_key` (no shared
+    # trust relationship between the two services' key material, same
+    # rationale ADR 0156 itself used for not reusing archival-service's key).
+    attribute_pseudonymization_key: str | None = None
