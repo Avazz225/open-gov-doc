@@ -2,9 +2,85 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P54-S1 (`fleet-management-service`: gate the entire API, which previously had zero
-authentication of any kind — first session of Phase 54, "Critical Authorization Bugs"). **New ADR**
-([0172](docs/adr/0172-fleet-management-service-operator-key-gate.md)) — a real authentication-model
+**Last completed:** P54-S2 (`migration-service`: gate the six `/transfers/{id}/steps/*` step-callback
+endpoints, which previously had no auth check at all — second session of Phase 54, "Critical
+Authorization Bugs"). **New ADR** ([0173](docs/adr/0173-migration-service-step-endpoints-workflow-service-caller-gate.md))
+— a real authentication-model decision, per the plan's own conditional DoD.
+
+**The gap.** Also found by this round's live-code security sweep. `migration-service`'s six
+`/transfers/{id}/steps/*` endpoints (`lock`/`copy`/`verify`/`release`/`delete-source`/`dry-run-check`)
+had no gate at all — unlike every sibling `/transfers`/`/paired-installations` endpoint, which all carry
+`license_gate(...)`. These are meant only as `connector_call` BPMN service-task callback targets, but
+`migration-service` registers with `registry-service` and is reachable through the gateway by any
+authenticated user. Combined with `step_delete_source` calling `folder-service`'s trash endpoint under
+`migration-service`'s own elevated `X-DMS-Principal` identity (an already-established, otherwise-fine
+system-identity convention, see below), the missing gate meant any authenticated user who knew or
+guessed a `transfer_id` could trigger a real folder trash action, bypassing the BPMN process, the
+transfer's own approval gate, and their own permissions on the source folder entirely.
+
+**The fix — no new secret, reused the identity these endpoints already have exactly one legitimate
+caller for.** Unlike `fleet-management-service` (P54-S1, a pure operator/console surface with no natural
+per-request caller), these six endpoints DO have one already-identifiable legitimate caller:
+`workflow-service`, driving an already-approved BPMN transfer. Traced the actual call path first:
+`workflow-service`'s generic `connector_call` dispatcher (`_handle_connector_task`, explicitly documented
+as "no knowledge of the calling service") sent **no headers at all** on its outbound POST — so a
+principal check couldn't work until that was fixed too. Added one line there: send
+`X-DMS-Principal: workflow-service` unconditionally on every `connector_call`, the same fixed
+system-identity convention this service already uses for its own `document_client.py`
+(`_SYSTEM_PRINCIPAL_HEADERS`). This is additive and forward-compatible — no other `connector_call` target
+exists yet, so nothing else changes behavior. On `migration-service`'s side, a new
+`_require_workflow_service_caller` dependency rejects anything but that exact principal — and it's
+unspoofable for a real end user specifically, since the gateway always overwrites any client-supplied
+`X-DMS-Principal` with the JWT's own verified `sub` before forwarding (confirmed by reading
+`gateway-service`'s `proxy()` handler directly), which can never legitimately equal the literal string
+`"workflow-service"`. `step_delete_source`'s own outbound elevated-identity call to `folder-service` was
+deliberately left untouched — it's the same established system-identity pattern `LocalDmsClient` already
+uses everywhere else in this service, not itself the bug; once the inbound gate closes off any caller
+except the legitimate BPMN flow, that outbound call is the expected, accepted shape.
+
+New/updated tests: `workflow-service` — one assertion added to the existing
+`test_instance_with_connector_service_task_completes_via_stub` confirming the stub receives
+`X-DMS-Principal: workflow-service` (`216/216`, no count change, real BPMN engine test doubling as the
+live proof the header actually reaches a `connector_call` target). `migration-service` — two new
+regression tests (`test_step_endpoint_requires_workflow_service_caller`,
+`test_step_endpoint_with_wrong_principal_returns_403`), both hitting a step endpoint directly with a
+made-up `transfer_id` since the gate runs before the transfer lookup. `10/10` tests (was 8, +2) — this
+service's own test suite runs live against the real container (no in-process `TestClient`), so
+`test_full_transfer_lifecycle_self_loopback` (a real end-to-end BPMN transfer through a real, separately
+running `workflow-service` container) doubled as the integration proof that the whole chain — header sent
+→ gate passes → real business logic runs — still works end to end. `ruff check`/`ruff format --check`
+clean for both services.
+
+Docker images rebuilt and redeployed for both `workflow-service` and `migration-service` (in that order,
+required — `migration-service`'s own live-stack test suite needed the already-fixed `workflow-service`
+container running first, or its self-loopback test would have 403'd at the very first step).
+**Live-verified against the real running stack**: `curl` directly against `migration-service` confirmed a
+step endpoint returns `403` with no header AND with a real (non-`"workflow-service"`) principal, while
+`X-DMS-Principal: workflow-service` passes the gate and reaches the real `404` for a nonexistent
+`transfer_id` — proving the gate discriminates correctly, not just "any header present."
+
+`docs/services/migration-service.md`: API table and Tests updated. `docs/services/workflow-service.md`:
+"Connector service tasks" section updated with the new header.
+
+**A stray, unexplained observation, noted for transparency, not acted on**: mid-session, `git log`
+showed an extra automatic commit (also titled "Planning P54 - P58", landing ~2.5 minutes after the real
+one) containing WIP fragments of this session's own `fleet-management-service` edits — no git hook is
+configured in this repo (`.git/hooks/` checked, nothing beyond `.sample` files) that could explain it, so
+it's presumably some environment-level auto-checkpoint outside this session's own git commands. The
+content was legitimate in-progress work, not corruption, so nothing was reverted or rewritten — just
+committed over normally with the real `P54-S1` commit as planned.
+
+**Next session:** P54-S3 — `favorite-service` never reads `X-DMS-Principal` anywhere (confirmed via
+grep — zero hits): `create_favorite`/`list_favorites`/`delete_favorite` take `user_id` as a
+client-supplied field with no check that it matches the caller's own verified identity, so any
+authenticated user can view/add/delete any other user's favorites. Small, mechanical fix — no design
+decision needed. Third and last session of Phase 54.
+
+---
+
+Immediately before P54-S2: **P54-S1** (`fleet-management-service`: gate the entire API, which previously
+had zero authentication of any kind — first session of Phase 54, "Critical Authorization Bugs"). **New
+ADR** ([0172](docs/adr/0172-fleet-management-service-operator-key-gate.md)) — a real authentication-model
 decision, per the plan's own conditional DoD.
 
 **The gap.** Found by this round's live-code security sweep, not a doc sweep — nothing had previously

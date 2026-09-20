@@ -21,7 +21,7 @@ this service can be both the source and the target of a transfer.
 | `GET`/`DELETE` | `/paired-installations[/{id}]` | List (never with `api_key`) / remove |
 | `POST` | `/transfers` | Start a transfer — four-eyes-capable (4.3, `action_type=migration.transfer.start`), `404` for an unknown target, `dry_run`/`retention_days` optional |
 | `GET` | `/transfers[/{id}]` | Status/list, optionally filtered by `status` |
-| `POST` | `/transfers/{id}/steps/{lock\|copy\|verify\|release\|delete-source\|dry-run-check}` | Internal — target of the `connector_call` service tasks in `resources/*.bpmn`, not intended for external callers |
+| `POST` | `/transfers/{id}/steps/{lock\|copy\|verify\|release\|delete-source\|dry-run-check}` | Internal — target of the `connector_call` service tasks in `resources/*.bpmn`. **Since P54-S2** ([ADR 0173](../adr/0173-migration-service-step-endpoints-workflow-service-caller-gate.md)), actually enforced, not just documented as "not intended for external callers": requires `X-DMS-Principal: workflow-service`, `403` otherwise |
 | `POST` | `/inbound/transfers[/...]` | Target side — called by a paired source, `Authorization: Bearer <api_key>` |
 | `GET` | `/healthz` | Health check (ungated) |
 
@@ -139,4 +139,11 @@ component — `registry-service.licensable_components["migration-service"] = "de
 Runs, like `webdav-connector`, against the real, running container (no in-process `TestClient`
 — the self-loopback smoke test needs a server reachable from outside via a real network socket,
 see ADR 0034/"Deliberate limitations"). `test_full_transfer_lifecycle_self_loopback`
-covers the complete flow including deletion after a `retention_days=0` period expires.
+covers the complete flow including deletion after a `retention_days=0` period expires — since
+this drives a real BPMN instance through a real, separately running `workflow-service` container,
+it also doubles as the live regression proof that `workflow-service`'s `connector_call` dispatcher
+correctly sends the new `X-DMS-Principal: workflow-service` header (P54-S2, see below): the whole
+lifecycle would 403 at the very first step otherwise. **10 tests since P54-S2** (+2:
+`test_step_endpoint_requires_workflow_service_caller`/`test_step_endpoint_with_wrong_principal_returns_403`,
+the new gate's regression proof — both call a step endpoint directly with a made-up `transfer_id`,
+since the gate runs before the transfer lookup).

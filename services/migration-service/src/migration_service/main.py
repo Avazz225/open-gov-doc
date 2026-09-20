@@ -81,6 +81,20 @@ def license_gate(action: str):
     return _check
 
 
+async def _require_workflow_service_caller(x_dms_principal: str = Header(default="")) -> None:
+    """P54-S2/ADR 0173: gates every `/transfers/{id}/steps/*` endpoint below -
+    these are `connector_call` BPMN service-task callback targets, meant
+    only for `workflow-service` itself to invoke, never a real end user
+    through the gateway (whose own verified `X-DMS-Principal` is their own
+    Keycloak `sub`, never this literal string - see the ADR for why this
+    check is unspoofable for exactly that caller class)."""
+    if x_dms_principal != "workflow-service":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Nur workflow-service darf diesen Endpunkt aufrufen",
+        )
+
+
 _CONFIG_ADMIN_PRINCIPAL_ID = "migration-service"
 
 # Since Post-Roadmap Phase 19 Session 6 (ADR 0071, permission-service
@@ -415,7 +429,10 @@ async def list_transfers(
 # --- Step endpoints (target of the `connector_call` service tasks) ---------
 
 
-@app.post("/transfers/{transfer_id}/steps/lock")
+@app.post(
+    "/transfers/{transfer_id}/steps/lock",
+    dependencies=[Depends(_require_workflow_service_caller)],
+)
 async def step_lock(transfer_id: str, session: AsyncSession = Depends(get_session)) -> dict:
     transfer = await _get_transfer_or_404(session, transfer_id)
     try:
@@ -427,7 +444,10 @@ async def step_lock(transfer_id: str, session: AsyncSession = Depends(get_sessio
     return result
 
 
-@app.post("/transfers/{transfer_id}/steps/copy")
+@app.post(
+    "/transfers/{transfer_id}/steps/copy",
+    dependencies=[Depends(_require_workflow_service_caller)],
+)
 async def step_copy(transfer_id: str, session: AsyncSession = Depends(get_session)) -> dict:
     transfer = await _get_transfer_or_404(session, transfer_id)
     installation = await repository.get_paired_installation(
@@ -447,7 +467,10 @@ async def step_copy(transfer_id: str, session: AsyncSession = Depends(get_sessio
     return result
 
 
-@app.post("/transfers/{transfer_id}/steps/verify")
+@app.post(
+    "/transfers/{transfer_id}/steps/verify",
+    dependencies=[Depends(_require_workflow_service_caller)],
+)
 async def step_verify(
     transfer_id: str, data: dict, session: AsyncSession = Depends(get_session)
 ) -> dict:
@@ -467,7 +490,10 @@ async def step_verify(
     return result
 
 
-@app.post("/transfers/{transfer_id}/steps/release")
+@app.post(
+    "/transfers/{transfer_id}/steps/release",
+    dependencies=[Depends(_require_workflow_service_caller)],
+)
 async def step_release(transfer_id: str, session: AsyncSession = Depends(get_session)) -> dict:
     transfer = await _get_transfer_or_404(session, transfer_id)
     installation = await repository.get_paired_installation(
@@ -485,7 +511,10 @@ async def step_release(transfer_id: str, session: AsyncSession = Depends(get_ses
     return result
 
 
-@app.post("/transfers/{transfer_id}/steps/delete-source")
+@app.post(
+    "/transfers/{transfer_id}/steps/delete-source",
+    dependencies=[Depends(_require_workflow_service_caller)],
+)
 async def step_delete_source(
     transfer_id: str, session: AsyncSession = Depends(get_session)
 ) -> dict:
@@ -501,7 +530,10 @@ async def step_delete_source(
     return result
 
 
-@app.post("/transfers/{transfer_id}/steps/dry-run-check")
+@app.post(
+    "/transfers/{transfer_id}/steps/dry-run-check",
+    dependencies=[Depends(_require_workflow_service_caller)],
+)
 async def step_dry_run_check(
     transfer_id: str, session: AsyncSession = Depends(get_session)
 ) -> dict:

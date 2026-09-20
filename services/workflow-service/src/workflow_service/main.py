@@ -120,7 +120,16 @@ def _handle_connector_task(extensions: dict[str, str], data: dict) -> dict:
             f"serviceUrl {service_url!r} referenziert eine unbekannte Prozessvariable: {exc}"
         ) from exc
     response = _connector_http_client.post(
-        service_url, json=data, timeout=settings.connector_call_timeout_seconds
+        service_url,
+        json=data,
+        # P54-S2/ADR 0173: a fixed system-identity header, unconditional on
+        # every connector_call target - the same established
+        # "trusted internal caller sends a fixed principal string"
+        # convention this service already uses for its own document_client
+        # (`_SYSTEM_PRINCIPAL_HEADERS`). Additive only: no existing target
+        # checks this header except `migration-service` since this session.
+        headers={"X-DMS-Principal": "workflow-service"},
+        timeout=settings.connector_call_timeout_seconds,
     )
     response.raise_for_status()
     body = response.json()

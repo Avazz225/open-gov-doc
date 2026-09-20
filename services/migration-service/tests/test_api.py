@@ -104,6 +104,25 @@ def test_healthz():
     assert response.json()["service"] == "migration-service"
 
 
+def test_step_endpoint_requires_workflow_service_caller():
+    """P54-S2/ADR 0173: the six `/transfers/{id}/steps/*` endpoints are
+    `connector_call` BPMN callback targets, not end-user-callable - a real
+    `transfer_id` is enough to reach this check, the gate runs before the
+    transfer lookup so the ID doesn't even need to be valid."""
+    with _client() as client:
+        response = client.post("/transfers/does-not-matter/steps/lock")
+    assert response.status_code == 403
+
+
+def test_step_endpoint_with_wrong_principal_returns_403():
+    with _client() as client:
+        response = client.post(
+            "/transfers/does-not-matter/steps/lock",
+            headers={"X-DMS-Principal": "someone-else"},
+        )
+    assert response.status_code == 403
+
+
 def test_create_paired_installation_returns_api_key_once_and_list_hides_it():
     with _client() as client:
         created = client.post(

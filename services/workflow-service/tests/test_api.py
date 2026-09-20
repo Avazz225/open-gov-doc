@@ -1591,6 +1591,10 @@ def test_instance_with_connector_service_task_completes_via_stub(
 
     def stub(request: httpx.Request) -> httpx.Response:
         assert request.url == "http://connector-stub.invalid/step"
+        # P54-S2/ADR 0173: sent unconditionally on every connector_call, the
+        # fixed system-identity header a target like `migration-service`
+        # now gates its own step-callback endpoints on.
+        assert request.headers["X-DMS-Principal"] == "workflow-service"
         return httpx.Response(200, json={"result": "ok"})
 
     monkeypatch.setattr(
