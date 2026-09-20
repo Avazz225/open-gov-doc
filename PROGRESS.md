@@ -2,12 +2,66 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P51-S4 (maintenance-mode "Category A" coverage: `document-service`/`folder-service`'s
-request-triggered cascading-write endpoints now reject during a system-wide emergency lockdown — fourth
-and last session of Phase 51, "Security & Correctness Bugfixes". **Phase 51 is now fully complete.**).
-No new ADR — extends an already-existing, already-designed mechanism (`workflow-service`'s own
-`_reject_during_maintenance` header check, P6-S6) to new call sites, per ADR 0152's own recommendation
-and Definition of Done exception.
+**Last completed:** P52-S1 (fine-grained user tracking, 5.5/ADR 0157: new `admin-ui` page — had always
+been API/curl-only. First session of Phase 52, "Dependency-Resolved / Overdue Completions"). No new
+ADR — a pure frontend CRUD page against already-existing, already-approved backend endpoints, per the
+plan's own DoD (P52-S1/S2 don't need one).
+
+The backend (config/sessions/retention endpoints, all since Post-Roadmap Phase 41 Session 3/ADR 0157)
+had full functionality the whole time but was never given a frontend. Followed the P50-S5
+(`AdGroupMappings`) pattern — `RequireAuth`→`RequireCapability`→`AdminShell`, new route `/user-tracking/`
+in the "Sicherheit" sidebar group — with one genuine structural difference this session had to solve:
+the backend splits its endpoints across TWO independent capabilities (`admin.user_tracking` for
+config/retention, `admin.user_tracking_view` for session data), unlike every other admin page's single
+capability. Extended `RequireCapability` (and `AdminSidebar`'s `requiresCapability`) to accept
+`string | string[]` with OR semantics, backward-compatible with every existing single-string caller —
+the page itself renders with EITHER capability, then each of its three sections does its own
+finer-grained `permissions.includes(...)` check, so a view-only auditor sees sessions without the config
+form and vice versa.
+
+No list-all endpoint exists for per-principal tracking config (`GET /user-tracking-config/{id}` is a
+single-record lookup) — unlike `AdGroupMappings.tsx`'s "load everything, then CRUD rows" shape, the
+config section is a lookup-by-principal-id form instead. Sessions section lists the most recent 200
+entries (optionally filtered by principal), read-only. Retention section is a plain singleton
+load/save, client-side validates `>= 1` day ahead of the backend's own `422`.
+
+New API client functions added from scratch to `api.ts` (zero existed before — confirmed via grep).
+New test files: `user-tracking.test.tsx` (+7 — section visibility per capability, config lookup/toggle,
+sessions list/filter, retention load/save + validation, a load-error path) and
+`require-capability.test.tsx` (+5 — the array/OR extension, plus a regression proving the pre-existing
+single-string behavior is unchanged). `287`/`288` tests passing (was 275/276 — +12 new, 1 pre-existing
+unrelated failure in `processing-failures.test.tsx`, confirmed via `git stash` to already exist on
+`develop` before this session, same Phase 47 Session 4 finding documented previously). `tsc --noEmit`/
+`eslint .`/`next build` all clean, new `/user-tracking` route confirmed in the build output.
+
+Docker image rebuilt and redeployed. **Live-verified end-to-end against the real running stack** via
+Playwright: logged in as `users-admin`, temporarily granted both new capabilities via a real
+`role-assignment` (neither is seeded onto any technical account by default, unlike `admin.user_
+management` which `users-admin` already had) — confirmed via
+`services/auth-service/src/auth_service/domain_admins.py` that a `TechnicalAccount`'s `principal_id` is
+its own row id (`str(account.id)`, `"2"` for `users-admin`), not the username string, the first
+role-assignment attempt using the literal string `"users-admin"` silently created a grant that could
+never actually match and was caught before considering the check done. Confirmed the new sidebar entry,
+all three sections rendering with real data (retention defaulted to 7 days), a real config lookup +
+toggle round-trip, and a real sessions filter — zero console errors. Both temporary role-assignments
+revoked afterward (per ADR 0157, no technical account is meant to have these by default); throwaway
+script and screenshot cleaned up.
+
+`docs/services/auth-service.md`: new closing bullet in the "Fine-Grained User Tracking" section
+recording the admin-UI page and the array-capability structural note. `docs/services/admin-ui.md`: new
+Backend Integration table row, Tests section updated.
+
+**Next session:** P52-S2 — cross-installation config-compare admin-UI screen (Concept §7.5,
+`config-service` backend already complete), second session of Phase 52.
+
+---
+
+Immediately before P52-S1: **P51-S4** (maintenance-mode "Category A" coverage: `document-service`/
+`folder-service`'s request-triggered cascading-write endpoints now reject during a system-wide
+emergency lockdown — fourth and last session of Phase 51, "Security & Correctness Bugfixes". **Phase 51
+is now fully complete.**). No new ADR — extends an already-existing, already-designed mechanism
+(`workflow-service`'s own `_reject_during_maintenance` header check, P6-S6) to new call sites, per ADR
+0152's own recommendation and Definition of Done exception.
 
 ADR 0164 (P44-S3) closed maintenance mode's "Category B" (background poll loops) but explicitly left
 "Category A" (request-triggered cascading writes) unaddressed, per ADR 0152's own scoping — cascades
@@ -62,48 +116,6 @@ deliberate deviation from its literal recommendation, and what's still open. `do
 struck the "Category A remains unaddressed" Consequences bullet, replaced with a closure note.
 `docs/services/document-service.md`/`docs/services/folder-service.md`: one sentence each, appended to
 the existing Category-B maintenance-mode mention.
-
-`repository.delete_folder()`'s not-empty check was purely local (`list_children`, a folder-only DB
-query) — documents live in `document-service`, a different service, and were never consulted at all on
-this path. The regular UI deletion path (`POST .../trash`) was unaffected, since it already cascades
-onto documents via a synchronous `document_client.cascade_trash` call — only the less-frequently-used
-legacy hard-delete fallback had the gap. First named at P4-S4, re-surfaced (still open) during the
-Phase 44+ gap-analysis round's docs sweep, assigned to a session for the first time here.
-
-Fixed by adding one more check to `delete_folder`, right after the existing permission check and before
-`repository.delete_folder()`: `await app.state.document_client.count_active([folder_id]) > 0` → `409`.
-Reused the exact same `DocumentClient.count_active()` method the forced-deletion trash-cascade path
-already calls for the identical purpose — no new HTTP client code needed. `cmis-connector`'s own
-`_do_delete()` pre-check (`_tree.list_children()`, raising a CMIS-shaped `constraint` error) stays as-is
-— it is no longer the only thing preventing orphaning, but it still owns translating "folder not empty"
-into the CMIS error taxonomy's specific `409` shape, a concern the generic `folder-service` fix doesn't
-(and shouldn't) replace. Only its explanatory comment was updated to stop claiming the reverse.
-
-New regression test `test_delete_folder_with_active_documents_returns_409` (`folder-service`), using the
-existing `AsyncMock` fake `document_client` fixture. `144`/`144` `folder-service` tests passing (was
-143, +1), `17`/`17` `cmis-connector` tests passing (comment-only change there, re-run to confirm no
-regression). One `folder-service` test failed on the first full-suite run
-(`test_trash_folder_with_approval_required_defers_execution`, `403` instead of `200`) — investigated,
-confirmed a one-off flake against the real `permission-service` integration (passed in isolation, passed
-again on a clean re-run of the full suite twice in a row afterward), not caused by this session's change,
-which touches only the unrelated `DELETE` endpoint. `ruff check`/`ruff format --check` show 21
-pre-existing violations in `apps/libreoffice-addin/python/ogdoc_addin.py`,
-`loadtest/notebook/analysis.ipynb`, and `services/federation-hub-service/tests/test_repository.py` — all
-in files untouched by this session, confirmed via `git stash` to already exist on `develop` before this
-session started; left alone as out of scope.
-
-Docker image rebuilt and redeployed. Live-verified against the real running stack: created a folder with
-one active document via `curl`, confirmed `DELETE /folders/{id}` now returns `409` with the new detail
-message and the folder remains `200`-resolvable afterward; trashed the document (`count_active` drops to
-`0`), retried `DELETE`, confirmed `204` — proving the check is precise (blocks only on genuinely active
-documents, not trashed ones) and that the pre-existing empty-subfolder `409` case remains unaffected.
-
-`docs/services/folder-service.md`: API table's `DELETE /folders/{id}` row and "Open Points" updated
-(new closed bullet, cross-referencing the fix). `docs/services/cmis-connector.md`: revised the
-"`delete` on a non-empty folder" open-points entry to correct its original "no change to folder-service
-needed" framing — this session found that reasoning incomplete (a genuine orphaning risk regardless of
-caller, not just a CMIS-contract nuance) and folder-service now also rejects server-side.
-`docs/services/user-ui.md`: closed its own cross-reference to the same known gap (line ~469).
 
 **Next session:** P52-S1 — fine-grained user tracking (5.5, ADR 0157) admin-UI page, following the
 P50-S5 pattern (`RequireAuth`→`RequireCapability`→`AdminShell`) for the three existing endpoint groups

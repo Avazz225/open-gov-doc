@@ -349,6 +349,103 @@ export async function setAdGroupMappingDefaultRole(
   return response.json();
 }
 
+// Fine-grained user tracking (5.5, ADR 0157, Phase 52 Session 1) - has
+// always been API-only until this session. Two independent backend
+// capabilities: `admin.user_tracking` gates config read/write, `admin.
+// user_tracking_view` gates session read - unlike every other admin page,
+// no single capability covers this whole page (see RequireCapability's
+// array form). No four-eyes on any of these three endpoint groups
+// (deliberately out of scope per ADR 0157) - `PUT` responses are the plain
+// resource, not a `{status, ...}` envelope like AD-group-mapping's.
+export interface UserTrackingConfig {
+  principal_id: string;
+  enabled: boolean;
+  updated_by: string;
+  updated_at: string;
+}
+
+export async function getUserTrackingConfig(
+  token: string,
+  principalId: string
+): Promise<UserTrackingConfig> {
+  const response = await request(
+    "auth-service",
+    `user-tracking-config/${encodeURIComponent(principalId)}`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function setUserTrackingConfig(
+  token: string,
+  principalId: string,
+  params: { enabled: boolean; updatedBy: string }
+): Promise<UserTrackingConfig> {
+  const response = await request(
+    "auth-service",
+    `user-tracking-config/${encodeURIComponent(principalId)}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: params.enabled, updated_by: params.updatedBy }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export interface UserTrackingSession {
+  id: string;
+  principal_id: string;
+  username: string;
+  event_type: string;
+  auth_method: string;
+  client_ip: string | null;
+  user_agent: string | null;
+  occurred_at: string;
+}
+
+export async function listUserTrackingSessions(
+  token: string,
+  principalId?: string
+): Promise<UserTrackingSession[]> {
+  const path = principalId
+    ? `user-tracking-sessions?principal_id=${encodeURIComponent(principalId)}`
+    : "user-tracking-sessions";
+  const response = await request("auth-service", path, {}, token);
+  return response.json();
+}
+
+export interface UserTrackingRetentionConfig {
+  retention_days: number;
+  updated_at: string;
+}
+
+export async function getUserTrackingRetentionConfig(
+  token: string
+): Promise<UserTrackingRetentionConfig> {
+  const response = await request("auth-service", "user-tracking-retention-config", {}, token);
+  return response.json();
+}
+
+export async function setUserTrackingRetentionConfig(
+  token: string,
+  retentionDays: number
+): Promise<UserTrackingRetentionConfig> {
+  const response = await request(
+    "auth-service",
+    "user-tracking-retention-config",
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ retention_days: retentionDays }),
+    },
+    token
+  );
+  return response.json();
+}
+
 export interface Role {
   id: number;
   name: string;

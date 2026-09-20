@@ -12,8 +12,9 @@ interface NavItem {
   // Domain-separated admin roles (4.6, P6-S5): if the capability is
   // missing, the entry is hidden - defense in depth is additionally
   // provided by `RequireCapability` on the target page itself, in case the
-  // URL is accessed directly.
-  requiresCapability?: string;
+  // URL is accessed directly. An array (Phase 52 Session 1) means "ANY of
+  // these", matching `RequireCapability`'s own array form.
+  requiresCapability?: string | string[];
 }
 
 interface NavGroup {
@@ -144,6 +145,11 @@ const GROUPS: NavGroup[] = [
         requiresCapability: "admin.user_management",
       },
       {
+        href: "/user-tracking/",
+        labelKey: "nav.userTracking",
+        requiresCapability: ["admin.user_tracking", "admin.user_tracking_view"],
+      },
+      {
         href: "/email-templates/",
         labelKey: "nav.emailTemplates",
         requiresCapability: "admin.notification_config",
@@ -212,9 +218,13 @@ export function AdminSidebar() {
   return (
     <nav className="admin-sidebar" aria-label={t("nav.ariaLabel")}>
       {GROUPS.map((group) => {
-        const visibleItems = group.items.filter(
-          (item) => !item.requiresCapability || permissions.includes(item.requiresCapability)
-        );
+        const visibleItems = group.items.filter((item) => {
+          if (!item.requiresCapability) return true;
+          const required = Array.isArray(item.requiresCapability)
+            ? item.requiresCapability
+            : [item.requiresCapability];
+          return required.some((c) => permissions.includes(c));
+        });
         if (visibleItems.length === 0) return null;
         const isCollapsed = Boolean(collapsed[group.id]);
         return (
