@@ -4,9 +4,13 @@ import httpx
 import pytest
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.testclient import TestClient
-from fleet_management_service.main import app
+from fleet_management_service.main import app, settings
 
 FLEET_KEY = "fleet-secret-xyz"
+# P54-S1/ADR 0172: distinct from FLEET_KEY (the per-installation agent key
+# this service ITSELF mints) - this is the operator secret a caller now
+# needs to reach this service's own API at all.
+OPERATOR_KEY = "fleet-operator-secret-for-tests"
 
 
 def _make_stub(*, license_installed: bool = True) -> FastAPI:
@@ -44,15 +48,44 @@ def _make_stub(*, license_installed: bool = True) -> FastAPI:
 
 @pytest.fixture
 def client():
-    with TestClient(app) as c:
-        app.state.agent_transport = httpx.ASGITransport(app=_make_stub())
-        yield c
+    """P54-S1/ADR 0172: `settings.fleet_operator_key` is set here and the
+    resulting bearer header applied as a CLIENT-level default (not per test
+    call site) - every one of this service's ~30 existing tests needed the
+    header once the whole API was gated, unlike `federation-hub-service`'s
+    own per-test set/reset pattern (ADR 0162), which only ever gated two of
+    many endpoints. The two dedicated gate tests below override the header
+    per-call instead of using this fixture's default."""
+    settings.fleet_operator_key = OPERATOR_KEY
+    try:
+        with TestClient(app, headers={"Authorization": f"Bearer {OPERATOR_KEY}"}) as c:
+            app.state.agent_transport = httpx.ASGITransport(app=_make_stub())
+            yield c
+    finally:
+        settings.fleet_operator_key = None
 
 
 def test_healthz(client):
     response = client.get("/healthz")
     assert response.status_code == 200
     assert response.json()["service"] == "fleet-management-service"
+
+
+def test_installations_requires_fleet_operator_key(client):
+    """P54-S1/ADR 0172."""
+    response = client.get("/installations", headers={"Authorization": ""})
+    assert response.status_code == 403
+
+
+def test_installations_with_wrong_operator_key_returns_403(client):
+    """P54-S1/ADR 0172."""
+    response = client.get("/installations", headers={"Authorization": "Bearer wrong-key"})
+    assert response.status_code == 403
+
+
+def test_healthz_stays_ungated_without_operator_key(client):
+    """P54-S1/ADR 0172: `/healthz` is the one deliberate exception."""
+    response = client.get("/healthz", headers={"Authorization": ""})
+    assert response.status_code == 200
 
 
 def _register(client, **overrides) -> dict:

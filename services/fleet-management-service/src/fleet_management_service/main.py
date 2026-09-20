@@ -246,9 +246,7 @@ async def list_installation_statuses(
     return list(await asyncio.gather(*(_fetch_status(i) for i in installations)))
 
 
-@app.post(
-    "/installations/{installation_id}/license", dependencies=[Depends(_require_operator_key)]
-)
+@app.post("/installations/{installation_id}/license", dependencies=[Depends(_require_operator_key)])
 async def push_license(
     installation_id: str,
     payload: LicenseUploadRequest,
@@ -320,13 +318,17 @@ async def create_group(
     return await _group_out(session, group)
 
 
-@app.get("/groups", response_model=list[GroupOut])
+@app.get("/groups", response_model=list[GroupOut], dependencies=[Depends(_require_operator_key)])
 async def list_groups(session: AsyncSession = Depends(get_session)) -> list[GroupOut]:
     groups = await repository.list_groups(session)
     return [await _group_out(session, g) for g in groups]
 
 
-@app.post("/groups/{group_id}/members", response_model=GroupOut)
+@app.post(
+    "/groups/{group_id}/members",
+    response_model=GroupOut,
+    dependencies=[Depends(_require_operator_key)],
+)
 async def add_group_member(
     group_id: str, payload: GroupMemberAdd, session: AsyncSession = Depends(get_session)
 ) -> GroupOut:
@@ -339,7 +341,11 @@ async def add_group_member(
     return await _group_out(session, group)
 
 
-@app.delete("/groups/{group_id}/members/{installation_id}", response_model=GroupOut)
+@app.delete(
+    "/groups/{group_id}/members/{installation_id}",
+    response_model=GroupOut,
+    dependencies=[Depends(_require_operator_key)],
+)
 async def remove_group_member(
     group_id: str, installation_id: str, session: AsyncSession = Depends(get_session)
 ) -> GroupOut:
@@ -352,7 +358,11 @@ async def remove_group_member(
     return await _group_out(session, group)
 
 
-@app.delete("/groups/{group_id}", status_code=status.HTTP_204_NO_CONTENT)
+@app.delete(
+    "/groups/{group_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(_require_operator_key)],
+)
 async def delete_group(group_id: str, session: AsyncSession = Depends(get_session)) -> None:
     try:
         await repository.delete_group(session, group_id)
@@ -361,7 +371,12 @@ async def delete_group(group_id: str, session: AsyncSession = Depends(get_sessio
     await session.commit()
 
 
-@app.post("/plans", response_model=UpdatePlanOut, status_code=status.HTTP_201_CREATED)
+@app.post(
+    "/plans",
+    response_model=UpdatePlanOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(_require_operator_key)],
+)
 async def create_plan(
     payload: UpdatePlanCreate, session: AsyncSession = Depends(get_session)
 ) -> UpdatePlan:
@@ -374,12 +389,18 @@ async def create_plan(
     return plan
 
 
-@app.get("/plans", response_model=list[UpdatePlanOut])
+@app.get(
+    "/plans", response_model=list[UpdatePlanOut], dependencies=[Depends(_require_operator_key)]
+)
 async def list_plans(session: AsyncSession = Depends(get_session)) -> list[UpdatePlan]:
     return await repository.list_update_plans(session)
 
 
-@app.get("/plans/{plan_id}", response_model=UpdatePlanOut)
+@app.get(
+    "/plans/{plan_id}",
+    response_model=UpdatePlanOut,
+    dependencies=[Depends(_require_operator_key)],
+)
 async def get_plan(plan_id: str, session: AsyncSession = Depends(get_session)) -> UpdatePlan:
     try:
         return await repository.get_update_plan(session, plan_id)
@@ -424,7 +445,12 @@ async def _rollout_out(session: AsyncSession, rollout) -> RolloutOut:
     )
 
 
-@app.post("/rollouts", response_model=RolloutOut, status_code=status.HTTP_201_CREATED)
+@app.post(
+    "/rollouts",
+    response_model=RolloutOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(_require_operator_key)],
+)
 async def create_rollout(payload: RolloutCreate, session: AsyncSession = Depends(get_session)):
     try:
         rollout, _runs = await repository.create_rollout(session, payload)
@@ -434,13 +460,19 @@ async def create_rollout(payload: RolloutCreate, session: AsyncSession = Depends
     return await _rollout_out(session, rollout)
 
 
-@app.get("/rollouts", response_model=list[RolloutOut])
+@app.get(
+    "/rollouts", response_model=list[RolloutOut], dependencies=[Depends(_require_operator_key)]
+)
 async def list_rollouts(session: AsyncSession = Depends(get_session)):
     rollouts = await repository.list_rollouts(session)
     return [await _rollout_out(session, r) for r in rollouts]
 
 
-@app.get("/rollouts/{rollout_id}", response_model=RolloutOut)
+@app.get(
+    "/rollouts/{rollout_id}",
+    response_model=RolloutOut,
+    dependencies=[Depends(_require_operator_key)],
+)
 async def get_rollout(rollout_id: str, session: AsyncSession = Depends(get_session)):
     try:
         rollout = await repository.get_rollout(session, rollout_id)
@@ -449,7 +481,11 @@ async def get_rollout(rollout_id: str, session: AsyncSession = Depends(get_sessi
     return await _rollout_out(session, rollout)
 
 
-@app.post("/rollouts/{rollout_id}/start", response_model=RolloutOut)
+@app.post(
+    "/rollouts/{rollout_id}/start",
+    response_model=RolloutOut,
+    dependencies=[Depends(_require_operator_key)],
+)
 async def start_rollout(
     rollout_id: str, payload: RolloutStart, session: AsyncSession = Depends(get_session)
 ):
@@ -487,6 +523,7 @@ async def _load_run_context(session: AsyncSession, rollout_id: str, installation
 @app.post(
     "/rollouts/{rollout_id}/installations/{installation_id}/advance",
     response_model=InstallationRunOut,
+    dependencies=[Depends(_require_operator_key)],
 )
 async def advance_installation_run(
     rollout_id: str, installation_id: str, session: AsyncSession = Depends(get_session)
@@ -538,6 +575,7 @@ async def advance_installation_run(
 @app.post(
     "/rollouts/{rollout_id}/installations/{installation_id}/mark-done",
     response_model=InstallationRunOut,
+    dependencies=[Depends(_require_operator_key)],
 )
 async def mark_installation_run_done(
     rollout_id: str,
@@ -583,6 +621,7 @@ async def mark_installation_run_done(
 @app.post(
     "/rollouts/{rollout_id}/installations/{installation_id}/approve",
     response_model=InstallationRunOut,
+    dependencies=[Depends(_require_operator_key)],
 )
 async def approve_installation_run(
     rollout_id: str,
@@ -615,6 +654,7 @@ async def approve_installation_run(
 @app.post(
     "/rollouts/{rollout_id}/installations/{installation_id}/reject",
     response_model=InstallationRunOut,
+    dependencies=[Depends(_require_operator_key)],
 )
 async def reject_installation_run(
     rollout_id: str,
@@ -641,6 +681,7 @@ async def reject_installation_run(
 @app.post(
     "/rollouts/{rollout_id}/installations/{installation_id}/retry",
     response_model=InstallationRunOut,
+    dependencies=[Depends(_require_operator_key)],
 )
 async def retry_installation_run(
     rollout_id: str, installation_id: str, session: AsyncSession = Depends(get_session)
@@ -662,6 +703,7 @@ async def retry_installation_run(
 @app.post(
     "/rollouts/{rollout_id}/installations/{installation_id}/acknowledge-fatal",
     response_model=InstallationRunOut,
+    dependencies=[Depends(_require_operator_key)],
 )
 async def acknowledge_fatal_installation_run(
     rollout_id: str, installation_id: str, session: AsyncSession = Depends(get_session)

@@ -2,9 +2,62 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P53-S4 (`mail-connector` event-loop test flakiness, fixed at the root — fourth and
-last session of Phase 53, "Lower-Priority Hardening & Polish". **Closes Phase 53.**). No new ADR —
-framed by the plan itself as "a maintenance-cost investment rather than a feature," a pure
+**Last completed:** P54-S1 (`fleet-management-service`: gate the entire API, which previously had zero
+authentication of any kind — first session of Phase 54, "Critical Authorization Bugs"). **New ADR**
+([0172](docs/adr/0172-fleet-management-service-operator-key-gate.md)) — a real authentication-model
+decision, per the plan's own conditional DoD.
+
+**The gap.** Found by this round's live-code security sweep, not a doc sweep — nothing had previously
+flagged it. Every endpoint in `fleet-management-service` (`create_installation`, `delete_installation`,
+`rotate_installation_key`, `push_license`, the group/plan/rollout CRUD, every rollout
+advance/mark-done/approve/reject/retry/acknowledge-fatal endpoint) had no `Depends()`-based auth, header
+check, or API-key gate at all — confirmed by grepping the whole file and finding only
+`Depends(get_session)`. Worse than the single-endpoint gap ADR 0162 already fixed in
+`federation-hub-service`: `rotate_installation_key` mints and returns the plaintext
+`fleet_agent_api_key` a real managed installation's `config-service`/`license-service` trusts.
+
+**The fix.** Reused ADR 0162's exact `hub_operator_key` mechanism (a new, optional
+`settings.fleet_operator_key`, `Authorization: Bearer <key>`, fully locked with no key configured) but
+applied it to the ENTIRE API surface rather than one endpoint — every one of this service's ~26
+non-`/healthz` routes now carries `dependencies=[Depends(_require_operator_key)]`. Traced the actual call
+graph first to confirm one secret is enough: no managed installation ever calls INTO
+`fleet-management-service` (the `fleet_agent_api_key` this service mints is verified by the TARGET
+installation's own `_is_fleet_agent()` checks, never the reverse), so there's no "console caller vs.
+managed-installation callback" distinction to make, unlike what the plan had speculated might be needed.
+`approve_installation_run`'s own already-documented ADR 0038 limitation (structural, not cryptographic,
+proposer/approver separation) was left untouched — unrelated to this session, and the new gate still
+meaningfully raises the bar for it (a caller now needs the operator key to reach either call at all).
+
+New/updated tests: shared `client` fixture now sets `settings.fleet_operator_key` and applies the bearer
+header as a `TestClient`-level default (every test needed it once the whole API was gated, so a global
+fixture default was used instead of ADR 0162's own per-test set/reset pattern, which only ever covered
+two endpoints), plus three new regression tests (`test_installations_requires_fleet_operator_key`,
+`test_installations_with_wrong_operator_key_returns_403`, `test_healthz_stays_ungated_without_operator_key`
+confirming the one deliberate exception). `33/33` tests (was 30, +3). `ruff check`/`ruff format --check`
+clean.
+
+Docker image rebuilt and redeployed. **Live-verified against the real running stack**: `curl` confirmed
+every previously-open endpoint (a read, `GET /installations`, and the most sensitive write,
+`POST /installations`) now returns `403` with no `Authorization` header and with a wrong one, while
+`/healthz` stays reachable throughout. A temporary `DMS_FLEET_OPERATOR_KEY` override (added to
+`infra/docker-compose.yml`, container restarted, verified, then the override removed and the container
+restarted again — `git diff` confirmed clean before moving on) proved a correctly-configured key passes
+the gate and reaches the real `200`.
+
+`docs/services/fleet-management-service.md`: "Architecture Decisions" gained the new gate's summary,
+Tests updated with the new count and live-verification note.
+
+**Next session:** P54-S2 — `migration-service`'s six `/transfers/{id}/steps/*` endpoints have no gate at
+all (unlike every sibling `/transfers`/`/paired-installations` endpoint, which all carry a
+`license_gate(...)` dependency), and `step_delete_source` impersonates the trusted `migration-service`
+identity via a hardcoded `X-DMS-Principal` header instead of forwarding the real caller's — a real,
+exploitable authorization bypass, not just a missing gate. Second session of Phase 54.
+
+---
+
+Immediately before P54-S1: **P53-S4** (`mail-connector` event-loop test flakiness, fixed at the root —
+fourth and last session of Phase 53, "Lower-Priority Hardening & Polish". **Closes Phase 53.**). No new
+ADR — framed by the plan itself as "a maintenance-cost investment rather than a feature," a pure
 test-infrastructure/robustness fix, no new architecture decision.
 
 **Root cause, precisely diagnosed rather than guessed at.** `_ingest_message` is the one call site in
