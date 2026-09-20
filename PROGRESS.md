@@ -2,7 +2,60 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P54-S3 (`favorite-service`: `user_id` ownership check, previously fully
+**Last completed:** P55-S1 (`teamspace-service`: new `consumer.py` cleaning up a teamspace orphaned by a
+root-folder deletion bypassing this service entirely — first session of Phase 55, "Correctness:
+Cross-Service Cleanup on Delete Paths"). **New ADR** ([0175](docs/adr/0175-teamspace-service-root-folder-deletion-cleanup-consumer.md))
+— the mark-orphaned-vs-teardown design decision the plan itself flagged as needing a real choice.
+
+**The gap.** Found by this round's live-code security sweep. `teamspace-service` had **no `consumer.py`
+at all** — confirmed no file, no `subscribe()` call anywhere in its source. Per ADR 0163/P44-S2, a
+`teamspace-manager` legitimately holds `folder.delete` on a teamspace's root folder — a deliberate
+decision at the time, correctly restricting *who* could trigger this, but `folder-service` itself has no
+concept of "teamspace," and ADR 0163 explicitly named that unaddressed. A manager could therefore
+delete/trash the root folder directly via `folder-service`, entirely bypassing this service's own
+`DELETE /teamspaces/{id}` (which deliberately preserves the root folder). Result: the `Teamspace` row,
+its members, and every member's `permission-service` role assignment on the now-nonexistent folder all
+kept existing forever — a silently broken teamspace with no cleanup path and no visible error until a
+member tried to use it.
+
+**The fix.** New `consumer.py` subscribes to `folder-service`'s `folder.resource.deleted` (the structural
+"this folder is now permanently gone" signal — deliberately NOT `folder.trashed`, which is reversible and
+would wrongly tear down a teamspace a manager might still restore). On a match (looked up via new
+`repository.get_teamspace_by_root_folder_id`), revokes every member's `permission-service` access on the
+resource, then calls the same `repository.delete_teamspace` the manual deletion path already uses — full
+teardown, not a "mark orphaned" flag (rejected as materially larger scope — a new admin-UI surface and
+state field — for a case with exactly one meaningful recovery action: none, since the teamspace's whole
+reason to exist is gone). New second, consumer-side `NatsEventBusClient` connection alongside the
+existing producer, same dual-bus pattern `case-service`/`notification-service` already use.
+
+New/updated tests: new `test_consumer.py` (+2) — `make_handler`'s returned `handle()` called directly
+with a real `Event` against a real DB (no real NATS round-trip needed, a `FakePermissionClient` records
+calls, same pattern as `case-service/tests/test_consumer.py`): the handler tears down a matching
+teamspace incl. revoking every member's access, and is a no-op for an unrelated folder's deletion event
+(the common case — this event fires for every folder deletion in the installation). `53/53` tests (was
+51, +2). `ruff check`/`ruff format --check` clean.
+
+Docker image rebuilt and redeployed. **Live-verified against the real running stack**: created a real
+teamspace via the API, confirmed two real `permission-service` role assignments existed for its creator
+on the root folder, deleted that root folder directly via `folder-service`'s `DELETE /folders/{id}`
+(bypassing `teamspace-service` entirely — the exact bypass this session closes), then confirmed against
+the real, rebuilt container: `GET /teamspaces/{id}` now `404`s, both role assignments are gone, and the
+container's own log shows `teamspace_orphan_cleanup_completed` — where before this session, both would
+have persisted forever.
+
+`docs/services/teamspace-service.md`: "Events" section gained the new consumer's description, Tests and
+live-verification note updated.
+
+**Next session:** P55-S2 — `auth-service`'s `DELETE /users/{id}` only calls Keycloak's `delete_user`; it
+never notifies or calls `permission-service` (to revoke that principal's `RoleAssignment` rows) or
+`teamspace-service` (to remove their `TeamspaceMember` rows), leaving stale grants/references behind
+indefinitely for every deleted user. Small, mechanical extension of the same "resource deletion cleans up
+its dependents" pattern this session just applied elsewhere — no new design decision expected. Second and
+last session of Phase 55.
+
+---
+
+Immediately before P55-S1: **P54-S3** (`favorite-service`: `user_id` ownership check, previously fully
 client-supplied with no identity verification at all — third and last session of Phase 54, "Critical
 Authorization Bugs". **Closes Phase 54.**). **New ADR** ([0174](docs/adr/0174-favorite-service-user-id-check-against-x-dms-username.md))
 — the plan had judged this "small, mechanical, no design decision needed" in advance, but attempting the

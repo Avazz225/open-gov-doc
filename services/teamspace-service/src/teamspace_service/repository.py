@@ -74,6 +74,19 @@ async def list_teamspaces_for_principal(
     return list(result.scalars().all())
 
 
+async def get_teamspace_by_root_folder_id(
+    session: AsyncSession, root_folder_id: str
+) -> Teamspace | None:
+    """P55-S1/ADR 0175: lookup key for `consumer.py`'s `folder.resource.deleted`
+    handler - returns `None` (a silent no-op for the caller) when the
+    deleted folder isn't a teamspace root, the common case since this
+    event fires for every folder deletion in the installation."""
+    result = await session.execute(
+        select(Teamspace).where(Teamspace.root_folder_id == root_folder_id)
+    )
+    return result.scalar_one_or_none()
+
+
 async def list_all_root_folder_ids(session: AsyncSession) -> list[str]:
     """Post-Roadmap Phase 38 Session 4 - startup backfill for existing
     teamspaces' resource-tree isolation (see `main.py`

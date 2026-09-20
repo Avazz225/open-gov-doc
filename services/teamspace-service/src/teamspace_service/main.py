@@ -18,7 +18,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from teamspace_service import repository
+from teamspace_service import consumer, repository
 from teamspace_service.clients import FolderServiceClient, PermissionServiceClient
 from teamspace_service.models import Base, TeamspaceMember
 from teamspace_service.schemas import (
@@ -125,6 +125,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await event_bus.connect()
     app.state.event_bus = event_bus
 
+    # P55-S1/ADR 0175: separate consumer-side connection, same dual-bus
+    # pattern as case-service/notification-service - reacts to
+    # `folder.resource.deleted` to clean up a teamspace whose root folder
+    # was deleted directly via folder-service (bypassing this service's
+    # own DELETE /teamspaces/{id}).
+    consumer_bus = NatsEventBusClient(settings.nats_url, ensure_stream=False)
+    await consumer_bus.connect()
+    app.state.consumer_bus = consumer_bus
+    await consumer.start_consuming(
+        consumer_bus,
+        settings.subjects,
+        app.state.session_factory,
+        app.state.permission_client,
+    )
+
     registration = await maybe_start_registration(
         registry_service_base_url=settings.registry_service_base_url,
         self_address=settings.self_address,
@@ -144,6 +159,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if registration:
         await registration.stop()
     await event_bus.close()
+    await consumer_bus.close()
     await app.state.folder_client.close()
     await app.state.permission_client.close()
     await engine.dispose()
