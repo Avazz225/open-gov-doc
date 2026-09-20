@@ -47,6 +47,7 @@
     "objectTypes": "Objekttypen",
     "kennzeichenSettings": "Kennzeichen-Einstellungen",
     "configPackages": "Konfigurationspakete",
+    "configCompare": "Installationsvergleich",
     "registry": "Registry",
     "teamspacesAdmin": "Team-Arbeitsbereiche",
     "installations": "Installationsverwaltung",
@@ -795,6 +796,23 @@
     "resultUpdated": "Aktualisiert",
     "resultSkipped": "Übersprungen",
     "resultErrors": "Fehler"
+  },
+  "configCompare": {
+    "pageTitle": "Installationsvergleich",
+    "hint": "Vergleicht die Konfiguration (7.3) der aktiven Installation mit einer anderen bekannten Installation - z. B. zur Drift-Erkennung zwischen Staging und Produktion (7.5). Feldweiser Vergleich (keine tiefe Struktur-Prüfung, ADR 0040) - eine Abweichung tief in einer Objekttyp-Maske wird als 'die gesamte Maske weicht ab' gemeldet, nicht zeilengenau.",
+    "baseIsActive": "Basis ist die aktive Installation ({name}) - ihre aktuelle, live abgerufene Konfiguration.",
+    "noOtherInstallations": "Keine weitere Installation bekannt - unter \"Installationsverwaltung\" zunächst eine zweite Installation hinzufügen.",
+    "formLabel": "Vergleich starten",
+    "compareInstallation": "Zu vergleichende Installation",
+    "username": "Benutzername (dort)",
+    "password": "Passwort (dort)",
+    "compare": "Vergleichen",
+    "compareError": "Vergleich fehlgeschlagen - Anmeldedaten oder Erreichbarkeit der anderen Installation prüfen.",
+    "resultTitle": "Vergleichsergebnis",
+    "deltaNoChanges": "Keine Unterschiede.",
+    "deltaOnlyInCompare": "Nur in der verglichenen Installation",
+    "deltaDiffering": "Abweichend",
+    "deltaOnlyInBase": "Nur in der aktiven Installation"
   },
   "storageGuard": {
     "pageTitle": "Speicher-Wächter",

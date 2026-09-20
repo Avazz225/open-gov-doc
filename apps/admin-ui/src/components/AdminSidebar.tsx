@@ -44,6 +44,11 @@ const GROUPS: NavGroup[] = [
         labelKey: "nav.configPackages",
         requiresCapability: "admin.object_config",
       },
+      {
+        href: "/config-compare/",
+        labelKey: "nav.configCompare",
+        requiresCapability: "admin.object_config",
+      },
       { href: "/registry/", labelKey: "nav.registry" },
       {
         href: "/teamspaces/",

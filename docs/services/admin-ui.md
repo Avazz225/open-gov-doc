@@ -253,11 +253,44 @@ at all** (previously exclusively CLI/raw API/fleet agent, see
    loads a live export for the preview anyway.
 
 Sidebar visibility gated via `requiresCapability: "admin.object_config"` (the same capability
-as `config-service`'s own import gate) — no additional `RequireCapability` wrapper on the
-page itself, following the more common, already-established pattern in this project (see
-"Authorization" below). Details/rationale for the backend changes (manifest field, new
-`realm_roles` category, split of `config/import`/`config/fleet-import` at the gateway) see
+as `config-service`'s own import gate), matched by a `RequireCapability capability="admin.
+object_config"` wrapper on the page itself (defense in depth for a direct link, the standard
+pattern — a stale claim of "no additional wrapper" here was corrected during **Phase 52
+Session 2** while adding the sibling config-compare page below). Details/rationale for the
+backend changes (manifest field, new `realm_roles` category, split of `config/import`/
+`config/fleet-import` at the gateway) see
 [ADR 0058](../adr/0058-konfigurationspakete-manifest-realm-roles-and-gateway-import-route-split.md).
+
+## Cross-Installation Config Compare (7.5, since Phase 52 Session 2)
+
+`ConfigCompare` (`/config-compare/`) — [ADR 0040](../adr/0040-config-compare-field-level-diff-no-cross-installation-fetch.md)'s
+own deferred "later UI session" ("CLI and raw API only... a later UI session would need to
+build its own view for this"). `POST /config/compare` itself has no notion of "installation A
+vs. B" — it only ever diffs two already-in-hand `ConfigDocument` payloads, and ADR 0040
+deliberately built no automated cross-installation fetch. This page respects that boundary:
+
+- **Base** is always the active installation's own live export — `compareConfig()` called
+  with `base` omitted, exactly like `ConfigPackages.tsx`'s own preview, just against the
+  active installation's session/`gatewayBaseUrl` as usual.
+- **Compare** is fetched via a one-off login scoped to just this screen: the admin picks
+  another installation from `useInstallation()`'s known list (`InstallationManager.tsx`'s own
+  infrastructure, reused directly — no new installation-registry mechanism), enters that
+  installation's own credentials, and the page calls two new `api.ts` primitives, `loginAt`/
+  `exportConfigAt`, which take an explicit `gatewayBaseUrl` parameter instead of this module's
+  mutable one (a new `requestAt()` helper underneath both `request()` and these two — `request()`
+  itself is now a thin wrapper calling `requestAt(gatewayBaseUrl, ...)`). The resulting token is
+  used only for that one export call and is never persisted alongside the active installation's
+  own token (`dms.tokens.<id>` in `auth-context.tsx`) or exposed via `useAuth()` — this mirrors
+  the CLI flow ADR 0040 itself describes ("two `dms config export` calls, each with its own
+  login, plus `dms config compare`"), just without leaving the browser tab.
+- **Rendering** reuses `ConfigPackages.tsx`'s exact `DeltaTable` presentation (per-category
+  card: only-in-compare, differing, only-in-base — names only, not each field's `{base,
+  compare}` detail, same as the existing page), duplicated rather than imported per this
+  project's established frontend convention (ADR 0006).
+
+Sidebar visibility and the page's own `RequireCapability` both gate on `admin.object_config`,
+the same capability as `ConfigPackages.tsx` — both are config-service admin functionality, and
+`POST /config/compare` itself is ungated server-side either way (same as `GET /config/export`).
 
 ## Multiple Installations (Concept 3a/8, since P4-S5)
 
@@ -313,6 +346,7 @@ Exclusively via the API gateway of the respective **active installation** (3.5, 
 | Processing failures | `GET /api/notification-service/notifications?status=failed_permanent`, `POST .../notifications/{id}/retry`, `GET /api/rendering-service/renditions?status=failed_permanent`, `POST .../renditions/{id}/retry`, `GET /api/ocr-service/ocr-results?status=failed_permanent`, `POST .../ocr-results/{id}/retry` (all since **Post-Roadmap Phase 20 Session 7**, [ADR 0083](../adr/0083-admin-ui-processing-failures-visibility.md), `ProcessingFailuresView`); since **Phase 40 Session 3**, also `GET {FEDERATION_HUB_BASE_URL}/handovers?status=delivery_failed`/`?status=result_delivery_failed`, `POST .../handovers/{id}/retry` — called directly against the hub, NOT via `/api/{service}/...` through the gateway (see "Processing Failure Visibility" above) |
 | Query console | `GET /api/query-service/query/events?actor=&subject=&event_type=&since=&until=` (since **P8-S1**, `QueryConsoleView`); since **P8-S2b** additionally `GET/POST /api/query-service/manipulation-mode/{status,activate,deactivate}`, `POST /api/query-service/manipulate/{dry-run,execute}`, `GET /api/permission-service/approval-requests?status=pending`, `POST /api/permission-service/approval-requests/{id}/approve` (the latter two already-existing endpoints, reused) |
 | Configuration packages | `GET /api/config-service/config/export`, `POST /api/config-service/config/compare`, `POST /api/config-service/config/import` (all since **P17-S1**, `ConfigPackages`) |
+| Cross-installation config compare (7.5, since **Phase 52 Session 2**) | `POST /api/auth-service/login` and `GET /api/config-service/config/export` against the OTHER installation's own gateway URL directly (`loginAt`/`exportConfigAt`, bypassing this module's own `gatewayBaseUrl`), then `POST /api/config-service/config/compare` against the active installation as usual — see "Cross-Installation Config Compare" below |
 
 ## Auth State
 
@@ -347,15 +381,19 @@ Two-stage Docker image (`apps/admin-ui/Dockerfile`), identical to the User UI. `
 ## Tests
 
 - `npm run typecheck` / `npm run lint` / `npm run build`.
-- `npm test` (Vitest + Testing Library, **287 tests since Phase 52 Session 1** — +12: a new
-  `user-tracking.test.tsx` for the new `UserTracking.tsx` component (+7 — section visibility per
-  capability, config lookup/toggle, sessions list/filter, retention load/save, client-side retention
-  validation, a load-error path) and a new `require-capability.test.tsx` (+5 — the pre-existing
-  single-capability behavior unchanged, plus the new array/OR form this session added to
-  `RequireCapability.tsx` itself, needed because this is the first admin page whose backend gates split
-  across two independent capabilities with no single one covering the whole page). **The same
+- `npm test` (Vitest + Testing Library, **278 tests since Phase 52 Session 2** — +3: a new
+  `config-compare.test.tsx` for the new `ConfigCompare.tsx` component — the empty-state hint with only
+  one known installation, a full login-at-the-other-installation/export/compare round trip (asserting
+  `loginAt`/`exportConfigAt` are called against the OTHER installation's own `gatewayBaseUrl`, never the
+  active one's), and a login-failure error path. Before Phase 52 Session 2, 275 tests since Phase 52
+  Session 1 — +12: a new `user-tracking.test.tsx` for the new `UserTracking.tsx` component (+7 —
+  section visibility per capability, config lookup/toggle, sessions list/filter, retention load/save,
+  client-side retention validation, a load-error path) and a new `require-capability.test.tsx` (+5 —
+  the pre-existing single-capability behavior unchanged, plus the new array/OR form this session added
+  to `RequireCapability.tsx` itself, needed because this is the first admin page whose backend gates
+  split across two independent capabilities with no single one covering the whole page). **The same
   pre-existing, unrelated `processing-failures.test.tsx` failure noted below (Phase 47 Session 4,
-  missing ADR-0162 operator-key input) is still present, confirmed unrelated to this session's diff.**
+  missing ADR-0162 operator-key input) is still present, confirmed unrelated to either session's diff.**
   Before Phase 52 Session 1, 263 tests since Phase 50 Session 5 — +10: a new
   `ad-group-mappings.test.tsx` for the new `AdGroupMappings.tsx` component — empty states, listing,
   create/reload for both the simple-mapping and composite-rule forms, the client-side ≥2-distinct-groups

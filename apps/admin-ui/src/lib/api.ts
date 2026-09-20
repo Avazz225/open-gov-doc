@@ -39,10 +39,27 @@ async function request(
   init: RequestInit = {},
   token?: string
 ): Promise<Response> {
+  return requestAt(gatewayBaseUrl, serviceType, path, init, token);
+}
+
+// Cross-installation config compare (7.5, Phase 52 Session 2) - the one
+// caller that needs to target an installation OTHER than the currently
+// active one (every other function in this module implicitly targets
+// `gatewayBaseUrl`, which only ever holds the active installation's own
+// gateway). Takes the base URL explicitly instead of relying on the
+// module-level mutable, so it never disturbs the active installation's own
+// `gatewayBaseUrl`/session while a comparison is in progress.
+async function requestAt(
+  baseUrl: string,
+  serviceType: string,
+  path: string,
+  init: RequestInit = {},
+  token?: string
+): Promise<Response> {
   const headers = new Headers(init.headers);
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
-  const response = await fetch(`${gatewayBaseUrl}/api/${serviceType}/${path}`, {
+  const response = await fetch(`${baseUrl}/api/${serviceType}/${path}`, {
     ...init,
     headers,
   });
@@ -2598,6 +2615,46 @@ export async function compareConfig(
     "config-service",
     "config/compare",
     jsonInit({ compare: compareDoc, categories: categories && categories.length ? categories : undefined }),
+    token
+  );
+  return response.json();
+}
+
+// Cross-installation compare (7.5, Phase 52 Session 2, ADR 0040's own
+// deferred "later UI session"): ADR 0040 deliberately built no automated
+// cross-installation fetch - "both exports must already be available to
+// the calling side, each produced via that installation's own, regularly
+// authenticated access". These two mirror `login`/`exportConfig` exactly,
+// but against an explicit `gatewayBaseUrl` (one of the OTHER installations
+// already known to `InstallationManager.tsx`, not the active one) instead
+// of this module's own mutable `gatewayBaseUrl` - a one-off login/export
+// scoped to fetching a single comparison document, its token never stored
+// alongside the active installation's own (`dms.tokens.<id>` in
+// `auth-context.tsx`) and never surfacing in `useAuth()`.
+export async function loginAt(
+  gatewayBaseUrl: string,
+  username: string,
+  password: string
+): Promise<TokenResponse> {
+  const response = await requestAt(
+    gatewayBaseUrl,
+    "auth-service",
+    "login",
+    jsonInit({ username, password })
+  );
+  return response.json();
+}
+
+export async function exportConfigAt(
+  gatewayBaseUrl: string,
+  token: string,
+  categories?: ConfigCategory[]
+): Promise<ConfigDocument> {
+  const response = await requestAt(
+    gatewayBaseUrl,
+    "config-service",
+    `config/export${categoryQuery(categories)}`,
+    {},
     token
   );
   return response.json();

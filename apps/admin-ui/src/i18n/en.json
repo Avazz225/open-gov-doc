@@ -47,6 +47,7 @@
     "objectTypes": "Object types",
     "kennzeichenSettings": "File reference number settings",
     "configPackages": "Configuration packages",
+    "configCompare": "Installation comparison",
     "registry": "Registry",
     "teamspacesAdmin": "Team workspaces",
     "installations": "Installation management",
@@ -795,6 +796,23 @@
     "resultUpdated": "Updated",
     "resultSkipped": "Skipped",
     "resultErrors": "Errors"
+  },
+  "configCompare": {
+    "pageTitle": "Installation Comparison",
+    "hint": "Compares the active installation's configuration (7.3) against another known installation - e.g. for drift detection between staging and production (7.5). Field-level comparison (no deep structural check, ADR 0040) - a change deep inside an object-type layout is reported as 'the entire layout differs', not row-precise.",
+    "baseIsActive": "Base is the active installation ({name}) - its current, live-fetched configuration.",
+    "noOtherInstallations": "No other installation known - add a second installation under \"Installation management\" first.",
+    "formLabel": "Start comparison",
+    "compareInstallation": "Installation to compare",
+    "username": "Username (there)",
+    "password": "Password (there)",
+    "compare": "Compare",
+    "compareError": "Comparison failed - check the other installation's credentials or reachability.",
+    "resultTitle": "Comparison result",
+    "deltaNoChanges": "No differences.",
+    "deltaOnlyInCompare": "Only in the compared installation",
+    "deltaDiffering": "Differing",
+    "deltaOnlyInBase": "Only in the active installation"
   },
   "storageGuard": {
     "pageTitle": "Storage guard",

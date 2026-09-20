@@ -2,10 +2,74 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P52-S1 (fine-grained user tracking, 5.5/ADR 0157: new `admin-ui` page — had always
-been API/curl-only. First session of Phase 52, "Dependency-Resolved / Overdue Completions"). No new
-ADR — a pure frontend CRUD page against already-existing, already-approved backend endpoints, per the
-plan's own DoD (P52-S1/S2 don't need one).
+**Last completed:** P52-S2 (cross-installation config-compare admin-UI screen, 7.5/ADR 0040's own
+deferred "later UI session" — second session of Phase 52, "Dependency-Resolved / Overdue Completions").
+No new ADR — a pure frontend feature against an already-existing, already-approved backend endpoint,
+respecting ADR 0040's own "no automated cross-installation fetch" decision rather than reopening it.
+
+`POST /config/compare` (config-service, since P14-S1/ADR 0040) has no notion of "installation A vs. B"
+at all — it only ever diffs two `ConfigDocument` payloads already in the request body, and ADR 0040
+deliberately declined to build an automated cross-installation fetch ("both exports must already be
+available to the calling side, each produced via that installation's own, regularly authenticated
+access"). The only real gap was the missing UI (`ConfigPackages.tsx` only ever compares an uploaded
+file against the ACTIVE installation's own live export, never a second installation).
+
+New page `/config-compare/`, following the same `RequireAuth`→`RequireCapability`→`AdminShell` pattern
+(`admin.object_config`, same capability as `ConfigPackages.tsx` — `POST /config/compare` itself is
+ungated server-side either way). Base is always the active installation's own live export (`base`
+omitted from the request, config-service defaults to it, same as `ConfigPackages.tsx`'s preview).
+Compare is fetched via a ONE-OFF login scoped to just this screen: pick another installation from
+`useInstallation()`'s already-known list (`InstallationManager.tsx`'s existing infrastructure, reused
+directly), enter its own credentials, and two new `api.ts` primitives (`loginAt`/`exportConfigAt`) fetch
+its export using an explicit `gatewayBaseUrl` parameter instead of this module's mutable one — the
+resulting token is never persisted alongside the active installation's own (`dms.tokens.<id>`) or
+exposed via `useAuth()`. This exactly mirrors the CLI flow ADR 0040 itself describes ("two `dms config
+export` calls, each with its own login, plus `dms config compare`"), just without leaving the browser
+tab. Refactored `request()` into a thin wrapper over a new `requestAt(baseUrl, ...)` helper to make this
+possible without touching any existing caller.
+
+Rendering reuses `ConfigPackages.tsx`'s exact `DeltaTable` presentation (per-category card: only-in-
+compare/differing/only-in-base, names only — the response's per-field `{base, compare}` detail and the
+backend's own `ignore_regex` support are NOT surfaced in this first pass, a smaller, still-open
+follow-up), duplicated rather than imported per this project's established frontend convention (ADR
+0006).
+
+New test file `config-compare.test.tsx` (+3 — the empty-state hint with only one known installation, a
+full login/export/compare round trip asserting `loginAt`/`exportConfigAt` are called against the OTHER
+installation's own `gatewayBaseUrl` never the active one's, and a login-failure error path). `277`/`278`
+tests passing (was 274/275 — +3 new, the same 1 pre-existing unrelated `processing-failures.test.tsx`
+failure). `tsc --noEmit`/`eslint .`/`next build` all clean, new `/config-compare` route confirmed in the
+build output. Also fixed a stale doc claim found in passing while writing this section's docs (`docs/
+services/admin-ui.md`'s Configuration Packages write-up had claimed "no additional `RequireCapability`
+wrapper on the page itself" — false, `config-packages/page.tsx` has always had one).
+
+Docker image rebuilt and redeployed. **Live-verified end-to-end against the real running stack** via
+Playwright: logged in as `config-admin` (the technical account actually holding `admin.object_config`,
+confirmed via `permission-service`'s role list rather than assumed), added a second installation
+pointing at the SAME real gateway (the dev stack only has one genuine installation — this still
+exercises the full real cross-network login→export→compare pipeline, a self-comparison just correctly
+shows zero differences across all 9 categories rather than proving nothing), submitted the compare form,
+and confirmed the real result rendered with real category cards — zero console errors. The first
+verification attempt used a too-short wait and looked like a silent failure (no error, no result); adding
+request/response tracing showed `POST /config/compare` was still genuinely in flight — this dev stack's
+accumulated months of test data make a full-corpus compare a real multi-second operation, not a bug.
+Throwaway script and screenshot cleaned up afterward (no server-side state to clean up — the second
+installation entry is pure browser `localStorage`, discarded with the script's browser context).
+
+`docs/adr/0040-...md`: closed its own "No admin-UI access to the compare function" Consequences bullet.
+`docs/services/admin-ui.md`: new Backend Integration table row, new "Cross-Installation Config Compare"
+section, Tests section updated (also correcting the P52-S1 entry's own absolute test counts, see below).
+
+**Next session:** P52-S3 — attribute-pseudonymization vault (5.2, ADR 0156) has no expiry/purge tied to
+retention expiry, ADR 0156 itself calls this "explicitly NOT solved by this session." Design and build a
+real retention policy for vault entries. New ADR expected (a genuine retention-policy design decision).
+
+---
+
+Immediately before P52-S2: **P52-S1** (fine-grained user tracking, 5.5/ADR 0157: new `admin-ui` page —
+had always been API/curl-only. First session of Phase 52, "Dependency-Resolved / Overdue Completions").
+No new ADR — a pure frontend CRUD page against already-existing, already-approved backend endpoints, per
+the plan's own DoD (P52-S1/S2 don't need one).
 
 The backend (config/sessions/retention endpoints, all since Post-Roadmap Phase 41 Session 3/ADR 0157)
 had full functionality the whole time but was never given a frontend. Followed the P50-S5
@@ -29,9 +93,13 @@ New API client functions added from scratch to `api.ts` (zero existed before —
 New test files: `user-tracking.test.tsx` (+7 — section visibility per capability, config lookup/toggle,
 sessions list/filter, retention load/save + validation, a load-error path) and
 `require-capability.test.tsx` (+5 — the array/OR extension, plus a regression proving the pre-existing
-single-string behavior is unchanged). `287`/`288` tests passing (was 275/276 — +12 new, 1 pre-existing
+single-string behavior is unchanged). `274`/`275` tests passing (was 262/263 — +12 new, 1 pre-existing
 unrelated failure in `processing-failures.test.tsx`, confirmed via `git stash` to already exist on
-`develop` before this session, same Phase 47 Session 4 finding documented previously). `tsc --noEmit`/
+`develop` before this session, same Phase 47 Session 4 finding documented previously). **Correction
+made during P52-S2**: this paragraph originally stated the wrong absolute counts (287/288 vs. 275/276)
+— the delta (+12) was always right, only the base/total were miscalculated when first written; fixed
+here rather than silently, per this project's own "self-correct before considering a session done"
+convention. `tsc --noEmit`/
 `eslint .`/`next build` all clean, new `/user-tracking` route confirmed in the build output.
 
 Docker image rebuilt and redeployed. **Live-verified end-to-end against the real running stack** via
