@@ -2,9 +2,58 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P54-S2 (`migration-service`: gate the six `/transfers/{id}/steps/*` step-callback
-endpoints, which previously had no auth check at all — second session of Phase 54, "Critical
-Authorization Bugs"). **New ADR** ([0173](docs/adr/0173-migration-service-step-endpoints-workflow-service-caller-gate.md))
+**Last completed:** P54-S3 (`favorite-service`: `user_id` ownership check, previously fully
+client-supplied with no identity verification at all — third and last session of Phase 54, "Critical
+Authorization Bugs". **Closes Phase 54.**). **New ADR** ([0174](docs/adr/0174-favorite-service-user-id-check-against-x-dms-username.md))
+— the plan had judged this "small, mechanical, no design decision needed" in advance, but attempting the
+obvious fix surfaced a real, previously-unconsidered nuance that would have broken production if shipped
+as planned, earning it an ADR after all.
+
+**The gap.** Also found by this round's live-code security sweep. `favorite-service` never read any
+`X-DMS-*` identity header anywhere (confirmed via grep — zero hits): `create_favorite`/`list_favorites`/
+`delete_favorite` took `user_id` as a fully client-supplied body/query field, used directly for every DB
+filter with no check against the caller's own identity — any authenticated user could view/add/delete
+any OTHER user's favorites by passing a different `user_id`.
+
+**The fix, and the nuance the plan hadn't anticipated.** Following the plan's own suggested approach
+(check `user_id` against `X-DMS-Principal`, matching `document-service`'s `scope="personal"` precedent)
+would have broken production: `apps/user-ui`'s only real caller (`CasesPane.tsx`) already sends
+`useAuth().user.username` as `user_id`, never `sub` — this service's stored `Favorite.user_id` rows have
+always been username-based in practice. Checking against `X-DMS-Principal` (a UUID) would have rejected
+every real, already-existing favorites call. Caught this by reading the actual frontend caller before
+finalizing the fix, not by assuming the plan's suggested approach was correct. Fix: check against
+`X-DMS-Username` instead — read directly in `gateway-service`'s `proxy()` handler, confirmed equally
+gateway-verified (same unconditional `.update(identity_headers)` as `X-DMS-Principal`, just the other
+verified JWT claim). New `_require_own_user_id(user_id, x_dms_username)`: `401` with no header, `403` if
+`user_id` doesn't match. No `apps/user-ui` change needed — it already sends exactly the value this check
+now requires.
+
+New/updated tests: shared test header helper switched from a bare string to `_headers(user_id)` sending
+`X-DMS-Username`, every existing test call site updated; four new regression tests
+(`test_create_favorite_for_another_user_is_rejected`, `test_create_favorite_without_principal_header_returns_401`,
+`test_list_favorites_for_another_user_is_rejected`, `test_delete_favorite_for_another_user_is_rejected` —
+the last one also confirms the target favorite genuinely survives the rejected cross-user delete attempt,
+not just that the response code is correct). `18/18` tests (was 14, +4). `ruff check`/`ruff format --check`
+clean.
+
+Docker image rebuilt and redeployed. **Live-verified against the real running stack**: `curl` confirmed
+no header → `401`; an attacker's own valid `X-DMS-Username` targeting another user's `user_id` → `403`
+for create/list/delete all three; the exact header/value shape `apps/user-ui` actually sends in
+production → the expected success response, confirming the fix doesn't regress the real feature. Test
+data cleaned up afterward.
+
+`docs/services/favorite-service.md`: new "Authorization" section, endpoint table, and Tests all updated.
+
+**Phase 54 ("Critical Authorization Bugs") is now closed** (P54-S1 through S3, all three sessions done —
+three genuinely exploitable authorization bypasses found by this round's live-code sweep, all closed).
+`graphify update .` to run next per the established phase-end convention, then continue per the standing
+"weiter selbstständig" instruction to Phase 55 ("Correctness: Cross-Service Cleanup on Delete Paths").
+
+---
+
+Immediately before P54-S3: **P54-S2** (`migration-service`: gate the six `/transfers/{id}/steps/*`
+step-callback endpoints, which previously had no auth check at all — second session of Phase 54,
+"Critical Authorization Bugs"). **New ADR** ([0173](docs/adr/0173-migration-service-step-endpoints-workflow-service-caller-gate.md))
 — a real authentication-model decision, per the plan's own conditional DoD.
 
 **The gap.** Also found by this round's live-code security sweep. `migration-service`'s six

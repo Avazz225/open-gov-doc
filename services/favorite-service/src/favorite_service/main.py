@@ -13,7 +13,7 @@ from dms_metrics_client import (
     metrics_payload,
 )
 from dms_registry_client import maybe_start_registration
-from fastapi import Depends, FastAPI, HTTPException, Response, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -85,6 +85,34 @@ async def get_session() -> AsyncIterator[AsyncSession]:
         yield session
 
 
+def _require_own_user_id(user_id: str, x_dms_username: str) -> None:
+    """P54-S3: `user_id` was previously a fully client-supplied field/query
+    param with no check at all against the caller's own identity - any
+    authenticated user could view/add/delete any OTHER user's favorites by
+    passing a different `user_id` (confirmed via grep: this service never
+    read any `X-DMS-*` identity header anywhere before this session). Same
+    "you may only act as yourself" principle `document-service`'s own
+    `scope="personal"` path already uses elsewhere.
+
+    Deliberately checked against the gateway-verified `X-DMS-Username`
+    (Keycloak `preferred_username`), NOT `X-DMS-Principal` (Keycloak `sub`,
+    a UUID): this service's `user_id` values have always been
+    username-based in practice - `apps/user-ui`'s only real caller
+    (`CasesPane.tsx`) already sends `useAuth().user.username`, never `sub`.
+    Checking against `X-DMS-Principal` instead would have rejected every
+    real, already-existing favorites call in production. `X-DMS-Username`
+    is set by the gateway from the same verified JWT claims, via the same
+    unconditional `.update(identity_headers)` as `X-DMS-Principal` - equally
+    unspoofable for a real end user, just the identifier scheme this
+    service's own data actually uses."""
+    if not x_dms_username:
+        raise HTTPException(status_code=401, detail="X-DMS-Username fehlt")
+    if user_id != x_dms_username:
+        raise HTTPException(
+            status_code=403, detail="user_id muss dem eigenen X-DMS-Username entsprechen"
+        )
+
+
 async def publish_event(
     event_type: str, subject: str, payload: dict, actor: str | None = None
 ) -> None:
@@ -111,8 +139,11 @@ def get_metrics() -> Response:
 
 @app.post("/favorites", response_model=FavoriteOut, status_code=status.HTTP_201_CREATED)
 async def create_favorite(
-    payload: FavoriteCreate, session: AsyncSession = Depends(get_session)
+    payload: FavoriteCreate,
+    session: AsyncSession = Depends(get_session),
+    x_dms_username: str = Header(default=""),
 ) -> FavoriteOut:
+    _require_own_user_id(payload.user_id, x_dms_username)
     try:
         favorite = await repository.create_favorite(session, payload)
     except repository.DuplicateError as exc:
@@ -133,8 +164,12 @@ async def create_favorite(
 
 @app.get("/favorites", response_model=list[FavoriteOut])
 async def list_favorites(
-    user_id: str, object_type: str | None = None, session: AsyncSession = Depends(get_session)
+    user_id: str,
+    object_type: str | None = None,
+    session: AsyncSession = Depends(get_session),
+    x_dms_username: str = Header(default=""),
 ) -> list[FavoriteOut]:
+    _require_own_user_id(user_id, x_dms_username)
     return await repository.list_favorites(session, user_id=user_id, object_type=object_type)
 
 
@@ -144,7 +179,9 @@ async def delete_favorite(
     object_type: str,
     object_id: str,
     session: AsyncSession = Depends(get_session),
+    x_dms_username: str = Header(default=""),
 ) -> None:
+    _require_own_user_id(user_id, x_dms_username)
     try:
         await repository.delete_favorite(
             session, user_id=user_id, object_type=object_type, object_id=object_id
