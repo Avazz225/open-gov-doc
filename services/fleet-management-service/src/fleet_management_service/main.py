@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 
 from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -74,6 +74,19 @@ async def get_session() -> AsyncIterator[AsyncSession]:
         yield session
 
 
+async def _require_operator_key(authorization: str = Header(default="")) -> None:
+    """P54-S1/ADR 0172: gates every endpoint below except `/healthz`. Same
+    `hub_operator_key` mechanism `federation-hub-service` already uses
+    (ADR 0039/0162) - fully locked (403) without a configured
+    `fleet_operator_key`, a deliberate fail-closed default, not a
+    regression."""
+    if not settings.fleet_operator_key or authorization != f"Bearer {settings.fleet_operator_key}":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Fehlender oder ungültiger Fleet-Operator-Schlüssel",
+        )
+
+
 def _agent_client(installation: ManagedInstallation) -> FleetAgentClient:
     return FleetAgentClient(
         gateway_base_url=installation.gateway_base_url,
@@ -92,6 +105,7 @@ def healthz() -> dict:
     "/installations",
     response_model=ManagedInstallationCreateOut,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(_require_operator_key)],
 )
 async def create_installation(
     payload: ManagedInstallationCreate, session: AsyncSession = Depends(get_session)
@@ -108,7 +122,11 @@ async def create_installation(
     )
 
 
-@app.get("/installations", response_model=list[ManagedInstallationOut])
+@app.get(
+    "/installations",
+    response_model=list[ManagedInstallationOut],
+    dependencies=[Depends(_require_operator_key)],
+)
 async def list_installations(
     session: AsyncSession = Depends(get_session),
 ) -> list[ManagedInstallation]:
@@ -117,7 +135,11 @@ async def list_installations(
     return await repository.list_managed_installations(session)
 
 
-@app.delete("/installations/{installation_id}", status_code=status.HTTP_204_NO_CONTENT)
+@app.delete(
+    "/installations/{installation_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(_require_operator_key)],
+)
 async def delete_installation(
     installation_id: str, session: AsyncSession = Depends(get_session)
 ) -> None:
@@ -131,6 +153,7 @@ async def delete_installation(
 @app.post(
     "/installations/{installation_id}/rotate-key",
     response_model=ManagedInstallationCreateOut,
+    dependencies=[Depends(_require_operator_key)],
 )
 async def rotate_installation_key(
     installation_id: str,
@@ -193,7 +216,11 @@ async def _fetch_status(installation: ManagedInstallation) -> InstallationStatus
         await client.close()
 
 
-@app.get("/installations/{installation_id}/status", response_model=InstallationStatusOut)
+@app.get(
+    "/installations/{installation_id}/status",
+    response_model=InstallationStatusOut,
+    dependencies=[Depends(_require_operator_key)],
+)
 async def get_installation_status(
     installation_id: str, session: AsyncSession = Depends(get_session)
 ) -> InstallationStatusOut:
@@ -204,7 +231,11 @@ async def get_installation_status(
     return await _fetch_status(installation)
 
 
-@app.get("/installations/status", response_model=list[InstallationStatusOut])
+@app.get(
+    "/installations/status",
+    response_model=list[InstallationStatusOut],
+    dependencies=[Depends(_require_operator_key)],
+)
 async def list_installation_statuses(
     session: AsyncSession = Depends(get_session),
 ) -> list[InstallationStatusOut]:
@@ -215,7 +246,9 @@ async def list_installation_statuses(
     return list(await asyncio.gather(*(_fetch_status(i) for i in installations)))
 
 
-@app.post("/installations/{installation_id}/license")
+@app.post(
+    "/installations/{installation_id}/license", dependencies=[Depends(_require_operator_key)]
+)
 async def push_license(
     installation_id: str,
     payload: LicenseUploadRequest,
@@ -237,7 +270,9 @@ async def push_license(
         await client.close()
 
 
-@app.post("/installations/{installation_id}/provision")
+@app.post(
+    "/installations/{installation_id}/provision", dependencies=[Depends(_require_operator_key)]
+)
 async def provision_installation(
     installation_id: str,
     payload: ProvisionRequest,
@@ -271,7 +306,12 @@ async def _group_out(session: AsyncSession, group) -> GroupOut:
     )
 
 
-@app.post("/groups", response_model=GroupOut, status_code=status.HTTP_201_CREATED)
+@app.post(
+    "/groups",
+    response_model=GroupOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(_require_operator_key)],
+)
 async def create_group(
     payload: GroupCreate, session: AsyncSession = Depends(get_session)
 ) -> GroupOut:

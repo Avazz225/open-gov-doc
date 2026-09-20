@@ -23,3 +23,10 @@ class Settings(BaseServiceSettings):
     # health checks, since `POST .../config/import` performs multiple
     # owner-service calls in sequence (see config-service).
     agent_request_timeout_seconds: float = 30.0
+
+    # P54-S1/ADR 0172: gates every endpoint except `/healthz` via
+    # `Authorization: Bearer <fleet_operator_key>` - the same
+    # `hub_operator_key` mechanism `federation-hub-service` already uses
+    # (ADR 0039/0162). `None` by default - fully locks the API until an
+    # operator deliberately configures this, same fail-closed default.
+    fleet_operator_key: str | None = None
