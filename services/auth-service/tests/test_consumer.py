@@ -18,7 +18,7 @@ def _approved_event(action_type: str, payload: dict | None = None) -> bytes:
     return event.to_bytes()
 
 
-async def test_approved_activation_enables_superuser_and_publishes(session_factory):
+async def test_approved_activation_enables_superuser_and_publishes(session_factory, keycloak_admin):
     await superuser.ensure_superuser_account(session_factory)
     try:
         published = []
@@ -27,7 +27,10 @@ async def test_approved_activation_enables_superuser_and_publishes(session_facto
             published.append((event_type, payload))
 
         handler = consumer.make_handler(
-            session_factory, activation_minutes=30, publish_event=fake_publish
+            session_factory,
+            activation_minutes=30,
+            publish_event=fake_publish,
+            keycloak_admin=keycloak_admin,
         )
 
         await handler(_approved_event("auth.superuser.activate"))
@@ -41,14 +44,17 @@ async def test_approved_activation_enables_superuser_and_publishes(session_facto
         await superuser.deactivate(session_factory)
 
 
-async def test_unrelated_action_type_is_ignored(session_factory):
+async def test_unrelated_action_type_is_ignored(session_factory, keycloak_admin):
     published = []
 
     async def fake_publish(event_type, payload, actor=None):
         published.append((event_type, payload))
 
     handler = consumer.make_handler(
-        session_factory, activation_minutes=30, publish_event=fake_publish
+        session_factory,
+        activation_minutes=30,
+        publish_event=fake_publish,
+        keycloak_admin=keycloak_admin,
     )
 
     await handler(_approved_event("permission.scope_lock.create"))
@@ -56,7 +62,7 @@ async def test_unrelated_action_type_is_ignored(session_factory):
     assert published == []
 
 
-async def test_missing_superuser_account_is_logged_not_raised(session_factory):
+async def test_missing_superuser_account_is_logged_not_raised(session_factory, keycloak_admin):
     """Regression (gleiches Prinzip wie P6-S4s KeyError-Lehre): ein Konsument
     darf nie an unerwartetem Zustand crashen, sonst bleibt die NATS-Nachricht
     unbestätigt und wird endlos erneut zugestellt. `_clean_tables` (conftest,
@@ -68,7 +74,10 @@ async def test_missing_superuser_account_is_logged_not_raised(session_factory):
         published.append((event_type, payload))
 
     handler = consumer.make_handler(
-        session_factory, activation_minutes=30, publish_event=fake_publish
+        session_factory,
+        activation_minutes=30,
+        publish_event=fake_publish,
+        keycloak_admin=keycloak_admin,
     )
 
     await handler(_approved_event("auth.superuser.activate"))  # darf nicht raisen
@@ -76,7 +85,9 @@ async def test_missing_superuser_account_is_logged_not_raised(session_factory):
     assert published == []
 
 
-async def test_approved_ad_group_mapping_create_executes_and_publishes(session_factory):
+async def test_approved_ad_group_mapping_create_executes_and_publishes(
+    session_factory, keycloak_admin
+):
     """Post-Roadmap Phase 39 Session 3 (ADR 0153) - gleiches Muster wie
     `test_approved_activation_enables_superuser_and_publishes`, nur mit
     `auth.ad_group_role_mapping.create`."""
@@ -86,7 +97,10 @@ async def test_approved_ad_group_mapping_create_executes_and_publishes(session_f
         published.append((event_type, payload))
 
     handler = consumer.make_handler(
-        session_factory, activation_minutes=30, publish_event=fake_publish
+        session_factory,
+        activation_minutes=30,
+        publish_event=fake_publish,
+        keycloak_admin=keycloak_admin,
     )
 
     await handler(
@@ -109,7 +123,9 @@ async def test_approved_ad_group_mapping_create_executes_and_publishes(session_f
     ]
 
 
-async def test_approved_ad_group_mapping_delete_executes_and_publishes(session_factory):
+async def test_approved_ad_group_mapping_delete_executes_and_publishes(
+    session_factory, keycloak_admin
+):
     async with session_factory() as session:
         mapping = await ad_group_mapping.create_mapping(
             session, ad_group_name="finance", role_name="dms-finance-role", created_by="admin"
@@ -123,7 +139,10 @@ async def test_approved_ad_group_mapping_delete_executes_and_publishes(session_f
         published.append((event_type, payload))
 
     handler = consumer.make_handler(
-        session_factory, activation_minutes=30, publish_event=fake_publish
+        session_factory,
+        activation_minutes=30,
+        publish_event=fake_publish,
+        keycloak_admin=keycloak_admin,
     )
     await handler(_approved_event("auth.ad_group_role_mapping.delete", {"mapping_id": mapping_id}))
 
@@ -138,14 +157,19 @@ async def test_approved_ad_group_mapping_delete_executes_and_publishes(session_f
     ]
 
 
-async def test_ad_group_mapping_delete_with_unknown_id_is_logged_not_raised(session_factory):
+async def test_ad_group_mapping_delete_with_unknown_id_is_logged_not_raised(
+    session_factory, keycloak_admin
+):
     published = []
 
     async def fake_publish(event_type, payload, actor=None):
         published.append((event_type, payload))
 
     handler = consumer.make_handler(
-        session_factory, activation_minutes=30, publish_event=fake_publish
+        session_factory,
+        activation_minutes=30,
+        publish_event=fake_publish,
+        keycloak_admin=keycloak_admin,
     )
 
     await handler(
@@ -155,14 +179,19 @@ async def test_ad_group_mapping_delete_with_unknown_id_is_logged_not_raised(sess
     assert published == []
 
 
-async def test_approved_ad_group_composite_rule_create_executes_and_publishes(session_factory):
+async def test_approved_ad_group_composite_rule_create_executes_and_publishes(
+    session_factory, keycloak_admin
+):
     published = []
 
     async def fake_publish(event_type, payload, actor=None):
         published.append((event_type, payload))
 
     handler = consumer.make_handler(
-        session_factory, activation_minutes=30, publish_event=fake_publish
+        session_factory,
+        activation_minutes=30,
+        publish_event=fake_publish,
+        keycloak_admin=keycloak_admin,
     )
 
     await handler(
@@ -190,7 +219,9 @@ async def test_approved_ad_group_composite_rule_create_executes_and_publishes(se
     ]
 
 
-async def test_approved_ad_group_composite_rule_delete_executes_and_publishes(session_factory):
+async def test_approved_ad_group_composite_rule_delete_executes_and_publishes(
+    session_factory, keycloak_admin
+):
     async with session_factory() as session:
         rule = await ad_group_mapping.create_composite_rule(
             session,
@@ -207,7 +238,10 @@ async def test_approved_ad_group_composite_rule_delete_executes_and_publishes(se
         published.append((event_type, payload))
 
     handler = consumer.make_handler(
-        session_factory, activation_minutes=30, publish_event=fake_publish
+        session_factory,
+        activation_minutes=30,
+        publish_event=fake_publish,
+        keycloak_admin=keycloak_admin,
     )
     await handler(_approved_event("auth.ad_group_role_composite_rule.delete", {"rule_id": rule_id}))
 

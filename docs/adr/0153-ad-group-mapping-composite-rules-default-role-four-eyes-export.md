@@ -122,20 +122,28 @@ already knows how to render, per `UserManagement.tsx`'s existing pattern for rol
   start ungated until an operator explicitly configures approval via `PUT
   /approval-config/<action_type>` on `permission-service` - no seeding needed, exactly mirroring ADR
   0130/0151's precedent.
-- **The default-role setting itself has no four-eyes protection**, unlike the per-mapping/per-rule CRUD -
+- ~~**The default-role setting itself has no four-eyes protection**, unlike the per-mapping/per-rule CRUD -
   a compromised `admin.user_management` account could still silently grant a broad default role to
   every otherwise-unmapped AD group member without a second approver. Accepted as this session's
   deliberate scope boundary (see "Decision"); a future session could extend four-eyes to this setting if
-  that risk is judged to outweigh the added friction.
+  that risk is judged to outweigh the added friction.~~ — **closed in Phase 53 Session 1**
+  ([ADR 0171](0171-ad-group-mapping-default-role-four-eyes-and-display-name-fix.md)): the deliberate
+  scope boundary was reversed on explicit request, using the exact same `_maybe_defer_to_approval`
+  pattern the other four mutations already had.
 - **Config-service's `ad_group_mappings` import, like `realm_roles`, bypasses four-eyes** - an
   installation with `auth.ad_group_role_mapping.create` gated will see that gate silently bypassed by a
   config-service-driven import, the same characteristic `realm_roles` already has today (not a new
   inconsistency this session introduces).
 - **No admin-ui CRUD surface for mapping/composite-rule/default-role management** - remains an
   API/curl-only feature for now, a natural candidate for a future session, not committed to here.
-- **A mapping/rule created via the four-eyes/consumer path records the approver's raw Keycloak `sub`
+- ~~**A mapping/rule created via the four-eyes/consumer path records the approver's raw Keycloak `sub`
   as `created_by`/actor**, not their `preferred_username` like the direct (ungated) path does - the
   approval-request payload carries no display-name field. A cosmetic inconsistency (verified live: the
   underlying identity is still correct and traceable), not a functional defect; extending the approval
   payload to also carry a display name would be a larger change with its own trade-offs, not attempted
-  here.
+  here.~~ — **closed in Phase 53 Session 1** ([ADR 0171](0171-ad-group-mapping-default-role-four-eyes-and-display-name-fix.md)):
+  a precise re-read of the code found this bullet's own wording imprecise (it's the raw
+  `initiated_by`/filer, not the approver) and resolved it server-side at execution time via the
+  already-established `admin_users.find_user_by_id` reverse-resolution primitive (ADR 0069) - a smaller
+  fix than the "extend the approval payload" option this bullet itself floated, and the approval
+  payload/schema stayed untouched.

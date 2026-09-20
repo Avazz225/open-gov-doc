@@ -2,8 +2,10 @@ import logging
 from collections.abc import Awaitable, Callable
 
 from dms_eventbus_client import Event, NatsEventBusClient, SubjectNotFoundError
+from keycloak import KeycloakAdmin
+from keycloak.exceptions import KeycloakGetError
 
-from auth_service import ad_group_mapping, superuser
+from auth_service import ad_group_mapping, admin_users, superuser
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +15,32 @@ _KNOWN_ACTION_TYPES = (
     "auth.ad_group_role_mapping.delete",
     "auth.ad_group_role_composite_rule.create",
     "auth.ad_group_role_composite_rule.delete",
+    "auth.ad_group_mapping.default_role_set",
 )
+
+
+def _resolve_display_name(keycloak_admin: KeycloakAdmin, principal_id: str | None) -> str | None:
+    """Resolves the initiator's raw Keycloak `sub` into their username
+    (Phase 53 Session 1, ADR 0171) - the direct/ungated path already stores
+    `user.get("preferred_username") or principal_id` as `created_by`, but
+    this consumer previously only had the raw `sub` from the approval
+    event's `initiated_by` field to work with, so every four-eyes-executed
+    mapping/rule ended up with a raw UUID instead. Reuses the exact same
+    reverse-resolution primitive `GET /users/{user_id}` already established
+    (`admin_users.find_user_by_id`, ADR 0069) rather than inventing a new
+    one or extending the approval-request payload itself (the "larger
+    change" ADR 0153 declined to attempt) - a plain server-side lookup at
+    execution time needs neither. Falls back to the raw id, same as the
+    direct path's own `or principal_id` fallback - e.g. a `TechnicalAccount`
+    initiator's `sub` is a local integer row id, not a Keycloak UUID, and
+    404s here exactly as expected."""
+    if principal_id is None:
+        return None
+    try:
+        match = admin_users.find_user_by_id(keycloak_admin, principal_id)
+    except KeycloakGetError:
+        return principal_id
+    return match["username"] if match is not None else principal_id
 
 
 def make_handler(
@@ -21,6 +48,7 @@ def make_handler(
     *,
     activation_minutes: int,
     publish_event: Callable[[str, dict], Awaitable[None]],
+    keycloak_admin: KeycloakAdmin,
 ) -> Callable[[bytes], Awaitable[None]]:
     """First consumer of this service ever (P6-S5, 4.6): executes the
     break-glass activation only after approval, exactly the same
@@ -35,7 +63,10 @@ def make_handler(
     OPTIONAL, per-action-type-configurable four-eyes pattern (`main.py`'s
     `_maybe_defer_to_approval`), so this consumer only ever sees an event
     for one of them when an admin actually turned on approval for that
-    specific action type."""
+    specific action type. Extended again in Phase 53 Session 1 (ADR 0171)
+    with a fifth action type (the default-role setting) and `keycloak_admin`
+    (see `_resolve_display_name` above) for the `created_by`/`updated_by`
+    display-name fix."""
 
     async def handle(payload: bytes) -> None:
         event = Event.from_bytes(payload)
@@ -74,7 +105,9 @@ def make_handler(
                         session,
                         ad_group_name=action_payload["ad_group_name"],
                         role_name=action_payload["role_name"],
-                        created_by=event.payload.get("initiated_by"),
+                        created_by=_resolve_display_name(
+                            keycloak_admin, event.payload.get("initiated_by")
+                        ),
                     )
                     await session.commit()
                     await publish_event(
@@ -105,7 +138,9 @@ def make_handler(
                         session,
                         role_name=action_payload["role_name"],
                         ad_group_names=action_payload["ad_group_names"],
-                        created_by=event.payload.get("initiated_by"),
+                        created_by=_resolve_display_name(
+                            keycloak_admin, event.payload.get("initiated_by")
+                        ),
                     )
                     await session.commit()
                     await publish_event(
@@ -118,6 +153,20 @@ def make_handler(
                     await session.commit()
                     await publish_event(
                         "auth.ad_group_role_composite_rule.deleted", rule, actor=event.actor
+                    )
+                elif action_type == "auth.ad_group_mapping.default_role_set":
+                    config = await ad_group_mapping.set_default_role(
+                        session,
+                        default_role_name=action_payload["default_role_name"],
+                        updated_by=_resolve_display_name(
+                            keycloak_admin, event.payload.get("initiated_by")
+                        ),
+                    )
+                    await session.commit()
+                    await publish_event(
+                        "auth.ad_group_mapping.default_role_set",
+                        {"default_role_name": config.default_role_name},
+                        actor=event.actor,
                     )
             except (
                 ad_group_mapping.MappingNotFoundError,
@@ -147,9 +196,13 @@ async def start_consuming(
     *,
     activation_minutes: int,
     publish_event: Callable[[str, dict], Awaitable[None]],
+    keycloak_admin: KeycloakAdmin,
 ) -> None:
     handler = make_handler(
-        session_factory, activation_minutes=activation_minutes, publish_event=publish_event
+        session_factory,
+        activation_minutes=activation_minutes,
+        publish_event=publish_event,
+        keycloak_admin=keycloak_admin,
     )
     for subject in subjects:
         try:

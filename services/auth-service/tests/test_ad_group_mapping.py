@@ -300,6 +300,10 @@ def test_me_requires_all_groups_of_a_composite_rule(
 
 
 def test_default_role_get_set_reset(client, domain_admin_auth_headers):
+    """`PUT` wraps its response since Phase 53 Session 1 (ADR 0171,
+    optional four-eyes) - `{status, config, approval_request_id}`, same
+    envelope shape as the other four AD-group-mapping mutations. `GET`
+    stays a plain, unwrapped resource, unchanged."""
     initial = client.get("/ad-group-mappings/default-role", headers=domain_admin_auth_headers)
     assert initial.status_code == 200
     assert initial.json()["default_role_name"] is None
@@ -310,7 +314,9 @@ def test_default_role_get_set_reset(client, domain_admin_auth_headers):
         headers=domain_admin_auth_headers,
     )
     assert updated.status_code == 200
-    assert updated.json()["default_role_name"] == "dms-basic-role"
+    body = updated.json()
+    assert body["status"] == "set"
+    assert body["config"]["default_role_name"] == "dms-basic-role"
 
     after_get = client.get("/ad-group-mappings/default-role", headers=domain_admin_auth_headers)
     assert after_get.json()["default_role_name"] == "dms-basic-role"
@@ -321,7 +327,31 @@ def test_default_role_get_set_reset(client, domain_admin_auth_headers):
         headers=domain_admin_auth_headers,
     )
     assert reset.status_code == 200
-    assert reset.json()["default_role_name"] is None
+    assert reset.json()["config"]["default_role_name"] is None
+
+
+def test_default_role_set_with_approval_required_defers_execution(
+    client, domain_admin_auth_headers, approval_config_override
+):
+    """Regression test (Phase 53 Session 1, ADR 0171): the default-role
+    setting previously had no four-eyes gate at all - ADR 0153's own
+    deliberate scope cut, reversed here on explicit request. Same pattern
+    as `test_create_ad_group_mapping_with_approval_required_defers_creation`."""
+    with approval_config_override("auth.ad_group_mapping.default_role_set", requires_approval=True):
+        response = client.put(
+            "/ad-group-mappings/default-role",
+            json={"default_role_name": "dms-basic-role"},
+            headers=domain_admin_auth_headers,
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["status"] == "pending_approval"
+        assert body["approval_request_id"] is not None
+        assert body["config"] is None
+
+        # Not applied - the default role remains unset.
+        after = client.get("/ad-group-mappings/default-role", headers=domain_admin_auth_headers)
+        assert after.json()["default_role_name"] is None
 
 
 def test_me_gets_default_role_when_groups_are_unmapped(

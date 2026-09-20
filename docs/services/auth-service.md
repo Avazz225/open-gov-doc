@@ -43,7 +43,7 @@
 | `POST` | `/ad-group-mappings` | **Since P24-S2**: creates a new mapping (`{ad_group_name, role_name}`). Takes effect from the next `GET /me` resolution onward. Gated like `GET /ad-group-mappings`. **Since Post-Roadmap Phase 39 Session 3** ([ADR 0153](../adr/0153-ad-group-mapping-composite-rules-default-role-four-eyes-export.md)) also optionally gated via the generic four-eyes mechanism (`auth.ad_group_role_mapping.create`) — response `{status: "created"\|"pending_approval", mapping, approval_request_id}` (bare object before this session), `201`. Audited via `auth.ad_group_role_mapping.created` |
 | `DELETE` | `/ad-group-mappings/{id}` | **Since P24-S2**: deletes a mapping, `404` for an unknown `id`. Audited via `auth.ad_group_role_mapping.deleted`. Gated like `GET /ad-group-mappings`. **Since Post-Roadmap Phase 39 Session 3** (ADR 0153) also optionally four-eyes-gated (`auth.ad_group_role_mapping.delete`) — response `{status: "deleted"\|"pending_approval", approval_request_id}`, `200` (was `204` before this session) |
 | `GET`/`POST`/`DELETE` | `/ad-group-composite-rules`(`/{id}`) | **Since Post-Roadmap Phase 39 Session 3** (ADR 0153): AND-composite counterpart of the three endpoints above (`{role_name, ad_group_names}`, at least 2 groups or `422`) — same gate/four-eyes/audit pattern, action types `auth.ad_group_role_composite_rule.create`/`.delete` |
-| `GET`/`PUT` | `/ad-group-mappings/default-role` | **Since Post-Roadmap Phase 39 Session 3** (ADR 0153): the configurable default role for genuinely unmapped groups (`{default_role_name, updated_at, updated_by}`) — gated on `admin.user_management`, deliberately no four-eyes |
+| `GET`/`PUT` | `/ad-group-mappings/default-role` | **Since Post-Roadmap Phase 39 Session 3** (ADR 0153): the configurable default role for genuinely unmapped groups (`{default_role_name, updated_at, updated_by}`) — gated on `admin.user_management`. `GET` returns the bare object, unchanged. `PUT`, since **Phase 53 Session 1** ([ADR 0171](../adr/0171-ad-group-mapping-default-role-four-eyes-and-display-name-fix.md)), joined the four-eyes mechanism the other mutations already had (`auth.ad_group_mapping.default_role_set`) — response `{status: "set"\|"pending_approval", config, approval_request_id}` (bare object before this session) |
 | `GET`/`POST` | `/ad-group-mapping-config`(`/import`) | **Since Post-Roadmap Phase 39 Session 3** (ADR 0153): `config-service`'s export/import target for the whole AD-group-mapping bundle (mappings + composite rules + default role) — service-to-service-gated (`X-DMS-Principal`/`_require_service_user_management`) like `POST /realm-roles`, not the bearer-token endpoints above; import is idempotent per item and deliberately bypasses four-eyes, same precedent as `POST /realm-roles` |
 | `GET`/`PUT` | `/user-tracking-config/{principal_id}` | **Since Post-Roadmap Phase 41 Session 3** (5.5, [ADR 0157](../adr/0157-fine-grained-user-tracking-privileged-accounts.md)): per-principal opt-in for fine-grained session tracking (`{principal_id, enabled, updated_by, updated_at}`) — `GET` synthesizes a default `enabled: false` shape instead of `404` for a principal with no row yet (the normal, expected state). Both gated on `admin.user_tracking` (role `domain-admin-user-tracking`) |
 | `GET` | `/user-tracking-sessions?principal_id=` | **Since Post-Roadmap Phase 41 Session 3**: tracked login/refresh events (`{id, principal_id, username, event_type, auth_method, client_ip, user_agent, occurred_at}`) — gated on a SEPARATE, higher-risk capability, `admin.user_tracking_view` (role `domain-admin-user-tracking-view`), since viewing already-collected data exposes behavioral information the toggle above does not |
@@ -258,8 +258,16 @@ session there was no translation layer at all for this, `/me` returned only Keyc
   claim AND neither the simple table nor any composite rule matched - deliberately NOT applied to a
   principal with no AD group claim at all, a narrower reading than "any unmapped principal" to avoid an
   unintended broad grant. `GET`/`PUT /ad-group-mappings/default-role`, gated on `admin.user_management`
-  like the rest of this surface, deliberately WITHOUT four-eyes (a single scalar setting, not a mapping
-  row - see ADR 0153 "Rationale").
+  like the rest of this surface. `PUT` gained optional four-eyes since **Phase 53 Session 1**
+  ([ADR 0171](../adr/0171-ad-group-mapping-default-role-four-eyes-and-display-name-fix.md)), reversing
+  ADR 0153's own deliberate "single scalar setting, not a mapping row" scope cut on explicit request -
+  same `_maybe_defer_to_approval` pattern, action type `auth.ad_group_mapping.default_role_set`.
+- **Initiator display-name resolution, added Phase 53 Session 1** ([ADR 0171](../adr/0171-ad-group-mapping-default-role-four-eyes-and-display-name-fix.md)):
+  a mapping/rule/default-role set via the four-eyes/consumer path now records the initiator's resolved
+  Keycloak username as `created_by`/`updated_by`, not their raw `sub` - `consumer._resolve_display_name()`
+  reuses `admin_users.find_user_by_id` (`GET /users/{user_id}`, ADR 0069), the same reverse-identity-
+  resolution primitive already used for delegations/teamspace member lists, called server-side at
+  execution time rather than extending the approval-request payload itself.
 - **Admin UI, added Phase 50 Session 5** — this whole surface was API-only until this session despite
   having full backend CRUD since P24-S2/ADR 0153. New `admin-ui` page (`/ad-group-mappings/`, `apps/
   admin-ui/src/components/AdGroupMappings.tsx`), following the established `RequireAuth`→
@@ -375,11 +383,13 @@ new role idempotently — a second call with the same name does not fail, same
   break-glass's mandatory pattern). Config export/import also closed - see "Configuration Packages"
   below. Still genuinely open: **no AD synchronization interval/no user/group synchronization** — group
   memberships are read exclusively from the `groups` JWT claim at token-acquisition time, no periodic
-  reconciliation (not part of ADR 0153's scope; concept 4.4 itself does not call for one). **No admin-UI
+  reconciliation (not part of ADR 0153's scope; concept 4.4 itself does not call for one). ~~**No admin-UI
   CRUD surface** for any of this — remains API/curl-only, same as before this session (deliberately not
   built, ADR 0153 "Rationale": no such UI existed before, and building one was beyond the four named
-  deliverables). The default-role setting itself has no four-eyes protection, unlike the per-row CRUD —
-  see ADR 0153 "Consequences". Role assignment/evaluation in the narrower sense remains the task of the
+  deliverables).~~ — **resolved in Phase 50 Session 5**, see "Admin UI, added Phase 50 Session 5" above.
+  ~~The default-role setting itself has no four-eyes protection, unlike the per-row CRUD — see ADR 0153
+  "Consequences".~~ — **resolved in Phase 53 Session 1** ([ADR 0171](../adr/0171-ad-group-mapping-default-role-four-eyes-and-display-name-fix.md)).
+  Role assignment/evaluation in the narrower sense remains the task of the
   Permission Service (4.1, P2-S2) — `auth-service` only supplies the role names, no permission check of
   its own.
 - **Issuer hostname consistency — partially solved since the ad-hoc post-roadmap SSO feature**: the Auth Service addresses Keycloak internally via `DMS_KEYCLOAK_BASE_URL` (`http://keycloak:8080` inside the compose network); issued tokens accordingly carry `iss=http://keycloak:8080/realms/dms`. With the new browser-based redirect flow (`standardFlowEnabled`, since the SSO feature), exactly the consequence predicted here became real: `GET /oidc/authorize` returns a URL to which the browser navigates — with the internal `http://keycloak:8080` this would not have been resolvable for the browser. Fixed via a new, separate `keycloak_public_base_url` setting (`DMS_KEYCLOAK_PUBLIC_BASE_URL`, `http://localhost:8080` in the compose stack), used only by `_authorization_endpoint` (in `keycloak_client.py`) — token/logout endpoints remain on the internal URL, since they are called exclusively server-side from within `auth-service`. `iss` in the token itself remains the internal URL (Keycloak's own `frontendUrl` configuration would be the complete fix for this, deliberately not touched here, since `TokenValidator` already consistently checks against the same internal issuer).

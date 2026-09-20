@@ -27,8 +27,10 @@ import { useAuth } from "@/lib/auth-context";
 // immediately, per-row delete calling DELETE immediately) rather than the
 // batched-single-PUT style `RetentionSettings.tsx` uses - mirrors
 // `UserManagement.tsx`'s "Role Assignments" section, including its
-// `pending_approval` handling (all four mutating calls here can optionally
-// be four-eyes-gated per installation).
+// `pending_approval` handling (every mutating call here can optionally be
+// four-eyes-gated per installation - the default-role setting joined the
+// other four in Phase 53 Session 1, ADR 0171, reversing ADR 0153's own
+// deliberate scope cut on explicit request).
 export function AdGroupMappings() {
   const { accessToken } = useAuth();
   const { t } = useI18n();
@@ -46,6 +48,7 @@ export function AdGroupMappings() {
 
   const [defaultRoleSelection, setDefaultRoleSelection] = useState("");
   const [defaultRoleSaving, setDefaultRoleSaving] = useState(false);
+  const [defaultRolePending, setDefaultRolePending] = useState(false);
 
   const reload = useCallback(async () => {
     if (!accessToken) return;
@@ -156,12 +159,16 @@ export function AdGroupMappings() {
     event.preventDefault();
     if (!accessToken) return;
     setDefaultRoleSaving(true);
+    setDefaultRolePending(false);
     try {
-      const updated = await setAdGroupMappingDefaultRole(
-        accessToken,
-        defaultRoleSelection || null
-      );
-      setDefaultRole(updated);
+      const result = await setAdGroupMappingDefaultRole(accessToken, defaultRoleSelection || null);
+      if (result.status === "pending_approval") {
+        // Four-eyes principle active - not yet applied, so the previous
+        // config stays displayed (it would be unchanged anyway).
+        setDefaultRolePending(true);
+      } else if (result.config) {
+        setDefaultRole(result.config);
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("adGroupMappings.defaultRoleSaveError"));
     } finally {
@@ -334,6 +341,7 @@ export function AdGroupMappings() {
             {t("common.save")}
           </button>
         </form>
+        {defaultRolePending && <p className="hint">{t("adGroupMappings.pendingApproval")}</p>}
         {defaultRole?.updated_by && (
           <p className="hint">
             {t("adGroupMappings.defaultRoleLastChangedBy", { username: defaultRole.updated_by })}

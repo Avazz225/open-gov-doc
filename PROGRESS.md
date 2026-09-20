@@ -2,10 +2,86 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P52-S4 (case-export open-case document inclusion — fourth and last session of Phase
-52, "Dependency-Resolved / Overdue Completions". **Phase 52 is now fully complete.**). **New ADR**
-([0170](docs/adr/0170-case-export-open-case-document-inclusion.md)) — a genuine design decision (which
-of two options to fix a real, live-documented bug with), per the plan's own DoD.
+**Last completed:** P53-S1 (AD-group-mapping default-role four-eyes + initiator display-name fix — first
+session of Phase 53, "Lower-Priority Hardening & Polish"). **New ADR**
+([0171](docs/adr/0171-ad-group-mapping-default-role-four-eyes-and-display-name-fix.md)) — the plan's own
+DoD made this conditional on whether the fix is "a real decision rather than a mechanical reuse of the
+existing generic mechanism"; judged a real decision (see below).
+
+Two small residuals from ADR 0153, neither touched by P50-S5 (which only added the admin-UI CRUD page):
+
+1. **`PUT /ad-group-mappings/default-role` gains the same optional four-eyes gate** the other four
+   AD-group-mapping mutations already have. ADR 0153 deliberately left this ungated ("gating it would be
+   scope beyond what was asked"), explicitly accepting the residual risk of a compromised
+   `admin.user_management` account silently granting a broad default role with no second approver. This
+   session reverses that scope boundary on explicit request — new action type
+   `auth.ad_group_mapping.default_role_set`, same `_maybe_defer_to_approval` pattern, response now the
+   same `{status, config, approval_request_id}` envelope shape as the sibling endpoints (was a bare
+   object before).
+2. **Initiator display-name resolution**: a mapping/rule/default-role set via the four-eyes/consumer
+   path now records the initiator's resolved Keycloak username as `created_by`/`updated_by`, not their
+   raw `sub`. ADR 0153's own wording ("the approver's raw Keycloak sub") was itself imprecise — it's
+   actually the raw `initiated_by` (the filer, not the approver) that leaked through. Fixed with a new
+   `consumer._resolve_display_name()` helper reusing the ALREADY-ESTABLISHED reverse-identity-resolution
+   primitive (`admin_users.find_user_by_id`, `GET /users/{user_id}`, ADR 0069 — the same mechanism
+   delegations/teamspace member lists already use), resolved server-side at execution time.
+
+**The real decision** (why this earns a new ADR, not just a mechanical fix): considered and explicitly
+rejected changing `initiated_by` itself to a display string at request time — `initiated_by`/`approved_by`
+are compared for self-approval prevention, and changing only one side would silently break that check (or
+worse, silently allow self-approval). Resolving only at the point `created_by`/`updated_by` gets written
+— a pure display-layer concern — avoids that risk entirely, confirmed live: attempting self-approval
+still correctly returned `403` before the fix for the display-name-carrying approver, exactly as before.
+
+`consumer.make_handler`/`start_consuming` gain a new required `keycloak_admin` parameter (already built
+once at `main.py`'s lifespan startup, now also threaded into the consumer). `admin-ui`'s
+`setAdGroupMappingDefaultRole()`/`AdGroupMappings.tsx` updated to match the new envelope, mirroring the
+identical `pending_approval` handling the other two create handlers already have (no new UI pattern).
+
+New/updated tests: `test_ad_group_mapping.py` (+1, the four-eyes-deferral test; the existing get/set/
+reset test updated for the new envelope), `test_consumer.py` (all eight existing tests updated to pass a
+real `keycloak_admin` fixture — the fake `"alice"`/`"bob"` test identities correctly 404 against the
+real dev Keycloak and fall back to the raw id, so every existing assertion stayed unchanged),
+`ad-group-mappings.test.tsx` (+1, the new pending-approval test; the existing default-role save test
+updated for the new envelope). `147`/`147` `auth-service` tests (unchanged count — the fixture update
+touched existing tests, only 1 genuinely new), `279`/`280` `admin-ui` tests (was 278/279, +1 new; the
+one pre-existing unrelated `processing-failures.test.tsx` failure remains, confirmed unrelated).
+`ruff check`/`ruff format --check` clean after a self-caught formatting slip (a manually-wrapped
+decorator line that `ruff format` itself collapses differently — caught and fixed before considering the
+session done, same self-correction discipline as every prior session). `tsc --noEmit`/`eslint .` clean.
+
+Docker images for both services rebuilt and redeployed. **Live-verified end-to-end against the real
+running stack**, entirely via `curl` (no Playwright needed for the backend logic, one screenshot-level
+Playwright smoke check for the frontend): confirmed the direct (ungated) path still works exactly as
+before; enabled four-eyes for the new action type, confirmed a set request now correctly defers to
+`pending_approval`; confirmed self-approval is still correctly rejected (`403`) — proving `initiated_by`/
+`approved_by` semantics are genuinely untouched; approved with a different principal and confirmed the
+setting was applied. **Critically**, confirmed the display-name fix specifically: a `TechnicalAccount`
+initiator's `sub` (a local integer row id) correctly falls back to the raw id (expected, matches the
+direct path's own fallback), while a REAL Keycloak test user's initiation correctly resolved to their
+actual username (`"p53s1-verify-user"`, not their UUID) once approved — the first attempt used a
+`TechnicalAccount` initiator and looked like the fix hadn't worked until this distinction was caught and
+a real Keycloak user was used instead. All test state (role assignments, the four-eyes config override,
+the throwaway Keycloak user, the stray unapproved request from a config-timing mistake mid-verification)
+cleaned up afterward. A drive-by fix found during the frontend screenshot check: the default-role
+section's own hint text still claimed "not four-eyes-gated" — corrected in both `de.json`/`en.json`.
+
+`docs/adr/0153-...md`: closed both residual Consequences bullets, correcting the "approver" wording
+imprecision in the process. `docs/services/auth-service.md`: API table, feature write-up, and Open
+Points all updated (also closed a third, unrelated-to-this-session stale bullet found in passing: "no
+admin-UI CRUD surface", already resolved by P50-S5 but never struck).
+
+**Next session:** P53-S2 — two small residuals from ADR 0154 (per-document `ResourceNode`), neither
+touched since: the document-resource backfill re-runs on every `document-service` startup (~109s in
+this project's own dev DB), and the `scope_case_resource_ids` delegation dimension has no UI in
+`user-ui`'s `DelegationsPane.tsx`.
+
+---
+
+Immediately before P53-S1: **P52-S4** (case-export open-case document inclusion — fourth and last
+session of Phase 52, "Dependency-Resolved / Overdue Completions". **Phase 52 is now fully complete.**).
+**New ADR** ([0170](docs/adr/0170-case-export-open-case-document-inclusion.md)) — a genuine design
+decision (which of two options to fix a real, live-documented bug with), per the plan's own DoD.
 
 `archival_service.general_export.build_case_export_package[_xjustiz]` filtered document references on
 `snapshot_version_number is not None` — a field `case-service` only ever sets once, at case CLOSURE.

@@ -333,13 +333,19 @@ export async function deleteAdGroupCompositeRule(
 }
 
 // Default role for a principal with AD groups but no matching mapping/rule
-// (Post-Roadmap Phase 39 Session 3) - a single scalar setting, not a
-// mapping row, so deliberately NOT four-eyes-gated (see `docs/services/
-// auth-service.md`).
+// (Post-Roadmap Phase 39 Session 3). `PUT` gained optional four-eyes since
+// Phase 53 Session 1 (ADR 0171), reversing ADR 0153's own deliberate scope
+// cut - see `docs/services/auth-service.md`.
 export interface AdGroupMappingDefaultRole {
   default_role_name: string | null;
   updated_at: string;
   updated_by: string | null;
+}
+
+export interface AdGroupMappingDefaultRoleActionResult {
+  status: "set" | "pending_approval";
+  config: AdGroupMappingDefaultRole | null;
+  approval_request_id: string | null;
 }
 
 export async function getAdGroupMappingDefaultRole(
@@ -352,7 +358,7 @@ export async function getAdGroupMappingDefaultRole(
 export async function setAdGroupMappingDefaultRole(
   token: string,
   defaultRoleName: string | null
-): Promise<AdGroupMappingDefaultRole> {
+): Promise<AdGroupMappingDefaultRoleActionResult> {
   const response = await request(
     "auth-service",
     "ad-group-mappings/default-role",

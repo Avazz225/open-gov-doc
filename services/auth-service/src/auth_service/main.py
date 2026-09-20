@@ -60,6 +60,7 @@ from auth_service.schemas import (
     AdGroupCompositeRuleOut,
     AdGroupMappingApprovalStatus,
     AdGroupMappingConfigBundle,
+    AdGroupMappingDefaultRoleActionResult,
     AdGroupMappingDefaultRoleIn,
     AdGroupMappingDefaultRoleOut,
     AdGroupRoleMappingActionResult,
@@ -300,6 +301,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.session_factory,
         activation_minutes=settings.superuser_activation_minutes,
         publish_event=publish_event,
+        keycloak_admin=app.state.keycloak_admin,
     )
 
     # Sensor concept (10.1, full rollout): a fresh `SensorConfigClient` per
@@ -1240,10 +1242,10 @@ async def get_ad_group_mapping_default_role(
     """Configurable default role for AD groups matching neither a simple
     mapping nor a composite rule (4.4, Post-Roadmap Phase 39 Session 3,
     ADR 0153 - the other named scope cut from ADR 0093). Deliberately
-    plain-gated like the rest of this admin surface, no four-eyes - the
-    plan's "four-eyes on mapping changes" deliverable names mapping/rule
-    CRUD specifically, and this is a single scalar setting, not a mapping
-    row (see ADR 0153 "Rationale" for the full reasoning)."""
+    plain-gated - reads are never four-eyes-relevant, same as every other
+    `GET` in this file. `PUT` below gained optional four-eyes since Phase 53
+    Session 1 (ADR 0171), reversing ADR 0153's own deliberate scope cut on
+    explicit request."""
     await _require_user_management(user)
     existing = await ad_group_mapping.get_default_role_config(session)
     return AdGroupMappingDefaultRoleOut(
@@ -1253,29 +1255,50 @@ async def get_ad_group_mapping_default_role(
     )
 
 
-@app.put("/ad-group-mappings/default-role", response_model=AdGroupMappingDefaultRoleOut)
+@app.put("/ad-group-mappings/default-role", response_model=AdGroupMappingDefaultRoleActionResult)
 async def set_ad_group_mapping_default_role(
     payload: AdGroupMappingDefaultRoleIn,
     user: dict = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
-) -> AdGroupMappingDefaultRoleOut:
-    """Sets/resets (`default_role_name=null`) the default role above."""
+) -> AdGroupMappingDefaultRoleActionResult:
+    """Sets/resets (`default_role_name=null`) the default role above.
+    Optionally four-eyes-gated since Phase 53 Session 1 (ADR 0171, action
+    type `auth.ad_group_mapping.default_role_set`) - same
+    `_maybe_defer_to_approval` pattern the other three AD-group-mapping
+    mutations already use (ADR 0153), applied here for the first time. A
+    compromised `admin.user_management` account could previously grant a
+    broad default role to every otherwise-unmapped AD group member with no
+    second approver - ADR 0153 itself named this as the accepted risk of
+    deliberately not building it; this session builds it, on request."""
     await _require_user_management(user)
+    principal_id = user.get("sub")
+    request_id = await _maybe_defer_to_approval(
+        action_type="auth.ad_group_mapping.default_role_set",
+        initiated_by=principal_id,
+        payload={"default_role_name": payload.default_role_name},
+    )
+    if request_id is not None:
+        return AdGroupMappingDefaultRoleActionResult(
+            status="pending_approval", approval_request_id=request_id
+        )
     config = await ad_group_mapping.set_default_role(
         session,
         default_role_name=payload.default_role_name,
-        updated_by=user.get("preferred_username") or user.get("sub"),
+        updated_by=user.get("preferred_username") or principal_id,
     )
     await session.commit()
     await publish_event(
         "auth.ad_group_mapping.default_role_set",
         {"default_role_name": config.default_role_name},
-        actor=user.get("sub"),
+        actor=principal_id,
     )
-    return AdGroupMappingDefaultRoleOut(
-        default_role_name=config.default_role_name,
-        updated_at=config.updated_at,
-        updated_by=config.updated_by,
+    return AdGroupMappingDefaultRoleActionResult(
+        status="set",
+        config=AdGroupMappingDefaultRoleOut(
+            default_role_name=config.default_role_name,
+            updated_at=config.updated_at,
+            updated_by=config.updated_by,
+        ),
     )
 
 

@@ -262,6 +262,21 @@ class AdGroupMappingDefaultRoleOut(BaseModel):
     updated_by: str | None = None
 
 
+class AdGroupMappingDefaultRoleActionResult(BaseModel):
+    """Response envelope for `PUT /ad-group-mappings/default-role` since
+    Phase 53 Session 1 (ADR 0171) - ADR 0153 deliberately left this single
+    scalar setting without four-eyes ("gating it would be scope beyond what
+    was asked"); this session reverses that scope boundary on explicit
+    request. Same "always wrapped, regardless of whether approval is
+    configured" convention as `AdGroupRoleMappingActionResult`/
+    `AdGroupCompositeRuleActionResult` above - `GET` stays a plain
+    `AdGroupMappingDefaultRoleOut`, unchanged."""
+
+    status: Literal["set", "pending_approval"]
+    config: AdGroupMappingDefaultRoleOut | None = None
+    approval_request_id: str | None = None
+
+
 class AdGroupMappingConfigBundle(BaseModel):
     """`GET`/`POST /ad-group-mapping-config` (4.4/7.3, Post-Roadmap Phase
     39 Session 3, ADR 0153) - the config-service export/import shape for

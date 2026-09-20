@@ -470,7 +470,7 @@
     "mappingCreateError": "Failed to create mapping",
     "compositeRuleCreateError": "Failed to create composite rule",
     "defaultRoleSectionTitle": "Default Role for Unmapped Groups",
-    "defaultRoleHint": "Granted when a principal brings AD groups but none of them appear in any mapping/rule above - a single setting, not four-eyes-gated.",
+    "defaultRoleHint": "Granted when a principal brings AD groups but none of them appear in any mapping/rule above - a single setting, optionally protected by the four-eyes principle (installation-wide configuration).",
     "defaultRoleFormLabel": "Set default role",
     "defaultRoleNone": "None",
     "defaultRoleSaveError": "Failed to save",

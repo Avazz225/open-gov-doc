@@ -250,9 +250,13 @@ describe("AdGroupMappings", () => {
       updated_by: null,
     });
     setAdGroupMappingDefaultRoleMock.mockResolvedValue({
-      default_role_name: "dms-poststelle",
-      updated_at: "2026-01-02T00:00:00Z",
-      updated_by: "admin",
+      status: "set",
+      config: {
+        default_role_name: "dms-poststelle",
+        updated_at: "2026-01-02T00:00:00Z",
+        updated_by: "admin",
+      },
+      approval_request_id: null,
     });
 
     renderAdGroupMappings();
@@ -266,6 +270,38 @@ describe("AdGroupMappings", () => {
       expect(setAdGroupMappingDefaultRoleMock).toHaveBeenCalledWith("token-123", "dms-poststelle")
     );
     expect(await screen.findByText("Zuletzt geändert von admin")).toBeInTheDocument();
+  });
+
+  it("shows a pending-approval hint instead of updating when four-eyes defers the default-role change", async () => {
+    // Phase 53 Session 1 (ADR 0171) - the default-role setting joined the
+    // other four AD-group-mapping mutations' optional four-eyes gate.
+    listAdGroupMappingsMock.mockResolvedValue([]);
+    listAdGroupCompositeRulesMock.mockResolvedValue([]);
+    getAdGroupMappingDefaultRoleMock.mockResolvedValue({
+      default_role_name: null,
+      updated_at: "2026-01-01T00:00:00Z",
+      updated_by: null,
+    });
+    setAdGroupMappingDefaultRoleMock.mockResolvedValue({
+      status: "pending_approval",
+      config: null,
+      approval_request_id: "req-1",
+    });
+
+    renderAdGroupMappings();
+    await waitFor(() => expect(getAdGroupMappingDefaultRoleMock).toHaveBeenCalledTimes(1));
+
+    const form = screen.getByRole("form", { name: "Standardrolle festlegen" });
+    fireEvent.change(within(form).getByLabelText("Rolle"), { target: { value: "dms-poststelle" } });
+    fireEvent.submit(form);
+
+    expect(
+      await screen.findByText(
+        "Vier-Augen-Prinzip aktiv - die Änderung wartet auf Genehmigung durch eine zweite Person, bevor sie wirksam wird."
+      )
+    ).toBeInTheDocument();
+    // Not applied - the previous (empty) config stays displayed.
+    expect(screen.queryByText(/Zuletzt geändert von/)).not.toBeInTheDocument();
   });
 
   it("shows an error when creating a mapping fails", async () => {

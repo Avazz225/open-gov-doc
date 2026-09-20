@@ -470,7 +470,7 @@
     "mappingCreateError": "Zuordnung anlegen fehlgeschlagen",
     "compositeRuleCreateError": "Verbund-Regel anlegen fehlgeschlagen",
     "defaultRoleSectionTitle": "Standardrolle für nicht zugeordnete Gruppen",
-    "defaultRoleHint": "Wird vergeben, wenn ein Principal AD-Gruppen mitbringt, aber keine davon in einer der obigen Zuordnungen/Regeln vorkommt - eine einzelne Einstellung, kein Vier-Augen-Prinzip.",
+    "defaultRoleHint": "Wird vergeben, wenn ein Principal AD-Gruppen mitbringt, aber keine davon in einer der obigen Zuordnungen/Regeln vorkommt - eine einzelne Einstellung, optional per Vier-Augen-Prinzip absicherbar (installationsweite Konfiguration).",
     "defaultRoleFormLabel": "Standardrolle festlegen",
     "defaultRoleNone": "Keine",
     "defaultRoleSaveError": "Speichern fehlgeschlagen",
