@@ -2,10 +2,60 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P52-S2 (cross-installation config-compare admin-UI screen, 7.5/ADR 0040's own
-deferred "later UI session" — second session of Phase 52, "Dependency-Resolved / Overdue Completions").
-No new ADR — a pure frontend feature against an already-existing, already-approved backend endpoint,
-respecting ADR 0040's own "no automated cross-installation fetch" decision rather than reopening it.
+**Last completed:** P52-S3 (pseudonymization vault retention, 5.2/ADR 0156's own explicitly deferred gap
+— third session of Phase 52, "Dependency-Resolved / Overdue Completions"). **New ADR** ([0169](docs/adr/0169-pseudonymization-vault-retention-tied-to-document-lifecycle.md))
+— a genuine retention-policy design decision, per the plan's own DoD.
+
+ADR 0156 built reversible attribute pseudonymization (5.2) but explicitly left vault-entry retention
+unsolved, naming two options without picking one: (a) tie it to document-service's existing
+retention/legal-hold machinery, or (b) a new, independent per-vault-entry `retention_until`/poll loop
+(the shape `auth-service`'s fine-grained-tracking retention, ADR 0157, happened to use for an unrelated
+feature). **Chose (a)**: a vault entry's lifetime is now tied exactly to its own document's row lifetime
+— deleted the moment the document is hard-deleted (`repository.hard_delete_document`), through
+whichever of the three existing paths gets it there (forced deletion, trash-expiry purge, records-
+quarantine auto-delete). No new table, no new config, no new poll loop. Directly implements Konzept
+5.2's own wording, only partially quoted in ADR 0156: "...real deletion only where no legal obligation
+stands in the way" — a vault entry has no independent legal basis apart from the document it belongs to,
+so reusing the document's own retention/legal-hold answer isn't an approximation, it's the correct
+scope.
+
+**A real, latent correctness bug found and fixed as part of choosing this design, not a separate
+finding**: `hard_delete_document`'s dependent-row cleanup (versions, orphaned lock, legal-hold history,
+records-quarantine history) never included `PseudonymizedAttribute`, and that table's FK to
+`Document.id` has no `ondelete=` clause. Every one of `hard_delete_document`'s three callers would
+therefore have hit an actual, committed Postgres FK violation — not merely an orphaning risk — the
+first time any document with a vault entry was ever forced-deleted, trash-purged, or quarantine-auto-
+deleted. One added loop (`for vault_entry in await list_pseudonymized_attributes(...): await
+session.delete(vault_entry)`, matching the existing pattern exactly) fixes the bug and closes ADR
+0156's retention gap in the same change — they turned out to be the same fix, not two.
+
+Rejected option (b) explicitly, not just by omission: an independent fixed-N-day config would be a
+second, parallel, harder-to-reason-about retention clock disconnected from the actual legal question
+(does a retention obligation currently block deleting this document) the system already answers once,
+per document — and wouldn't close the FK-violation bug on its own. No new NATS event added for
+vault-entry purging specifically — each of the three hard-delete paths already publishes its own
+document-level event plus a `DeletionRegisterEntry`, already the complete audit trail for "this
+document, and everything belonging to it, is now permanently gone."
+
+New regression tests: a repository-level test (`test_repository.py`, +1 — proves the FK-safe cleanup
+and that the vault entry is gone afterward) and a real-database integration test
+(`test_retention_actions.py`, +1 — using a real committed `session.commit()` against the real Postgres
+engine, the one that would have actually caught the FK violation this session fixes, unlike a
+rollback-scoped unit test). `386`/`386` `document-service` tests passing (was 384, +2). `ruff
+check`/`ruff format --check` clean on all touched files (same pre-existing, unrelated violations
+elsewhere, confirmed via `git stash` multiple times already this phase).
+
+Docker image rebuilt and redeployed. **Live-verified end-to-end against the real running stack** via
+`curl`: created a real object type with a `personal_data: true` attribute, created a real document with
+that attribute, pseudonymized it, trashed it, then purged it (the real hard-delete path, the exact
+scenario the bug affected) — confirmed `204`, not the FK violation this session fixes, then confirmed
+both the document (`404`) and the vault row (`SELECT count(*) ... = 0`, checked directly in Postgres)
+were genuinely gone. Throwaway object type and temporary role-assignment grants cleaned up afterward.
+
+`docs/adr/0156-...md`: closed its own "no expiry or automatic purge" Consequences bullet, added a note
+distinguishing it from the still-separately-open "no automatic trigger on pseudonymization itself"
+bullet (different question, not closed by this session). `docs/services/document-service.md`: new
+bullet in "Attribute-Level Pseudonymization", closed the matching Open Points bullet.
 
 `POST /config/compare` (config-service, since P14-S1/ADR 0040) has no notion of "installation A vs. B"
 at all — it only ever diffs two `ConfigDocument` payloads already in the request body, and ADR 0040
@@ -13,6 +63,22 @@ deliberately declined to build an automated cross-installation fetch ("both expo
 available to the calling side, each produced via that installation's own, regularly authenticated
 access"). The only real gap was the missing UI (`ConfigPackages.tsx` only ever compares an uploaded
 file against the ACTIVE installation's own live export, never a second installation).
+
+**Next session:** P52-S4 — `archival-service`'s `general_export.build_case_export_package` silently
+drops an OPEN case's document references (only closed cases get `snapshot_version_number` set), so
+exporting an open case produces a schema-valid but document-less ZIP with no error. ADR 0159 calls this
+"a genuine, separate future-session candidate," still undecided. Decide between a
+`current_version_number` fallback for open cases vs. enforcing "case must be closed first" as a
+precondition, and implement it. New ADR expected (a real design decision), fourth and last session of
+Phase 52.
+
+---
+
+Immediately before P52-S3: **P52-S2** (cross-installation config-compare admin-UI screen, 7.5/ADR 0040's
+own deferred "later UI session" — second session of Phase 52, "Dependency-Resolved / Overdue
+Completions"). No new ADR — a pure frontend feature against an already-existing, already-approved
+backend endpoint, respecting ADR 0040's own "no automated cross-installation fetch" decision rather than
+reopening it.
 
 New page `/config-compare/`, following the same `RequireAuth`→`RequireCapability`→`AdminShell` pattern
 (`admin.object_config`, same capability as `ConfigPackages.tsx` — `POST /config/compare` itself is

@@ -727,6 +727,34 @@ async def test_hard_delete_document_removes_records_quarantine_history(session):
         await repository.get_document(session, document.id)
 
 
+# --- Pseudonymization vault retention (5.2, Phase 52 Session 3, ADR 0169) -
+
+
+async def test_hard_delete_document_removes_pseudonymized_attributes(session):
+    """Regression test: before this fix, `PseudonymizedAttribute`'s FK to
+    `Document.id` had no `ondelete=`, and this function's dependent-row
+    cleanup never included it - `session.delete(document)` below would have
+    hit a real Postgres FK violation for any document with a vault entry.
+    Tying vault-entry lifetime to the document's own hard-delete (rather
+    than a new, independent retention_until/poll loop) is this session's
+    actual design decision, see ADR 0169."""
+    document = await _make_document(session)
+    await repository.pseudonymize_attribute(
+        session,
+        document.id,
+        "SVNR",
+        encrypted_value=b"ciphertext",
+        pseudonymized_by="carol",
+        reason="DSGVO-Löschanfrage",
+    )
+
+    await repository.hard_delete_document(session, document.id)
+
+    with pytest.raises(repository.NotFoundError):
+        await repository.get_document(session, document.id)
+    assert await repository.list_pseudonymized_attributes(session, document.id) == []
+
+
 async def test_create_and_release_records_quarantine(session):
     document = await _make_document(session)
 

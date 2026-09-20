@@ -90,13 +90,19 @@ Three further decisions followed, all resolved via research/precedent without a 
 - **New RBAC**: `admin.attribute_pseudonymization`/`admin.attribute_reveal` (roles `domain-admin-
   pseudonymization`/`domain-admin-pii-reveal`), auto-seeded on every fresh installation via
   `ensure_domain_admin_roles` like every other domain-admin role in this project.
-- **Encrypted vault entries have no expiry or automatic purge** - the concept's own "deletion obligation"
+- ~~**Encrypted vault entries have no expiry or automatic purge** - the concept's own "deletion obligation"
   is only partially discharged by this session's mechanism as a result: the pseudonymized value is no
   longer live/searchable, but the encrypted original persists in the vault indefinitely, still
   personal data under GDPR for as long as it exists. A future session would need to decide a genuine
   retention policy for vault entries themselves (e.g. hard-delete after N years, or on the same
   retention/legal-hold machinery `document-service` already has) before this fully closes the concept's
-  stated tension - explicitly NOT solved by this session.
+  stated tension - explicitly NOT solved by this session.~~ — **closed in Phase 52 Session 3**
+  ([ADR 0169](0169-pseudonymization-vault-retention-tied-to-document-lifecycle.md)): a vault entry is
+  now deleted automatically the moment its own document is hard-deleted (forced deletion, trash-expiry
+  purge, or records-quarantine auto-delete), tied to exactly the retention/legal-hold machinery this
+  paragraph itself named as the intended option. Also fixed a real, latent FK-violation bug found while
+  building this: `hard_delete_document` never cleaned up vault rows before, and their FK to `Document.id`
+  has no `ondelete=` clause.
 - **No automatic trigger on retention expiry** - only a manual, admin-invoked action this session. The
   concept's own sibling section (5.2a) explicitly permits a purely manual/direct-configuration mechanism
   ("BPMN-modelable OR direct object/object-type configuration"), so this is a legitimate, deliberately
@@ -104,7 +110,9 @@ Three further decisions followed, all resolved via research/precedent without a 
   concept's framing ("instead of hard-deleting... wherever a retention obligation exists") would
   eventually want an automatic path too (e.g. a new per-object-type/per-document flag, checked in
   `document_service.main._retention_poll_loop` alongside the existing soft-delete/forced-deletion
-  branches). Deferred as an explicit Open Point, not built speculatively.
+  branches). Deferred as an explicit Open Point, not built speculatively. **Note (Phase 52 Session 3)**:
+  this bullet is about triggering pseudonymization itself automatically (still not built, still open) -
+  a DIFFERENT question from vault-entry retention/purge above, which ADR 0169 does now close.
 - **`folder-service`/`case-service` have no equivalent mechanism** - their own `attributes` JSON columns
   remain unaffected by this session. A future mirroring session would reuse the same vault-table/crypto/
   RBAC shape.

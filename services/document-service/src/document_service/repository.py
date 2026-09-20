@@ -591,7 +591,26 @@ async def hard_delete_document(session: AsyncSession, document_id: str) -> None:
     deliberately has NO FK to `Document.id`. First removes all
     dependent rows (versions, a possibly orphaned lock, the legal hold
     history, the records-quarantine history since post-roadmap phase 31
-    session 5) so that FK constraints are not violated."""
+    session 5, the pseudonymization vault since Phase 52 Session 3/ADR
+    0169 - see below) so that FK constraints are not violated.
+
+    Pseudonymization vault cleanup (5.2, ADR 0156's own deferred "no
+    automatic vault-entry expiry" gap, closed here): `PseudonymizedAttribute`
+    rows were never included in this cleanup before Phase 52 Session 3, so a
+    document with any vault entries would hit an actual Postgres FK
+    violation right here (the FK has no `ondelete=`) the moment it was ever
+    forced-deleted/trash-purged/quarantine-auto-deleted - a real, latent
+    bug, not just an orphaning risk, since every one of this function's
+    three callers (`retention_actions.py`) goes through this exact path.
+    Tying vault-entry lifetime to the document's own row lifetime (rather
+    than a new, independent per-vault-entry retention_until/poll loop,
+    ADR 0156's other floated option) directly implements Konzept 5.2's own
+    "real deletion only where no legal obligation stands in the way" -
+    a vault entry survives exactly as long as its document might still be
+    restored/revealed (soft-deleted-but-in-trash, under legal hold, or
+    simply still live), and disappears the moment the document itself
+    becomes permanently, irrecoverably gone, regardless of which of the
+    three paths got it there."""
     document = await get_document(session, document_id)
     for version in await list_versions(session, document_id):
         await session.delete(version)
@@ -602,6 +621,8 @@ async def hard_delete_document(session: AsyncSession, document_id: str) -> None:
         await session.delete(hold)
     for quarantine in await list_records_quarantine(session, document_id=document_id):
         await session.delete(quarantine)
+    for vault_entry in await list_pseudonymized_attributes(session, document_id):
+        await session.delete(vault_entry)
     # Without an explicit intermediate flush, SQLAlchemy's unit of work does
     # not reliably order the subsequent DELETE statement for `document` AFTER
     # the ones above (no declared `relationship()`s between these

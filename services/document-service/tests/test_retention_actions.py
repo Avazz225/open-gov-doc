@@ -72,6 +72,44 @@ async def test_execute_forced_deletion_removes_storage_content_and_document(sess
         await storage.close()
 
 
+async def test_execute_forced_deletion_of_a_document_with_a_pseudonymized_attribute(session):
+    """Real-DB regression test (5.2, Phase 52 Session 3, ADR 0169): before
+    this fix, `hard_delete_document` never cleaned up `PseudonymizedAttribute`
+    rows, and their FK to `Document.id` has no `ondelete=` - a real, committed
+    Postgres FK violation, not just an orphaning risk, since every forced-
+    deletion/trash-purge/quarantine-auto-delete goes through this exact
+    function. Uses the same real `session.commit()` as the test above,
+    unlike the plain repository-level regression test in
+    test_repository.py - this is the one that would have actually caught
+    the FK violation against the real database engine."""
+    storage = StorageClient(STORAGE_SERVICE_URL)
+    try:
+        document_id = await _upload_and_create_document(session, storage, content=b"geheim")
+        await repository.pseudonymize_attribute(
+            session,
+            document_id,
+            "SVNR",
+            encrypted_value=b"ciphertext",
+            pseudonymized_by="carol",
+            reason="DSGVO-Löschanfrage",
+        )
+        await session.commit()
+
+        await retention_actions.execute_forced_deletion(
+            session,
+            storage,
+            document_id,
+            reason="Frist abgelaufen",
+            triggered_by="system:retention-poll",
+            governance_bypass_role="dms-admin",
+        )
+        await session.commit()
+
+        assert await repository.list_pseudonymized_attributes(session, document_id) == []
+    finally:
+        await storage.close()
+
+
 async def test_purge_expired_trash_entry_removes_storage_content_and_document(session):
     storage = StorageClient(STORAGE_SERVICE_URL)
     try:
