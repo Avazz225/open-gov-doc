@@ -26,6 +26,46 @@ import { useInstallation } from "@/lib/installation-context";
 // the admin picks a known installation (`InstallationManager.tsx`'s own
 // list) and authenticates against it directly, mirroring the CLI flow ADR
 // 0040 describes ("two dms config export calls, each with its own login").
+function formatDeltaValue(value: unknown): string {
+  if (value === null || value === undefined) return "–";
+  if (typeof value === "string") return value;
+  return JSON.stringify(value);
+}
+
+// Per-field diff view (Phase 58 Session 2, ADR 0040's own self-documented
+// "smaller, still-open follow-up") - `delta.differing` already carried
+// {base, compare} per field since P14-S1 (see `CategoryDelta`'s own type),
+// only the frontend never rendered it, showing item NAMES only. A native
+// <details>/<summary> per item needs no extra expand-state, the standard
+// "click to reveal a table" idiom.
+function DifferingItem({ name, fields }: { name: string; fields: Record<string, { base: unknown; compare: unknown }> }) {
+  const { t } = useI18n();
+  const fieldNames = Object.keys(fields);
+  return (
+    <details>
+      <summary>{name}</summary>
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th>{t("configCompare.diffField")}</th>
+            <th>{t("configCompare.diffBase")}</th>
+            <th>{t("configCompare.diffCompare")}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {fieldNames.map((field) => (
+            <tr key={field}>
+              <td>{field}</td>
+              <td>{formatDeltaValue(fields[field].base)}</td>
+              <td>{formatDeltaValue(fields[field].compare)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </details>
+  );
+}
+
 function DeltaTable({ category, delta }: { category: string; delta: CategoryDelta }) {
   const { t } = useI18n();
   const differingNames = Object.keys(delta.differing);
@@ -43,9 +83,12 @@ function DeltaTable({ category, delta }: { category: string; delta: CategoryDelt
         </p>
       )}
       {differingNames.length > 0 && (
-        <p>
-          <strong>{t("configCompare.deltaDiffering")}:</strong> {differingNames.join(", ")}
-        </p>
+        <div>
+          <strong>{t("configCompare.deltaDiffering")}:</strong>
+          {differingNames.map((name) => (
+            <DifferingItem key={name} name={name} fields={delta.differing[name]} />
+          ))}
+        </div>
       )}
       {delta.only_in_base.length > 0 && (
         <p className="hint">
@@ -67,6 +110,7 @@ export function ConfigCompare() {
   );
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [ignoreRegex, setIgnoreRegex] = useState("");
 
   const [isComparing, setIsComparing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -83,7 +127,7 @@ export function ConfigCompare() {
     try {
       const tokens = await loginAt(target.gatewayBaseUrl, username, password);
       const compareDoc = await exportConfigAt(target.gatewayBaseUrl, tokens.access_token);
-      setResult(await compareConfig(accessToken, compareDoc));
+      setResult(await compareConfig(accessToken, compareDoc, undefined, ignoreRegex || undefined));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("configCompare.compareError"));
     } finally {
@@ -134,6 +178,15 @@ export function ConfigCompare() {
                 required
               />
             </label>
+            <label>
+              {t("configCompare.ignoreRegex")}
+              <input
+                value={ignoreRegex}
+                onChange={(e) => setIgnoreRegex(e.target.value)}
+                placeholder={t("configCompare.ignoreRegexPlaceholder")}
+              />
+            </label>
+            <p className="hint">{t("configCompare.ignoreRegexHint")}</p>
             <button type="submit" disabled={isComparing}>
               {t("configCompare.compare")}
             </button>

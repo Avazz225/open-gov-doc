@@ -2,8 +2,67 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P58-S1 (Pseudonymization Completion — first session of Phase 58, "Pseudonymization
-Completion & Small Polish Bundle"). **New ADR**
+**Last completed:** P58-S2 (Small Polish Bundle — second and last session of Phase 58. **Closes Phase
+58.**). No new ADR — per the plan's own DoD (pure completion/polish of already-established patterns and
+already-existing backend surfaces).
+
+**Three independent, cheap items, one genuinely closed as planned, one found already closed, one
+genuinely built:**
+
+- **(a) `admin-ui`'s `/config-compare/` page** (ADR 0040's own self-documented "smaller, still-open
+  follow-up"): each differing item in the compare result is now a `<details>`/`<summary>` disclosure
+  showing a per-field `{base, compare}` table (the backend already returned this shape since P14-S1,
+  the frontend only ever rendered item names). A new global ignore-regex text input sends the backend's
+  already-existing `ignore_regex` parameter as `{"*": value}` — deliberately only the global form, not a
+  per-category map, the smallest increment closing the follow-up without inventing a per-category input
+  nothing asked for. `docs/adr/0040-...md`'s own matching bullet struck through.
+- **(b) `user-ui`'s `RetentionPanel`/`FolderRetentionModal` client-side role restriction** — **found
+  already fully implemented**, not a gap. Both components already compute `canManageLegalHold`
+  (`admin.legal_hold`, ADR 0075, P19-S10) and `canManageRetention` (`admin.retention`, P38-S3) and wire
+  them into every set/release/save button's `disabled` state with hint tooltips. The plan's premise for
+  this item traced back to two stale `docs/services/user-ui.md` Open Points bullets making the opposite
+  claim — both struck through with the closing sessions named, per this project's established doc-drift
+  correction convention. No code change needed.
+- **(c) `registry-service`'s periodic cleanup of permanently-unreachable instance rows** — genuinely
+  built (real, if cosmetic, gap: dead rows were already excluded from routing but accumulated unbounded
+  in the raw admin listing). New `_cleanup_poll_loop` (same poll-loop idiom as `document-service`'s own),
+  new `repository.list_permanently_unreachable` (cutoff `unreachable_cleanup_after_seconds`, default 7
+  days — deliberately much longer than the 15s routing-health window), reuses the existing
+  `repository.deregister` (not a bulk `DELETE`) so cleanup still publishes `registry.instance.
+  deregistered`, just with `actor="system:registry-cleanup"`. The matching `docs/services/registry-
+  service.md` Open Points bullet struck through.
+
+New/updated tests: `admin-ui` +2 (`config-compare.test.tsx`), 282 total (one known, independently-
+reproducible, pre-existing `processing-failures.test.tsx` flake confirmed unrelated — last touched
+P40-S3, untouched by this session). `registry-service` +2 (`test_repository.py`), 46 total. `tsc`/
+`eslint` clean for `admin-ui`. `ruff` clean for `registry-service` (same pre-existing, unrelated
+repo-wide ruff failures — `libreoffice-addin`/`loadtest/notebook`/`federation-hub-service` — confirmed
+out of scope again).
+
+Docker images for `admin-ui`/`registry-service` rebuilt/redeployed. **Live-verified against the real
+running stack**: for (c), inserted a real `ServiceInstance` row directly via SQL with `last_heartbeat_at`
+10 days old, restarted `registry-service` to force an immediate poll tick, confirmed the row was
+automatically removed from `GET /instances`; separately inserted a merely-1-hour-stale row (`healthy:
+false`, within the 7-day window) and confirmed it survived the same tick — proving the cleanup targets
+genuinely permanent unreachability, not routine routing staleness. For (a), confirmed `admin-ui`'s login
+page renders cleanly in a real headless-Chromium session with no console/page errors; the actual new
+interactive behavior (ignore-regex submission, per-field diff expansion) is covered by the Vitest
+component tests with real simulated user interaction rather than a full interactive login-based browser
+walkthrough — noted transparently as a partial live-verification, proportionate to this item's small
+scope, unlike (c)'s full end-to-end live verification.
+
+**Phase 58 ("Pseudonymization Completion & Small Polish Bundle") is now closed** (P58-S1 through S2,
+both sessions done). `graphify update .` to run next per the established phase-end convention.
+
+**Next session**: none currently defined — `IMPLEMENTATION_PLAN.md` has no further sessions queued
+beyond Phase 58. Per the standing "weiter selbstständig" instruction, the established project pattern is
+that a new gap-analysis round is typically explicitly requested by the user rather than self-initiated —
+the correct next step is to report status rather than inventing a new round unprompted.
+
+---
+
+Immediately before P58-S2: **P58-S1** (Pseudonymization Completion — first session of Phase 58,
+"Pseudonymization Completion & Small Polish Bundle"). **New ADR**
 ([0177](docs/adr/0177-pseudonymization-retention-trigger-and-folder-case-mirroring.md)) — closes both
 of ADR 0156's own named residual gaps.
 

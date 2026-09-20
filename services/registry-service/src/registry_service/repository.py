@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -133,3 +133,20 @@ async def list_all(session: AsyncSession, *, heartbeat_timeout_seconds: float) -
     result = await session.execute(select(ServiceInstance))
     instances = result.scalars().all()
     return [_to_out(i, heartbeat_timeout_seconds, now) for i in instances]
+
+
+async def list_permanently_unreachable(
+    session: AsyncSession, *, cleanup_after_seconds: float
+) -> list[ServiceInstance]:
+    """Periodic cleanup (3.2a, Phase 58 Session 2) - rows whose last
+    heartbeat is older than `cleanup_after_seconds` (a much longer window
+    than `heartbeat_timeout_seconds`, which only decides routing eligibility
+    on read, see `list_active_by_type` above). These rows are already
+    excluded from routing and filtered out of `GET /instances/{service_type}`
+    - this only removes them from the raw `GET /instances` admin listing
+    they'd otherwise accumulate in forever."""
+    cutoff = datetime.now(UTC) - timedelta(seconds=cleanup_after_seconds)
+    result = await session.execute(
+        select(ServiceInstance).where(ServiceInstance.last_heartbeat_at < cutoff)
+    )
+    return list(result.scalars().all())

@@ -816,7 +816,13 @@
     "deltaNoChanges": "Keine Unterschiede.",
     "deltaOnlyInCompare": "Nur in der verglichenen Installation",
     "deltaDiffering": "Abweichend",
-    "deltaOnlyInBase": "Nur in der aktiven Installation"
+    "deltaOnlyInBase": "Nur in der aktiven Installation",
+    "diffField": "Feld",
+    "diffBase": "Aktive Installation",
+    "diffCompare": "Verglichene Installation",
+    "ignoreRegex": "Regex ignorieren (optional)",
+    "ignoreRegexPlaceholder": "z. B. ^internal_.*",
+    "ignoreRegexHint": "Feldnamen, die auf dieses Muster passen, werden bei allen Kategorien beim Vergleich übersprungen (7.5)."
   },
   "storageGuard": {
     "pageTitle": "Speicher-Wächter",

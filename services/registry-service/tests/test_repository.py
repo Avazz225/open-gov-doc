@@ -162,3 +162,34 @@ async def test_list_all_includes_stale_with_healthy_flag(session):
 
     match = next(i for i in all_instances if i.instance_id == req.instance_id)
     assert match.healthy is False
+
+
+async def test_list_permanently_unreachable_excludes_a_merely_stale_instance(session):
+    """Merely stale (misses the routing-eligibility window) must NOT be
+    swept - only permanently unreachable (misses the much longer cleanup
+    window) is (Phase 58 Session 2)."""
+    req = make_request()
+    await repository.register(session, req)
+    instance = await session.get(ServiceInstance, req.instance_id)
+    instance.last_heartbeat_at = datetime.now(UTC) - timedelta(hours=1)
+    await session.flush()
+
+    unreachable = await repository.list_permanently_unreachable(
+        session, cleanup_after_seconds=604800.0
+    )
+
+    assert req.instance_id not in {i.instance_id for i in unreachable}
+
+
+async def test_list_permanently_unreachable_includes_a_genuinely_old_instance(session):
+    req = make_request()
+    await repository.register(session, req)
+    instance = await session.get(ServiceInstance, req.instance_id)
+    instance.last_heartbeat_at = datetime.now(UTC) - timedelta(days=8)
+    await session.flush()
+
+    unreachable = await repository.list_permanently_unreachable(
+        session, cleanup_after_seconds=604800.0
+    )
+
+    assert req.instance_id in {i.instance_id for i in unreachable}

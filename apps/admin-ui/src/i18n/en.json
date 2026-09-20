@@ -816,7 +816,13 @@
     "deltaNoChanges": "No differences.",
     "deltaOnlyInCompare": "Only in the compared installation",
     "deltaDiffering": "Differing",
-    "deltaOnlyInBase": "Only in the active installation"
+    "deltaOnlyInBase": "Only in the active installation",
+    "diffField": "Field",
+    "diffBase": "Active installation",
+    "diffCompare": "Compared installation",
+    "ignoreRegex": "Ignore regex (optional)",
+    "ignoreRegexPlaceholder": "e.g. ^internal_.*",
+    "ignoreRegexHint": "Field names matching this pattern are skipped across every category during comparison (7.5)."
   },
   "storageGuard": {
     "pageTitle": "Storage guard",

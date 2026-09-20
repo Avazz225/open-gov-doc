@@ -2619,12 +2619,21 @@ export interface CompareResult {
 export async function compareConfig(
   token: string,
   compareDoc: ConfigDocument,
-  categories?: ConfigCategory[]
+  categories?: ConfigCategory[],
+  ignoreRegex?: string
 ): Promise<CompareResult> {
   const response = await request(
     "config-service",
     "config/compare",
-    jsonInit({ compare: compareDoc, categories: categories && categories.length ? categories : undefined }),
+    jsonInit({
+      compare: compareDoc,
+      categories: categories && categories.length ? categories : undefined,
+      // "*" is config-service's own global-default key (P14-S1, ADR 0040) -
+      // this UI only offers one global pattern, not a per-category map, the
+      // smallest increment closing the "still-open follow-up" (Phase 58
+      // Session 2) without inventing a per-category input UI nothing asked for.
+      ignore_regex: ignoreRegex ? { "*": ignoreRegex } : undefined,
+    }),
     token
   );
   return response.json();

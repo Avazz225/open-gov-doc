@@ -283,10 +283,18 @@ deliberately built no automated cross-installation fetch. This page respects tha
   own token (`dms.tokens.<id>` in `auth-context.tsx`) or exposed via `useAuth()` — this mirrors
   the CLI flow ADR 0040 itself describes ("two `dms config export` calls, each with its own
   login, plus `dms config compare`"), just without leaving the browser tab.
-- **Rendering** reuses `ConfigPackages.tsx`'s exact `DeltaTable` presentation (per-category
-  card: only-in-compare, differing, only-in-base — names only, not each field's `{base,
-  compare}` detail, same as the existing page), duplicated rather than imported per this
-  project's established frontend convention (ADR 0006).
+- **Rendering** reuses `ConfigPackages.tsx`'s `DeltaTable` presentation (per-category card:
+  only-in-compare, differing, only-in-base), duplicated rather than imported per this project's
+  established frontend convention (ADR 0006). Since **Phase 58 Session 2**: each differing item
+  is now a `<details>`/`<summary>` disclosure — expanding it shows a per-field table (`field`,
+  `base`, `compare`), the backend's own `{base, compare}` detail per field (already returned
+  since P14-S1) is finally rendered instead of just the item's name, closing ADR 0040's own
+  self-documented "smaller, still-open follow-up".
+- **Ignore-regex (since Phase 58 Session 2)**: one optional text input sends the backend's
+  already-existing `ignore_regex` parameter ([`CompareRequest.ignore_regex`](../adr/0040-config-compare-field-level-diff-no-cross-installation-fetch.md),
+  P14-S1) as a single GLOBAL pattern (`{"*": value}`) — the backend itself supports a per-category
+  map too, but this UI deliberately offers only the global form, the smallest increment closing
+  the follow-up without a per-category input nothing asked for.
 
 Sidebar visibility and the page's own `RequireCapability` both gate on `admin.object_config`,
 the same capability as `ConfigPackages.tsx` — both are config-service admin functionality, and
@@ -381,7 +389,15 @@ Two-stage Docker image (`apps/admin-ui/Dockerfile`), identical to the User UI. `
 ## Tests
 
 - `npm run typecheck` / `npm run lint` / `npm run build`.
-- `npm test` (Vitest + Testing Library, **280 tests since P53-S3** — +1: a new
+- `npm test` (Vitest + Testing Library, **282 tests since Phase 58 Session 2** — +2 in
+  `config-compare.test.tsx`: the new global ignore-regex field is sent as `ignore_regex: {"*":
+  value}`, and expanding a differing item's new `<details>` disclosure reveals its per-field
+  `{base, compare}` table — see "Cross-Installation Config Compare" above. One known, unrelated,
+  independently-reproducible flake remains in `processing-failures.test.tsx` ("retries a failed
+  handover (result leg) and reloads" — confirmed to fail in isolation too, last touched at P40-S3,
+  untouched by this session, not investigated further here).
+
+Older history: 280 tests since P53-S3 — +1: a new
   `reports-view.test.tsx` test ("shows a visible status for each schedule's last delivery attempt")
   for the new `last_status`/`last_error`-driven status column in `ReportsView.tsx`'s schedule table
   (`.badge.ok`/`.badge.down`/never-run hint, incl. the `title` tooltip carrying `last_error` on the

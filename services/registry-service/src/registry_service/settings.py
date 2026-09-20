@@ -34,3 +34,13 @@ class Settings(BaseServiceSettings):
     # comes from `monitoring-service`, not from here.
     monitoring_service_base_url: str = "http://localhost:8026"
     sensor_sample_interval_seconds: float = 15.0
+
+    # Periodic cleanup of permanently-unreachable instance rows (3.2a, Phase
+    # 58 Session 2) - a much longer window than `heartbeat_timeout_seconds`
+    # (which only decides routing eligibility, not row lifetime). Default 7
+    # days: long enough that a genuinely temporary outage/redeploy never
+    # gets cleaned up, short enough that stale rows from a permanently
+    # decommissioned instance don't accumulate indefinitely in the admin
+    # UI's registry overview.
+    unreachable_cleanup_after_seconds: float = 604800.0
+    cleanup_poll_interval_seconds: float = 3600.0

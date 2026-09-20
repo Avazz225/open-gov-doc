@@ -30,6 +30,38 @@ configure_logging(settings)
 logger = logging.getLogger(__name__)
 
 
+async def _cleanup_poll_loop(session_factory) -> None:
+    """Periodic cleanup of permanently-unreachable instance rows (3.2a,
+    Phase 58 Session 2) - same poll-loop idiom as `document_service.main.
+    _retention_poll_loop`/`workflow_service.main._sla_poll_loop`. An error
+    in one tick doesn't abort the loop. Reuses `repository.deregister`
+    (not a bulk DELETE) so each cleanup still publishes the existing
+    `registry.instance.deregistered` event - consistent with the manual
+    `DELETE /instances/{id}` path, just with a different actor."""
+    while True:
+        try:
+            async with session_factory() as session:
+                stale = await repository.list_permanently_unreachable(
+                    session, cleanup_after_seconds=settings.unreachable_cleanup_after_seconds
+                )
+                for instance in stale:
+                    instance_id = instance.instance_id
+                    service_type = instance.service_type
+                    await repository.deregister(session, instance_id)
+                    await session.commit()
+                    await publish_event(
+                        "registry.instance.deregistered",
+                        subject=instance_id,
+                        payload={"service_type": service_type},
+                        actor="system:registry-cleanup",
+                    )
+        except Exception:
+            logger.exception(
+                "Cleanup-Poll-Tick fehlgeschlagen - wird beim nächsten Tick erneut versucht."
+            )
+        await asyncio.sleep(settings.cleanup_poll_interval_seconds)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     startup_start = time.time()
@@ -118,12 +150,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         run_gauge_sampler_loop(samplers, interval_seconds=settings.sensor_sample_interval_seconds)
     )
 
+    cleanup_poll_task = asyncio.create_task(_cleanup_poll_loop(app.state.session_factory))
+
     startup_end = time.time()
     millis = round((startup_end - startup_start) * 1000, 3)
     logger.info("Startup completed in %s ms.", millis, exc_info=True)
 
     yield
 
+    cleanup_poll_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await cleanup_poll_task
     sensor_sampler_task.cancel()
     with suppress(asyncio.CancelledError):
         await sensor_sampler_task

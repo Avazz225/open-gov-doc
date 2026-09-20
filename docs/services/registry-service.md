@@ -33,6 +33,27 @@
 - A **new** registration (row does not yet exist) always starts with `status="active"`; a re-registration of the same `instance_id` (self-healing after `404`, not a real restart, see `dms-registry-client`) leaves an existing `status` unchanged — only heartbeat/register never automatically revert it, only `/drain`/`/activate` set it.
 - **Rollback (10.5, P10-S3)**: `POST /instances/{instance_id}/activate` resets `status` back to `"active"` — without this reversal there would be no way to make an already-drained instance reachable for new requests again. Concept 10.5 explicitly requires that a rollback remains possible as long as the drain is not yet fully completed (i.e. the instance has not yet stopped). Used by `scripts/rolling-update.sh`'s manual rollback procedure, see `docs/operations/rolling-updates.md`.
 
+## Periodic Cleanup of Unreachable Instances (3.2a, Phase 58 Session 2)
+
+A background poll loop (`_cleanup_poll_loop`, same idiom as `document_service.main.
+_retention_poll_loop`/`workflow_service.main._sla_poll_loop`) periodically removes `ServiceInstance`
+rows whose `last_heartbeat_at` age exceeds `unreachable_cleanup_after_seconds` (default 7 days,
+`cleanup_poll_interval_seconds` default 1h) — a much longer window than `heartbeat_timeout_seconds`
+(15s), which only decides routing/`healthy` eligibility on read, not row lifetime.
+
+- **Reuses `repository.deregister`, not a bulk `DELETE`** — each cleaned-up row still publishes the
+  existing `registry.instance.deregistered` event (same as the manual `DELETE /instances/{id}` path),
+  just with `actor="system:registry-cleanup"` instead of `system:<service_type>` — visible in the
+  audit trail like any other deregistration, distinguishable by actor.
+- **Cosmetic fix, not a routing-correctness fix** — dead rows were already excluded from
+  `GET /instances/{service_type}` (the active routing table) and shown with `healthy: false` in the
+  raw `GET /instances` admin listing; this only stops that listing from accumulating permanently-dead
+  rows unbounded (real, observed pre-existing pain — see the now-closed Open Point below).
+- Live-verified against the real running stack: a manually-inserted row with `last_heartbeat_at` 10
+  days old was removed on the next poll tick (forced via a container restart); an otherwise-identical
+  row only 1 hour old (`healthy: false`, still within the 7-day cleanup window) was confirmed to
+  survive the same tick.
+
 ## License Brokering (3.2b/9.3, P9-S2)
 
 - **Only configured components are subject to licensing at all**: `settings.licensable_components` (default `{"workflow-service": "demo", "webdav-connector": "demo", "migration-service": "demo"}`, the latter two since P12-S1/P12-S2) assigns each separately licensable `service_type` a policy (`"demo"` or `"lock"`) that applies when no valid license is installed or the component is not included in the license's `licensed_components`. Every unlisted `service_type` is "core" and always gets `"licensed"` — Concept 9.1 explicitly names the CMIS connector/migration service/workflow automation as examples of separately licensable components. Concept 3.3 explicitly names connectors as an example, hence `webdav-connector` since P12-S1 follows the same `"demo"` pattern as `workflow-service` (see `docs/services/webdav-connector.md`); `migration-service` likewise since P12-S2 (see `docs/services/migration-service.md`).
@@ -74,4 +95,4 @@ statically configuring backend addresses.
 ## Open Points
 
 - Actively pinging the reported `health_endpoint` (instead of pure heartbeat push) as a possible later addition, not part of this session.
-- **No cleanup of permanently unreachable instances** (observed since P4-S1: container restarts without a clean `DELETE /instances/{id}`, e.g. on `docker compose down` without prior deregistration, leave permanent `healthy=false` rows behind). Not critical for routing (`GET /instances/{service_type}` already filters them out), but they accumulate unbounded in the table — periodic cleanup (e.g. deletion after X days without a heartbeat) is not part of this session.
+- ~~**No cleanup of permanently unreachable instances** (observed since P4-S1: container restarts without a clean `DELETE /instances/{id}`, e.g. on `docker compose down` without prior deregistration, leave permanent `healthy=false` rows behind). Not critical for routing (`GET /instances/{service_type}` already filters them out), but they accumulate unbounded in the table — periodic cleanup (e.g. deletion after X days without a heartbeat) is not part of this session.~~ — **closed in Phase 58 Session 2**, see "Periodic Cleanup of Unreachable Instances" below.

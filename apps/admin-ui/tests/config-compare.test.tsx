@@ -127,11 +127,82 @@ describe("ConfigCompare", () => {
       )
     );
     expect(exportConfigAtMock).toHaveBeenCalledWith("https://prod.example.org", "other-token");
-    expect(compareConfigMock).toHaveBeenCalledWith("active-token", otherExport);
+    expect(compareConfigMock).toHaveBeenCalledWith("active-token", otherExport, undefined, undefined);
 
     expect(await screen.findByText("Rechnung")).toBeInTheDocument();
     expect(screen.getByText("Vertrag")).toBeInTheDocument();
-    expect(screen.getByText("Akte")).toBeInTheDocument();
+    expect(screen.getByText("Akte", { selector: "summary" })).toBeInTheDocument();
+  });
+
+  it("sends the ignore-regex field as a global pattern when filled in", async () => {
+    seedTwoInstallations();
+    loginAtMock.mockResolvedValue({
+      access_token: "other-token",
+      refresh_token: "r",
+      expires_in: 3600,
+      token_type: "bearer",
+    });
+    const otherExport = { schema_version: "1", exported_at: "2026-01-02T00:00:00Z" };
+    exportConfigAtMock.mockResolvedValue(otherExport);
+    compareConfigMock.mockResolvedValue(COMPARE_RESULT);
+
+    renderConfigCompare();
+
+    const form = await screen.findByRole("form", { name: "Vergleich starten" });
+    fireEvent.change(within(form).getByLabelText("Zu vergleichende Installation"), {
+      target: { value: "prod" },
+    });
+    fireEvent.change(within(form).getByLabelText("Benutzername (dort)"), {
+      target: { value: "users-admin" },
+    });
+    fireEvent.change(within(form).getByLabelText("Passwort (dort)"), {
+      target: { value: "secret" },
+    });
+    fireEvent.change(within(form).getByLabelText("Regex ignorieren (optional)"), {
+      target: { value: "^internal_.*" },
+    });
+    fireEvent.submit(form);
+
+    await waitFor(() =>
+      expect(compareConfigMock).toHaveBeenCalledWith(
+        "active-token",
+        otherExport,
+        undefined,
+        "^internal_.*"
+      )
+    );
+  });
+
+  it("expands a differing item to show its per-field base/compare values", async () => {
+    seedTwoInstallations();
+    loginAtMock.mockResolvedValue({
+      access_token: "other-token",
+      refresh_token: "r",
+      expires_in: 3600,
+      token_type: "bearer",
+    });
+    exportConfigAtMock.mockResolvedValue({ schema_version: "1", exported_at: "2026-01-02T00:00:00Z" });
+    compareConfigMock.mockResolvedValue(COMPARE_RESULT);
+
+    renderConfigCompare();
+
+    const form = await screen.findByRole("form", { name: "Vergleich starten" });
+    fireEvent.change(within(form).getByLabelText("Zu vergleichende Installation"), {
+      target: { value: "prod" },
+    });
+    fireEvent.change(within(form).getByLabelText("Benutzername (dort)"), {
+      target: { value: "users-admin" },
+    });
+    fireEvent.change(within(form).getByLabelText("Passwort (dort)"), {
+      target: { value: "secret" },
+    });
+    fireEvent.submit(form);
+
+    const summary = await screen.findByText("Akte", { selector: "summary" });
+    fireEvent.click(summary);
+
+    expect(screen.getByText("name")).toBeInTheDocument();
+    expect(screen.getByText("Akte (neu)")).toBeInTheDocument();
   });
 
   it("shows an error when the login against the other installation fails", async () => {
