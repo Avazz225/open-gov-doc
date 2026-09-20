@@ -16,7 +16,7 @@
 | `GET` | `/me` | Validate bearer token (JWKS, stateless, no round trip to Keycloak), return normalized identity. **Since P24-S2**: `realm_roles` additionally contains the roles derived from the `groups` JWT claim (AD group→role mapping, 4.4) alongside Keycloak's raw `realm_access.roles`, merged and deduplicated into the same list — see "AD Group→Role Mapping" below |
 | `GET` | `/users` | List users (since P4-S3, basis for the Admin UI user management) — reads directly from Keycloak. **Gated since P6-S5**: requires the capability `admin.user_management` (domain "user/permission management", 4.6), otherwise `403` |
 | `POST` | `/users` | Create user (`username`, `email`, `password`, `first_name`, `last_name`) — 409 for an already-taken username. Gated like `GET /users`. **Since Post-Roadmap Phase 42 Session 2**: also checks `license-service`'s `"users"` usage dimension first, `403` if exceeded — see "License-Limit Block on New Users" below |
-| `DELETE` | `/users/{id}` | Delete user — 404 for an unknown `id`. Gated like `GET /users` |
+| `DELETE` | `/users/{id}` | Delete user — 404 for an unknown `id`. Gated like `GET /users`. **Since P55-S2**: after the Keycloak deletion, also revokes every `permission-service` `RoleAssignment` for this principal and removes their `teamspace-service` memberships — both fail-soft (logged, not raised), see "Cross-Service Cleanup on User Deletion" below |
 | `GET` | `/users/{id}` | **Since P19-S4** (ADR 0069): reverse identity resolution, counterpart to `GET /users/lookup` — returns only `{id, username}`, `404` for an unknown `id`. Same gate as `GET /users/lookup` (`users.lookup` via the "everyone" group). Must be registered after all static `/users/...` paths (registration order, see ADR 0069) |
 | `GET` | `/me/preferences` | Theme and locale preference of the logged-in account (`{theme, locale}`, defaults `"auto"`/`"de"`) — since P4-S6, `locale` added in Phase 47 Session 1 |
 | `PUT` | `/me/preferences` | Partial update: `{theme?, locale?}` (`theme` ∈ `light`/`dark`/`high-contrast`/`auto`, `locale` ∈ `de`/`en`, otherwise 422) — a field omitted from the body is left unchanged, see "Theme/Locale Preference" below |
@@ -327,12 +327,30 @@ Registers itself with the registry at startup (`libs/dms-registry-client`: regis
 
 ## Sensors (Concept 10.1)
 
-None yet — follows in Phase 11.
+~~None yet — follows in Phase 11.~~ Stale — this service registers `bootstrap_http_sensors`/`sensor_registry` like every other service, same standard HTTP request/duration sensor rollout, found and corrected as a drive-by fix while writing this session's own docs (P55-S2).
+
+## Cross-Service Cleanup on User Deletion (P55-S2)
+
+`DELETE /users/{id}` previously only called Keycloak's `delete_user` — it never notified or called `permission-service` (to revoke that principal's `RoleAssignment` rows) or `teamspace-service` (to remove their `TeamspaceMember` rows), leaving stale grants/references accumulate indefinitely for every deleted user (breaking, among other things, `GET /users/lookup` resolution for admin/UI display of a reference to an account that can never authenticate again). Unlike `permission-service`'s own `delete_group`, which explicitly documents and justifies leaving `RoleAssignment` rows behind as harmless (a deleted group's rows simply match no principal anymore), a deleted USER has no equivalent precedent — this is real, unaddressed data-hygiene debt, the same "resource deletion cleans up its dependents in another service" shape already fixed several times elsewhere in this project (e.g. ADR 0169's pseudonymization-vault cleanup, P55-S1's teamspace orphan cleanup).
+
+Both new cleanup calls run **after** the Keycloak deletion (the security-relevant part) and are **fail-soft** — a `permission-service`/`teamspace-service` outage doesn't turn a completed user deletion into a confusing partial-failure `500`:
+
+- `PermissionServiceClient.revoke_all_role_assignments(principal_id)` — lists then deletes every `RoleAssignment` for the principal via `GET`/`DELETE /role-assignments`.
+- `TeamspaceClient.delete_memberships(principal_id)` (new `teamspace_client.py`) — calls `teamspace-service`'s new `DELETE /principals/{id}/teamspace-memberships` (see `docs/services/teamspace-service.md`), a system-to-system cleanup endpoint gated to only accept `X-DMS-Principal: auth-service`.
+
+No new ADR — a mechanical extension of an already-established cleanup-on-delete pattern, not a new architecture decision.
 
 ## Tests
 
-`uv run pytest services/auth-service/tests` (**136 tests**, of which 5 new since **Post-Roadmap Phase
-42 Session 2** — new `test_license_limit.py`: `LicenseLimitClient.is_exceeded` unit tests (exceeded/not
+`uv run pytest services/auth-service/tests` (**149 tests since P55-S2** — +2:
+`test_delete_user_revokes_role_assignments`/`test_delete_user_removes_teamspace_memberships` in
+`test_admin_users.py`, both real round trips against the real, live-running `permission-service`/
+`teamspace-service` (the latter invites a second, fixed cleanup principal as manager before the
+deleted user's own membership is removed, so the test doesn't leave a permanently unmanageable
+teamspace behind — same cleanup discipline `teamspace-service/tests/test_api.py`'s own
+`_cleanup_teamspace_folders` fixture already established for a different reason). Before P55-S2, **136
+tests**, of which 5 new since **Post-Roadmap Phase 42 Session 2** — new `test_license_limit.py`:
+`LicenseLimitClient.is_exceeded` unit tests (exceeded/not
 exceeded/fails open, mirroring `document-service`'s identically named test module), `POST /users`
 blocked `403` when the `"users"` license dimension is exceeded, allowed `201` when it is not. A local
 `_default_no_license_limit_exceeded` override fixture (same name, same shadowing trick as

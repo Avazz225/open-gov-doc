@@ -2,9 +2,89 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P55-S1 (`teamspace-service`: new `consumer.py` cleaning up a teamspace orphaned by a
-root-folder deletion bypassing this service entirely — first session of Phase 55, "Correctness:
-Cross-Service Cleanup on Delete Paths"). **New ADR** ([0175](docs/adr/0175-teamspace-service-root-folder-deletion-cleanup-consumer.md))
+**Last completed:** P55-S2 (`auth-service`'s `DELETE /users/{id}` cross-service cleanup, previously only
+deleting the Keycloak account — second and last session of Phase 55, "Correctness: Cross-Service Cleanup
+on Delete Paths". **Closes Phase 55.**). No new ADR — mechanical extension of an already-established
+cleanup-on-delete pattern, per the plan's own DoD.
+
+**The gap.** Also found by this round's live-code security sweep. `DELETE /users/{id}` only called
+Keycloak's `delete_user` — never notified or called `permission-service` (to revoke the deleted
+principal's `RoleAssignment` rows) or `teamspace-service` (to remove their `TeamspaceMember` rows),
+leaving both accumulate indefinitely for every deleted user. Unlike `permission-service`'s own
+`delete_group`, which explicitly documents and justifies leaving `RoleAssignment` rows behind as
+harmless (a deleted group's rows simply match no principal anymore), a deleted USER had no equivalent
+precedent — real, unaddressed data-hygiene debt, breaking (among other things) `GET /users/lookup`
+resolution for an admin/UI display of a reference to an account that can never authenticate again.
+
+**The fix — two new cleanup calls, both fail-soft, both running after the Keycloak deletion already
+succeeded.** `PermissionServiceClient.revoke_all_role_assignments(principal_id)`: lists then deletes
+every `RoleAssignment` for the principal. New `teamspace_client.py`/`TeamspaceClient.delete_memberships`:
+calls a genuinely new `teamspace-service` endpoint, `DELETE /principals/{id}/teamspace-memberships`
+(gated to only accept `X-DMS-Principal: auth-service`, same fixed system-identity convention as
+P54-S2/ADR 0173) — removes the principal from every teamspace they belong to (not the teamspaces
+themselves, unlike P55-S1/ADR 0175's root-folder-gone teardown) and revokes their `permission-service`
+access on each, reusing the exact same per-teamspace logic `remove_member` already uses. Both calls are
+fail-soft (logged, not raised) — a `permission-service`/`teamspace-service` outage shouldn't turn a
+completed user deletion into a confusing partial-failure `500`. **Found and fixed a real deployment gap
+while live-verifying**: `infra/docker-compose.yml`'s `auth-service` block had no
+`DMS_TEAMSPACE_SERVICE_BASE_URL` set, so the real deployed container would have silently fallen back to
+`Settings`' `localhost:8032` default — unreachable from inside its own container — and the cleanup would
+have fail-soft-swallowed every single call in production without ever actually running. Added the
+internal Compose hostname, same pattern every other inter-service URL in that block already uses.
+
+New/updated tests: `auth-service` — two new real-round-trip tests in `test_admin_users.py`
+(`test_delete_user_revokes_role_assignments`, `test_delete_user_removes_teamspace_memberships`, the
+latter inviting a second, fixed cleanup principal as manager before the deleted user's own membership is
+removed, so the test doesn't leave a permanently unmanageable teamspace behind). `149/149` tests (was
+147, +2). `teamspace-service` — three new tests for the new endpoint
+(`test_delete_principal_memberships_requires_auth_service_caller`,
+`test_delete_principal_memberships_removes_membership_and_revokes_access`,
+`test_delete_principal_memberships_for_a_principal_with_none_is_a_no_op`). `56/56` tests (was 53, +3).
+`ruff check`/`ruff format --check` clean for both services.
+
+**A second real, previously-latent bug found and fixed while running these tests, unrelated to this
+session's own feature work**: `teamspace-service`'s ENTIRE test suite started intermittently failing its
+own lifespan startup with `nats: JetStream.Error consumer is already bound to a subscription` —
+`scripts/run-tests.sh`'s `CONSUMER_SERVICES` registry (which stops a service's own Docker container
+before testing it in-process, specifically to avoid a durable-name collision between the container's own
+NATS consumer and the test suite's in-process one) simply didn't yet know about `teamspace-service`'s
+brand-new consumer (P55-S1 added the service's first-ever one). Root-caused precisely (confirmed
+case-service's own, structurally identical consumer pattern tests cleanly, ruling out a systemic bug;
+confirmed the real, currently-running `teamspace-service` container — left over from P55-S1's own live
+verification — was the second, colliding claimant of the same durable name) rather than papering over it
+with a retry/backoff band-aid. Added `teamspace-service` to `CONSUMER_SERVICES`, closing the gap at its
+actual root for good.
+
+Docker images rebuilt and redeployed for both `teamspace-service` (the new endpoint) and `auth-service`
+(the new cleanup calls). **Live-verified against the real running stack, end to end through both real
+containers**: created two real Keycloak users (an admin-capable caller and a target), granted the target
+a real `permission-service` role assignment plus real teamspace membership (with a second, cleanup
+principal invited as manager beforehand, same non-destructive-test discipline as the new automated
+tests), called `DELETE /users/{id}` through the real, rebuilt `auth-service` container using the admin
+caller's real bearer token — confirmed afterward: all 3 real `permission-service` role assignments gone,
+the target's teamspace membership gone while the teamspace and its other member survive untouched, no
+errors in the container's logs. All test data cleaned up afterward.
+
+`docs/services/auth-service.md`: new "Cross-Service Cleanup on User Deletion" section, endpoint table and
+Tests updated; also found and fixed an unrelated stale "Sensors: none yet" doc-drift claim as a drive-by
+correction. `docs/services/teamspace-service.md`: endpoint table and Tests updated.
+
+**Phase 55 ("Correctness: Cross-Service Cleanup on Delete Paths") is now closed** (P55-S1 through S2,
+both sessions done). `graphify update .` to run next per the established phase-end convention.
+
+**Next session:** P56-S1 — maintenance-mode "Category A" coverage (P51-S4/ADR 0152) was extended to
+`document-service`/`folder-service` only; ADR 0152's own Consequences names `case-service`→
+`workflow-service`, `migration-service`→`permission-service`/peer-installations/`folder-service`, and
+`signature-service`→`document-service` as the remaining request-triggered cascading-write call sites.
+Extend the same, already-proven header-based `_reject_during_maintenance` pattern to these remaining
+call sites. Small, mechanical, no design decision expected. First session of Phase 56, "RBAC /
+Maintenance-Mode Completion."
+
+---
+
+Immediately before P55-S2: **P55-S1** (`teamspace-service`: new `consumer.py` cleaning up a teamspace
+orphaned by a root-folder deletion bypassing this service entirely — first session of Phase 55,
+"Correctness: Cross-Service Cleanup on Delete Paths"). **New ADR** ([0175](docs/adr/0175-teamspace-service-root-folder-deletion-cleanup-consumer.md))
 — the mark-orphaned-vs-teardown design decision the plan itself flagged as needing a real choice.
 
 **The gap.** Found by this round's live-code security sweep. `teamspace-service` had **no `consumer.py`

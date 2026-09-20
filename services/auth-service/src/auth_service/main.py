@@ -93,6 +93,7 @@ from auth_service.schemas import (
     UserTrackingSessionOut,
 )
 from auth_service.settings import Settings
+from auth_service.teamspace_client import TeamspaceClient
 
 settings = Settings()
 configure_logging(settings)
@@ -216,6 +217,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.license_limit_client = LicenseLimitClient(
         settings.license_service_base_url, settings.license_limit_cache_ttl_seconds
     )
+    app.state.teamspace_client = TeamspaceClient(settings.teamspace_service_base_url)
 
     engine = build_engine(settings.postgres_dsn)
     async with engine.begin() as conn:
@@ -345,6 +347,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await event_bus.close()
     await app.state.permission_client.close()
     await app.state.license_limit_client.close()
+    await app.state.teamspace_client.close()
     if app.state.federation_hub_client is not None:
         await app.state.federation_hub_client.close()
     await engine.dispose()
@@ -967,11 +970,21 @@ async def get_user(user_id: str, user: dict = Depends(get_current_user)) -> dict
 
 @app.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_user(user_id: str, user: dict = Depends(get_current_user)) -> None:
+    """P55-S2: previously only deleted the Keycloak account - never
+    notified `permission-service` (stale `RoleAssignment` rows) or
+    `teamspace-service` (stale `TeamspaceMember` rows), leaving both
+    accumulate indefinitely for every deleted user. Both cleanup calls run
+    AFTER the Keycloak deletion (the security-relevant part) and are
+    fail-soft - a `permission-service`/`teamspace-service` outage doesn't
+    turn a completed user deletion into a confusing partial-failure `500`,
+    see each client's own docstring."""
     await _require_user_management(user)
     try:
         admin_users.delete_user(app.state.keycloak_admin, user_id)
     except UserNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    await app.state.permission_client.revoke_all_role_assignments(user_id)
+    await app.state.teamspace_client.delete_memberships(user_id)
 
 
 # Keycloak creates these realm roles itself (default behavior since

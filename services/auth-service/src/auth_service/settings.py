@@ -25,6 +25,10 @@ class Settings(BaseServiceSettings):
 
     permission_service_base_url: str = "http://localhost:8004"
     monitoring_service_base_url: str = "http://localhost:8026"
+    # P55-S2: `DELETE /users/{id}` cross-service cleanup - removes the
+    # deleted user's teamspace memberships too, not just Keycloak/
+    # permission-service state.
+    teamspace_service_base_url: str = "http://localhost:8032"
 
     # License limit block on new user creation (concept 9.3, Post-Roadmap
     # Phase 42 Session 2) - brings the "users" dimension to parity with

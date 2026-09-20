@@ -43,6 +43,19 @@ _TEAMSPACE_ADMIN_PRINCIPAL_ID = "teamspace-service"
 _REQUIRED_ROLE_NAMES = ("domain-admin-users",)
 
 
+async def _require_auth_service_caller(x_dms_principal: str = Header(default="")) -> None:
+    """P55-S2: gates `DELETE /principals/{id}/teamspace-memberships` -
+    system-to-system cleanup callback, meant only for `auth-service`'s own
+    `DELETE /users/{id}` to invoke, never a real end user. Same fixed
+    system-identity convention as P54-S2/ADR 0173's
+    `_require_workflow_service_caller` in `migration-service`."""
+    if x_dms_principal != "auth-service":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Nur auth-service darf diesen Endpunkt aufrufen",
+        )
+
+
 async def _ensure_bootstrap_permissions() -> None:
     """Since P32-S1 (ADR 0130): `PermissionServiceClient._ensure_role`'s
     get-or-create call to `POST /roles` is now self-gated
@@ -495,6 +508,44 @@ async def remove_member(
         payload={"principal_id": principal_id},
         actor=x_dms_principal,
     )
+
+
+@app.delete(
+    "/principals/{principal_id}/teamspace-memberships",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(_require_auth_service_caller)],
+)
+async def delete_principal_memberships(
+    principal_id: str, session: AsyncSession = Depends(get_session)
+) -> None:
+    """P55-S2/auth-service's `DELETE /users/{id}` cross-service cleanup:
+    removes `principal_id` from every teamspace they currently belong to
+    (not the teamspaces themselves, unlike P55-S1/ADR 0175's orphan
+    cleanup - the folders/teamspaces stay intact, only this one deleted
+    user's membership and `permission-service` access on each go away).
+    Reuses the exact same per-teamspace revoke+remove logic
+    `remove_member` above already uses. Idempotent - a principal with no
+    memberships is a silent no-op, not a 404."""
+    memberships = await repository.list_memberships_for_principal(session, principal_id)
+    for membership in memberships:
+        try:
+            teamspace = await repository.get_teamspace(session, membership.teamspace_id)
+        except repository.NotFoundError:
+            continue
+        await repository.remove_member(session, membership.teamspace_id, principal_id)
+        await app.state.permission_client.revoke_resource_access(
+            principal_id=principal_id, resource_id=teamspace.root_folder_id
+        )
+        await app.state.permission_client.revoke_manager_access(
+            principal_id=principal_id, resource_id=teamspace.root_folder_id
+        )
+        await publish_event(
+            "teamspace.member_removed",
+            subject=membership.teamspace_id,
+            payload={"principal_id": principal_id},
+            actor="auth-service",
+        )
+    await session.commit()
 
 
 @app.post(

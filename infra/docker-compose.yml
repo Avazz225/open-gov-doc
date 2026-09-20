@@ -352,6 +352,11 @@ services:
       # Phase 42 Session 2) - no `depends_on` (same fail-open, TTL-cache
       # reasoning as document-service's identical setting above).
       DMS_LICENSE_SERVICE_BASE_URL: http://license-service:8000
+      # P55-S2: `DELETE /users/{id}` cross-service cleanup - the internal
+      # Compose hostname, same reasoning as every other inter-service URL
+      # in this block (the `Settings` default `localhost:8032` only
+      # resolves for tests run via `scripts/run-tests.sh` outside Docker).
+      DMS_TEAMSPACE_SERVICE_BASE_URL: http://teamspace-service:8000
       DMS_NATS_URL: nats://nats:4222
       # Directory/contacts (2.5/4.4, P15-S4) - first own Postgres schema
       # of this service (federation identity for the optional federated

@@ -398,6 +398,59 @@ def test_remove_member_revokes_permission_service_access(client):
     assert assignments == []
 
 
+def test_delete_principal_memberships_requires_auth_service_caller(client):
+    """P55-S2: `DELETE /principals/{id}/teamspace-memberships` is a
+    system-to-system cleanup callback, meant only for `auth-service`'s own
+    `DELETE /users/{id}` to invoke."""
+    response = client.delete("/principals/does-not-matter/teamspace-memberships")
+    assert response.status_code == 403
+
+    response = client.delete(
+        "/principals/does-not-matter/teamspace-memberships",
+        headers={"X-DMS-Principal": "someone-else"},
+    )
+    assert response.status_code == 403
+
+
+def test_delete_principal_memberships_removes_membership_and_revokes_access(client):
+    """P55-S2: removes the principal from every teamspace they belong to
+    (not the teamspaces themselves, unlike P55-S1/ADR 0175's orphan
+    cleanup) and revokes their `permission-service` access on each."""
+    teamspace = _create_teamspace(client)
+    client.post(
+        f"/teamspaces/{teamspace['id']}/members",
+        json={"principal_id": "bob"},
+        headers=_headers("alice"),
+    )
+
+    response = client.delete(
+        "/principals/bob/teamspace-memberships", headers={"X-DMS-Principal": "auth-service"}
+    )
+    assert response.status_code == 204
+
+    members = client.get(f"/teamspaces/{teamspace['id']}/members", headers=_headers("alice")).json()
+    assert "bob" not in {m["principal_id"] for m in members}
+
+    with httpx.Client(base_url=PERMISSION_SERVICE_URL) as permission_client:
+        assignments = permission_client.get(
+            "/role-assignments",
+            params={"principal_id": "bob", "resource_id": teamspace["root_folder_id"]},
+        ).json()
+    assert assignments == []
+
+    # The teamspace itself is untouched - alice's own membership survives.
+    response = client.get(f"/teamspaces/{teamspace['id']}", headers=_headers("alice"))
+    assert response.status_code == 200
+
+
+def test_delete_principal_memberships_for_a_principal_with_none_is_a_no_op(client):
+    response = client.delete(
+        "/principals/nobody-is-a-member-anywhere/teamspace-memberships",
+        headers={"X-DMS-Principal": "auth-service"},
+    )
+    assert response.status_code == 204
+
+
 def test_delete_teamspace_requires_manager(client):
     teamspace = _create_teamspace(client)
     client.post(

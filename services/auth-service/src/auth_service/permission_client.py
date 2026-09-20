@@ -1,4 +1,8 @@
+import logging
+
 import httpx
+
+logger = logging.getLogger(__name__)
 
 
 class PermissionServiceClient:
@@ -99,6 +103,33 @@ class PermissionServiceClient:
         )
         response.raise_for_status()
         return str(response.json()["id"])
+
+    async def revoke_all_role_assignments(self, principal_id: str) -> None:
+        """P55-S2: called from `DELETE /users/{id}` - `permission-service`'s
+        own `delete_group` deliberately documents leaving `RoleAssignment`
+        rows behind as harmless once a group no longer matches any
+        principal, but a deleted USER has no equivalent existing
+        precedent/justification here, and the stale rows are real
+        data-hygiene debt (e.g. breaking `GET /users/lookup` resolution for
+        admin/UI display of a reference to an account that can never
+        authenticate again). Idempotent - a principal with no assignments
+        is a silent no-op. Fail-soft (logs and returns): by the time this
+        runs, the Keycloak account is already gone - the security-relevant
+        part of the deletion already succeeded, this is best-effort hygiene
+        cleanup, not itself worth failing the whole `DELETE /users/{id}`
+        call over if `permission-service` happens to be unreachable."""
+        try:
+            response = await self._client.get(
+                "/role-assignments", params={"principal_id": principal_id}
+            )
+            response.raise_for_status()
+            for assignment in response.json():
+                delete_response = await self._client.delete(f"/role-assignments/{assignment['id']}")
+                delete_response.raise_for_status()
+        except httpx.HTTPError:
+            logger.warning(
+                "role_assignment_cleanup_failed: principal_id=%s", principal_id, exc_info=True
+            )
 
     async def close(self) -> None:
         await self._client.aclose()

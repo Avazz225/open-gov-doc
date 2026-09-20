@@ -153,6 +153,18 @@ async def get_member(
     return result.scalar_one_or_none()
 
 
+async def list_memberships_for_principal(
+    session: AsyncSession, principal_id: str
+) -> list[TeamspaceMember]:
+    """P55-S2: lookup for the `DELETE /principals/{id}/teamspace-memberships`
+    cleanup endpoint - every teamspace this principal currently belongs to,
+    regardless of `can_manage_members`."""
+    result = await session.execute(
+        select(TeamspaceMember).where(TeamspaceMember.principal_id == principal_id)
+    )
+    return list(result.scalars().all())
+
+
 async def list_members(session: AsyncSession, teamspace_id: str) -> list[TeamspaceMember]:
     result = await session.execute(
         select(TeamspaceMember)
