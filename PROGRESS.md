@@ -2,10 +2,80 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P56-S2 (`document-service`'s `list_documents_by_kennzeichen` gained row-level RBAC
-filtering, previously fully ungated — second and last session of Phase 56, "RBAC / Maintenance-Mode
-Completion". **Closes Phase 56.**). **New ADR** ([0176](docs/adr/0176-document-service-kennzeichen-lookup-row-level-rbac.md))
-— a real design decision, per the plan's own DoD.
+**Last completed:** P57-S1 (Documentation Drift Cleanup — first and only session of Phase 57. **Closes
+Phase 57.**). No new ADR — doc-only, per the plan's own DoD ("no new ADR, no tests beyond a final grep
+confirming every listed claim now reads as closed").
+
+**The task.** The "Planning P54-P58" gap-analysis round's docs-sweep agent had flagged 18 stale "still
+open"/"not yet built" claims across `docs/services/*.md` — cases where a LATER session actually closed
+the gap a doc still describes as open, but never circled back to strike it through. Purely a
+documentation-accuracy pass, no code changes.
+
+**What was found and fixed** (each verified against the real current code/docs before editing, not just
+trusted from the plan's own text — one item's premise turned out subtly wrong, see below):
+
+- `admin-ui.md`: the "workflow designer/license overview/audit trail/config import-export don't exist"
+  claim — all three except workflow designer now exist (`app/license/page.tsx`,
+  `app/audit-trace-settings/page.tsx`, `components/ConfigPackages.tsx`); workflow designer correctly
+  remains out of scope (separate app, `process-designer`).
+- `audit-service.md`: admin-UI audit-trail view, CSV/PDF export (P7-S2b), and forensic-trace UI (P7-S2c)
+  all shipped — closed all three Open Points bullets.
+- `case-service.md`: the mail-room cross-link claimed unwired — `mail-connector`'s `CaseClient` was
+  actually wired up at P15-S3 itself.
+- `license-service.md`: CMIS/migration-service enforcement claimed missing — both covered by the
+  `registry-service` `licensable_components` pattern since P12-S1/P12-S2.
+- `document-service.md`: a duplicate, un-struck "not backup-differentiated" bullet (the same gap was
+  already correctly closed elsewhere in the same file at P11-S4).
+- `folder-service.md`: **partial correction, not a full closure** — `folder-service` itself genuinely
+  still has no backup-differentiated deletion register (unlike `document-service`'s P11-S4 fix). But the
+  doc's own stated reason ("`audit-service` does not yet consume `folder.>`") was wrong — `audit-service`
+  has consumed `folder.>` since P7-S2, so the same partial hash-chain compensation `document-service`
+  itself relied on pre-P11-S4 does apply here too.
+- `object-type-service.md`: two GUI-editor claims (attribute/layout editor, `allowed_parent_types`/
+  `icon`/reference-number-generator editor) both shipped at P5b-S3/P5e-S3; the "resolved Kennzeichen
+  display" duplication concern already investigated and explicitly declined at P42-S3 (only one real
+  frontend implementation exists, not the ≥3 the original framing assumed) — annotated as a considered
+  decision, not silently left stale.
+- `user-ui.md`: the mirrored Kennzeichen-duplication claim (same P42-S3 finding — `ExplorerPane`/
+  `FolderTree` actually share one `lib/kennzeichen.ts` helper, not independent duplicated logic); an
+  installation-wide trash view claimed missing — `TrashPane` shipped at P15-S1.
+- `plugin-orchestration-service.md`: rolling updates claimed pending — closed at P10-S3
+  (`registry-service`'s drain mechanism + `scripts/rolling-update.sh`).
+- `signature-service.md` + `workflow-service.md` (two duplicate copies of the same bullet): a
+  process-designer palette entry for signature tasks claimed missing — directly self-contradicted by
+  `workflow-service.md`'s own text confirming it shipped at P6-S8 (`SignatureTaskPropertiesProvider`);
+  the single highest-confidence finding of the whole sweep.
+- `process-designer.md`: a version-assignment race claimed open — the underlying backend race was
+  already fixed via a Postgres advisory lock at P25-S1/ADR 0096 (backend-only fix, no frontend change
+  needed).
+- `workflow-service.md`: a federation-hub retry-queue claim already closed via ADR 0081.
+
+**One item deliberately NOT marked closed** — `workflow-service.md`'s "no prebuilt calendar templates
+(e.g. German holidays)" bullet. The plan's own text assumed this closed at "P17-S3 (configuration
+packages)"; investigation found the generic config-package export/import mechanism for the
+`business_calendars` category actually shipped earlier, at **P14-S5** — but no actual German-holiday (or
+any other) template *content* was ever authored/seeded through it anywhere in the codebase (confirmed via
+a repo-wide grep for holiday names). Corrected the doc's imprecise "reserved for Phase 17" framing rather
+than falsely striking it through — this remains a genuinely open gap for the template content itself.
+
+No code changes, no new tests — final verification was itself the per-claim grep/read done while fixing
+each bullet (confirming the referenced file/endpoint/component actually exists before writing the
+strikethrough), consistent with the plan's own DoD for this session.
+
+**Phase 57 ("Documentation Drift Cleanup") is now closed** (P57-S1, its only session, done).
+`graphify update .` to run next per the established phase-end convention.
+
+**Next session**: **P58-S1** (Pseudonymization Completion & Small Polish Bundle, first session of
+Phase 58 — ADR 0156's two residual gaps: no automatic retention-expiry pseudonymization trigger, and no
+`folder-service`/`case-service` pseudonymization mechanism at all).
+
+---
+
+Immediately before P57-S1: **P56-S2** (`document-service`'s `list_documents_by_kennzeichen` gained
+row-level RBAC filtering, previously fully ungated — second and last session of Phase 56, "RBAC /
+Maintenance-Mode Completion". **Closed Phase 56.**). **New ADR**
+([0176](docs/adr/0176-document-service-kennzeichen-lookup-row-level-rbac.md)) — a real design decision,
+per the plan's own DoD.
 
 **The gap.** ADR 0149 itself, when it retrofitted row-level RBAC filtering onto every other cross-folder
 read path in `document-service`, explicitly named this endpoint "a separate, larger effort, out of

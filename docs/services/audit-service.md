@@ -72,9 +72,9 @@ None yet — follows in Phase 11.
 
 ## Open Points
 
-- Admin UI view of the audit trail (Concept 5.3) follows with the Admin UI (P4-S3).
-- **Export for audits (CSV/PDF) and standard reports (5.4a) follow in P7-S2b** (new Reporting Service, read model over the event stream) — this session only delivers the first-class actor/filter foundation needed for that.
-- **Forensic trace UI (5.4b) follows in P7-S2c** — builds directly on the filter API built here (compromised account: "all actions by user X from timestamp Y").
+- ~~Admin UI view of the audit trail (Concept 5.3) follows with the Admin UI (P4-S3).~~ — **closed in Phase 57 Session 1**: `admin-ui`'s `app/audit-trace-settings/page.tsx` (audit trail) and `app/forensic-trace/page.tsx` (forensic trace, see below) both exist. Stale bullet, left un-struck when those sessions shipped.
+- ~~Export for audits (CSV/PDF) and standard reports (5.4a) follow in P7-S2b~~ — **closed at P7-S2b**: `reporting-service`'s `GET /reports/*/export?format=csv|pdf` endpoints, see `docs/services/reporting-service.md`.
+- ~~Forensic trace UI (5.4b) follows in P7-S2c~~ — **closed at P7-S2c**: `reporting-service`'s `GET /forensic-trace`/`.../export`, surfaced in `admin-ui`'s `app/forensic-trace/page.tsx`, see `docs/services/reporting-service.md`.
 - **`actor` remains `None` at some call sites**, since the respective schemas do not yet carry an action identity (e.g. `document.metadata.updated`, `folder.resource.moved`/`.deleted`, `document.restored`/`.retention.updated`) — retrofitting these fields was deliberately not part of P7-S2 (pure first-class-instead-of-ad-hoc retrofit of already-present information, no new fields in foreign schemas).
 - ~~No role check for `GET /events`/`GET /events/verify`~~ — **resolved in Post-Roadmap Phase 38 Session 2**, see "Authorization" above.
 - **`on_behalf_of` (4.4a, since P14-S11) currently has exactly one producer** (`workflow-service`'s task completion "on behalf of") — remains `None` for every other event schema, exactly the same deliberate boundary as the original `actor` field above (first-class-instead-of-ad-hoc retrofit only where such an action already actually exists).
