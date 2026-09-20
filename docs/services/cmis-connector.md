@@ -63,19 +63,27 @@ here, but this DMS has no second object that could carry such an id). A checkout
 actor can always re-"acquire" their own lock at any time (idempotent), and only a DIFFERENT actor
 triggers a genuine conflict.
 
-## `delete` on a non-empty folder (a real finding)
+## `delete` on a non-empty folder (a real finding, since closed at the source)
 
-`folder-service`'s hard-delete endpoint (`DELETE /folders/{id}`) only checks its own subfolders
-for emptiness, **not** documents — documents live in a completely different service/schema
-(`document-service`) and are never cross-checked there. This was never visible before because the
-only prior caller (`webdav-connector`'s `DmsDavFolder.handle_delete()`) always recursively deletes
-all children first before deleting the (then guaranteed empty) folder itself — CMIS's `delete`
-action, by contrast, is per the specification a **non-cascading** single-object delete attempt
-that MUST fail with `constraint` (409) on a non-empty folder. `cmis-connector` therefore checks
-itself (`_tree.list_children()`) for subfolders AND documents before calling
-`delete_folder()` at all — no change to `folder-service` needed, the check belongs here (a
-consequence of the CMIS contract, not a general shortcoming of `folder-service`'s hard-delete
-fallback).
+`folder-service`'s hard-delete endpoint (`DELETE /folders/{id}`) used to only check its own
+subfolders for emptiness, **not** documents — documents live in a completely different
+service/schema (`document-service`) and were never cross-checked there. This was never visible
+before because the only prior caller (`webdav-connector`'s `DmsDavFolder.handle_delete()`) always
+recursively deletes all children first before deleting the (then guaranteed empty) folder itself —
+CMIS's `delete` action, by contrast, is per the specification a **non-cascading** single-object
+delete attempt that MUST fail with `constraint` (409) on a non-empty folder, so `cmis-connector`
+checks itself (`_tree.list_children()`) for subfolders AND documents before calling
+`delete_folder()` at all.
+
+~~No change to `folder-service` needed, the check belongs here (a consequence of the CMIS contract,
+not a general shortcoming of `folder-service`'s hard-delete fallback).~~ — **Revised in Phase 51
+Session 3**: this framing undersold it — the underlying gap was a genuine orphaning risk on
+`folder-service`'s own endpoint regardless of caller (ANY direct `DELETE /folders/{id}` call, CMIS
+or not, could silently orphan documents), not merely a CMIS-contract nuance this connector alone
+needed to work around. `folder-service` now also rejects (`409`) a folder with active documents
+server-side, the same `document_client.count_active` check the forced-deletion path already used —
+see `docs/services/folder-service.md`. `cmis-connector`'s own check here stays regardless: it's what
+actually produces the CMIS-shaped `constraint` error rather than a raw, un-translated `409`.
 
 ## Only `cmis:name` as a writable property
 

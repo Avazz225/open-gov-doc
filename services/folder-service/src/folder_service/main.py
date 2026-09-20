@@ -718,6 +718,21 @@ async def delete_folder(
             status_code=409, detail=f"Sonderordner {folder_id!r} kann nicht gelöscht werden"
         )
     await _require_folder_delete_permission(x_dms_principal, folder_id)
+    # Phase 51 Session 3: `repository.delete_folder()` only ever checked for
+    # contained SUBFOLDERS (`list_children`, a local DB query) - documents
+    # live in a different service and were never checked at all on this
+    # legacy hard-delete fallback path, a real orphaning risk (the regular
+    # trash-based path, `POST .../trash` below, is unaffected - it cascades
+    # onto documents via `document_client.cascade_trash`). Same
+    # cross-service check the forced-deletion path already uses
+    # (`document_client.count_active`), same `FolderNotEmptyError`/`409` the
+    # subfolder check below already raises - "cannot delete a non-empty
+    # folder" is one caller-facing contract regardless of which kind of
+    # child blocks it.
+    if await app.state.document_client.count_active([folder_id]) > 0:
+        raise HTTPException(
+            status_code=409, detail=f"Ordner {folder_id!r} enthält noch aktive Dokumente"
+        )
     try:
         await repository.delete_folder(session, folder_id)
     except repository.NotFoundError as exc:

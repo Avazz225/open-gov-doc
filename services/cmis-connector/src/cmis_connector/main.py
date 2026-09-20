@@ -273,11 +273,14 @@ def _do_move(target: ResolvedObject, form, actor: str) -> tuple[dict, int]:
 
 def _do_delete(target: ResolvedObject, form, actor: str) -> tuple[dict, int]:
     if target.kind == "folder":
-        # `folder-service`'s hard delete only checks its own subfolders, not
-        # documents (which live in a different service/schema, see
-        # docs/services/cmis-connector.md "Deliberate Limitations") - CMIS's
-        # `delete` MUST, however, reject on ANY child (folder OR document),
-        # hence the complete check here instead of there.
+        # `folder-service`'s hard delete now also rejects a folder with
+        # active documents server-side (Phase 51 Session 3, closing the gap
+        # this comment used to describe - `docs/services/cmis-connector.md`
+        # "Deliberate Limitations" has the full history), but only with a
+        # plain `409`, not a CMIS-shaped `constraint` error - this check
+        # stays, now as the thing that actually produces the correct CMIS
+        # error taxonomy rather than as the only thing preventing the
+        # orphaning in the first place.
         subfolders, documents = _tree.list_children(target.folder.id, x_dms_principal=actor)
         if subfolders or documents:
             raise CmisError("constraint", "Ordner ist nicht leer")

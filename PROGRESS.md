@@ -2,9 +2,64 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P51-S2 (`auth-service`: `/me/preferences` no longer `500`s for a technical-account
-login — second session of Phase 51, "Security & Correctness Bugfixes"). No new ADR — a graceful-
-degradation fix for a caller type the endpoint was never designed for, not a new design decision.
+**Last completed:** P51-S3 (`folder-service`: `DELETE /folders/{id}` hard-delete fallback now also
+checks for active documents, not just subfolders — third session of Phase 51, "Security & Correctness
+Bugfixes"). No new ADR — a symptom-level fix that closes a real, previously-unassigned orphaning risk
+using an already-existing client method, not a new design decision.
+
+`repository.delete_folder()`'s not-empty check was purely local (`list_children`, a folder-only DB
+query) — documents live in `document-service`, a different service, and were never consulted at all on
+this path. The regular UI deletion path (`POST .../trash`) was unaffected, since it already cascades
+onto documents via a synchronous `document_client.cascade_trash` call — only the less-frequently-used
+legacy hard-delete fallback had the gap. First named at P4-S4, re-surfaced (still open) during the
+Phase 44+ gap-analysis round's docs sweep, assigned to a session for the first time here.
+
+Fixed by adding one more check to `delete_folder`, right after the existing permission check and before
+`repository.delete_folder()`: `await app.state.document_client.count_active([folder_id]) > 0` → `409`.
+Reused the exact same `DocumentClient.count_active()` method the forced-deletion trash-cascade path
+already calls for the identical purpose — no new HTTP client code needed. `cmis-connector`'s own
+`_do_delete()` pre-check (`_tree.list_children()`, raising a CMIS-shaped `constraint` error) stays as-is
+— it is no longer the only thing preventing orphaning, but it still owns translating "folder not empty"
+into the CMIS error taxonomy's specific `409` shape, a concern the generic `folder-service` fix doesn't
+(and shouldn't) replace. Only its explanatory comment was updated to stop claiming the reverse.
+
+New regression test `test_delete_folder_with_active_documents_returns_409` (`folder-service`), using the
+existing `AsyncMock` fake `document_client` fixture. `144`/`144` `folder-service` tests passing (was
+143, +1), `17`/`17` `cmis-connector` tests passing (comment-only change there, re-run to confirm no
+regression). One `folder-service` test failed on the first full-suite run
+(`test_trash_folder_with_approval_required_defers_execution`, `403` instead of `200`) — investigated,
+confirmed a one-off flake against the real `permission-service` integration (passed in isolation, passed
+again on a clean re-run of the full suite twice in a row afterward), not caused by this session's change,
+which touches only the unrelated `DELETE` endpoint. `ruff check`/`ruff format --check` show 21
+pre-existing violations in `apps/libreoffice-addin/python/ogdoc_addin.py`,
+`loadtest/notebook/analysis.ipynb`, and `services/federation-hub-service/tests/test_repository.py` — all
+in files untouched by this session, confirmed via `git stash` to already exist on `develop` before this
+session started; left alone as out of scope.
+
+Docker image rebuilt and redeployed. Live-verified against the real running stack: created a folder with
+one active document via `curl`, confirmed `DELETE /folders/{id}` now returns `409` with the new detail
+message and the folder remains `200`-resolvable afterward; trashed the document (`count_active` drops to
+`0`), retried `DELETE`, confirmed `204` — proving the check is precise (blocks only on genuinely active
+documents, not trashed ones) and that the pre-existing empty-subfolder `409` case remains unaffected.
+
+`docs/services/folder-service.md`: API table's `DELETE /folders/{id}` row and "Open Points" updated
+(new closed bullet, cross-referencing the fix). `docs/services/cmis-connector.md`: revised the
+"`delete` on a non-empty folder" open-points entry to correct its original "no change to folder-service
+needed" framing — this session found that reasoning incomplete (a genuine orphaning risk regardless of
+caller, not just a CMIS-contract nuance) and folder-service now also rejects server-side.
+`docs/services/user-ui.md`: closed its own cross-reference to the same known gap (line ~469).
+
+**Next session:** P51-S4 — maintenance-mode "Category A" coverage gap: `is_maintenance_active()`
+(`libs/dms-permission-client`, built P44-S3) is not yet called at request-triggered cascading-write call
+sites (`document-service`→`storage-service`/`virus-scan-service`/`rendering-service`,
+`folder-service`→`document-service`, etc.) — extend coverage per the Phase 51 plan text.
+
+---
+
+Immediately before P51-S3: **P51-S2** (`auth-service`: `/me/preferences` no longer `500`s for a
+technical-account login — second session of Phase 51, "Security & Correctness Bugfixes"). No new ADR —
+a graceful-degradation fix for a caller type the endpoint was never designed for, not a new design
+decision.
 
 `GET`/`PUT /me/preferences` unconditionally called `KeycloakAdmin.get_user(user["sub"])` regardless of
 caller type. For a `TechnicalAccount`-authenticated caller (`users-admin`, `config-admin`, `superuser`,

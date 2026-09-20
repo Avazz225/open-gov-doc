@@ -226,6 +226,26 @@ def test_delete_empty_folder(client):
     assert client.get(f"/folders/{created['id']}").status_code == 404
 
 
+def test_delete_folder_with_active_documents_returns_409(client):
+    """Regression test (Phase 51 Session 3): `DELETE /folders/{id}`'s hard-
+    delete path previously only ever checked for contained SUBFOLDERS
+    (`repository.delete_folder`'s local `list_children` query) - documents
+    live in `document-service`, a different service, and were never checked
+    at all on this legacy fallback path, a real orphaning risk. The regular
+    trash-based path (`POST .../trash`) is unaffected - it cascades onto
+    documents itself via `document_client.cascade_trash`, exercised by
+    `test_trash_and_restore_folder_calls_document_cascade` above."""
+    created = client.post("/folders", json={"name": "Mit Dokument", "created_by": "alice"}).json()
+    app.state.document_client.count_active.return_value = 1
+
+    response = client.delete(f"/folders/{created['id']}")
+
+    assert response.status_code == 409
+    # Not actually deleted - still resolvable afterward, same as the
+    # existing non-empty-subfolder case above.
+    assert client.get(f"/folders/{created['id']}").status_code == 200
+
+
 def test_trash_and_restore_folder_calls_document_cascade(client):
     """Verifiziert die Endpunkt-Verdrahtung zum Kaskaden-Aufruf an
     document-service (5.2, seit P7-S1b) - die reine Kaskaden-Logik
