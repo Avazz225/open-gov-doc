@@ -275,18 +275,34 @@ def test_delete_tree_cascades_documents_and_subfolders(real_user):
     )
     # The document itself was soft-deleted (trashed) by the cascade before
     # the folder's hard delete - deleting the folder also removes its
-    # `ResourceNode` in permission-service (a pre-existing, unrelated
-    # mechanism, see `folder.resource.deleted`), and the now-trashed
-    # document's `folder_id` still points at that now-nonexistent resource.
-    # `GET /documents/{id}` (Post-Roadmap Phase 38 Session 4, ADR 0149)
-    # therefore 403s for EVERYONE afterward, not just an unprivileged
-    # caller, since the ancestor walk finds nothing to check against - a
-    # known, accepted residual of this session's retrofit (see ADR 0149
-    # "Consequences"), not a bug this test should paper over. Resolving via
-    # the CMIS surface instead doesn't avoid it either: `DmsTreeClient.
-    # get_document` only special-cases `404`, so the same `403` would
-    # surface there as an unhandled `HTTPStatusError` - asserting the real,
-    # current outcome directly is more honest than routing around it.
+    # `ResourceNode` in permission-service, which (since Phase 51 Session 1,
+    # `ON DELETE CASCADE` on `resource_node.parent_id`) also removes the
+    # still-trashed document's own per-document `ResourceNode` (ADR 0154),
+    # since it's a child of the folder's node. `GET /documents/{id}`'s
+    # ancestor walk therefore finds no node at all for the document itself
+    # and denies at the very first hop - 403 for EVERYONE afterward, not
+    # just an unprivileged caller, a deliberate, accepted residual (ADR 0149
+    # "Consequences": an orphaned resource fails closed, not open) - not a
+    # bug this test should paper over. Resolving via the CMIS surface
+    # instead doesn't avoid it either: `DmsTreeClient.get_document` only
+    # special-cases `404`, so the same `403` would surface there as an
+    # unhandled `HTTPStatusError` - asserting the real, current outcome
+    # directly is more honest than routing around it.
+    #
+    # Between Phase 39 Session 4 (ADR 0154, which gave documents their own
+    # per-document `ResourceNode`, parented to their folder's) and Phase 51
+    # Session 1, this test was actually observing a DIFFERENT, unintended
+    # outcome: the folder's `ResourceNode` deletion failed with an unhandled
+    # `ForeignKeyViolationError` (the still-existing child document node
+    # blocked it) and consequently never happened at all - live-verified via
+    # a direct reproduction against the running stack during the Phase 51+
+    # gap-analysis round that found this. The folder's node stayed dangling
+    # forever (JetStream keeps redelivering the same failing event, but the
+    # underlying FK violation never resolved itself), so the ancestor walk
+    # from the document's own (still-existing) node successfully reached
+    # `root` and inherited the "everyone" grant - `200`, not `403`. Fixed at
+    # the database level (`ON DELETE CASCADE`), not by special-casing this
+    # code path, so any resource hierarchy with the same shape self-heals.
     detail = httpx.get(
         f"{DOCUMENT_SERVICE_URL}/documents/{document['cmis:objectId']}",
         headers={"X-DMS-Principal": "cmis-connector-tests"},

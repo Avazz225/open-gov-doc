@@ -213,6 +213,17 @@ tradeoff, not something this session's scope calls for optimizing.
   permission check to special-case "no resource node" for already-deleted documents, or having folder
   deletion also touch cross-service document rows it does not otherwise know about; both are more
   invasive design changes than this session's scope calls for.
+  **Update, Phase 51 Session 1**: this residual's own premise — that hard-deleting a folder successfully
+  removes its `ResourceNode` — was silently invalidated by ADR 0154 (Phase 39 Session 4, which postdates
+  this ADR): giving documents their own per-document `ResourceNode`, parented to their folder's, meant a
+  folder with a still-trashed (not yet purged) document inside it now had a live child at delete time,
+  and the `*.resource.deleted` handler's plain `session.delete()` failed with an unhandled
+  `ForeignKeyViolationError` — the folder's node then dangled forever instead of being removed, producing
+  the OPPOSITE of this residual (a permanent over-ALLOW via inheritance from `root`, not the over-DENY
+  described above), a genuine authorization exposure until Phase 51 Session 1 added `ON DELETE CASCADE`
+  to `resource_node.parent_id` (see `docs/services/permission-service.md`). This residual's original
+  description is accurate again as of that fix — deliberately not re-closed here, since it's still the
+  same accepted tradeoff this ADR always named, just now actually reachable again.
 - **Deliberately left ungated** (internal/server-to-server or status-visibility endpoints, matching this
   project's existing precedent elsewhere for "network-topology-trust" paths): `document-service`'s
   `cascade-trash`/`cascade-restore` (called only by `folder-service` during folder cascade operations),

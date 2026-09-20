@@ -106,6 +106,31 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ADD COLUMN IF NOT EXISTS scope_case_resource_ids JSON"
             )
         )
+        # Phase 51 Session 1: `resource_node.parent_id` never had
+        # `ON DELETE CASCADE` - a resource whose children still reference it
+        # (e.g. a folder with a still-trashed document's own per-document
+        # `ResourceNode`, ADR 0154) made `structure_consumer.py`'s
+        # `session.delete(node)` fail with an unhandled
+        # `ForeignKeyViolationError` on every delivery attempt, leaving the
+        # parent's node dangling forever (see `models.py`'s `ResourceNode`
+        # docstring). Postgres has no `ALTER CONSTRAINT ... ON DELETE
+        # CASCADE` - drop and recreate is the only way; safe to run on every
+        # startup (a few milliseconds of DDL, not a hot path), same
+        # philosophy as the `ADD COLUMN IF NOT EXISTS` migrations above.
+        await conn.execute(
+            text(
+                "ALTER TABLE permission.resource_node "
+                "DROP CONSTRAINT IF EXISTS resource_node_parent_id_fkey"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE permission.resource_node "
+                "ADD CONSTRAINT resource_node_parent_id_fkey "
+                "FOREIGN KEY (parent_id) REFERENCES permission.resource_node (resource_id) "
+                "ON DELETE CASCADE"
+            )
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 

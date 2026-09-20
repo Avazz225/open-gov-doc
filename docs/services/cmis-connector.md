@@ -178,18 +178,21 @@ children listing, object-by-id, content stream (including default selector), ren
 cancelCheckout, deletion (document, non-empty folder → `constraint`), cascading
 `deleteTree`.
 
-**Found during Phase 50 Session 1's full-repo backend regression, not fixed here (out of scope)**:
-`test_delete_tree_cascades_documents_and_subfolders` now fails —
-`GET /documents/{id}` for a document whose folder's `ResourceNode` was removed by the cascading
-`deleteTree` returns `200` where the test asserts the documented residual `403` (ADR 0149
-"Consequences": the ancestor walk finding nothing to check against was expected to 403 for
-everyone, not just an unprivileged caller). This test could not be observed running at all between
-Phase 48 Session 1 and this session — an unrelated `uv` workspace-configuration regression (see
-`libs/README.md`) broke every `uv run` invocation for that entire window, so there is no way to tell
-from test history alone whether this is a recent authorization change or has been silently broken
-since some point before Phase 48. Worth a dedicated session to determine whether `document-service`'s
-ancestor-walk permission check now defaults to allow instead of deny when it finds a missing/orphaned
-resource node — if so, this is a real authorization regression, not just a stale test assertion.
+~~**Found during Phase 50 Session 1's full-repo backend regression, not fixed here (out of scope)**:
+`test_delete_tree_cascades_documents_and_subfolders` now fails — `GET /documents/{id}` for a document
+whose folder's `ResourceNode` was removed by the cascading `deleteTree` returns `200` where the test
+asserts the documented residual `403`... Worth a dedicated session to determine whether
+`document-service`'s ancestor-walk permission check now defaults to allow instead of deny when it finds
+a missing/orphaned resource node — if so, this is a real authorization regression, not just a stale test
+assertion.~~ — **closed in Phase 51 Session 1**: a real authorization regression, confirmed, not a stale
+test assertion. Root cause was in `permission-service`, not `document-service`: `ON DELETE CASCADE` was
+missing on `resource_node.parent_id`, so a folder hard-deleted while its still-trashed document's own
+per-document `ResourceNode` (ADR 0154) still referenced it as parent made the deletion handler fail with
+an unhandled `ForeignKeyViolationError` on every delivery attempt — the folder's node dangled forever
+(not just during a race window), so the ancestor walk kept finding it and inheriting `root`'s "everyone"
+grant. Fixed at the database level; see `docs/services/permission-service.md`'s "Structure
+Synchronization" section and ADR 0149's updated Consequences for the full mechanism. `17`/`17` tests
+passing again (was 16 passed/1 failed).
 
 ## Deliberate limitations
 

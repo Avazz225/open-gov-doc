@@ -18,8 +18,18 @@ class ResourceNode(Base):
     __tablename__ = "resource_node"
 
     resource_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    # `ondelete="CASCADE"` (Phase 51 Session 1) - a resource with descendants
+    # (e.g. a folder whose still-trashed document has its own per-document
+    # `ResourceNode` since ADR 0154/P39-S4) previously failed a plain
+    # `session.delete()` in `structure_consumer.py` with an unhandled
+    # `ForeignKeyViolationError`, leaving the parent's node dangling FOREVER
+    # (JetStream redelivers the same failing event indefinitely, but the
+    # underlying FK violation never resolves itself) - see that module's
+    # docstring for the live-verified consequence this caused.
     parent_id: Mapped[str | None] = mapped_column(
-        String(128), ForeignKey("permission.resource_node.resource_id"), nullable=True
+        String(128),
+        ForeignKey("permission.resource_node.resource_id", ondelete="CASCADE"),
+        nullable=True,
     )
     resource_type: Mapped[str] = mapped_column(String(64), default="folder")
     # Inheritance on/off (4.1) - False breaks the inheritance chain at this node.

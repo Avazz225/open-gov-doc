@@ -2,10 +2,70 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P50-S5 (`auth-service`'s AD-group→role mapping: new admin-UI CRUD page — fifth and
-last session of Phase 50, "Remaining Lower-Priority Hardening"). No new ADR (polish/hardening — a pure
-frontend CRUD page against already-existing, already-approved backend endpoints, not a new architecture
-decision, per the plan's own DoD). **This closes Phase 50.**
+**Last completed:** P51-S1 (`permission-service`: `ON DELETE CASCADE` on `resource_node.parent_id` —
+first session of Phase 51, "Security & Correctness Bugfixes"). No new ADR — a symptom-level fix
+restoring already-intended, already-documented behavior (ADR 0149's own residual), not a new design
+decision, per the plan's own conditional DoD.
+
+Investigated why `permission-service`'s ancestor-walk (`_collect_effective_roles`, breaks on a missing
+`ResourceNode`) produced two seemingly-opposite live symptoms and found they share one root cause.
+`ResourceNode.parent_id`'s foreign key never had `ON DELETE CASCADE`. Once ADR 0154 (Phase 39 Session 4)
+gave documents their own per-document `ResourceNode` (parented to their folder's), a folder hard-deleted
+while a still-trashed (not yet purged) document inside it still had its own node made
+`structure_consumer.py`'s `.resource.deleted` handler fail with an unhandled `ForeignKeyViolationError`
+on every JetStream delivery attempt — redelivered indefinitely (the handler doesn't ack on failure), but
+the underlying FK violation never resolves itself on retry, so the folder's node dangled **forever**, not
+just during a race window. Live-reproduced directly against the running stack before touching any code:
+created a folder + document, trashed the document, hard-deleted the folder, confirmed the folder's
+`ResourceNode` (and thus `GET /documents/{id}` access for an unrelated principal) stayed alive and
+`200`-allowed even 2+ seconds later — a permanent bug, not a transient race.
+
+This exactly explains `cmis-connector`'s live-verified anomaly (found Phase 50 Session 1): the ancestor
+walk from the document's own still-existing node reached the still-undeleted folder node and inherited
+`root`'s "everyone" grant — a genuine authorization exposure (briefly-or-indefinitely too permissive),
+the opposite of ADR 0149's own documented "orphaned resource fails closed" residual. Fixed at the
+database level (`ON DELETE CASCADE` on the self-referencing FK — Postgres has no `ALTER CONSTRAINT ...
+ON DELETE CASCADE`, drop-and-recreate via the same ad-hoc `ALTER TABLE` migration pattern already used
+for every other schema change in this service) rather than special-casing the one call site, so any
+resource hierarchy of any depth self-heals: deleting a node now also removes every descendant's node.
+Re-verified live after rebuilding/redeploying: the exact same repro now correctly shows both nodes gone
+and `GET /documents/{id}` returning `403`, no FK violation in the logs.
+
+New regression test in `permission-service` (`test_resource_deleted_event_cascades_to_a_still_existing_
+child_node`) proving a parent's node is removed — and its child's node cascades away too — even when the
+child still exists at delete time, the exact scenario that used to fail silently forever.
+`docs/services/cmis-connector.md`'s own `test_delete_tree_cascades_documents_and_subfolders` comment
+rewritten to explain the real mechanism (previously described a plausible-sounding but, since ADR 0154,
+no-longer-accurate story); ADR 0149's Consequences section gained an update note explaining why its own
+residual's premise briefly broke and is now restored.
+
+`182`/`182` `permission-service` tests passing (was 181, +1), `17`/`17` `cmis-connector` (was 16
+passed/1 failed — the test itself needed no assertion change, only its explanatory comment), `381`/`381`
+`document-service` and `143`/`143` `folder-service` unchanged (checked for regressions, since both touch
+the resource-node lifecycle too). `ruff check`/`ruff format --check` clean. Docker image rebuilt and
+redeployed for `permission-service`, confirmed the new constraint live via `\d permission.resource_node`
+before re-running the live repro.
+
+`docs/services/permission-service.md`: new paragraph in "Structure Synchronization" documenting the
+fix, mirroring the existing CREATE-side safety net's own write-up right above it. `docs/adr/0149-
+teamspace-permission-anchoring-broad-rbac-retrofit.md`: Consequences update note. `docs/services/
+cmis-connector.md`: closed the Phase 50 Session 1 finding.
+
+**Next session:** P51-S2 — `auth-service`'s `GET`/`PUT /me/preferences` `500`s for the `users-admin`
+technical account (Keycloak `404 User not found` from `admin_users.get_theme_preference`/etc., all
+calling `KeycloakAdmin.get_user(user_id)` directly) — found live in Phase 49 Session 3, confirmed
+pre-existing and cross-app, never yet fixed or even assigned to a session until now. Root cause is
+plausibly that `users-admin` has been a local `TechnicalAccount` row (not a real Keycloak account) since
+Phase 18 Session 3/ADR 0065, so a Keycloak admin-API lookup by that `sub` doesn't resolve. Fix the crash
+and backfill the finding into the relevant services' Open Points (it was never recorded there, only in
+`PROGRESS.md`).
+
+---
+
+Immediately before P51-S1: **P50-S5** (`auth-service`'s AD-group→role mapping: new admin-UI CRUD page —
+fifth and last session of Phase 50, "Remaining Lower-Priority Hardening"). No new ADR (polish/hardening —
+a pure frontend CRUD page against already-existing, already-approved backend endpoints, not a new
+architecture decision, per the plan's own DoD). **This closed Phase 50.**
 
 The backend (1:1 mappings since P24-S2/ADR 0093, composite AND-rules + configurable default role +
 optional four-eyes since Post-Roadmap Phase 39 Session 3/ADR 0153) has had full CRUD the whole time but

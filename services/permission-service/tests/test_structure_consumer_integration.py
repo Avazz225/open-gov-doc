@@ -143,3 +143,43 @@ def test_resource_deleted_event_removes_node(client):
         _poll_until(lambda: client.get(f"/resources/{resource_id}").status_code == 404)
     )
     assert removed, "Löschung wurde nicht rechtzeitig übernommen"
+
+
+def test_resource_deleted_event_cascades_to_a_still_existing_child_node(client):
+    """Phase 51 Session 1 (live-verified regression, see `models.py`'s
+    `ResourceNode` docstring): a parent whose child node still references it
+    (e.g. a folder with a still-trashed document's own per-document
+    `ResourceNode`, ADR 0154) previously made this exact event handler fail
+    with an unhandled `ForeignKeyViolationError` on every delivery attempt -
+    the parent's node dangled forever (JetStream keeps redelivering the same
+    failing event, but the underlying FK violation never resolved itself).
+    `ON DELETE CASCADE` on `resource_node.parent_id` fixes this at the
+    database level: deleting the parent now also removes the child, exactly
+    mirroring what should happen when a folder and everything still nested
+    under it (including an unpurged trashed document) is hard-deleted."""
+    parent = f"folder-{uuid.uuid4().hex[:8]}"
+    child = f"document-{uuid.uuid4().hex[:8]}"
+    asyncio.run(
+        _publish("folder.resource.created", {"resource_id": parent, "parent_id": ROOT_RESOURCE_ID})
+    )
+    asyncio.run(_poll_until(lambda: client.get(f"/resources/{parent}").status_code == 200))
+    asyncio.run(
+        _publish(
+            "document.resource.created",
+            {"resource_id": child, "parent_id": parent, "resource_type": "document"},
+        )
+    )
+    asyncio.run(_poll_until(lambda: client.get(f"/resources/{child}").status_code == 200))
+
+    asyncio.run(_publish("folder.resource.deleted", {"resource_id": parent}))
+
+    parent_removed = asyncio.run(
+        _poll_until(lambda: client.get(f"/resources/{parent}").status_code == 404)
+    )
+    assert parent_removed, (
+        "Übergeordneter Knoten wurde trotz noch existierendem Kind nicht entfernt"
+    )
+    # The cascade removes the child too - not merely "doesn't block the
+    # parent's own deletion", the child row is actually gone from the table,
+    # same as it would be if it had been explicitly deleted itself.
+    assert client.get(f"/resources/{child}").status_code == 404
