@@ -751,6 +751,7 @@ async def trash_folder(
     folder_id: str,
     payload: TrashRequest,
     x_dms_principal: str = Header(default=""),
+    x_dms_maintenance_active: str = Header(default="false"),
     session: AsyncSession = Depends(get_session),
 ) -> TrashResult:
     """Trash path (5.2, since P7-S1b) - cascades over the entire active
@@ -768,6 +769,11 @@ async def trash_folder(
             detail=f"Sonderordner {folder_id!r} kann nicht in den Papierkorb verschoben werden",
         )
     await _require_folder_delete_permission(x_dms_principal, folder_id)
+    # Maintenance mode (4.8), Category A (Phase 51 Session 4, ADR 0152):
+    # `soft_delete_folder` below cascades into document-service
+    # (`POST /documents/cascade-trash`) - the same kind of write an
+    # emergency lockdown exists to stop, previously unchecked here.
+    await _reject_during_maintenance(x_dms_maintenance_active)
     if await app.state.approval_client.requires_approval("folder.delete"):
         request = await app.state.approval_client.create_request(
             action_type="folder.delete",
@@ -799,6 +805,7 @@ async def trash_folder(
 async def restore_folder(
     folder_id: str,
     x_dms_principal: str = Header(default=""),
+    x_dms_maintenance_active: str = Header(default="false"),
     session: AsyncSession = Depends(get_session),
 ) -> FolderOut:
     """Trash restore (5.2, since P7-S1b) - only possible within the
@@ -813,6 +820,10 @@ async def restore_folder(
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     await _require_folder_permission(x_dms_principal, folder_id, access_type="write")
+    # Maintenance mode (4.8), Category A (Phase 51 Session 4, ADR 0152): same
+    # reasoning as `trash_folder` above - `restore_folder` below cascades
+    # into document-service (`POST /documents/cascade-restore`).
+    await _reject_during_maintenance(x_dms_maintenance_active)
     try:
         folder = await repository.restore_folder(
             session, folder_id, document_client=app.state.document_client
@@ -895,6 +906,23 @@ async def put_retention(
         },
     )
     return updated
+
+
+async def _reject_during_maintenance(x_dms_maintenance_active: str) -> None:
+    """Maintenance mode (4.8), Category A request-triggered cascading writes
+    (Phase 51 Session 4, ADR 0152) - same helper shape and message as
+    `workflow-service`'s own `_reject_during_maintenance` (P6-S6), reading
+    the header the gateway already forwards on the inbound request rather
+    than an extra `permission-service` round trip (`is_maintenance_active()`
+    remains for this service's own Category B poll loop above, which has no
+    inbound request to read a header off). Guards `trash_folder`/
+    `restore_folder`, the two endpoints here that cascade into
+    document-service's own write path."""
+    if x_dms_maintenance_active.lower() == "true":
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Systemweite Notfallsperre aktiv - Wartungsmodus",
+        )
 
 
 async def _require_folder_permission(

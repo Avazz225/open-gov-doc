@@ -2,10 +2,66 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P51-S3 (`folder-service`: `DELETE /folders/{id}` hard-delete fallback now also
-checks for active documents, not just subfolders — third session of Phase 51, "Security & Correctness
-Bugfixes"). No new ADR — a symptom-level fix that closes a real, previously-unassigned orphaning risk
-using an already-existing client method, not a new design decision.
+**Last completed:** P51-S4 (maintenance-mode "Category A" coverage: `document-service`/`folder-service`'s
+request-triggered cascading-write endpoints now reject during a system-wide emergency lockdown — fourth
+and last session of Phase 51, "Security & Correctness Bugfixes". **Phase 51 is now fully complete.**).
+No new ADR — extends an already-existing, already-designed mechanism (`workflow-service`'s own
+`_reject_during_maintenance` header check, P6-S6) to new call sites, per ADR 0152's own recommendation
+and Definition of Done exception.
+
+ADR 0164 (P44-S3) closed maintenance mode's "Category B" (background poll loops) but explicitly left
+"Category A" (request-triggered cascading writes) unaddressed, per ADR 0152's own scoping — cascades
+that happen INSIDE an otherwise gateway-checked request, where the gateway checks maintenance state once
+at ingress but the downstream cross-service write itself never re-checks. Concrete call sites: in
+`document-service`, `create_document`/`checkin_version` (cascade into `virus-scan-service`/
+`storage-service`) and `redact_document` (cascades into `rendering-service`, persists the result as a
+new document); in `folder-service`, `trash_folder`/`restore_folder` (cascade into `document-service`'s
+own `cascade-trash`/`cascade-restore`).
+
+Research turned up that `workflow-service` already solved this exact problem at **P6-S6** — long before
+ADR 0152 was even written — via a `_reject_during_maintenance` helper reading the `X-DMS-Maintenance-
+Active` header the gateway already forwards on every proxied request, rather than an extra
+`permission-service` round trip. ADR 0152's own "Recommendation" section explicitly names this as the
+correct approach for Category A ("header-forwarding... rather than an extra query") and
+`libs/dms-permission-client`'s `is_maintenance_active()` docstring says the same ("a request-scoped
+caller should prefer that header instead") — but neither cross-references that `workflow-service` had
+already built and proven it. First implementation attempt used `is_maintenance_active()` (the Category B
+poll-loop pattern) before this was caught and corrected to the header-based approach.
+
+Fixed by copying `workflow-service`'s exact pattern into both services: a local `_reject_during_maintenance`
+helper, a new `x_dms_maintenance_active: str = Header(default="false")` parameter on each of the five
+endpoints above, checked right after the existing auth/permission check (before any of the endpoint's
+own work, including local-only DB writes) and before the cascading call. Same `503` status and exact
+message text (`"Systemweite Notfallsperre aktiv - Wartungsmodus"`) as `gateway-service`/`workflow-service`
+already use, for consistency. A deliberately narrower implementation than ADR 0152's literal wording
+("each internal `*_client.py` forward the header downstream") — rejecting in the calling service's own
+handler achieves the same protection (the cascade never starts) without needing to also modify
+`storage-service`/`virus-scan-service`/`rendering-service` to check an inbound header from internal
+callers. `case-service`→`workflow-service`, `migration-service`→`permission-service`/peers/
+`folder-service`, and `signature-service`→`document-service` (also named in ADR 0152's Findings) remain
+open — this session scoped only the two services the plan text explicitly named.
+
+New regression tests: `document-service` (+3: `test_create_document_rejected_during_maintenance_mode`,
+`test_checkin_version_rejected_during_maintenance_mode` in `test_api.py`,
+`test_redact_rejected_during_maintenance_mode` in `test_redaction.py` — the latter two demonstrate the
+check fires before the document even needs to exist), `folder-service` (+2:
+`test_trash_folder_rejected_during_maintenance_mode`, `test_restore_folder_rejected_during_maintenance_
+mode`). `387`/`387` `document-service` tests (was 384), `148`/`148` `folder-service` (was 146),
+`216`/`216` `workflow-service` unaffected (confirms no regression from the shared helper naming/pattern).
+`ruff check`/`ruff format --check` clean on all touched files (21 pre-existing violations elsewhere —
+`apps/libreoffice-addin`, `loadtest/notebook`, `federation-hub-service` test — confirmed via `git stash`
+already present on `develop` before this session, out of scope, same as noted in P51-S3).
+
+Docker images for both services rebuilt and redeployed. Live-verified against the real running stack via
+`curl`: `POST /documents`/`POST /folders/{id}/trash`/`POST /folders/{id}/restore` all return `503` with
+`X-DMS-Maintenance-Active: true`, and succeed normally (`201`/`200`/`200`) without it — proving the
+header, not some other state, gates the rejection.
+
+`docs/adr/0152-...md`: new "Update, Phase 51 Session 4" paragraph documenting the closure, the
+deliberate deviation from its literal recommendation, and what's still open. `docs/adr/0164-...md`:
+struck the "Category A remains unaddressed" Consequences bullet, replaced with a closure note.
+`docs/services/document-service.md`/`docs/services/folder-service.md`: one sentence each, appended to
+the existing Category-B maintenance-mode mention.
 
 `repository.delete_folder()`'s not-empty check was purely local (`list_children`, a folder-only DB
 query) — documents live in `document-service`, a different service, and were never consulted at all on
@@ -49,10 +105,59 @@ needed" framing — this session found that reasoning incomplete (a genuine orph
 caller, not just a CMIS-contract nuance) and folder-service now also rejects server-side.
 `docs/services/user-ui.md`: closed its own cross-reference to the same known gap (line ~469).
 
-**Next session:** P51-S4 — maintenance-mode "Category A" coverage gap: `is_maintenance_active()`
-(`libs/dms-permission-client`, built P44-S3) is not yet called at request-triggered cascading-write call
-sites (`document-service`→`storage-service`/`virus-scan-service`/`rendering-service`,
-`folder-service`→`document-service`, etc.) — extend coverage per the Phase 51 plan text.
+**Next session:** P52-S1 — fine-grained user tracking (5.5, ADR 0157) admin-UI page, following the
+P50-S5 pattern (`RequireAuth`→`RequireCapability`→`AdminShell`) for the three existing endpoint groups
+(`/user-tracking-config`, `/user-tracking-sessions`, `/user-tracking-retention-config`), first session
+of Phase 52 ("Dependency-Resolved / Overdue Completions").
+
+---
+
+Immediately before P51-S4: **P51-S3** (`folder-service`: `DELETE /folders/{id}` hard-delete fallback now
+also checks for active documents, not just subfolders — third session of Phase 51, "Security &
+Correctness Bugfixes"). No new ADR — a symptom-level fix that closes a real, previously-unassigned
+orphaning risk using an already-existing client method, not a new design decision.
+
+`repository.delete_folder()`'s not-empty check was purely local (`list_children`, a folder-only DB
+query) — documents live in `document-service`, a different service, and were never consulted at all on
+this path. The regular UI deletion path (`POST .../trash`) was unaffected, since it already cascades
+onto documents via a synchronous `document_client.cascade_trash` call — only the less-frequently-used
+legacy hard-delete fallback had the gap. First named at P4-S4, re-surfaced (still open) during the
+Phase 44+ gap-analysis round's docs sweep, assigned to a session for the first time here.
+
+Fixed by adding one more check to `delete_folder`, right after the existing permission check and before
+`repository.delete_folder()`: `await app.state.document_client.count_active([folder_id]) > 0` → `409`.
+Reused the exact same `DocumentClient.count_active()` method the forced-deletion trash-cascade path
+already calls for the identical purpose — no new HTTP client code needed. `cmis-connector`'s own
+`_do_delete()` pre-check (`_tree.list_children()`, raising a CMIS-shaped `constraint` error) stays as-is
+— it is no longer the only thing preventing orphaning, but it still owns translating "folder not empty"
+into the CMIS error taxonomy's specific `409` shape, a concern the generic `folder-service` fix doesn't
+(and shouldn't) replace. Only its explanatory comment was updated to stop claiming the reverse.
+
+New regression test `test_delete_folder_with_active_documents_returns_409` (`folder-service`), using the
+existing `AsyncMock` fake `document_client` fixture. `144`/`144` `folder-service` tests passing (was
+143, +1), `17`/`17` `cmis-connector` tests passing (comment-only change there, re-run to confirm no
+regression). One `folder-service` test failed on the first full-suite run
+(`test_trash_folder_with_approval_required_defers_execution`, `403` instead of `200`) — investigated,
+confirmed a one-off flake against the real `permission-service` integration (passed in isolation, passed
+again on a clean re-run of the full suite twice in a row afterward), not caused by this session's change,
+which touches only the unrelated `DELETE` endpoint. `ruff check`/`ruff format --check` show 21
+pre-existing violations in `apps/libreoffice-addin/python/ogdoc_addin.py`,
+`loadtest/notebook/analysis.ipynb`, and `services/federation-hub-service/tests/test_repository.py` — all
+in files untouched by this session, confirmed via `git stash` to already exist on `develop` before this
+session started; left alone as out of scope.
+
+Docker image rebuilt and redeployed. Live-verified against the real running stack: created a folder with
+one active document via `curl`, confirmed `DELETE /folders/{id}` now returns `409` with the new detail
+message and the folder remains `200`-resolvable afterward; trashed the document (`count_active` drops to
+`0`), retried `DELETE`, confirmed `204` — proving the check is precise (blocks only on genuinely active
+documents, not trashed ones) and that the pre-existing empty-subfolder `409` case remains unaffected.
+
+`docs/services/folder-service.md`: API table's `DELETE /folders/{id}` row and "Open Points" updated
+(new closed bullet, cross-referencing the fix). `docs/services/cmis-connector.md`: revised the
+"`delete` on a non-empty folder" open-points entry to correct its original "no change to folder-service
+needed" framing — this session found that reasoning incomplete (a genuine orphaning risk regardless of
+caller, not just a CMIS-contract nuance) and folder-service now also rejects server-side.
+`docs/services/user-ui.md`: closed its own cross-reference to the same known gap (line ~469).
 
 ---
 

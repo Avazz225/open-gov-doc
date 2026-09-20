@@ -1498,6 +1498,25 @@ async def _persist_new_document(
     return document
 
 
+async def _reject_during_maintenance(x_dms_maintenance_active: str) -> None:
+    """Maintenance mode (4.8), Category A request-triggered cascading writes
+    (Phase 51 Session 4, ADR 0152) - same helper shape and message as
+    `workflow-service`'s own `_reject_during_maintenance` (P6-S6), reading
+    the header the gateway already forwards on the inbound request rather
+    than an extra `permission-service` round trip. Guards the few endpoints
+    here that cascade into another service's write path (`create_document`/
+    `checkin_version` into virus-scan-service/storage-service,
+    `redact_document` into rendering-service) - the primary CRUD paths'
+    OWN local-only writes are not separately gated here, matching ADR
+    0152's own scoping (system-wide write prevention beyond the gateway is
+    explicitly out of scope, only cross-service cascades are)."""
+    if x_dms_maintenance_active.lower() == "true":
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Systemweite Notfallsperre aktiv - Wartungsmodus",
+        )
+
+
 async def _require_document_permission(
     x_dms_principal: str, resource_id: str, *, access_type: str
 ) -> None:
@@ -1552,6 +1571,7 @@ async def create_document(
     originating_case_id: str | None = Form(None),
     draft: bool = Form(False),
     x_dms_principal: str = Header(default=""),
+    x_dms_maintenance_active: str = Header(default="false"),
     session: AsyncSession = Depends(get_session),
 ) -> DocumentOut:
     # Sensor "document.upload.duration" (10.1, P11-S1): start time is only
@@ -1574,6 +1594,17 @@ async def create_document(
     # `ResourceNode`.
     if not x_dms_principal:
         raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+
+    # Maintenance mode (4.8), Category A (Phase 51 Session 4, ADR 0152):
+    # this request-triggered path cascades into virus-scan-service (`.scan`
+    # below) and storage-service (`_persist_new_document`) - exactly the
+    # kind of write an emergency lockdown exists to stop, previously
+    # unchecked here. Reads the already-forwarded gateway header instead of
+    # an extra `permission-service` round trip (`is_maintenance_active()`
+    # remains for Category B poll loops, which have no inbound request to
+    # read a header off) - same pattern `workflow-service` established at
+    # P6-S6 (`_reject_during_maintenance`).
+    await _reject_during_maintenance(x_dms_maintenance_active)
 
     # License limit block (concept 9.3, P9-S2): only genuine new creations,
     # not versioning/restoration of existing documents - "doesn't
@@ -2601,6 +2632,7 @@ async def redact_document(
     document_id: str,
     payload: RedactionRequest,
     x_dms_principal: str = Header(default=""),
+    x_dms_maintenance_active: str = Header(default="false"),
     session: AsyncSession = Depends(get_session),
 ) -> DocumentOut:
     """Document redaction workflow (14.2, post-roadmap phase 31 session 4,
@@ -2626,6 +2658,10 @@ async def redact_document(
     is (a pre-existing, documented gap this session doesn't newly introduce)."""
     if not x_dms_principal:
         raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    # Maintenance mode (4.8), Category A (Phase 51 Session 4, ADR 0152): this
+    # path cascades into rendering-service (`.redact` below) and persists
+    # the result as a new document.
+    await _reject_during_maintenance(x_dms_maintenance_active)
     try:
         document = await repository.get_document(session, document_id)
         version = await repository.get_version(
@@ -3675,6 +3711,7 @@ async def checkin_version(
     created_by: str = Form(...),
     comment: str | None = Form(None),
     x_dms_principal: str = Header(default=""),
+    x_dms_maintenance_active: str = Header(default="false"),
     session: AsyncSession = Depends(get_session),
 ) -> CheckinResult:
     # RBAC (Post-Roadmap Phase 38 Session 4, ADR 0149) - checked before the
@@ -3688,6 +3725,11 @@ async def checkin_version(
         target_document = None
     if target_document is not None:
         await _require_document_permission(x_dms_principal, target_document.id, access_type="write")
+
+    # Maintenance mode (4.8), Category A (Phase 51 Session 4, ADR 0152): same
+    # reasoning as `create_document` above - this path cascades into
+    # virus-scan-service and storage-service.
+    await _reject_during_maintenance(x_dms_maintenance_active)
 
     # License limit block (concept 9.3, Post-Roadmap Phase 42 Session 2) - a
     # new version is excluded from the "documents" dimension (no new document

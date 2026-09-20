@@ -495,6 +495,38 @@ def test_list_documents_unknown_folder_returns_empty(client):
     assert response.json() == []
 
 
+def test_create_document_rejected_during_maintenance_mode(client):
+    """Maintenance mode (4.8), Category A (Phase 51 Session 4, ADR 0152) -
+    reads the gateway-forwarded `X-DMS-Maintenance-Active` header (no
+    gateway in this test run, simulated directly), same pattern as
+    `workflow-service`'s `test_start_instance_rejected_during_maintenance_
+    mode`. Fires before the virus-scan/storage cascade this check exists to
+    guard - here also before folder/license validation, since it's checked
+    right after the principal header."""
+    response = client.post(
+        "/documents",
+        data={"title": "X", "created_by": "alice"},
+        files={"file": ("x.pdf", b"data", "application/pdf")},
+        headers={"X-DMS-Maintenance-Active": "true"},
+    )
+    assert response.status_code == 503
+
+
+def test_checkin_version_rejected_during_maintenance_mode(client):
+    """Same as above, for the other endpoint that cascades into
+    virus-scan-service/storage-service. Fires before the document even
+    needs to exist (the maintenance check runs unconditionally, the
+    permission check only when `target_document` resolves) - an unknown
+    `document_id` still gets `503`, not `404`."""
+    response = client.post(
+        "/documents/does-not-exist/versions",
+        data={"expected_base_version_number": 1, "created_by": "alice"},
+        files={"file": ("v2.pdf", b"v2", "application/pdf")},
+        headers={"X-DMS-Maintenance-Active": "true"},
+    )
+    assert response.status_code == 503
+
+
 def test_create_document_rejects_infected_upload(client):
     response = upload(client, content=EICAR_SIGNATURE)
 

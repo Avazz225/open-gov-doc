@@ -109,5 +109,9 @@ mirroring `workflow-service`'s own identical treatment of new process-instance s
 - **No code changes needed in `permission-service` itself** — `GET /maintenance-mode`'s contract was
   already stable and already well-tested from ADR 0024's original session; this ADR only adds new
   callers of an existing endpoint.
-- **Category A (request-triggered cascading writes) remains explicitly unaddressed** — ADR 0152's own
-  documented, lower-priority second half, unchanged by this session.
+- ~~**Category A (request-triggered cascading writes) remains explicitly unaddressed** — ADR 0152's own
+  documented, lower-priority second half, unchanged by this session.~~ — **partially closed in Phase 51
+  Session 4** (see ADR 0152's own "Update" note): `document-service`/`folder-service`'s cascading
+  endpoints now reject during maintenance mode via the gateway-forwarded header, the same shape
+  `workflow-service` already had. `case-service`/`migration-service`/`signature-service`'s own Category
+  A call sites remain open.

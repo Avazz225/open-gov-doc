@@ -90,3 +90,24 @@ system state, not a new privilege).
   `workflow-service`'s existing pattern into the ~9 identified Category B call sites, and only then
   decide whether Category A's header-forwarding variant is worth the same session's scope or a separate
   one.
+
+**Update, Phase 51 Session 4**: Category B was closed in Phase 44 Session 3 (ADR 0164). This session
+closed Category A for the two services the follow-up plan explicitly named — `document-service`
+(`create_document`, `checkin_version`, `redact_document` — the three request-triggered endpoints that
+cascade into `storage-service`/`virus-scan-service`/`rendering-service`) and `folder-service`
+(`trash_folder`/`restore_folder`, cascading into `document-service`). Implemented as a header check
+(`X-DMS-Maintenance-Active`, already forwarded by the gateway) right in each endpoint's own handler via
+a local `_reject_during_maintenance` helper — the same shape `workflow-service` already established at
+P6-S6, copied rather than reinvented once it turned out to already exist in this codebase (this ADR's
+own "Findings" section named it "the only existing precedent" without registering it also already
+covers Category A, not just B). A deliberate, narrower implementation than this ADR's literal
+recommendation ("each internal `*_client.py` forward the header downstream"): rejecting in the calling
+service's own handler achieves the same protection (the cascade never starts) without needing to modify
+`storage-service`/`virus-scan-service`/`rendering-service` themselves to check an inbound header from
+internal callers - fewer moving parts, same residual race window this ADR already accepted (a
+maintenance-mode toggle mid-cascade, narrower than Category B's permanent exposure).
+**Still open**: `case-service`→`workflow-service`, `migration-service`→`permission-service`/peer
+installations/`folder-service`, and `signature-service`→`document-service` — named in this ADR's
+"Findings" but not part of the Phase 51 Session 4 plan item, which scoped only the two services above.
+Same pattern (`_reject_during_maintenance` reading `X-DMS-Maintenance-Active`) applies directly if a
+future session picks these up.

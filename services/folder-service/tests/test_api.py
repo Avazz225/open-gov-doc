@@ -270,6 +270,39 @@ def test_trash_and_restore_folder_calls_document_cascade(client):
     app.state.document_client.cascade_restore.assert_awaited_once_with(parent["id"])
 
 
+def test_trash_folder_rejected_during_maintenance_mode(client):
+    """Maintenance mode (4.8), Category A (Phase 51 Session 4, ADR 0152) -
+    reads the gateway-forwarded `X-DMS-Maintenance-Active` header (no
+    gateway in this test run, simulated directly), same pattern as
+    `workflow-service`'s `test_start_instance_rejected_during_maintenance_
+    mode`. Fires before the document-service cascade this check exists to
+    guard - the folder remains untouched afterward."""
+    created = client.post("/folders", json={"name": "X", "created_by": "alice"}).json()
+
+    response = client.post(
+        f"/folders/{created['id']}/trash",
+        json={"deleted_by": "alice"},
+        headers={"X-DMS-Maintenance-Active": "true"},
+    )
+
+    assert response.status_code == 503
+    assert client.get(f"/folders/{created['id']}").status_code == 200
+
+
+def test_restore_folder_rejected_during_maintenance_mode(client):
+    """Same as above, for the other endpoint that cascades into
+    document-service (`cascade_restore`)."""
+    created = client.post("/folders", json={"name": "X", "created_by": "alice"}).json()
+    client.post(f"/folders/{created['id']}/trash", json={"deleted_by": "alice"})
+
+    response = client.post(
+        f"/folders/{created['id']}/restore",
+        headers={"X-DMS-Maintenance-Active": "true"},
+    )
+
+    assert response.status_code == 503
+
+
 def test_trash_folder_with_approval_required_defers_execution(client):
     """Löschantrag-Workflow für reguläre Nutzer (5.2, seit P7-S1c) - echte
     Integration gegen den lokal laufenden permission-service, gleiches

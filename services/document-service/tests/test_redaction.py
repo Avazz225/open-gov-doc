@@ -90,6 +90,22 @@ def test_redact_requires_principal_header(client):
     assert response.status_code == 401
 
 
+def test_redact_rejected_during_maintenance_mode(client):
+    """Maintenance mode (4.8), Category A (Phase 51 Session 4, ADR 0152) -
+    same header-based pattern as `test_api.py`'s equivalent new tests for
+    `create_document`/`checkin_version`. Fires before the document lookup
+    (the check runs right after the principal header check, before
+    `repository.get_document`), so an unknown `document_id` still gets
+    `503`, not `404` - demonstrating this cascades-into-rendering-service
+    path fails fast regardless of what document is targeted."""
+    response = client.post(
+        "/documents/does-not-exist/redact",
+        json={"regions": REGION_BOTTOM_STRIP, "created_by": "alice"},
+        headers={"X-DMS-Maintenance-Active": "true"},
+    )
+    assert response.status_code == 503
+
+
 def test_redact_requires_read_permission(client):
     document_id = upload(client).json()["id"]
     response = client.post(
