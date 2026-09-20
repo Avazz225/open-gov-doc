@@ -33,6 +33,26 @@ class ExportError(Exception):
     unhandled 500, same idiom as `pipeline.PipelineError`)."""
 
 
+def _resolve_export_version(reference: dict) -> int | None:
+    """Which version to export for one case document reference (Phase 52
+    Session 4, ADR 0170) - a closed case's reference carries its frozen
+    `snapshot_version_number` (set once, at closure, `case_service.
+    repository.close_case`); an OPEN case's reference instead carries a
+    live `current_version_number`, resolved fresh by case-service on every
+    read (`case_service.main._resolve_reference`, only while `case.status
+    == "open"`). The two fields are mutually exclusive by construction, not
+    by convention - checking snapshot first and falling back to current is
+    therefore exhaustive, not a heuristic guess. Before this fix, only
+    `snapshot_version_number` was ever consulted, so every reference on an
+    open case was silently excluded - a schema-valid but document-less
+    export, with no error anywhere in the response. `.get()`, not `[...]`,
+    since some callers' fixtures predate this field."""
+    snapshot = reference.get("snapshot_version_number")
+    if snapshot is not None:
+        return snapshot
+    return reference.get("current_version_number")
+
+
 class ReferencedDocumentMissingError(Exception):
     """A case's `CaseDocumentReference` points at a document/version that no
     longer exists in document-service (data drift - e.g. the document was
@@ -86,9 +106,7 @@ async def build_case_export_package(
     document_client: DocumentClient,
     leser_name: str,
 ) -> bytes:
-    """Exports every currently-active document reference of the case (same
-    `removed_at is None and snapshot_version_number is not None` filter
-    `case_pipeline._build_package` already uses for the disposal path) -
+    """Exports every currently-active document reference of the case -
     unlike disposal, the case does NOT need to be closed; any case may be
     exported for handoff. `case` is the ALREADY-FETCHED case dict (see
     `main.py`'s `export_case_xdomea` - fetching it there, not here, lets the
@@ -97,20 +115,26 @@ async def build_case_export_package(
     document references) instead of a single blanket `httpx.HTTPStatusError`
     catch conflating both into a misleading "case unknown" - found live
     during this session's own verification, see that exception's
-    docstring)."""
+    docstring). Version resolution since Phase 52 Session 4 (ADR 0170) uses
+    `_resolve_export_version` (snapshot for a closed case, live current
+    version for an open one) - NOT the plain `snapshot_version_number is
+    not None` filter `case_pipeline._build_package` uses for the disposal
+    path, which is only safe there because disposal is unreachable for an
+    open case in the first place (`case_service`'s own `CaseNotClosedError`
+    gate on `POST /cases/{id}/archive-request`); reusing it here silently
+    dropped every reference on an open case, this function's own explicitly
+    stated purpose."""
     case_id = case["id"]
     references = await case_client.list_document_references(case_id)
-    active_references = [
-        r
-        for r in references
-        if r["removed_at"] is None and r["snapshot_version_number"] is not None
-    ]
+    active_references = [r for r in references if r["removed_at"] is None]
 
     documents: list[dict] = []
     contents: dict[str, bytes] = {}
     for reference in active_references:
+        version_number = _resolve_export_version(reference)
+        if version_number is None:
+            continue
         document_id = reference["document_id"]
-        version_number = reference["snapshot_version_number"]
         try:
             version = await document_client.get_version(document_id, version_number)
             content = await document_client.download_version_content(document_id, version_number)
@@ -192,22 +216,22 @@ async def build_case_export_package_xjustiz(
 ) -> bytes:
     """XJustiz counterpart to `build_case_export_package` above - same data
     fetching (incl. the same `ReferencedDocumentMissingError` data-integrity
-    check), different message format (`xjustiz.py`, mapping the case to a
-    `Type.GDS.Akte` rather than an XDOMEA-style `Vorgang`). `case` is the
-    ALREADY-FETCHED case dict, same reasoning as `build_case_export_package`."""
+    check and the same `_resolve_export_version` open/closed-case version
+    resolution, Phase 52 Session 4/ADR 0170), different message format
+    (`xjustiz.py`, mapping the case to a `Type.GDS.Akte` rather than an
+    XDOMEA-style `Vorgang`). `case` is the ALREADY-FETCHED case dict, same
+    reasoning as `build_case_export_package`."""
     case_id = case["id"]
     references = await case_client.list_document_references(case_id)
-    active_references = [
-        r
-        for r in references
-        if r["removed_at"] is None and r["snapshot_version_number"] is not None
-    ]
+    active_references = [r for r in references if r["removed_at"] is None]
 
     documents: list[dict] = []
     contents: dict[str, bytes] = {}
     for reference in active_references:
+        version_number = _resolve_export_version(reference)
+        if version_number is None:
+            continue
         document_id = reference["document_id"]
-        version_number = reference["snapshot_version_number"]
         try:
             version = await document_client.get_version(document_id, version_number)
             content = await document_client.download_version_content(document_id, version_number)

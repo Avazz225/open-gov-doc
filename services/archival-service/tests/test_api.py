@@ -576,6 +576,71 @@ async def test_export_case_xdomea_returns_a_valid_zip_package_excluding_removed_
     xdomea.validate_abgabe_message(message_xml)
 
 
+async def test_export_case_xdomea_includes_documents_for_a_still_open_case(client):
+    """Regression test (Phase 52 Session 4, ADR 0170): before this fix, the
+    export filter only ever consulted `snapshot_version_number` - a field
+    only ever set at case CLOSURE - so every reference on a still-open case
+    was silently excluded, producing a schema-valid but document-less ZIP
+    with a plain 200, no error anywhere. An open case's reference instead
+    carries `current_version_number` (case-service's own live-resolved
+    field, `snapshot_version_number: None`) - this must now be used as the
+    version to export."""
+    app.state.case_client.get_case.return_value = {
+        "id": "case-1",
+        "name": "Noch offener Fall",
+        "status": "open",
+    }
+    app.state.case_client.list_document_references.return_value = [
+        {
+            "document_id": "doc-1",
+            "snapshot_version_number": None,
+            "current_version_number": 2,
+            "removed_at": None,
+        },
+    ]
+    app.state.document_client.get_version.return_value = {
+        "content_type": "application/pdf",
+        "filename": "schreiben.pdf",
+    }
+    app.state.document_client.download_version_content.return_value = b"%PDF-fake-content"
+
+    response = client.post("/xdomea/export/cases/case-1", params={"leser_name": "Andere Behoerde"})
+
+    assert response.status_code == 200
+    app.state.document_client.get_version.assert_called_once_with("doc-1", 2)
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        assert "dokumente/" in "\n".join(archive.namelist())
+        message_xml = archive.read("abgabe.xml")
+    xdomea.validate_abgabe_message(message_xml)
+
+
+async def test_export_case_xdomea_skips_a_reference_with_neither_snapshot_nor_current_version(
+    client,
+):
+    """A reference whose document was no longer resolvable at all (neither
+    ever closed-snapshotted nor currently resolvable) is skipped, not
+    exported and not an error - the same "remains traceably present, just
+    not included" handling `case_service.repository.close_case`'s own
+    docstring already describes for the closure-snapshot case."""
+    app.state.case_client.get_case.return_value = {"id": "case-1", "name": "Fall", "status": "open"}
+    app.state.case_client.list_document_references.return_value = [
+        {
+            "document_id": "doc-unresolvable",
+            "snapshot_version_number": None,
+            "current_version_number": None,
+            "removed_at": None,
+        },
+    ]
+
+    response = client.post("/xdomea/export/cases/case-1", params={"leser_name": "Andere Behoerde"})
+
+    assert response.status_code == 200
+    app.state.document_client.get_version.assert_not_called()
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        message_xml = archive.read("abgabe.xml")
+    xdomea.validate_abgabe_message(message_xml)
+
+
 # --- General XDOMEA import (14.2, Post-Roadmap Phase 31 Session 13b, ADR 0128) --
 
 
@@ -946,6 +1011,41 @@ async def test_export_case_xjustiz_returns_a_valid_zip_package_excluding_removed
     assert response.status_code == 200
     app.state.document_client.get_version.assert_called_once_with("doc-1", 1)
     with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        message_xml = archive.read("xjustiz_nachricht.xml")
+    xjustiz.validate_uebermittlung_schriftgutobjekte(message_xml)
+
+
+async def test_export_case_xjustiz_includes_documents_for_a_still_open_case(client):
+    """XJustiz counterpart to the XDOMEA regression test above (Phase 52
+    Session 4, ADR 0170) - same open-case bug, same fix
+    (`_resolve_export_version`), shared by both message formats."""
+    app.state.case_client.get_case.return_value = {
+        "id": "case-1",
+        "name": "Noch offener Fall",
+        "status": "open",
+    }
+    app.state.case_client.list_document_references.return_value = [
+        {
+            "document_id": "doc-1",
+            "snapshot_version_number": None,
+            "current_version_number": 3,
+            "removed_at": None,
+        },
+    ]
+    app.state.document_client.get_version.return_value = {
+        "content_type": "application/pdf",
+        "filename": "schreiben.pdf",
+    }
+    app.state.document_client.download_version_content.return_value = b"%PDF-fake-content"
+
+    response = client.post(
+        "/xjustiz/export/cases/case-1", params={"empfaenger_name": "Testgericht"}
+    )
+
+    assert response.status_code == 200
+    app.state.document_client.get_version.assert_called_once_with("doc-1", 3)
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        assert "dokumente/" in "\n".join(archive.namelist())
         message_xml = archive.read("xjustiz_nachricht.xml")
     xjustiz.validate_uebermittlung_schriftgutobjekte(message_xml)
 

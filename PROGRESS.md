@@ -2,9 +2,64 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P52-S3 (pseudonymization vault retention, 5.2/ADR 0156's own explicitly deferred gap
-— third session of Phase 52, "Dependency-Resolved / Overdue Completions"). **New ADR** ([0169](docs/adr/0169-pseudonymization-vault-retention-tied-to-document-lifecycle.md))
-— a genuine retention-policy design decision, per the plan's own DoD.
+**Last completed:** P52-S4 (case-export open-case document inclusion — fourth and last session of Phase
+52, "Dependency-Resolved / Overdue Completions". **Phase 52 is now fully complete.**). **New ADR**
+([0170](docs/adr/0170-case-export-open-case-document-inclusion.md)) — a genuine design decision (which
+of two options to fix a real, live-documented bug with), per the plan's own DoD.
+
+`archival_service.general_export.build_case_export_package[_xjustiz]` filtered document references on
+`snapshot_version_number is not None` — a field `case-service` only ever sets once, at case CLOSURE.
+For a still-OPEN case, every reference was silently excluded: a normal `200`, a schema-valid ZIP, zero
+documents inside, no error or warning anywhere. ADR 0159 (Phase 43 Session 1) found and documented this
+live but deliberately left it unfixed as out of scope for a transport-mechanics session.
+
+Chose the plan's option (a) — a `current_version_number` fallback — over option (b) — enforcing "case
+must be closed first". Option (b) would have reversed ADR 0127's own already-made, still-valid design
+intent (general case export was explicitly designed to work on any case, open or closed) rather than
+fixed a mistake: the bug was never "open cases shouldn't be exportable", it was "the code forgot open
+cases have a different, already-modeled way to know their current document version." New
+`_resolve_export_version()` helper: `snapshot_version_number` if set (closed case), else
+`current_version_number` (open case) — mutually exclusive by construction in `case-service`'s own model,
+so this is exhaustive, not a heuristic. `case_pipeline.py`'s own copy of the old filter (disposal path)
+is deliberately left untouched — provably unreachable for an open case (`case-service`'s own
+`CaseNotClosedError` gate on `POST /cases/{id}/archive-request`), so it was never actually broken.
+`workflow-service`'s DMS-to-DMS XDOMEA handoff (ADR 0159's own feature) benefits automatically with no
+code change of its own — it already just forwards `archival-service`'s response bytes.
+
+New regression tests (`test_api.py`, +4: two per message format — one proving an open case's documents
+are now included, one proving a reference with neither field set is still safely skipped, not an
+error). `145`/`145` `archival-service` tests passing. `ruff check`/`ruff format --check` clean on all
+touched files.
+
+Docker image rebuilt and redeployed. **Live-verified end-to-end against the real running stack**: created
+a real case against a real manual-task process definition (confirmed `status: "open"`), attached a real
+document (confirmed `snapshot_version_number: null, current_version_number: 1` — exactly the open-case
+shape), called `POST /xdomea/export/cases/{id}` directly — the ZIP now contains BOTH `abgabe.xml` AND
+`dokumente/<file>` (previously would have been `abgabe.xml` only), reproducing and closing the exact
+scenario ADR 0159 documented live. Test document trashed afterward.
+
+`docs/adr/0159-...md`: no change needed (its own documentation of the finding already correctly framed
+it as deferred, not fixed). `docs/adr/0159-dms-to-dms-xdomea-handoff-implementation.md` cross-referenced
+from the new ADR. `docs/services/archival-service.md`/`docs/services/workflow-service.md`: both closed
+their matching Open Points bullets (the same finding had been documented in both, from ADR 0159's own
+session).
+
+**Phase 52 ("Dependency-Resolved / Overdue Completions") is now fully complete** — all four sessions
+done: fine-grained user tracking admin-UI, cross-installation config-compare admin-UI, pseudonymization
+vault retention, case-export open-case fix. Per the project's own `graphify update .` convention
+(phase-end only), the graph will be updated after this entry.
+
+**Next session:** P53-S1 — two small residuals from ADR 0153 (AD-group-mapping composite rules/default
+role), neither touched by P50-S5: the default-role setting has no four-eyes protection, and the
+four-eyes approval path records the approver's raw Keycloak `sub` instead of a display name (cosmetic).
+Bundle both, same ADR, same service — first session of Phase 53 ("Lower-Priority Hardening & Polish").
+
+---
+
+Immediately before P52-S4: **P52-S3** (pseudonymization vault retention, 5.2/ADR 0156's own explicitly
+deferred gap — third session of Phase 52, "Dependency-Resolved / Overdue Completions"). **New ADR**
+([0169](docs/adr/0169-pseudonymization-vault-retention-tied-to-document-lifecycle.md)) — a genuine
+retention-policy design decision, per the plan's own DoD.
 
 ADR 0156 built reversible attribute pseudonymization (5.2) but explicitly left vault-entry retention
 unsolved, naming two options without picking one: (a) tie it to document-service's existing
