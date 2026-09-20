@@ -1819,7 +1819,9 @@ async def list_documents(
 
 @app.get("/documents/by-kennzeichen", response_model=list[DocumentOut])
 async def list_documents_by_kennzeichen(
-    value: str, session: AsyncSession = Depends(get_session)
+    value: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> list[DocumentOut]:
     """Cross-object-type reference number search (2.5/3.3, P15-S3) - route
     MUST be registered before `/documents/{document_id}`, otherwise FastAPI
@@ -1827,8 +1829,26 @@ async def list_documents_by_kennzeichen(
     pattern as `/documents/deleted`). Returns a list instead of a single
     match - `Kennzeichen` is not globally unique (see
     `repository.list_documents_by_kennzeichen`), the caller (e.g.
-    `mail-connector`) must check for 0/1/N matches itself."""
-    return await repository.list_documents_by_kennzeichen(session, value)
+    `mail-connector`) must check for 0/1/N matches itself.
+
+    **Since P56-S2** (ADR 0176): row-level RBAC filtering - this is a
+    cross-FOLDER search (unlike `list_documents_by_folder` above, which is
+    already scoped to one already-permission-checked folder), so without
+    this a caller could enumerate the existence and metadata of documents
+    they have no read access to at all (e.g. a teamspace-isolated document,
+    `inherit=False`) simply by guessing/brute-forcing Kennzeichen values -
+    "everyone"'s baseline `document.read` grant covers the vast majority of
+    documents, but not those. `401` without a principal header, matching
+    `_require_document_permission`'s own convention."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="X-DMS-Principal fehlt")
+    candidates = await repository.list_documents_by_kennzeichen(session, value)
+    if not candidates:
+        return []
+    allowed = await app.state.permission_client.check_read_batch(
+        principal_id=x_dms_principal, resource_ids=[document.id for document in candidates]
+    )
+    return [document for document in candidates if allowed.get(document.id, False)]
 
 
 async def _require_classified_deletion_permission(x_dms_principal: str) -> None:

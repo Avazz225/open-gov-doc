@@ -2807,6 +2807,54 @@ def test_lookup_by_kennzeichen_can_return_multiple_documents():
     assert {d["id"] for d in response.json()} == {first["id"], second["id"]}
 
 
+def test_lookup_by_kennzeichen_without_principal_returns_401(client):
+    response = client.get(
+        "/documents/by-kennzeichen",
+        params={"value": "does-not-matter"},
+        headers={"X-DMS-Principal": ""},
+    )
+    assert response.status_code == 401
+
+
+def test_lookup_by_kennzeichen_omits_a_document_the_caller_cannot_read(client):
+    """P56-S2/ADR 0176 - same isolation mechanism `test_versions_batch_
+    omits_a_document_the_caller_cannot_read` above already proved for the
+    versions-batch endpoint, applied here: an individually isolated
+    document (`inherit=False`, simulating a teamspace-isolated document
+    without needing a real teamspace-service round trip) is omitted from
+    the by-kennzeichen result for a principal without an explicit grant,
+    even though it genuinely matches."""
+    isolated = upload(client, content=b"isoliert").json()
+    client.patch(
+        f"/documents/{isolated['id']}",
+        json={"attributes": {"Kennzeichen": "2026-lookup-isolated"}},
+        headers={"X-DMS-Roles": "dms-admin"},
+    )
+    httpx.patch(
+        f"{PERMISSION_SERVICE_URL}/resources/{isolated['id']}",
+        json={"inherit": False},
+        timeout=10.0,
+    ).raise_for_status()
+
+    scoped_principal = "document-service-tests-kennzeichen-scoped"
+    response = client.get(
+        "/documents/by-kennzeichen",
+        params={"value": "2026-lookup-isolated"},
+        headers={"X-DMS-Principal": scoped_principal},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+    # The default test principal ("everyone" baseline, no explicit grant on
+    # this resource either) is likewise excluded - confirms this isn't
+    # merely a per-principal allowlist quirk of `scoped_principal`.
+    default_response = client.get(
+        "/documents/by-kennzeichen", params={"value": "2026-lookup-isolated"}
+    )
+    assert default_response.json() == []
+
+
 def test_quarantine_release_requires_principal(client):
     # Same default-header override as the other "without_principal" tests
     # above - the `client` fixture now sends one by default.

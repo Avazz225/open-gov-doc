@@ -2,10 +2,66 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P56-S1 (maintenance-mode "Category A" coverage extended to the last three remaining
-call sites — first session of Phase 56, "RBAC / Maintenance-Mode Completion"). No new ADR — mechanical
-extension of an already-proven, already-designed pattern (ADR 0152 amended in place instead), per the
-plan's own DoD.
+**Last completed:** P56-S2 (`document-service`'s `list_documents_by_kennzeichen` gained row-level RBAC
+filtering, previously fully ungated — second and last session of Phase 56, "RBAC / Maintenance-Mode
+Completion". **Closes Phase 56.**). **New ADR** ([0176](docs/adr/0176-document-service-kennzeichen-lookup-row-level-rbac.md))
+— a real design decision, per the plan's own DoD.
+
+**The gap.** ADR 0149 itself, when it retrofitted row-level RBAC filtering onto every other cross-folder
+read path in `document-service`, explicitly named this endpoint "a separate, larger effort, out of
+scope." `GET /documents/by-kennzeichen` (`mail-connector`'s candidate-matching path) had no permission
+check of any kind — no `X-DMS-Principal` requirement, no filtering. Unlike a folder-scoped listing
+endpoint (already behind a permission-checked folder), this is a genuine cross-folder, installation-wide
+search — any caller could enumerate the existence and metadata of a document they have no read access to
+at all (e.g. a teamspace-isolated document, `inherit=False`) simply by guessing/brute-forcing Kennzeichen
+values.
+
+**The fix.** Required `X-DMS-Principal` (`401` without it) and row-level filtered the candidate list via
+`PermissionServiceClient.check_read_batch` — already existing on this service's own client (built for
+`webdav-connector`'s N+1 fix, Phase 50 Session 4), no new method needed, no new `filtering.py` module
+either (unlike `reporting-service`/`query-service`'s own filtering, every candidate here is already a
+`document-service`-local row whose own `id` **is** its `resource_id` directly, ADR 0154 — no resolution
+step needed). One batched `POST /check/batch` call regardless of candidate count — already closes the
+"unbounded per-candidate fan-out" shape this project has hit before. No superuser bypass — confirmed via
+grep that `document-service` has no activated-superuser concept anywhere in its own code, so none was
+invented for just this one endpoint. `mail-connector` (the real primary caller) needed **no client-side
+change at all**: its `DocumentClient._SYSTEM_PRINCIPAL_HEADERS = {"X-DMS-Principal": "mail-connector"}`
+is already applied to every request at `httpx.AsyncClient` construction time (Phase 38 Session 4) — only
+this session's server-side check was missing.
+
+New/updated tests: `test_lookup_by_kennzeichen_without_principal_returns_401`,
+`test_lookup_by_kennzeichen_omits_a_document_the_caller_cannot_read` (same `inherit=False` isolation
+mechanism `test_versions_batch_omits_a_document_the_caller_cannot_read` already proved for the
+versions-batch endpoint, applied here — a genuinely matching document is omitted for both a scoped
+principal AND the default test principal, confirming this isn't a per-principal allowlist quirk).
+`393/393` tests (was 391, +2). `ruff check`/`ruff format --check` clean.
+
+Docker image rebuilt and redeployed. **Live-verified against the real running stack**: created a real
+document with a real Kennzeichen, confirmed it's visible via lookup before isolation; isolated it
+directly via `permission-service` (`PATCH /resources/{id}` `inherit=false`, the same real-permission-
+service technique the automated test uses); confirmed it then disappears from the lookup for an unrelated
+principal AND for the document's own creator (no explicit resource grant); confirmed `mail-connector`'s
+own real identity likewise no longer sees it, then restored `inherit=true` and confirmed `mail-connector`
+sees it again — proving the fix doesn't regress the real automated-matching flow for ordinary documents.
+Test document cleaned up (trashed) afterward.
+
+`docs/services/document-service.md`: endpoint table entry and the Open Points bullet ADR 0149 originally
+left open both updated/closed.
+
+**Phase 56 ("RBAC / Maintenance-Mode Completion") is now closed** (P56-S1 through S2, both sessions
+done). `graphify update .` to run next per the established phase-end convention.
+
+**Next session**: none currently defined — `IMPLEMENTATION_PLAN.md` has no further sessions queued
+beyond Phase 56. Per the standing "weiter selbstständig" instruction, the next step is to check whether
+the user wants to initiate another gap-analysis round (the established pattern after a phase block
+closes), rather than inventing one unprompted.
+
+---
+
+Immediately before P56-S2: **P56-S1** (maintenance-mode "Category A" coverage extended to the last three
+remaining call sites — first session of Phase 56, "RBAC / Maintenance-Mode Completion"). No new ADR —
+mechanical extension of an already-proven, already-designed pattern (ADR 0152 amended in place instead),
+per the plan's own DoD.
 
 **The gap.** ADR 0152's own "Findings" named six Category A (request-triggered cascading write) call
 sites; P51-S4 closed only two (`document-service`/`folder-service`). The remaining three, all still
