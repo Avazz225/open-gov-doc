@@ -1712,6 +1712,10 @@ export interface ReportSchedule {
   filters: Record<string, unknown>;
   next_run_at: string;
   last_run_at: string | null;
+  // Visible failure status (Phase 53 Session 3) - `null` until the
+  // schedule has ever actually run once, then "sent"/"failed".
+  last_status: "sent" | "failed" | null;
+  last_error: string | null;
   created_at: string;
 }
 

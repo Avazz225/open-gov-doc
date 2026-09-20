@@ -2,7 +2,76 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P53-S2 (two small residuals from ADR 0154 — second session of Phase 53,
+**Last completed:** P53-S3 (`reporting-service` scheduled-report `recipient_email` validation +
+visible failure status — third session of Phase 53, "Lower-Priority Hardening & Polish"). No new ADR —
+the plan's own DoD names only P53-S1 as a conditional exception; this session is pure hardening of an
+already-established pattern (server-side format validation, a status field surfacing an existing
+failure mode), no new architecture decision.
+
+**Two-part fix, both closing the same Open Point** (`docs/services/reporting-service.md`: "recipient
+email not validated upfront, a send failure was neither surfaced nor isolated"):
+
+1. **Upfront format validation.** `ReportScheduleCreate.recipient_email` gained a Pydantic v2
+   `field_validator` against a plain regex (`^[^\s@]+@[^\s@]+\.[^\s@]+$`) — `422` on a malformed value
+   at `POST /report-schedules` instead of only failing silently at the next poll tick. Deliberately no
+   `EmailStr`/`email-validator` dependency — confirmed via a repo-wide grep that neither is used
+   anywhere in this codebase; the regex matches the established minimalist-validator convention
+   (precedent: `federation-hub-service/schemas.py`'s version-format check).
+2. **A real per-schedule isolation bug, found while building the status field.** `_run_due_schedules`'s
+   `notification_client.send_email` call was previously unguarded — one schedule's send failure (e.g. an
+   unreachable/unknown recipient) raised out of the loop body and silently aborted the *entire* poll
+   tick, skipping every other due schedule until the next interval. Now wrapped in its own `try`/`except`
+   that marks only that one schedule `last_status="failed"`/`last_error=<exception text>` and
+   `continue`s — the rest of the tick proceeds unaffected. `report_schedule` gained `last_status`
+   (`"sent"|"failed"|null`)/`last_error` columns (manual `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` in
+   the lifespan, since `Base.metadata.create_all` never alters an existing table — the same no-Alembic
+   idiom as `permission-service`'s own migrations); `mark_schedule_run` now takes a required `status`.
+
+**Admin UI.** `ReportsView.tsx`'s schedule table gained a "last delivery" status column: `null` → a
+plain "never run yet" hint, `"sent"` → `.badge.ok`, `"failed"` → `.badge.down` carrying `last_error` as
+its `title` tooltip (the same badge convention as `InstallationManager`/`LicenseStatusView`). `api.ts`'s
+`ReportSchedule` interface extended with both fields.
+
+New/updated tests: `reporting-service` — `test_create_schedule_rejects_a_malformed_recipient_email`
+(422), `test_poll_tick_marks_schedule_failed_when_notification_send_fails`, and
+`test_poll_tick_still_processes_other_due_schedules_after_one_fails` (two schedules, first fails via
+`side_effect`, asserts BOTH get attempted and the second still reaches `status="sent"` — the isolation
+regression test), plus `test_mark_schedule_run_records_failure_status_and_error` in `test_repository.py`.
+**78/78** `reporting-service` tests (was 74, +4). `admin-ui` — new `reports-view.test.tsx` test for the
+three badge states incl. the `title` tooltip on the failed badge. **280/280** `admin-ui` tests (was 279,
++1; the one known pre-existing, unrelated `processing-failures.test.tsx` failure, Phase 47 Session 4,
+remains and is unrelated to this diff). `ruff check`/`ruff format --check` clean for both services;
+`tsc --noEmit`/`eslint .`/`next build` clean for `admin-ui`.
+
+Docker images for `reporting-service`/`admin-ui` rebuilt and redeployed. **Live-verified against the
+real running stack**: confirmed the `ALTER TABLE` migration applied to the real `reporting.report_schedule`
+table; `curl` directly against the container — malformed `recipient_email` → `422` with the expected
+message, valid schedule → `201` with `last_status: null`. For the Admin UI status column: since a real
+poll tick is on a 3600s default interval (impractical to wait out live, and the failure-path *logic*
+itself is already covered by the two new isolation/failure tests against a real DB commit), set
+`last_status='failed'`/`last_error=...` directly on the created schedule's row in the real Postgres to
+simulate a failed delivery, then logged into `admin-ui` via Playwright (a throwaway Keycloak test user,
+created via the Keycloak master-realm admin API and deleted again afterward) and confirmed the real
+Reports page rendered `<span class="badge down" title="...">Fehlgeschlagen</span>` for that row — proving
+the backend fields reach the real page, not only the mocked component test. Test schedule and Keycloak
+user both cleaned up afterward.
+
+`docs/services/reporting-service.md`: endpoint table, schema, "Poll Loop" section, Open Points (closed
+the residual bullet), Tests, and Live Docker Verification all updated. `docs/services/admin-ui.md`:
+"Standard Reports" section and the Tests test-count chain updated (the latter also backfilled a missed
+P53-S1 entry: `ad-group-mappings.test.tsx`'s four-eyes-envelope test had never been chained into this
+file's test-count history, 278→279, before this session's 279→280).
+
+**Next session:** P53-S4 — `mail-connector`'s recurring, non-deterministic test flakiness in
+`_ingest()`-calling tests (`RuntimeError: ... bound to a different event loop`, `app.state.virus_scan`'s
+client reused across `pytest-asyncio` test functions), re-confirmed at least three times across prior
+phases without ever being fixed at the root. Framed as a maintenance-cost investment rather than a
+feature. Fourth and last session of Phase 53 — completing it closes the phase and requires a
+`graphify update .` run afterward.
+
+---
+
+Immediately before P53-S3: **P53-S2** (two small residuals from ADR 0154 — second session of Phase 53,
 "Lower-Priority Hardening & Polish"). No new ADR — the plan's own DoD calls this polish/hardening of an
 already-established pattern; ADR 0154 amended in place (Consequences bullets closed) rather than a new
 ADR filed, per the plan text's own framing.

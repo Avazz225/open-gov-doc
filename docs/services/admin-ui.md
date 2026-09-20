@@ -202,7 +202,7 @@ Legal hold management itself (set/lift) does **not** happen in the Admin UI, but
 
 ## Standard Reports (5.4a, since P7-S2b)
 
-`ReportsView` (`/reports/`) bundles four fixed report sections — document volume, open workflow tasks, storage usage per backend, user activity — plus a fifth section for managing schedulable report runs, all against the new `reporting-service` (see `docs/services/reporting-service.md`). Each report section follows the same pattern: filter form (where applicable), table, two export buttons (`GET .../export?format=csv|pdf`, blob download via the same `triggerBrowserDownload` mechanism as the document download in the User UI). The scheduling section (`ReportScheduleSection`) creates/deletes `report_schedule` rows (report type, format, frequency, recipient email) — the actual dispatch (poll loop + email with a download link) runs entirely in `reporting-service`, this page is only the management UI for it. Deliberately in the Admin UI rather than the User UI — system evaluation/user activity is an administrative matter, the same role split as e.g. `MaintenanceBanner`.
+`ReportsView` (`/reports/`) bundles four fixed report sections — document volume, open workflow tasks, storage usage per backend, user activity — plus a fifth section for managing schedulable report runs, all against the new `reporting-service` (see `docs/services/reporting-service.md`). Each report section follows the same pattern: filter form (where applicable), table, two export buttons (`GET .../export?format=csv|pdf`, blob download via the same `triggerBrowserDownload` mechanism as the document download in the User UI). The scheduling section (`ReportScheduleSection`) creates/deletes `report_schedule` rows (report type, format, frequency, recipient email) — the actual dispatch (poll loop + email with a download link) runs entirely in `reporting-service`, this page is only the management UI for it. Deliberately in the Admin UI rather than the User UI — system evaluation/user activity is an administrative matter, the same role split as e.g. `MaintenanceBanner`. **Since P53-S3**: the schedule table gained a "last delivery" status column reading the new `last_status`/`last_error` fields — `null` shows a plain hint ("never run yet"), `"sent"` a `.badge.ok`, `"failed"` a `.badge.down` carrying `last_error` as its `title` tooltip (the same badge convention as `InstallationManager`/`LicenseStatusView`) — surfacing a previously silent poll-tick failure (see `docs/services/reporting-service.md` "Poll Loop") directly in this page instead of only in service logs.
 
 ## Forensic Trace & Audit Depth (5.4b, since P7-S2c)
 
@@ -381,7 +381,15 @@ Two-stage Docker image (`apps/admin-ui/Dockerfile`), identical to the User UI. `
 ## Tests
 
 - `npm run typecheck` / `npm run lint` / `npm run build`.
-- `npm test` (Vitest + Testing Library, **278 tests since Phase 52 Session 2** — +3: a new
+- `npm test` (Vitest + Testing Library, **280 tests since P53-S3** — +1: a new
+  `reports-view.test.tsx` test ("shows a visible status for each schedule's last delivery attempt")
+  for the new `last_status`/`last_error`-driven status column in `ReportsView.tsx`'s schedule table
+  (`.badge.ok`/`.badge.down`/never-run hint, incl. the `title` tooltip carrying `last_error` on the
+  failed badge) — see `docs/services/reporting-service.md`. The one known pre-existing, unrelated
+  `processing-failures.test.tsx` failure (noted below, Phase 47 Session 4) is still present, confirmed
+  unrelated to this session's diff. Before P53-S3, 279 tests since P53-S1 — +1: `ad-group-mappings.test.tsx`
+  gained a test for the new `AdGroupMappingDefaultRoleActionResult` envelope's `pending_approval` path
+  on `handleSaveDefaultRole` (see `docs/services/auth-service.md`). Before P53-S1, **278 tests since Phase 52 Session 2** — +3: a new
   `config-compare.test.tsx` for the new `ConfigCompare.tsx` component — the empty-state hint with only
   one known installation, a full login-at-the-other-installation/export/compare round trip (asserting
   `loginAt`/`exportConfigAt` are called against the OTHER installation's own `gatewayBaseUrl`, never the

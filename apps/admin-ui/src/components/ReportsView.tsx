@@ -472,6 +472,7 @@ function ReportScheduleSection({ token }: { token: string }) {
               <th>{t("reports.frequency")}</th>
               <th>{t("reports.recipientEmail")}</th>
               <th>{t("reports.nextRunAt")}</th>
+              <th>{t("reports.lastStatus")}</th>
               <th></th>
             </tr>
           </thead>
@@ -483,6 +484,17 @@ function ReportScheduleSection({ token }: { token: string }) {
                 <td>{schedule.frequency}</td>
                 <td>{schedule.recipient_email}</td>
                 <td>{new Date(schedule.next_run_at).toLocaleString()}</td>
+                <td>
+                  {schedule.last_status == null ? (
+                    <span className="hint">{t("reports.lastStatusNeverRun")}</span>
+                  ) : schedule.last_status === "sent" ? (
+                    <span className="badge ok">{t("reports.lastStatusSent")}</span>
+                  ) : (
+                    <span className="badge down" title={schedule.last_error ?? undefined}>
+                      {t("reports.lastStatusFailed")}
+                    </span>
+                  )}
+                </td>
                 <td>
                   <button type="button" onClick={() => handleDelete(schedule.id)}>
                     {t("reports.deleteSchedule")}

@@ -167,10 +167,40 @@ async def test_mark_schedule_run_advances_next_run_and_sets_last_run(session):
     await session.flush()
 
     ran_at = datetime(2026, 1, 1, 12, tzinfo=UTC)
-    await repository.mark_schedule_run(session, schedule, ran_at=ran_at)
+    await repository.mark_schedule_run(session, schedule, ran_at=ran_at, status="sent")
 
     assert schedule.last_run_at == ran_at
+    assert schedule.last_status == "sent"
+    assert schedule.last_error is None
     assert schedule.next_run_at == datetime(2026, 1, 2, tzinfo=UTC)
+
+
+async def test_mark_schedule_run_records_failure_status_and_error(session):
+    """Regression test (Phase 53 Session 3) - `status`/`error` are
+    required, not optional-with-a-default, precisely so a future caller
+    can't accidentally reintroduce "ran, but no record of whether it
+    worked"."""
+    schedule = await repository.create_schedule(
+        session,
+        report_type="storage_usage",
+        format="csv",
+        frequency="daily",
+        recipient_email="a@example.invalid",
+        filters={},
+    )
+    schedule.next_run_at = datetime(2026, 1, 1, tzinfo=UTC)
+    await session.flush()
+
+    await repository.mark_schedule_run(
+        session,
+        schedule,
+        ran_at=datetime(2026, 1, 1, 12, tzinfo=UTC),
+        status="failed",
+        error="E-Mail-Versand fehlgeschlagen: recipient unknown",
+    )
+
+    assert schedule.last_status == "failed"
+    assert schedule.last_error == "E-Mail-Versand fehlgeschlagen: recipient unknown"
 
 
 async def test_create_and_get_report_run(session):

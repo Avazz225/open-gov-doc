@@ -86,13 +86,19 @@ async def _run_due_schedules(session_factory) -> None:
                     # a real registered account.
                     principal_id=_SCHEDULED_REPORT_PRINCIPAL,
                 )
-            except Exception:
+            except Exception as exc:
                 logger.exception(
                     "Berichtsgenerierung fuer Planung %r fehlgeschlagen - "
                     "naechster Versuch beim naechsten faelligen Zeitpunkt.",
                     schedule.id,
                 )
-                await repository.mark_schedule_run(session, schedule, ran_at=datetime.now(UTC))
+                await repository.mark_schedule_run(
+                    session,
+                    schedule,
+                    ran_at=datetime.now(UTC),
+                    status="failed",
+                    error=f"Berichtsgenerierung fehlgeschlagen: {exc}",
+                )
                 await session.commit()
                 continue
 
@@ -110,15 +116,45 @@ async def _run_due_schedules(session_factory) -> None:
             download_url = (
                 f"{settings.gateway_base_url}/api/reporting-service/report-runs/{run.id}/download"
             )
-            await app.state.notification_client.send_email(
-                recipient=schedule.recipient_email,
-                subject=f"DMS-Bericht: {schedule.report_type}",
-                body=(
-                    f"Der geplante Bericht {schedule.report_type!r} steht bereit. "
-                    f"Download: {download_url}"
-                ),
+            # Own try/except (Phase 53 Session 3) - previously NOT
+            # per-schedule-isolated: a bad/no-longer-deliverable address
+            # (notification-service rejects any `recipient` that isn't a
+            # real registered account's email, not just a malformed string,
+            # see `_EMAIL_FORMAT_PATTERN` above for the format-only half of
+            # this fix) raised out of this whole function, aborting the
+            # ENTIRE tick - every other due schedule after this one in the
+            # same `due` list was silently skipped too, and `mark_schedule_
+            # run` was never called for the failing schedule, so it never
+            # advanced past "due" and retried forever with zero visible
+            # record of ever having failed.
+            try:
+                await app.state.notification_client.send_email(
+                    recipient=schedule.recipient_email,
+                    subject=f"DMS-Bericht: {schedule.report_type}",
+                    body=(
+                        f"Der geplante Bericht {schedule.report_type!r} steht bereit. "
+                        f"Download: {download_url}"
+                    ),
+                )
+            except Exception as exc:
+                logger.exception(
+                    "E-Mail-Versand fuer Planung %r fehlgeschlagen - "
+                    "naechster Versuch beim naechsten faelligen Zeitpunkt.",
+                    schedule.id,
+                )
+                await repository.mark_schedule_run(
+                    session,
+                    schedule,
+                    ran_at=datetime.now(UTC),
+                    status="failed",
+                    error=f"E-Mail-Versand fehlgeschlagen: {exc}",
+                )
+                await session.commit()
+                continue
+
+            await repository.mark_schedule_run(
+                session, schedule, ran_at=datetime.now(UTC), status="sent"
             )
-            await repository.mark_schedule_run(session, schedule, ran_at=datetime.now(UTC))
             await session.commit()
 
 
@@ -331,6 +367,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with engine.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS reporting"))
         await conn.run_sync(Base.metadata.create_all)
+        # Ad-hoc schema extension (no Alembic, see CONTRIBUTING.md):
+        # `last_status`/`last_error` only added in Phase 53 Session 3,
+        # `create_all` only creates missing tables, not missing columns on
+        # existing ones - same established pattern as e.g. permission-
+        # service's own `ADD COLUMN IF NOT EXISTS` migrations.
+        await conn.execute(
+            text(
+                "ALTER TABLE reporting.report_schedule "
+                "ADD COLUMN IF NOT EXISTS last_status VARCHAR(16)"
+            )
+        )
+        await conn.execute(
+            text("ALTER TABLE reporting.report_schedule ADD COLUMN IF NOT EXISTS last_error TEXT")
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 

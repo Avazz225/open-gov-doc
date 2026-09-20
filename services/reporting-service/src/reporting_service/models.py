@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from dms_db_base import make_declarative_base
-from sqlalchemy import JSON, DateTime, String
+from sqlalchemy import JSON, DateTime, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 Base = make_declarative_base("reporting")
@@ -38,6 +38,14 @@ class ReportSchedule(Base):
     filters: Mapped[dict] = mapped_column(JSON, default=dict)
     next_run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Visible failure status (Phase 53 Session 3) - before this, a failed
+    # send (e.g. a syntactically valid but genuinely undeliverable address)
+    # was only ever logged, with no record anywhere a person could see it;
+    # the schedule just silently kept retrying forever with no visible sign
+    # anything was wrong. `None` until the schedule has run at least once,
+    # matching `last_run_at`'s own semantics.
+    last_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 

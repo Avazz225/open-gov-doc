@@ -330,6 +330,25 @@ def test_create_list_delete_schedule(client):
     assert all(s["id"] != schedule_id for s in listed_after.json())
 
 
+def test_create_schedule_rejects_a_malformed_recipient_email(client):
+    """Regression test (Phase 53 Session 3): before this fix, a typo'd
+    address was accepted without complaint here and only ever surfaced at
+    the next poll tick, logged only - see `test_poll_tick_...` below for
+    the other half of this fix (a syntactically valid but undeliverable
+    address, which this format check cannot catch)."""
+    response = client.post(
+        "/report-schedules",
+        json={
+            "report_type": "storage_usage",
+            "format": "csv",
+            "frequency": "daily",
+            "recipient_email": "not-an-email",
+            "filters": {},
+        },
+    )
+    assert response.status_code == 422
+
+
 def test_delete_unknown_schedule_returns_404(client):
     response = client.delete("/report-schedules/unknown-id")
     assert response.status_code == 404
@@ -678,6 +697,8 @@ async def test_poll_tick_executes_due_schedule_and_sends_notification(poll_env):
     async with session_factory() as session:
         updated = await repository.get_schedule(session, schedule_id)
         assert updated.last_run_at is not None
+        assert updated.last_status == "sent"
+        assert updated.last_error is None
         assert updated.next_run_at > datetime(2020, 1, 1, tzinfo=UTC)
 
 
@@ -698,3 +719,79 @@ async def test_poll_tick_skips_schedules_that_are_not_due_yet(poll_env):
     await _run_due_schedules(session_factory)
 
     app.state.notification_client.send_email.assert_not_called()
+
+
+async def test_poll_tick_marks_schedule_failed_when_notification_send_fails(poll_env):
+    """Regression test (Phase 53 Session 3): before this fix, a failed send
+    (e.g. `recipient_email` no longer belongs to any registered account)
+    was only ever logged - the schedule stayed permanently "due" with
+    `last_run_at`/`next_run_at` never advancing, so it retried every tick
+    forever with no visible record anywhere that anything was wrong."""
+    session_factory = poll_env
+    app.state.notification_client.send_email.side_effect = RuntimeError("recipient unknown")
+    async with session_factory() as session:
+        schedule = await repository.create_schedule(
+            session,
+            report_type="storage_usage",
+            format="csv",
+            frequency="daily",
+            recipient_email="gone@example.invalid",
+            filters={},
+        )
+        schedule.next_run_at = datetime(2020, 1, 1, tzinfo=UTC)
+        await session.commit()
+        schedule_id = schedule.id
+
+    await _run_due_schedules(session_factory)
+
+    async with session_factory() as session:
+        updated = await repository.get_schedule(session, schedule_id)
+        assert updated.last_status == "failed"
+        assert updated.last_error is not None
+        assert "recipient unknown" in updated.last_error
+        # Still advances - a permanently failing schedule must not retry
+        # every single tick forever, same "next attempt at the next due
+        # time, not immediately" precedent as the report-generation
+        # failure branch right above already established.
+        assert updated.next_run_at > datetime(2020, 1, 1, tzinfo=UTC)
+
+
+async def test_poll_tick_still_processes_other_due_schedules_after_one_fails(poll_env):
+    """The actual core bug (Phase 53 Session 3): the notification-send call
+    used to sit OUTSIDE any per-schedule try/except, so an unhandled
+    exception for one schedule aborted the whole tick - every other due
+    schedule was silently skipped too, not just retried later, but never
+    even attempted this tick."""
+    session_factory = poll_env
+    app.state.notification_client.send_email.side_effect = [
+        RuntimeError("recipient unknown"),
+        None,
+    ]
+    async with session_factory() as session:
+        failing = await repository.create_schedule(
+            session,
+            report_type="storage_usage",
+            format="csv",
+            frequency="daily",
+            recipient_email="gone@example.invalid",
+            filters={},
+        )
+        failing.next_run_at = datetime(2020, 1, 1, tzinfo=UTC)
+        healthy = await repository.create_schedule(
+            session,
+            report_type="storage_usage",
+            format="csv",
+            frequency="daily",
+            recipient_email="admin@example.invalid",
+            filters={},
+        )
+        healthy.next_run_at = datetime(2020, 1, 1, tzinfo=UTC)
+        await session.commit()
+        healthy_id = healthy.id
+
+    await _run_due_schedules(session_factory)
+
+    assert app.state.notification_client.send_email.call_count == 2
+    async with session_factory() as session:
+        updated_healthy = await repository.get_schedule(session, healthy_id)
+        assert updated_healthy.last_status == "sent"

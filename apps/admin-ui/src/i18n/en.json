@@ -650,7 +650,11 @@
     "recipientEmail": "Recipient email",
     "createSchedule": "Create schedule",
     "deleteSchedule": "Delete",
-    "nextRunAt": "Next run"
+    "nextRunAt": "Next run",
+    "lastStatus": "Last delivery",
+    "lastStatusNeverRun": "Never run yet",
+    "lastStatusSent": "Sent",
+    "lastStatusFailed": "Failed"
   },
   "forensicTrace": {
     "pageTitle": "Forensic trace",

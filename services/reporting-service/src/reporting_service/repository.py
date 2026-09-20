@@ -111,9 +111,21 @@ def advance_next_run(current: datetime, frequency: str) -> datetime:
 
 
 async def mark_schedule_run(
-    session: AsyncSession, schedule: ReportSchedule, *, ran_at: datetime
+    session: AsyncSession,
+    schedule: ReportSchedule,
+    *,
+    ran_at: datetime,
+    status: str,
+    error: str | None = None,
 ) -> None:
+    """`status`/`error` (Phase 53 Session 3) - required, not optional with a
+    default: every caller of this function represents a tick that either
+    succeeded or failed, and forcing the caller to say which prevents a new
+    call site from accidentally reintroducing the old "ran, but no record of
+    whether it actually worked" gap this session closes."""
     schedule.last_run_at = ran_at
+    schedule.last_status = status
+    schedule.last_error = error
     schedule.next_run_at = advance_next_run(schedule.next_run_at, schedule.frequency)
     await session.flush()
 

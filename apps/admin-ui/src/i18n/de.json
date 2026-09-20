@@ -650,7 +650,11 @@
     "recipientEmail": "Empfänger-E-Mail",
     "createSchedule": "Planung anlegen",
     "deleteSchedule": "Löschen",
-    "nextRunAt": "Nächster Lauf"
+    "nextRunAt": "Nächster Lauf",
+    "lastStatus": "Letzter Versand",
+    "lastStatusNeverRun": "Noch nie gelaufen",
+    "lastStatusSent": "Erfolgreich",
+    "lastStatusFailed": "Fehlgeschlagen"
   },
   "forensicTrace": {
     "pageTitle": "Forensik-Trace",

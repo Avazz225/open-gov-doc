@@ -205,4 +205,50 @@ describe("ReportsView", () => {
       })
     );
   });
+
+  it("shows a visible status for each schedule's last delivery attempt (Phase 53 Session 3)", async () => {
+    listReportSchedulesMock.mockResolvedValue([
+      {
+        id: "sched-never",
+        report_type: "storage_usage",
+        format: "pdf",
+        frequency: "weekly",
+        recipient_email: "a@example.com",
+        next_run_at: "2026-08-10T00:00:00Z",
+        last_status: null,
+        last_error: null,
+      },
+      {
+        id: "sched-sent",
+        report_type: "storage_usage",
+        format: "pdf",
+        frequency: "weekly",
+        recipient_email: "b@example.com",
+        next_run_at: "2026-08-10T00:00:00Z",
+        last_status: "sent",
+        last_error: null,
+      },
+      {
+        id: "sched-failed",
+        report_type: "storage_usage",
+        format: "pdf",
+        frequency: "weekly",
+        recipient_email: "c@example.com",
+        next_run_at: "2026-08-10T00:00:00Z",
+        last_status: "failed",
+        last_error: "E-Mail-Versand fehlgeschlagen: recipient unknown",
+      },
+    ]);
+
+    renderReportsView();
+
+    expect(await screen.findByText("Noch nie gelaufen")).toBeInTheDocument();
+    expect(screen.getByText("Erfolgreich")).toBeInTheDocument();
+    const failedBadge = screen.getByText("Fehlgeschlagen");
+    expect(failedBadge).toBeInTheDocument();
+    expect(failedBadge).toHaveAttribute(
+      "title",
+      "E-Mail-Versand fehlgeschlagen: recipient unknown"
+    );
+  });
 });
