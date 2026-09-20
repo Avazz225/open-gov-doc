@@ -2,7 +2,68 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P53-S3 (`reporting-service` scheduled-report `recipient_email` validation +
+**Last completed:** P53-S4 (`mail-connector` event-loop test flakiness, fixed at the root — fourth and
+last session of Phase 53, "Lower-Priority Hardening & Polish". **Closes Phase 53.**). No new ADR —
+framed by the plan itself as "a maintenance-cost investment rather than a feature," a pure
+test-infrastructure/robustness fix, no new architecture decision.
+
+**Root cause, precisely diagnosed rather than guessed at.** `_ingest_message` is the one call site in
+this service reached both from the background `_poll_loop` task (always running on the lifespan/portal
+event loop) AND directly from tests that bypass `TestClient`'s own request dispatch
+(`tests/test_api.py::_ingest`, pytest-asyncio's own, separate event loop) — every other endpoint is only
+ever reached via one real HTTP request, always on the loop lifespan started on, so this ambiguity is
+unique to this one function. It used the long-lived `app.state.documents`/`app.state.cases`/
+`app.state.virus_scan`/`app.state.storage`/`app.state.event_bus` clients, each of which binds to
+whichever event loop first uses it — reused across the two call paths, this intermittently broke. Three
+prior sessions (Post-Roadmap Phase 31 Session 12, Phase 38 Session 4, Phase 44 Session 3) each
+re-confirmed the symptom (`RuntimeError: ... bound to a different event loop`) without fixing it at the
+root, each noting "would need restructuring `app.state.virus_scan`'s client lifecycle, out of scope for
+that session." This session is explicitly that restructuring.
+
+**The fix.** `_ingest_message` now constructs its own short-lived `DocumentClient`/`CaseClient`/
+`VirusScanClient`/`StorageClient` fresh per call (closed in a `finally`) — the same pattern
+`_load_candidate_pattern` already used for its own two clients, extended to the rest of the function.
+`publish_event` gained an optional `event_bus` parameter (defaults to `app.state.event_bus` for every
+other caller, unaffected); `_ingest_message` passes its own freshly `connect()`-ed, then-`close()`-d
+`NatsEventBusClient` instead.
+
+**A second, previously-unknown instance of the identical root cause, found live while writing this
+session's own regression test.** Reverting the documented "avoid two back-to-back real `_ingest()` calls
+in one test, proved flaky" workaround into an actual test exposed that `app.state.event_bus` (NATS) had
+the exact same bug — but it doesn't surface as a `RuntimeError`, it surfaces as an unexplained
+`nats.errors.TimeoutError`: a JetStream publish's reply `Future` is awaited on one loop but resolved by a
+background read-loop task bound to a different one, so the waiter simply never wakes up instead of
+raising immediately, and the call just times out on NATS's own default 5s request timeout. Confirmed via
+an isolated repro script (a single `NatsEventBusClient`, two sequential publishes on one loop — worked
+fine, ruling out the stream itself) before concluding this was the same event-loop-binding class of bug,
+not a NATS server-side issue.
+
+New test: `test_two_back_to_back_ingests_do_not_hit_the_cross_event_loop_error` — two real, sequential
+`_ingest()` calls in one test, exactly the scenario the codebase's own comments already named as
+reliably flaky. Reproduced 5/5 in isolation before the fix (deterministic, not flaky, once isolated);
+passes reliably (~1s) after it. `78/78` `mail-connector` tests (was 77, +1) — and the full suite's own
+run time dropped from ~153s to a consistent ~20s across two full runs, suggesting some of this service's
+broader test-suite slowness was this same root cause manifesting as delay on other tests too, not only
+as the one documented failure mode. `ruff check`/`ruff format --check` clean.
+
+Docker image rebuilt and redeployed. **Live-verified against the real running stack**: sent a real email
+via SMTP to the running `mailpit` container; the real, rebuilt container's poll loop picked it up on its
+next tick, scanned it (`scan_status: "clean"`), staged it, and it appeared correctly in `GET /inbound` —
+confirming the refactored `_ingest_message` still works end-to-end in production's single-event-loop
+case (expected to be unaffected, since production only ever calls it from the poll loop's own loop; this
+verification confirms that expectation held). No errors in container logs during the cycle. Test message
+rejected (cleanup) and confirmed removed from the active listing afterward.
+
+`docs/services/mail-connector.md`: "Ingestion pipeline" section, Tests, Open Points (closed the
+long-standing flakiness bullet), and the live-verification note all updated.
+
+**Phase 53 ("Lower-Priority Hardening & Polish") is now closed** (P53-S1 through S4, all four sessions
+done). `graphify update .` to run next per the established phase-end convention, then continue per the
+standing "weiter selbstständig" instruction to whatever comes after Phase 53 in `IMPLEMENTATION_PLAN.md`.
+
+---
+
+Immediately before P53-S4: **P53-S3** (`reporting-service` scheduled-report `recipient_email` validation +
 visible failure status — third session of Phase 53, "Lower-Priority Hardening & Polish"). No new ADR —
 the plan's own DoD names only P53-S1 as a conditional exception; this session is pure hardening of an
 already-established pattern (server-side format validation, a status field surfacing an existing

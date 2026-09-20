@@ -109,72 +109,126 @@ def _safe_filename(name: str) -> str:
 
 
 async def _ingest_message(session: AsyncSession, mailbox_id: str, raw: RawIncomingMessage) -> None:
+    """P53-S4: every client used in this function's own body is constructed
+    fresh here and closed in the `finally` below, instead of reading the
+    long-lived `app.state.documents`/`app.state.cases`/`app.state.virus_scan`/
+    `app.state.storage` instances - the same already-established pattern
+    `_load_candidate_pattern` uses for its own two clients (see that
+    docstring for the full explanation: an `app.state.*` client is bound to
+    the event loop it was first used on at lifespan startup). This function
+    is the one genuinely ambiguous call site in this service - called both
+    from the background `_poll_loop` task (always running on the lifespan/
+    portal event loop) AND directly from tests bypassing `TestClient`'s own
+    request dispatch (`tests/test_api.py::_ingest`, pytest-asyncio's own,
+    different event loop) - so, unlike every other endpoint in this file
+    (always reached via one real HTTP call, always on the same loop lifespan
+    started on), it cannot safely assume which loop it runs on. This was the
+    root cause of this service's long-standing, non-deterministic
+    `RuntimeError: ... bound to a different event loop` test flakiness
+    (Post-Roadmap Phase 31 Session 12, Phase 38 Session 4, Phase 44 Session
+    3 all re-confirmed it without fixing it at the root) - the same root
+    cause also affects `app.state.event_bus` (NATS), fixed further down in
+    this function with the identical pattern; there it surfaces not as a
+    `RuntimeError` but as an unexplained `nats.errors.TimeoutError`, since a
+    reply `Future` awaited from a different loop than the one whose
+    background read-loop task resolves it just never wakes up instead of
+    raising immediately."""
     from_address, subject, received_at, body_text, attachment_parts = _parse_message(raw.raw_bytes)
 
-    # Candidate pattern loaded fresh per message instead of cached once at
-    # startup (Post-Roadmap Phase 19 Session 11) - inbound mail is
-    # realistically low-frequency (mail room operation), an additional
-    # cross-service call per NEWLY incoming message (not per candidate) is
-    # acceptable and keeps newly created object types/changed formats
-    # immediately effective, without waiting for a restart.
-    candidate_pattern = await _load_candidate_pattern()
-    match = await matching.resolve_match(
-        f"{subject}\n{body_text}",
-        document_client=app.state.documents,
-        case_client=app.state.cases,
-        pattern=candidate_pattern,
-    )
-    message = await repository.create_inbound_message(
-        session,
-        mailbox_id=mailbox_id,
-        source_uid=raw.uid,
-        from_address=from_address,
-        subject=subject,
-        body_text=body_text,
-        received_at=received_at,
-        match_type=match.match_type,
-        match_value=match.match_value,
-        proposed_target_type=match.target_type,
-        proposed_target_id=match.target_id,
-        match_candidates=match.candidates,
-    )
-
-    # The body text itself counts as the first (synthetic) attachment - the
-    # correspondence itself is just as worth archiving as its enclosures
-    # (see docstring on `_parse_message`).
-    parts = list(attachment_parts)
-    if body_text.strip():
-        parts.insert(0, (f"{_safe_filename(subject)}.txt", "text/plain", body_text.encode("utf-8")))
-
-    for filename, content_type, payload in parts:
-        scan = await app.state.virus_scan.scan(
-            data=payload, filename=filename, content_type=content_type, created_by="mail-connector"
+    document_client = DocumentClient(settings.document_service_base_url)
+    case_client = CaseClient(settings.case_service_base_url)
+    virus_scan_client = VirusScanClient(settings.virus_scan_service_base_url)
+    storage_client = StorageClient(settings.storage_service_base_url)
+    try:
+        # Candidate pattern loaded fresh per message instead of cached once at
+        # startup (Post-Roadmap Phase 19 Session 11) - inbound mail is
+        # realistically low-frequency (mail room operation), an additional
+        # cross-service call per NEWLY incoming message (not per candidate) is
+        # acceptable and keeps newly created object types/changed formats
+        # immediately effective, without waiting for a restart.
+        candidate_pattern = await _load_candidate_pattern()
+        match = await matching.resolve_match(
+            f"{subject}\n{body_text}",
+            document_client=document_client,
+            case_client=case_client,
+            pattern=candidate_pattern,
         )
-        storage_key = None
-        if scan.status == "clean":
-            storage_key = f"posteingang/{message.id}/{uuid.uuid4().hex}/{filename}"
-            await app.state.storage.upload(storage_key, payload, content_type)
-        await repository.add_attachment(
+        message = await repository.create_inbound_message(
             session,
-            message_id=message.id,
-            filename=filename,
-            content_type=content_type,
-            size_bytes=len(payload),
-            scan_id=scan.scan_id,
-            scan_status=scan.status,
-            storage_object_key=storage_key,
+            mailbox_id=mailbox_id,
+            source_uid=raw.uid,
+            from_address=from_address,
+            subject=subject,
+            body_text=body_text,
+            received_at=received_at,
+            match_type=match.match_type,
+            match_value=match.match_value,
+            proposed_target_type=match.target_type,
+            proposed_target_id=match.target_id,
+            match_candidates=match.candidates,
         )
 
-    await publish_event(
-        "mail_connector.message.received",
-        subject=message.id,
-        payload={
-            "from_address": from_address,
-            "subject": subject,
-            "status": message.status,
-            "match_type": message.match_type,
-        },
-    )
+        # The body text itself counts as the first (synthetic) attachment - the
+        # correspondence itself is just as worth archiving as its enclosures
+        # (see docstring on `_parse_message`).
+        parts = list(attachment_parts)
+        if body_text.strip():
+            parts.insert(
+                0, (f"{_safe_filename(subject)}.txt", "text/plain", body_text.encode("utf-8"))
+            )
+
+        for filename, content_type, payload in parts:
+            scan = await virus_scan_client.scan(
+                data=payload,
+                filename=filename,
+                content_type=content_type,
+                created_by="mail-connector",
+            )
+            storage_key = None
+            if scan.status == "clean":
+                storage_key = f"posteingang/{message.id}/{uuid.uuid4().hex}/{filename}"
+                await storage_client.upload(storage_key, payload, content_type)
+            await repository.add_attachment(
+                session,
+                message_id=message.id,
+                filename=filename,
+                content_type=content_type,
+                size_bytes=len(payload),
+                scan_id=scan.scan_id,
+                scan_status=scan.status,
+                storage_object_key=storage_key,
+            )
+    finally:
+        await document_client.close()
+        await case_client.close()
+        await virus_scan_client.close()
+        await storage_client.close()
+
+    # Same reasoning as the four clients above - `app.state.event_bus`'s
+    # underlying NATS connection was `connect()`-ed at lifespan startup (the
+    # portal loop), and its request/reply reply is resolved by a background
+    # read-loop task bound to THAT loop; awaiting it from a different loop
+    # (a direct test call) leaves the waiting `Future` never woken and
+    # surfaces as an unexplained `nats.errors.TimeoutError` instead of the
+    # httpx clients' `RuntimeError` - found live while writing this
+    # session's own regression test (two real, sequential `_ingest()` calls
+    # in one test), see `test_two_back_to_back_ingests_do_not_hit_the_cross_event_loop_error`.
+    ingest_event_bus = NatsEventBusClient(settings.nats_url, stream="mail_connector")
+    await ingest_event_bus.connect()
+    try:
+        await publish_event(
+            "mail_connector.message.received",
+            subject=message.id,
+            payload={
+                "from_address": from_address,
+                "subject": subject,
+                "status": message.status,
+                "match_type": message.match_type,
+            },
+            event_bus=ingest_event_bus,
+        )
+    finally:
+        await ingest_event_bus.close()
 
 
 async def _load_candidate_pattern() -> "re.Pattern[str]":
@@ -410,11 +464,19 @@ async def get_session() -> AsyncIterator[AsyncSession]:
         yield session
 
 
-async def publish_event(event_type: str, subject: str, payload: dict) -> None:
+async def publish_event(
+    event_type: str, subject: str, payload: dict, *, event_bus: NatsEventBusClient | None = None
+) -> None:
+    """`event_bus` defaults to the long-lived `app.state.event_bus` (every
+    caller except `_ingest_message` - all reached via a real HTTP request,
+    always on the same event loop lifespan started on). `_ingest_message`
+    passes its own short-lived, freshly connected instance instead - see its
+    own docstring for why."""
     event = Event(
         event_type=event_type, service_name=settings.service_name, subject=subject, payload=payload
     )
-    await app.state.event_bus.publish(event_type, event.to_bytes())
+    bus = event_bus if event_bus is not None else app.state.event_bus
+    await bus.publish(event_type, event.to_bytes())
 
 
 @app.get("/healthz")

@@ -229,6 +229,33 @@ async def test_ingest_with_attachment_scans_and_stores_both_parts(client, sessio
     assert "anhang.pdf" in filenames
 
 
+async def test_two_back_to_back_ingests_do_not_hit_the_cross_event_loop_error(client, session):
+    """P53-S4 regression test. Two real, sequential `_ingest()` calls in one
+    test - each one bypasses `TestClient`'s own request dispatch (runs on
+    pytest-asyncio's event loop, not the `TestClient` portal's) - used to be
+    documented in this file as reliably flaky (see
+    `test_list_inbound_without_filter_excludes_inaccessible_departmental_mailbox`'s
+    docstring), the actual, previously-unfixed
+    `RuntimeError: ... bound to a different event loop` this whole session
+    exists to close: `_ingest_message` used to read the long-lived
+    `app.state.documents`/`app.state.cases`/`app.state.virus_scan`/
+    `app.state.storage` clients, which bind to whichever event loop first
+    uses them - a second call from a different loop than the first (or a
+    concurrent touch from the background `_poll_loop` task, always running
+    on the `TestClient` portal's own loop) could crash. `_ingest_message`
+    now constructs its own short-lived clients per call (same pattern
+    `_load_candidate_pattern` already used), so two calls no longer share
+    any client object at all - this test simply proves both succeed."""
+    await _ingest(session, uid="uid-2b-first", subject="Erste Nachricht")
+    await _ingest(session, uid="uid-2b-second", subject="Zweite Nachricht")
+
+    response = client.get("/inbound", headers=ADMIN_HEADERS)
+    assert response.status_code == 200
+    subjects = {m["subject"] for m in response.json()}
+    assert "Erste Nachricht" in subjects
+    assert "Zweite Nachricht" in subjects
+
+
 async def test_ingest_detects_unique_kennzeichen_match(client, session):
     document_id, kennzeichen = _real_document_with_kennzeichen()
 
