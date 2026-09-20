@@ -165,6 +165,42 @@ def test_update_preferences_rejects_unknown_theme(test_user):
     assert response.status_code == 422
 
 
+def test_get_preferences_for_a_technical_account_returns_defaults_instead_of_crashing(
+    client, domain_admin_auth_headers
+):
+    """Regression test (Phase 51 Session 2, found live in Phase 49 Session
+    3): a `TechnicalAccount`-authenticated caller (`users-admin` here) has
+    no corresponding Keycloak user at all - `user["sub"]` is the account's
+    own local integer row id, not a Keycloak UUID - so the previous
+    unconditional `KeycloakAdmin.get_user()` call `500`d on every single
+    admin-ui page load while logged in as such an account (every page loads
+    the theme/locale switcher). Reuses the `client`/`domain_admin_auth_
+    headers` fixtures instead of a second `TestClient(app)` - two separate
+    app lifespans in the same test double-subscribe the same NATS durable
+    consumer, the exact conflict `domain_admin_auth_headers` itself already
+    avoids by depending on `client` rather than creating its own."""
+    response = client.get("/me/preferences", headers=domain_admin_auth_headers)
+
+    assert response.status_code == 200
+    assert response.json() == {"theme": "auto", "locale": "de"}
+
+
+def test_update_preferences_for_a_technical_account_echoes_the_request_instead_of_crashing(
+    client, domain_admin_auth_headers
+):
+    """Same fix, the `PUT` side - echoes back what was actually requested
+    (not silently substituting the defaults), since a caller that just
+    asked to set `theme="dark"` should not see the response claim
+    `theme="auto"`, even though nothing is actually persisted server-side
+    for a technical account."""
+    response = client.put(
+        "/me/preferences", json={"theme": "dark"}, headers=domain_admin_auth_headers
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"theme": "dark", "locale": "de"}
+
+
 def test_preferences_reject_missing_token():
     with TestClient(app) as client:
         response = client.get("/me/preferences")

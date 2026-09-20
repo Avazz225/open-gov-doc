@@ -665,7 +665,26 @@ def get_my_preferences(user: dict = Depends(get_current_user)) -> ThemePreferenc
     so it applies across devices (user feedback after P4-S5). Since Phase 47
     Session 1 additionally the UI display language, same cross-device
     reasoning, own independent Keycloak attribute (see `admin_users.
-    get_locale_preference`)."""
+    get_locale_preference`).
+
+    **Since Phase 51 Session 2**: a locally-issued token (`TechnicalAccount`
+    - `users-admin`, `config-admin`, `superuser`, etc., decoupled from
+    Keycloak since Phase 18 Session 3/ADR 0065) has no corresponding
+    Keycloak user at all - `user["sub"]` is that account's own local integer
+    row id, not a Keycloak UUID, so `KeycloakAdmin.get_user()` 404s. Found
+    live in Phase 49 Session 3 (surfaced as a cross-app `500` on every
+    admin-ui page load while logged in as such an account, since every page
+    loads the theme/locale switcher), left unfixed until this session.
+    Returns `ThemePreference`'s own defaults instead of crashing - a
+    technical account has no Keycloak profile to persist a cross-device
+    preference on; the frontend's `localStorage` cache still applies the
+    chosen theme/locale immediately within the same browser (ADR 0009's
+    already-established fire-and-forget design), the only loss is
+    cross-device sync, which a shared technical account arguably shouldn't
+    have anyway (device A's operator choosing dark mode has no reason to
+    also flip device B's)."""
+    if user.get("iss") == local_token_issuer.LOCAL_ISSUER:
+        return ThemePreference()
     theme = admin_users.get_theme_preference(app.state.keycloak_admin, user["sub"])
     locale = admin_users.get_locale_preference(app.state.keycloak_admin, user["sub"])
     return ThemePreference(theme=theme, locale=locale)
@@ -679,7 +698,21 @@ def update_my_preferences(
     docstring): only a field actually present in the request body is
     written, so an existing caller that only ever sends `{"theme": ...}`
     (every app before this session) cannot accidentally reset the other
-    preference back to its default."""
+    preference back to its default.
+
+    **Since Phase 51 Session 2**: same locally-issued-token short-circuit as
+    `GET /me/preferences` above - echoes back whatever was requested (not
+    the defaults; a caller that just asked to set `theme="dark"` should not
+    see the response claim `theme="auto"`) instead of attempting a Keycloak
+    write that would 404. Nothing is actually persisted server-side for a
+    technical account, matching `GET`'s own now-stateless behavior for the
+    same caller."""
+    if user.get("iss") == local_token_issuer.LOCAL_ISSUER:
+        defaults = ThemePreference()
+        return ThemePreference(
+            theme=payload.theme if payload.theme is not None else defaults.theme,
+            locale=payload.locale if payload.locale is not None else defaults.locale,
+        )
     if payload.theme is not None:
         admin_users.set_theme_preference(app.state.keycloak_admin, user["sub"], payload.theme)
     if payload.locale is not None:

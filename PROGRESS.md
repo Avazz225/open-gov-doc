@@ -2,10 +2,57 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P51-S1 (`permission-service`: `ON DELETE CASCADE` on `resource_node.parent_id` —
-first session of Phase 51, "Security & Correctness Bugfixes"). No new ADR — a symptom-level fix
-restoring already-intended, already-documented behavior (ADR 0149's own residual), not a new design
-decision, per the plan's own conditional DoD.
+**Last completed:** P51-S2 (`auth-service`: `/me/preferences` no longer `500`s for a technical-account
+login — second session of Phase 51, "Security & Correctness Bugfixes"). No new ADR — a graceful-
+degradation fix for a caller type the endpoint was never designed for, not a new design decision.
+
+`GET`/`PUT /me/preferences` unconditionally called `KeycloakAdmin.get_user(user["sub"])` regardless of
+caller type. For a `TechnicalAccount`-authenticated caller (`users-admin`, `config-admin`, `superuser`,
+etc. — decoupled from Keycloak since Phase 18 Session 3/ADR 0065, issuing locally-signed tokens),
+`user["sub"]` is that account's own local integer row id, not a Keycloak UUID, so the Keycloak lookup
+404d and surfaced as an unhandled `500` on every single admin-ui page load while logged in as one of
+these accounts (every page loads the theme/locale switcher) — found live in Phase 49 Session 3, confirmed
+cross-app and pre-existing, left unassigned to any session for two full phases until now.
+
+Fixed by checking `user["iss"] == local_token_issuer.LOCAL_ISSUER` — the exact same claim `POST /refresh`
+already uses to route between the local and Keycloak token paths, so no new distinguishing mechanism was
+needed — and short-circuiting: `GET` returns `ThemePreference`'s own defaults (`theme="auto"`,
+`locale="de"`) instead of attempting the doomed Keycloak call; `PUT` echoes back whatever was actually
+requested (not the defaults — a caller that just asked to set `theme="dark"` shouldn't see the response
+claim `theme="auto"`). Nothing is persisted server-side for a technical account either way — the
+frontend's `localStorage` cache still applies the choice immediately within the same browser (ADR 0009's
+already-established fire-and-forget design), the only loss is cross-device sync, which a shared technical
+account arguably shouldn't have anyway (device A's operator choosing dark mode has no reason to also
+flip device B's).
+
+Two new regression tests in `test_login_flow.py`, reusing the existing `domain_admin_auth_headers`
+fixture (real login as `users-admin`) rather than a second `TestClient(app)` — the first attempt did
+create a second one and hit the same "two app lifespans in one test double-subscribe the same NATS
+durable consumer" conflict this project has hit before, caught and fixed before considering the session
+done. `146`/`146` `auth-service` tests passing (was 144, +2). `ruff check`/`ruff format --check` clean.
+Docker image rebuilt and redeployed; live-verified twice: a direct `curl` round-trip against the real
+container (`GET` → `200 {"theme":"auto","locale":"de"}`, `PUT {"theme":"dark"}` → `200
+{"theme":"dark","locale":"de"}`, both previously `500`), and a real Playwright browser session logged in
+as `users-admin` exercising the actual theme switcher in `admin-ui` — zero console errors, where the
+original finding was a console `500` on every page load. Throwaway verification script cleaned up
+afterward.
+
+`docs/services/auth-service.md`: new paragraph in "Theme/Locale Preference" documenting the fix — the
+finding was never actually recorded in any service's Open Points before this session, only in
+`PROGRESS.md`, so this is the first time it's backfilled into the docs proper.
+
+**Next session:** P51-S3 — `folder-service`'s `DELETE /folders/{id}` hard-delete path
+(`repository.delete_folder()`) checks for contained SUBFOLDERS before deleting, but never checks for
+contained DOCUMENTS — a real orphaning risk on the legacy hard-delete fallback path (the regular
+trash-based UI path is unaffected). `cmis-connector` already has to work around this gap itself with its
+own pre-check before calling through. Add the same document check the subfolder check already does.
+
+---
+
+Immediately before P51-S2: **P51-S1** (`permission-service`: `ON DELETE CASCADE` on
+`resource_node.parent_id` — first session of Phase 51, "Security & Correctness Bugfixes"). No new ADR —
+a symptom-level fix restoring already-intended, already-documented behavior (ADR 0149's own residual),
+not a new design decision, per the plan's own conditional DoD.
 
 Investigated why `permission-service`'s ancestor-walk (`_collect_effective_roles`, breaks on a missing
 `ResourceNode`) produced two seemingly-opposite live symptoms and found they share one root cause.
