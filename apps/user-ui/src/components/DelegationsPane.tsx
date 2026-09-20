@@ -62,6 +62,13 @@ export function DelegationsPane({
   const [objectTypes, setObjectTypes] = useState<ObjectType[]>([]);
   const [scopeObjectTypeIds, setScopeObjectTypeIds] = useState<number[]>([]);
   const [scopeFolderResourceIdsText, setScopeFolderResourceIdsText] = useState("");
+  // Fourth scope dimension (Phase 53 Session 2, ADR 0154's own documented
+  // UI gap) - same comma-separated free-text idiom as the folder field
+  // above, no case picker exists anywhere in this app yet (case counts
+  // are comparable in scale to documents, so a `<select>` over `GET
+  // /cases` wouldn't scale the way it does for the much smaller object-
+  // type list above).
+  const [scopeCaseResourceIdsText, setScopeCaseResourceIdsText] = useState("");
 
   useEffect(() => {
     if (!token) return;
@@ -108,16 +115,22 @@ export function DelegationsPane({
         .split(",")
         .map((id) => id.trim())
         .filter(Boolean);
+      const caseResourceIds = scopeCaseResourceIdsText
+        .split(",")
+        .map((id) => id.trim())
+        .filter(Boolean);
       await createDelegation(token, {
         deputyPrincipalId: deputy.id,
         startsAt: new Date(startsAt).toISOString(),
         endsAt: new Date(endsAt).toISOString(),
         objectTypeIds: scopeObjectTypeIds,
         folderResourceIds,
+        caseResourceIds,
       });
       setDeputyUsername("");
       setScopeObjectTypeIds([]);
       setScopeFolderResourceIdsText("");
+      setScopeCaseResourceIdsText("");
       await reload();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("delegations.createError"));
@@ -195,6 +208,15 @@ export function DelegationsPane({
           />
         </label>
         <p className="hint">{t("delegations.scopeFolderResourceIdsHint")}</p>
+        <label>
+          {t("delegations.scopeCaseResourceIdsLabel")}
+          <input
+            type="text"
+            value={scopeCaseResourceIdsText}
+            onChange={(e) => setScopeCaseResourceIdsText(e.target.value)}
+          />
+        </label>
+        <p className="hint">{t("delegations.scopeCaseResourceIdsHint")}</p>
         <button type="submit" disabled={isCreating}>
           {t("delegations.createButton")}
         </button>

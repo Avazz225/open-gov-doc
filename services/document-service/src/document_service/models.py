@@ -363,6 +363,24 @@ class TrashConfig(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class ResourceBackfillState(Base):
+    """Marks whether the startup `ResourceNode` backfill (5.2, Post-Roadmap
+    Phase 39 Session 4/ADR 0154) has already completed a clean pass over
+    every document - added Phase 53 Session 2 (ADR 0154's own suggested
+    fix for its documented ~109s-per-startup cost, now this installation's
+    dev DB has grown past 42,699 documents). Same single-row pattern as
+    `TrashConfig`/`UploadConfig`. Only set once ALL documents in a pass
+    backfilled without a single failure - a run with any failures leaves
+    this unset, so the next startup retries everything (the loop's
+    existing self-healing property is preserved, not weakened by this
+    marker)."""
+
+    __tablename__ = "resource_backfill_state"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class AuditTraceConfig(Base):
     """Base logging depth for the forensic trace (5.4b, since
     P7-S2c) - same single-row pattern as ``UploadConfig``. Controls whether

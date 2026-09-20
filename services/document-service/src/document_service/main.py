@@ -816,24 +816,51 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # this loop already runs on every startup specifically so a missed row
     # self-heals next time, so failing this hard for one bad row is a much
     # worse outcome than logging and moving on.
-    backfill_semaphore = asyncio.Semaphore(settings.document_resource_backfill_concurrency)
+    #
+    # Skip marker (Phase 53 Session 2): the ~109s cost ADR 0154 itself
+    # flagged is the FAN-OUT of one HTTP+DB round trip per document, almost
+    # all of which resolve to a no-op existence check on permission-service's
+    # side (see `repository.is_resource_backfill_completed`'s docstring) -
+    # once an installation has had one fully clean pass (zero failures), the
+    # entire scan+fan-out is skipped on every subsequent startup instead of
+    # repeating it. A run with ANY failure does NOT set the marker, so the
+    # self-healing retry-next-restart property is unchanged for an
+    # installation that hasn't yet fully caught up.
+    async with app.state.session_factory() as backfill_check_session:
+        already_completed = await repository.is_resource_backfill_completed(backfill_check_session)
+    if already_completed:
+        logger.info(
+            "ResourceNode-Backfill bereits abgeschlossen (Marker gesetzt) - wird übersprungen."
+        )
+    else:
+        backfill_semaphore = asyncio.Semaphore(settings.document_resource_backfill_concurrency)
+        backfill_had_failure = False
 
-    async def _backfill_one(document_id: str, folder_id: str | None) -> None:
-        async with backfill_semaphore:
-            try:
-                await app.state.permission_client.create_resource_node(
-                    resource_id=document_id, parent_id=folder_id or "root", resource_type="document"
-                )
-            except Exception:
-                logger.exception(
-                    "ResourceNode-Backfill für document_id=%r fehlgeschlagen - wird beim "
-                    "nächsten Neustart erneut versucht.",
-                    document_id,
-                )
+        async def _backfill_one(document_id: str, folder_id: str | None) -> None:
+            nonlocal backfill_had_failure
+            async with backfill_semaphore:
+                try:
+                    await app.state.permission_client.create_resource_node(
+                        resource_id=document_id,
+                        parent_id=folder_id or "root",
+                        resource_type="document",
+                    )
+                except Exception:
+                    backfill_had_failure = True
+                    logger.exception(
+                        "ResourceNode-Backfill für document_id=%r fehlgeschlagen - wird beim "
+                        "nächsten Neustart erneut versucht.",
+                        document_id,
+                    )
 
-    async with app.state.session_factory() as backfill_session:
-        documents = await repository.list_all_documents(backfill_session)
-    await asyncio.gather(*(_backfill_one(d.id, d.folder_id) for d in documents))
+        async with app.state.session_factory() as backfill_session:
+            documents = await repository.list_all_documents(backfill_session)
+        await asyncio.gather(*(_backfill_one(d.id, d.folder_id) for d in documents))
+
+        if not backfill_had_failure:
+            async with app.state.session_factory() as mark_session:
+                await repository.mark_resource_backfill_completed(mark_session)
+                await mark_session.commit()
 
     app.state.license_limit_client = LicenseLimitClient(
         settings.license_service_base_url, settings.license_limit_cache_ttl_seconds

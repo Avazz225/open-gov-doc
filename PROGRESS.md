@@ -2,8 +2,77 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P53-S1 (AD-group-mapping default-role four-eyes + initiator display-name fix — first
-session of Phase 53, "Lower-Priority Hardening & Polish"). **New ADR**
+**Last completed:** P53-S2 (two small residuals from ADR 0154 — second session of Phase 53,
+"Lower-Priority Hardening & Polish"). No new ADR — the plan's own DoD calls this polish/hardening of an
+already-established pattern; ADR 0154 amended in place (Consequences bullets closed) rather than a new
+ADR filed, per the plan text's own framing.
+
+**Item 1 — backfill idempotency marker.** ADR 0154's own `ResourceNode` startup backfill re-ran on
+every `document-service` restart (~109s in this project's dev DB, per its own live measurement) even
+once an installation had long since caught up — the cost is the FAN-OUT of one HTTP+DB round trip per
+document, almost all resolving to a no-op existence check server-side, not the scan itself. Fixed with
+a new persisted marker: `ResourceBackfillState` singleton (`id=1`, `completed_at`), checked first in
+the lifespan; only set after a pass over every document completes with ZERO failures, so the existing
+self-healing retry-next-restart property is unchanged for an installation that hasn't fully caught up.
+
+**Item 2 — `scope_case_resource_ids` delegation-scope UI.** The newest of the delegation model's four
+scope dimensions (ADR 0154) had no field in `user-ui`'s `DelegationsPane.tsx`. Added the same
+comma-separated free-text idiom the existing `scope_folder_resource_ids` field already uses (no
+case-picker component exists anywhere in this app, and case counts are comparable in scale to documents
+so a `<select>` wouldn't scale the way it does for the much smaller object-type list). `api.ts`'s
+`Delegation`/`createDelegation` updated to carry the new field through.
+
+**A stale doc claim found and fixed while writing this session's own docs, twice**: both
+`docs/services/user-ui.md` and `docs/services/permission-service.md` still said `DelegationsPane`
+"exposes no scope dimension at all today, not even the three pre-existing ones" — false since
+Post-Roadmap Phase 32 Session 2 (ADR 0131) added object-type/folder-resource fields, predating ADR
+0154 itself; both corrected in place, not just the new field documented.
+
+New/updated tests: `test_repository.py` (+3 — marker unset by default, set-and-persists, idempotent
+double-set), `test_api.py` (+2 — a real lifespan skip proof and a real lifespan run-and-mark proof, both
+via `TestClient(app)` with `PermissionServiceClient.create_resource_node` monkeypatched to track calls),
+`delegations-pane.test.tsx` (+2 — case-scope included in a full multi-dimension create, and the
+comma-split/trim behavior in isolation). `396`/`396` `document-service` tests (was 391, +5), `286`/`286`
+`user-ui` tests (was 284, +2). `ruff check`/`ruff format --check`, `tsc --noEmit`, `eslint .`, `next
+build` all clean.
+
+**A real, self-caught test-infrastructure bug found and fixed while writing the two new `document-
+service` API-level tests, unrelated to the actual feature logic**: a bare `with TestClient(app): pass`
+(literally zero requests made inside the block) deadlocks `TestClient.__exit__`'s `wait_shutdown()`
+indefinitely in this project's starlette/anyio version combination — every other existing raw
+`TestClient(app, ...)` block in this suite happens to always issue at least one request first, so this
+was never hit before. First surfaced as an apparently-hung ~18-minute full-suite run; root-caused via
+`PYTHONFAULTHANDLER=1`+`timeout --signal=ABRT` (a full Python thread-state dump showing the main thread
+blocked in `wait_shutdown`, the actual app event loop idling in `select()` with nothing pending — not a
+Postgres lock, not a NATS consumer conflict, both checked and ruled out directly against the running
+containers before finding the real cause). Fixed by adding a trivial `c.get("/healthz")` inside both new
+tests' `with` blocks; documented inline so a future test author doesn't strip it out as apparently
+decorative.
+
+Docker images for `document-service`/`user-ui` rebuilt and redeployed. **Live-verified end-to-end
+against the real running stack**: restarted `document-service` twice — first restart ran a real,
+zero-failure backfill (408 documents, ~1.2s, this dev DB's document count having shrunk considerably
+since ADR 0154's original 42,699-document measurement across many later sessions' own test cleanup) and
+set the marker; second restart logged the skip message and completed in ~155ms. For the delegation UI:
+logged into `user-ui` via Playwright, created a real delegation with two real comma-separated case IDs
+through the actual form, confirmed via a direct `permission-service` query that the stored row's
+`scope_case_resource_ids` exactly matched the two typed values (trimmed correctly) — then revoked it and
+cleaned up test state.
+
+`docs/adr/0154-...md`: closed both residual Consequences bullets (backfill cost, delegation-scope UI
+gap) in place. `docs/services/document-service.md`: backfill section + schema table updated.
+`docs/services/user-ui.md`/`docs/services/permission-service.md`: `DelegationsPane` write-ups corrected
+and updated (including the drive-by stale-claim fixes above).
+
+**Next session:** P53-S3 — `reporting-service`'s scheduled-report `recipient_email` isn't validated
+upfront (a typo/bad address only surfaces at the next poll tick, logged only, no status field
+communicating the failure back to the Admin UI). Add upfront validation plus a visible failure status,
+third session of Phase 53.
+
+---
+
+Immediately before P53-S2: **P53-S1** (AD-group-mapping default-role four-eyes + initiator display-name
+fix — first session of Phase 53, "Lower-Priority Hardening & Polish"). **New ADR**
 ([0171](docs/adr/0171-ad-group-mapping-default-role-four-eyes-and-display-name-fix.md)) — the plan's own
 DoD made this conditional on whether the fix is "a real decision rather than a mechanical reuse of the
 existing generic mechanism"; judged a real decision (see below).

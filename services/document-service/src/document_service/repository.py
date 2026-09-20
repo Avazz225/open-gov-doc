@@ -18,6 +18,7 @@ from document_service.models import (
     LegalHold,
     PseudonymizedAttribute,
     RecordsQuarantine,
+    ResourceBackfillState,
     RetentionConfig,
     ShareLink,
     ShareLinkConfig,
@@ -32,6 +33,7 @@ _TRASH_CONFIG_ID = 1
 _AUDIT_TRACE_CONFIG_ID = 1
 _SHARE_LINK_CONFIG_ID = 1
 _EXPORT_CONFIG_ID = 1
+_RESOURCE_BACKFILL_STATE_ID = 1
 
 
 class NotFoundError(Exception):
@@ -119,6 +121,32 @@ async def list_all_documents(session: AsyncSession) -> list[Document]:
     the time this runs, no filter needed for that case."""
     result = await session.execute(select(Document))
     return list(result.scalars().all())
+
+
+async def is_resource_backfill_completed(session: AsyncSession) -> bool:
+    """Whether the startup `ResourceNode` backfill above has already
+    completed a clean pass (Phase 53 Session 2, ADR 0154's own suggested
+    fix for its documented ~109s-per-startup cost) - lets the lifespan skip
+    `list_all_documents()`/the whole fan-out entirely once caught up,
+    rather than repeating ~42,699 mostly-no-op HTTP round trips on every
+    single restart."""
+    state = await session.get(ResourceBackfillState, _RESOURCE_BACKFILL_STATE_ID)
+    return state is not None and state.completed_at is not None
+
+
+async def mark_resource_backfill_completed(session: AsyncSession) -> None:
+    """Called only after a pass over every document backfilled with ZERO
+    failures - a run with any failure must NOT call this, so the next
+    startup retries everything again (preserves the loop's existing
+    self-healing property; this marker only ever short-circuits an
+    already-fully-caught-up installation, never a genuinely incomplete
+    one)."""
+    state = await session.get(ResourceBackfillState, _RESOURCE_BACKFILL_STATE_ID)
+    if state is None:
+        state = ResourceBackfillState(id=_RESOURCE_BACKFILL_STATE_ID)
+        session.add(state)
+    state.completed_at = datetime.now(UTC)
+    await session.flush()
 
 
 async def list_documents_by_folder(

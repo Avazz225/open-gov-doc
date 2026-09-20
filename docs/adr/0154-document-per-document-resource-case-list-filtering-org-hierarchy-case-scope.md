@@ -171,7 +171,7 @@ always fail-closed against a check that never supplies it.
 - **`reporting-service` no longer depends on `document-service` at all** (its `DocumentClient`/
   `document_service_base_url` setting/`app.state.document_client` removed entirely, having served no
   purpose beyond the now-removed folder-resolution lookup) - a net simplification, not a regression.
-- **Every document now carries a `ResourceNode` row**, doubling permission-service's resource-tree size
+- ~~**Every document now carries a `ResourceNode` row**, doubling permission-service's resource-tree size
   in installations with large document counts. **Measured, not theoretical**: this session's own dev
   database (42,699 documents) made a first, naive sequential backfill crash the service outright (see
   above) and, even bounded-concurrent at 50, adds roughly 109 seconds to every `document-service`
@@ -180,15 +180,32 @@ always fail-closed against a check that never supplies it.
   own precedent). A future session should reconsider "run on every startup" if this becomes disruptive
   in practice (e.g. a persisted "backfill completed" marker to skip it once caught up, or a genuine bulk
   registration endpoint on `permission-service` instead of one HTTP round trip per document) - not
-  addressed here, since it was discovered during this session's own live verification, not before.
+  addressed here, since it was discovered during this session's own live verification, not before.~~ —
+  **closed in Phase 53 Session 2**, using exactly the first option this bullet itself floated: a
+  persisted `ResourceBackfillState` marker (single-row, same pattern as `TrashConfig`/other singleton
+  config tables), set only after a pass over every document completes with zero failures. All
+  subsequent startups skip the scan+fan-out entirely instead of repeating it, while a genuinely
+  incomplete installation (any failure in a pass) still retries on the next restart exactly as before -
+  the self-healing property this ADR names is unchanged, only a fully-caught-up installation's redundant
+  work is eliminated. See `docs/services/document-service.md` for the mechanism.
 - **`GET /cases`/`.../by-vorgangsnummer` now make one additional `check_batch` call per request** beyond
   the pre-existing baseline check - an accepted cost, matching the same trade-off `query-service`/
   `reporting-service`/`search-service`'s already-established row-level filtering already makes.
-- **A fourth delegation scope dimension exists but has no dedicated UI field** - `POST /delegations`'s
+- ~~**A fourth delegation scope dimension exists but has no dedicated UI field** - `POST /delegations`'s
   schema accepts `scope_case_resource_ids`, but `user-ui`'s `DelegationsPane` (self-service delegation
   form) does not expose ANY scope dimension today, not even the three pre-existing ones
   (`scope_object_type_ids`/`scope_process_definition_ids`/`scope_folder_resource_ids`) - a person can
   only pick a deputy and a time window, never a scope, via the UI. This is a pre-existing gap this
   session does not close (org-hierarchy grants populate the new dimension automatically without any UI
   change needed, since they're system-triggered, not user-authored). A future session could add scope
-  selection to `DelegationsPane` for all four dimensions at once, not case-scoping in isolation.
+  selection to `DelegationsPane` for all four dimensions at once, not case-scoping in isolation.~~ —
+  **closed in Phase 53 Session 2.** This bullet's own claim was already imprecise when written: two of
+  the three "pre-existing" dimensions (`scope_object_type_ids`/`scope_folder_resource_ids`) already had
+  UI since **Post-Roadmap Phase 32 Session 2** ([ADR 0131](0131-delegation-scope-resolution-case-then-document.md)),
+  predating this ADR - only `scope_process_definition_ids` and `scope_case_resource_ids` were genuinely
+  missing. This session adds a `scope_case_resource_ids` field to `DelegationsPane.tsx`, matching the
+  existing `scope_folder_resource_ids` field's exact idiom (comma-separated free text - no case-picker
+  component exists anywhere in `user-ui`, and case counts are comparable in scale to documents, so a
+  `<select>` wouldn't scale the way it does for the much smaller object-type list). `scope_process_
+  definition_ids` remains genuinely missing from the UI - out of this session's stated scope
+  (case-scoping specifically), not silently closed alongside it.

@@ -2496,6 +2496,11 @@ export interface Delegation {
   scope_object_type_ids: number[] | null;
   scope_process_definition_ids: number[] | null;
   scope_folder_resource_ids: string[] | null;
+  // Fourth scope dimension (Post-Roadmap Phase 39 Session 4, ADR 0154) -
+  // exposed on self-service `POST /delegations` from the start, but never
+  // surfaced in this UI until Phase 53 Session 2 (ADR 0154's own
+  // documented gap).
+  scope_case_resource_ids: string[] | null;
   created_at: string;
   revoked_at: string | null;
   revoked_by: string | null;
@@ -2512,6 +2517,11 @@ export async function createDelegation(
     // semantics as the backend's own `scope_*` fields.
     objectTypeIds?: number[];
     folderResourceIds?: string[];
+    // Since Phase 53 Session 2 (ADR 0154's own documented UI gap, closed
+    // here) - same "free-text, comma-separated" idiom as
+    // `folderResourceIds` above, no case picker exists anywhere in this
+    // app yet.
+    caseResourceIds?: string[];
   }
 ): Promise<Delegation> {
   const response = await request(
@@ -2527,6 +2537,9 @@ export async function createDelegation(
         ...(params.objectTypeIds?.length ? { scope_object_type_ids: params.objectTypeIds } : {}),
         ...(params.folderResourceIds?.length
           ? { scope_folder_resource_ids: params.folderResourceIds }
+          : {}),
+        ...(params.caseResourceIds?.length
+          ? { scope_case_resource_ids: params.caseResourceIds }
           : {}),
       }),
     },

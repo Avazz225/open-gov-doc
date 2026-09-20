@@ -6,7 +6,9 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import pytest
 from dms_eventbus_client import Event
+from document_service import repository
 from document_service.main import app
+from document_service.permission_client import PermissionServiceClient
 from fastapi.testclient import TestClient
 
 
@@ -2852,3 +2854,99 @@ def test_quarantine_release_publishes_dedicated_event(client, monkeypatch):
     events = [e for e in published if e.event_type == "document.created_from_quarantine_release"]
     assert len(events) == 1
     assert events[0].payload["source_scan_id"] == "scan-1"
+
+
+# --- Resource backfill skip marker (5.2, Phase 53 Session 2, ADR 0154) ----
+
+
+async def test_resource_backfill_is_skipped_once_marked_completed(session, monkeypatch):
+    """Regression test: before this fix, the startup backfill fanned out
+    one HTTP round trip to permission-service per document on EVERY
+    restart, even once an installation had long since caught up (the
+    ~109s/42,699-document cost ADR 0154 itself documented). Pre-seeds a
+    document AND the completion marker directly in the DB, then proves a
+    fresh startup's `create_resource_node` is never called at all - not
+    merely that it tolerates an already-registered resource (permission-
+    service's own server-side existence check already covered that), but
+    that the client-side call, and the `list_all_documents()` scan behind
+    it, never happen."""
+    await repository.create_document(
+        session,
+        document_id=str(uuid.uuid4()),
+        title="Backfill-Skip-Test",
+        filename="x.pdf",
+        content_type="application/pdf",
+        size_bytes=1,
+        checksum_sha256="a" * 64,
+        storage_object_key="documents/x/aaaa",
+        folder_id=None,
+        object_type_id=None,
+        attributes={},
+        created_by="alice",
+    )
+    await repository.mark_resource_backfill_completed(session)
+    await session.commit()
+
+    calls: list[str] = []
+
+    async def _tracked_create_resource_node(
+        self, *, resource_id: str, parent_id: str | None, resource_type: str = "folder"
+    ) -> None:
+        calls.append(resource_id)
+
+    monkeypatch.setattr(
+        PermissionServiceClient, "create_resource_node", _tracked_create_resource_node
+    )
+
+    # The `c.get("/healthz")` is load-bearing, not decorative: a bare
+    # `with TestClient(app) as c: pass` (no request at all) was found to
+    # deadlock `TestClient.__exit__`'s `wait_shutdown()` indefinitely in
+    # this project's starlette/anyio version combination - every other
+    # existing use of a raw `with TestClient(app, ...)` block in this test
+    # suite happens to always issue at least one request already, so this
+    # was never hit before this session's first bare-block test.
+    with TestClient(app, headers={"X-DMS-Principal": "document-service-tests"}) as c:
+        c.get("/healthz")
+
+    assert calls == []
+
+
+async def test_resource_backfill_runs_and_marks_completed_when_not_yet_marked(session, monkeypatch):
+    """Positive-control counterpart to the skip test above: with the
+    marker unset (the default, e.g. every fresh installation and every
+    installation mid-catch-up), the backfill still runs exactly as before
+    this session - calls `create_resource_node` for the pre-existing
+    document, and marks the completion marker afterward since the (single,
+    successful) call raised nothing."""
+    document = await repository.create_document(
+        session,
+        document_id=str(uuid.uuid4()),
+        title="Backfill-Run-Test",
+        filename="x.pdf",
+        content_type="application/pdf",
+        size_bytes=1,
+        checksum_sha256="b" * 64,
+        storage_object_key="documents/x/bbbb",
+        folder_id=None,
+        object_type_id=None,
+        attributes={},
+        created_by="alice",
+    )
+    await session.commit()
+
+    calls: list[str] = []
+
+    async def _tracked_create_resource_node(
+        self, *, resource_id: str, parent_id: str | None, resource_type: str = "folder"
+    ) -> None:
+        calls.append(resource_id)
+
+    monkeypatch.setattr(
+        PermissionServiceClient, "create_resource_node", _tracked_create_resource_node
+    )
+
+    with TestClient(app, headers={"X-DMS-Principal": "document-service-tests"}) as c:
+        c.get("/healthz")
+
+    assert calls == [document.id]
+    assert await repository.is_resource_backfill_completed(session) is True

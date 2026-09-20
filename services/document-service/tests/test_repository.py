@@ -755,6 +755,31 @@ async def test_hard_delete_document_removes_pseudonymized_attributes(session):
     assert await repository.list_pseudonymized_attributes(session, document.id) == []
 
 
+# --- Resource backfill skip marker (5.2, Phase 53 Session 2, ADR 0154) ----
+
+
+async def test_resource_backfill_not_completed_by_default(session):
+    assert await repository.is_resource_backfill_completed(session) is False
+
+
+async def test_mark_resource_backfill_completed_persists(session):
+    assert await repository.is_resource_backfill_completed(session) is False
+
+    await repository.mark_resource_backfill_completed(session)
+
+    assert await repository.is_resource_backfill_completed(session) is True
+
+
+async def test_mark_resource_backfill_completed_is_idempotent(session):
+    """Calling it twice (e.g. two clean startups in a row, however
+    unlikely once the marker is set) must not raise - same "upsert the
+    singleton row" shape as the other config tables' own set functions."""
+    await repository.mark_resource_backfill_completed(session)
+    await repository.mark_resource_backfill_completed(session)
+
+    assert await repository.is_resource_backfill_completed(session) is True
+
+
 async def test_create_and_release_records_quarantine(session):
     document = await _make_document(session)
 

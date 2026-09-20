@@ -142,7 +142,7 @@ describe("DelegationsPane", () => {
     expect(createDelegationMock.mock.calls[0][1].deputyPrincipalId).toBe("bob-sub");
   });
 
-  it("creates a scoped delegation with selected object types and folder IDs (P32-S2)", async () => {
+  it("creates a scoped delegation with selected object types, folder IDs, and case IDs (P32-S2, case scope since Phase 53 Session 2/ADR 0154)", async () => {
     listObjectTypesMock.mockResolvedValue([
       { id: 1, name: "Rechnung", applies_to: "document", attributes: [], icon: null },
       { id: 2, name: "Vertrag", applies_to: "document", attributes: [], icon: null },
@@ -157,6 +157,7 @@ describe("DelegationsPane", () => {
       scope_object_type_ids: [1],
       scope_process_definition_ids: null,
       scope_folder_resource_ids: ["folder-a"],
+      scope_case_resource_ids: ["case-a"],
       created_at: farFutureStart,
       revoked_at: null,
       revoked_by: null,
@@ -176,12 +177,50 @@ describe("DelegationsPane", () => {
       screen.getByLabelText("Nur für diese Ordner-IDs (optional, kommagetrennt)"),
       "folder-a"
     );
+    await user.type(
+      screen.getByLabelText("Nur für diese Fall-IDs (optional, kommagetrennt)"),
+      "case-a"
+    );
     await user.click(screen.getByText("Hinterlegen"));
 
     await waitFor(() => expect(createDelegationMock).toHaveBeenCalled());
     const params = createDelegationMock.mock.calls[0][1];
     expect(params.objectTypeIds).toEqual([1]);
     expect(params.folderResourceIds).toEqual(["folder-a"]);
+    expect(params.caseResourceIds).toEqual(["case-a"]);
+  });
+
+  it("trims and filters multiple comma-separated case IDs, same as the existing folder-ID field (Phase 53 Session 2)", async () => {
+    lookupUserByUsernameMock.mockResolvedValue({ id: "bob-sub", username: "bob" });
+    createDelegationMock.mockResolvedValue({
+      id: "d1",
+      delegator_principal_id: "alice-sub",
+      deputy_principal_id: "bob-sub",
+      starts_at: farFutureStart,
+      ends_at: farFutureEnd,
+      scope_object_type_ids: null,
+      scope_process_definition_ids: null,
+      scope_folder_resource_ids: null,
+      scope_case_resource_ids: ["case-a", "case-b"],
+      created_at: farFutureStart,
+      revoked_at: null,
+      revoked_by: null,
+    });
+
+    const user = userEvent.setup();
+    renderPane();
+
+    await screen.findByText("Noch keine Stellvertretung hinterlegt.");
+    await user.type(screen.getByPlaceholderText("Nutzername der Stellvertretung"), "bob");
+    await user.type(
+      screen.getByLabelText("Nur für diese Fall-IDs (optional, kommagetrennt)"),
+      " case-a ,case-b, "
+    );
+    await user.click(screen.getByText("Hinterlegen"));
+
+    await waitFor(() => expect(createDelegationMock).toHaveBeenCalled());
+    const params = createDelegationMock.mock.calls[0][1];
+    expect(params.caseResourceIds).toEqual(["case-a", "case-b"]);
   });
 
   it("shows an error when creating with an unknown deputy username", async () => {

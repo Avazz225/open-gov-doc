@@ -412,7 +412,7 @@ async def _clean_tables():
                 "document.document, document.upload_config, document.retention_config, "
                 "document.trash_config, document.audit_trace_config, "
                 "document.audit_trace_role_override, document.export_config, "
-                "document.folder_export_job CASCADE"
+                "document.folder_export_job, document.resource_backfill_state CASCADE"
             )
         )
     await eng.dispose()

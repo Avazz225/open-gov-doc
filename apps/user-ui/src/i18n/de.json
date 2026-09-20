@@ -590,6 +590,8 @@
     "scopeObjectTypesHint": "Ohne Auswahl gilt die Stellvertretung für jede Dokumentklasse.",
     "scopeFolderResourceIdsLabel": "Nur für diese Ordner-IDs (optional, kommagetrennt)",
     "scopeFolderResourceIdsHint": "Ohne Angabe gilt die Stellvertretung für jeden Ordner.",
+    "scopeCaseResourceIdsLabel": "Nur für diese Fall-IDs (optional, kommagetrennt)",
+    "scopeCaseResourceIdsHint": "Ohne Angabe gilt die Stellvertretung für jeden Fall.",
     "createButton": "Hinterlegen",
     "revokeButton": "Widerrufen",
     "revokedState": "widerrufen",

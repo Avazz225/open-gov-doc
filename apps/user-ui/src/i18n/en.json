@@ -590,6 +590,8 @@
     "scopeObjectTypesHint": "Without a selection, the delegation applies to every document class.",
     "scopeFolderResourceIdsLabel": "Only for these folder IDs (optional, comma-separated)",
     "scopeFolderResourceIdsHint": "Without specifying any, the delegation applies to every folder.",
+    "scopeCaseResourceIdsLabel": "Only for these case IDs (optional, comma-separated)",
+    "scopeCaseResourceIdsHint": "Without specifying any, the delegation applies to every case.",
     "createButton": "Set up",
     "revokeButton": "Revoke",
     "revokedState": "revoked",

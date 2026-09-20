@@ -3,7 +3,7 @@
 **Purpose:** Documents as the core entity (Concept 2.1) — CRUD, permanent versioning (2.1a, no overwriting/discarding), an editing lock for external editing including force-unlock and conflict copy (4.2). Never holds file content itself — every byte access goes through the Storage Service's HTTP API (3.6).
 
 **Concept reference:** 2.1/2.1a/4.2/3.1/3.6/5.2/5.2a (retention/legal hold/forced deletion, since P7-S1)/5.4b (audit depth for forensic trace, since P7-S2c)/5.6 (records disposal lifecycle fields, since P7-S3)/4.2a (public share link, since P14-S10)/14.2 (classification level, redaction, records quarantine, output stamping, work tray promotion, Post-Roadmap Phase 31 Sessions 3–7)
-**Own Postgres schema:** `document` (tables `document`, `document_version`, `document_lock`, `upload_config`, `legal_hold`, `records_quarantine`, `deletion_register_entry`, `retention_config`, `trash_config`, `audit_trace_config`, `audit_trace_role_override`, `share_link_config`, `share_link`, `pseudonymized_attribute`)
+**Own Postgres schema:** `document` (tables `document`, `document_version`, `document_lock`, `upload_config`, `legal_hold`, `records_quarantine`, `deletion_register_entry`, `retention_config`, `trash_config`, `audit_trace_config`, `audit_trace_role_override`, `share_link_config`, `share_link`, `pseudonymized_attribute`, `resource_backfill_state`)
 
 ## API
 
@@ -113,10 +113,16 @@ pre-existing document the instant this session's checks went live. **Bounded-con
 (`asyncio.Semaphore`, default `document_resource_backfill_concurrency=50`) - live verification against
 this project's own dev database (42,699 real documents) found a naive sequential version crashed the
 service's startup outright (an orphaned `parent_id` reference, see below) and, even once fixed, would
-have taken minutes; bounded concurrency brought a clean run down to ~109 seconds in this environment -
-still a real, ongoing startup cost at this scale (the loop runs on every restart), not a one-time
-migration cost, see [ADR 0154](../adr/0154-document-per-document-resource-case-list-filtering-org-hierarchy-case-scope.md)
-"Consequences" for the caveat. `permission_service.repository.create_resource_node()` itself also gained
+have taken minutes; bounded concurrency brought a clean run down to ~109 seconds in this environment. **Since Phase 53
+Session 2**, a persisted `ResourceBackfillState` singleton marker (same pattern as `TrashConfig`/other
+config tables) is checked first: once a pass over every document has completed with ZERO failures, the
+marker is set and every subsequent startup skips the scan+fan-out entirely (`repository.is_resource_
+backfill_completed()`), logging "ResourceNode-Backfill bereits abgeschlossen (Marker gesetzt) - wird
+übersprungen." instead. Any run with even one failure does NOT set the marker, so the self-healing
+retry-on-next-restart property is unchanged for an installation that hasn't fully caught up yet -
+live-verified: a fresh run against this environment's current 408 real documents completed in ~1.2s and
+set the marker; the immediately following restart logged the skip message and completed in ~155ms.
+`permission_service.repository.create_resource_node()` itself also gained
 a safety net from this same live verification: if `parent_id` doesn't correspond to an existing node
 (possible for a real, pre-existing folder whose own `ResourceNode` was never registered - `folder-
 service`'s registration is purely event-driven, no synchronous guarantee), it now falls back to `root`
