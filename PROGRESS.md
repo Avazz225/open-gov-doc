@@ -2,10 +2,65 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P59-S5 (`migration-service`'s `POST /transfers`/`POST /paired-installations` combined
-missing caller-permission checks, an SSRF-vulnerable `base_url`, and a forgeable `created_by` field — fifth
-and last session of Phase 59, "Critical Authorization Bugs". **Phase 59 is now fully closed** — all five
-criticals from this round's live-code security sweep are fixed, tested, and live-verified). **New ADR**
+**Last completed:** P60-S1 (`federation-hub-service`'s `callback_base_url` SSRF + `ocr-service`'s
+per-document IDOR, bundled — first session of Phase 60, "High-Severity Findings"). **New ADR**
+([0183](docs/adr/0183-federation-hub-callback-ssrf-and-ocr-service-document-idor.md)) — a real
+authorization-model decision, per the plan's own DoD.
+
+**The gaps.** (a) `federation-hub-service`'s `POST /installations` had zero validation on
+`callback_base_url` — combined with open self-registration (ADR 0039's deliberate model, not revisited),
+an attacker could register an installation whose `callback_base_url` points at an internal-only target
+(e.g. cloud metadata), then force the hub to make a server-side HTTP call there via `POST /handovers`
+delivery, using the ungated `GET /handovers/{id}` status as a blind SSRF oracle. (b) `ocr-service`'s four
+OCR-result endpoints checked only the coarse, "everyone"-granted `ocr.read`/`.write` — never the source
+document's own ACL — the identical bug `rendering-service` already fixed at Phase 50 Session 3.
+
+**The fix.** (a) `_validate_callback_base_url` — resolves the hostname, rejects loopback/private/
+link-local/reserved/multicast (covers `169.254.169.254` via the link-local check). **Corrected from the
+plan's own originally-floated design** (https-only, hard-fail on unresolvable) after checking real usage:
+this project has no TLS anywhere, and federation-hub-service's own ~15+ existing tests deliberately
+register with genuinely non-resolving RFC 2606 test domains while mocking delivery — both would have broken
+under the plan's literal wording, so the guard allows an unresolvable hostname through unresolved and keeps
+`http` alongside `https`, while still closing the finding's actual exploit shape (a literal or
+resolved-to-private target). (b) `_require_ocr_document_permission`, mirroring `rendering-service`'s
+`_require_rendition_document_permission` verbatim — checks `document.read`/`.write` against
+`resource_id=result.document_id`, applied existence-first to all four named endpoints; the cross-document
+listing mode (no `document_id`) keeps the coarse `ocr.read` check.
+
+New/updated tests: `ocr-service` net +4 (`test_list_ocr_results_unregistered_document_is_403`,
+`test_get_ocr_result_without_document_permission_is_403`,
+`test_download_page_image_without_document_permission_is_403`; one existing test renamed/re-asserted to
+match the new, deliberate `403` for a retry on an unregistered document — previously `200` with reset
+bookkeeping, now correctly blocked since such a retry could never succeed anyway; one existing test
+switched from a literal unregistered `document_id` to a real uploaded document, which is what it actually
+meant to cover), 60 passed + 9 skipped total. `federation-hub-service` unchanged at 75/75 — no new tests
+needed, the guard is exercised implicitly by every existing registration test still passing under the
+corrected, permissive-on-unresolvable design. **Found and fixed in passing**: `ocr-service`'s own
+`test_pipeline.py` had a pre-existing, unrelated gap since P59-S2 — `_delete_storage_object_for_version`
+called `storage-service` directly with no identity header, broken by that session's trusted-caller gate
+and apparently unnoticed until this session's full-suite run; fixed by sending
+`X-DMS-Principal: ocr-service`. `ruff` clean (same pre-existing, unrelated repo-wide failures confirmed out
+of scope again).
+
+Both services rebuilt/redeployed. **Live-verified against the real running stack**: `curl` against
+`federation-hub-service` confirmed `422` for a private IP and the metadata address, firing before any
+signature check; `curl` against `ocr-service` confirmed `403` for an unregistered `document_id` on the
+filtered listing, `200` for the coarse cross-document listing, and a real freshly uploaded document's own
+listing succeeding for its owner. Throwaway test data cleaned up afterward.
+
+`docs/services/federation-hub-service.md`/`docs/services/ocr-service.md`: API tables annotated, new
+"Authorization" section in ocr-service.md, Open Points bullets closed in both, test counts updated.
+
+**Next session:** P60-S2 — `archival-service` XXE hardening at four `etree.fromstring()` call sites.
+Second session of Phase 60.
+
+---
+
+Immediately before P60-S1: **P59-S5** (`migration-service`'s `POST /transfers`/`POST /paired-installations`
+combined missing caller-permission checks, an SSRF-vulnerable `base_url`, and a forgeable `created_by`
+field — fifth and last session of Phase 59, "Critical Authorization Bugs". **Phase 59 is now fully
+closed** — all five criticals from this round's live-code security sweep are fixed, tested, and
+live-verified). **New ADR**
 ([0182](docs/adr/0182-migration-service-transfer-and-pairing-authorization.md)) — a real authorization-model
 decision, per the plan's own DoD.
 

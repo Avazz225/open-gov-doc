@@ -9,16 +9,20 @@
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/ocr-results?document_id=...&version_number=...&status=...` | OCR results for a version (`version_number` optional — without it: all versions of the document) — since **P19-S8** gated by `ocr.read`. Since **Post-Roadmap Phase 20 Session 7**, `document_id` is also optional (previously required) and a new `status` filter was added — without `document_id` this returns a cross-document list, the basis for the new Admin UI view of `failed_permanent` results ([ADR 0083](../adr/0083-admin-ui-processing-failures-visibility.md)) |
-| `GET` | `/ocr-results/{id}` | Single OCR result (full text, word bounding boxes, confidence) — 404 on unknown `id`; since **P19-S8** gated by `ocr.read` |
-| `GET` | `/ocr-results/{id}/page-image?page_number=...` | A page image, rasterized by the OCR Service itself (PDFs only, see below; `page_number` optional, default `1`) — 404 on unknown `id` or outside the valid page range, 409 if no standalone page image exists (raster image case); since **P19-S8** gated by `ocr.read` |
+| `GET` | `/ocr-results?document_id=...&version_number=...&status=...` | OCR results for a version (`version_number` optional — without it: all versions of the document) — since **P19-S8** gated by `ocr.read`. Since **Post-Roadmap Phase 20 Session 7**, `document_id` is also optional (previously required) and a new `status` filter was added — without `document_id` this returns a cross-document list, the basis for the new Admin UI view of `failed_permanent` results ([ADR 0083](../adr/0083-admin-ui-processing-failures-visibility.md)). **Since Phase 60 Session 1** ([ADR 0183](../adr/0183-federation-hub-callback-ssrf-and-ocr-service-document-idor.md)): WITH `document_id`, checks the caller's own `document.read` on it instead, see "Authorization" below |
+| `GET` | `/ocr-results/{id}` | Single OCR result (full text, word bounding boxes, confidence) — 404 on unknown `id`; since **P19-S8** gated by `ocr.read`. **Since Phase 60 Session 1**: `document.read` on the result's own `document_id` instead, see "Authorization" below |
+| `GET` | `/ocr-results/{id}/page-image?page_number=...` | A page image, rasterized by the OCR Service itself (PDFs only, see below; `page_number` optional, default `1`) — 404 on unknown `id` or outside the valid page range, 409 if no standalone page image exists (raster image case); since **P19-S8** gated by `ocr.read`. **Since Phase 60 Session 1**: `document.read` on the result's own `document_id` instead, see "Authorization" below |
 | `GET` | `/config` | Current configuration (`max_word_count`, `batch_size`, `allowed_content_types`, `updated_at`) — creates the default row on the very first call (P5b-S5); since **P19-S8** gated by `ocr.read` |
 | `PUT` | `/config` | Updates `max_word_count`/`batch_size`/`allowed_content_types`, takes effect on the next processed document without a restart (Admin UI "OCR Settings"); since **P19-S8** ([ADR 0073](../adr/0073-ocr-rendering-virus-scan-rbac.md)) gated by `ocr.write` |
-| `POST` | `/ocr-results/{id}/retry` | Manual restart of a `failed_permanent` result (since **P20-S4**, [ADR 0080](../adr/0080-rendering-ocr-service-retry-backoff-failed-permanent.md)) — `404` on unknown `id`, `409` if `status != "failed_permanent"`, otherwise an immediate reprocessing attempt; gated by `ocr.write` |
+| `POST` | `/ocr-results/{id}/retry` | Manual restart of a `failed_permanent` result (since **P20-S4**, [ADR 0080](../adr/0080-rendering-ocr-service-retry-backoff-failed-permanent.md)) — `404` on unknown `id`, `409` if `status != "failed_permanent"`, otherwise an immediate reprocessing attempt; gated by `ocr.write`. **Since Phase 60 Session 1**: `document.write` on the result's own `document_id` instead, see "Authorization" below |
 | `POST` | `/ocr-results/{id}/reviewed` | **Since Phase 45 Session 3**: connector-call callback from the `ocr_review.bpmn` review workflow, fired by `workflow-service` once a human completes the Manual Task — `404` on unknown `id`, `409` if `status != "needs_review"`, otherwise flips `status` back to `"ready"` and records `reviewed_at`/`reviewed_by`. Deliberately **ungated** (no `X-DMS-Principal` check) — `workflow-service`'s `_handle_connector_task` sends no principal header at all, same precedent as migration-service's own `/transfers/{id}/steps/*` connector-call targets |
 | `GET` | `/healthz` | Health check |
 
 The `id` of an OCR result is a natural key `{document_id}:{version_number}` (see Data Model) — unlike rendering-service, there is deliberately only one authoritative result per version here, no discriminator for multiple rules.
+
+## Authorization (Phase 60 Session 1, [ADR 0183](../adr/0183-federation-hub-callback-ssrf-and-ocr-service-document-idor.md))
+
+`GET /ocr-results` (with `document_id`), `GET /ocr-results/{id}`, `POST /ocr-results/{id}/retry`, and `GET /ocr-results/{id}/page-image` previously checked only the coarse, "everyone"-granted `ocr.read`/`ocr.write` — any caller could read the full text/confidence/pages of, or retry, ANY OCR result regardless of the underlying document's own per-document ACL. `rendering-service` had the identical bug shape, closed at Phase 50 Session 3 with `_require_rendition_document_permission` — `_require_ocr_document_permission` mirrors it verbatim: checks the caller's own `document.read`/`.write` against `resource_id=result.document_id` (the SAME per-document `ResourceNode` `document-service` already anchors the document to, ADR 0144/0154), not a new ocr-specific resource type. `GET /ocr-results` WITHOUT `document_id` (the cross-document admin listing) keeps the coarse `ocr.read` check, since there is no single document to check against. Existence (the `OcrResult` row, `404`) is always confirmed before the permission check runs — same ordering convention as everywhere else in this project. **Deliberate consequence**: retrying a `failed_permanent` result whose `document_id` has no `ResourceNode` left at all (never registered, or the document was fully deleted/purged) now `403`s instead of the previous silent `200`/reset-attempts behavior — accepted, since such a retry could never have actually succeeded anyway.
 
 ## Automatic OCR Pipeline (3.9)
 
@@ -113,7 +117,16 @@ None yet — follows in Phase 11.
 
 ## Tests
 
-- `uv run pytest services/ocr-service/tests` (**66 tests since Phase 45 Session 3**, +5: a repository
+- `uv run pytest services/ocr-service/tests` (**60 passed + 9 skipped since Phase 60 Session 1** — RBAC
+  coverage for the four now-document-scoped endpoints (see "Authorization" above):
+  `test_list_ocr_results_unregistered_document_is_403`,
+  `test_get_ocr_result_without_document_permission_is_403`,
+  `test_download_page_image_without_document_permission_is_403`; renamed and re-asserted
+  `test_retry_for_an_unregistered_document_is_403` (was `test_retry_for_a_permanently_missing_document_
+  resets_attempts_but_stays_failed_permanent`, now expects `403` instead of the previous `200`, see
+  "Authorization" above); `test_list_ocr_results_empty_for_unknown_document` changed to use a real,
+  freshly uploaded document rather than a literal unregistered `document_id`. Before that, 66 tests since
+  Phase 45 Session 3, +5: a repository
   test for `mark_reviewed`, two new API tests for `POST /ocr-results/{id}/reviewed` (`404`/`409`), and a
   new Tesseract-gated pipeline test confirming a real workflow-service instance is started with the
   correct `business_key` for a `needs_review` result — verified against the real, exact live count via
@@ -137,6 +150,7 @@ None yet — follows in Phase 11.
 - **No reviewer-facing OCR-text/document preview linked from the review task itself** (Phase 45 Session 3) — a reviewer must independently open the document in `user-ui` to judge the OCR result before completing the task; the task's `business_key` (the OCR result ID, embedding the document ID) is the only identifying information shown in `reviewer-ui`'s generic task table.
 - ~~**No automatic reprocessing on permanent `failed`**~~ — **fixed in Post-Roadmap Phase 20 Session 4** ([ADR 0080](../adr/0080-rendering-ocr-service-retry-backoff-failed-permanent.md)): automatic retry with full-jitter backoff up to `max_ocr_attempts`, after that `failed_permanent` + manual restart via `POST .../retry`.
 - ~~No authorization~~ — **fixed in Post-Roadmap Phase 19 Session 8** ([ADR 0073](../adr/0073-ocr-rendering-virus-scan-rbac.md)): all endpoints now check `ocr.read`/`ocr.write` via `permission-service`.
+- ~~Only the coarse `ocr.read`/`ocr.write` checked, never the underlying document's own per-document ACL — the identical bug `rendering-service` already fixed at Phase 50 Session 3~~ — **closed in Phase 60 Session 1** ([ADR 0183](../adr/0183-federation-hub-callback-ssrf-and-ocr-service-document-idor.md)), see "Authorization" above.
 - **Word ceiling is a rough estimate** (P5b-S5): `page count × 250` instead of an exact count — can trigger too early for text-sparse multi-page PDFs and never for text-dense single images (see ADR 0016 for details/rationale).
 - **Batch size only limits the number of concurrent calls, not the resource usage per call** — no real worker pool with memory/CPU accounting.
 - **`ocrEnabled` is only visible/controllable as a Compose profile** — the Admin UI only shows "reachable"/"not reachable", no toggle (see ADR 0016 for the rationale).

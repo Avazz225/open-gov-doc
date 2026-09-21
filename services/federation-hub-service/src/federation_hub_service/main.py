@@ -1,10 +1,13 @@
 import asyncio
+import ipaddress
 import json
 import logging
+import socket
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
+from urllib.parse import urlparse
 
 import httpx
 from dms_common import configure_logging
@@ -299,6 +302,60 @@ def get_ca_certificate() -> CaCertificateOut:
     return CaCertificateOut(ca_certificate_pem=app.state.hub_ca_certificate_pem.decode("utf-8"))
 
 
+def _validate_callback_base_url(base_url: str) -> None:
+    """SSRF guard (Phase 60 Session 1) - `callback_base_url` previously had
+    no validation at all. Combined with self-registration requiring no
+    admin approval (ADR 0039's own deliberate open-registration model -
+    unrelated to this finding, not revisited here), an attacker could
+    register an installation whose `callback_base_url` points at an
+    internal-only target (e.g. a cloud metadata endpoint), then force the
+    hub to make a server-side HTTP call there via `POST /handovers`
+    delivery, using the (deliberately ungated, address-book-style)
+    `GET /handovers/{id}` status field as a blind success/failure oracle.
+
+    Deliberately NOT https-only and NOT a hard failure on unresolvable
+    hostnames, unlike `migration_service.main._validate_peer_base_url`'s
+    stricter design for a materially different real caller: this
+    project's federation model has no TLS anywhere (message-level
+    signing via ADR 0039's certificates instead), and this service's own
+    extensive existing test suite deliberately registers with genuinely
+    non-resolving RFC 2606 test domains (`*.test`/`*.invalid`) while
+    mocking the actual delivery transport - rejecting those at
+    registration time would defeat that established, deliberate
+    convention. This still closes the literal, actually-exploitable shape
+    the finding describes (a metadata/loopback/private IP given directly,
+    or a hostname that DOES resolve to one) - a hostname that fails to
+    resolve is simply allowed through unresolved, an accepted residual gap
+    (no DNS-rebinding protection either, same caveat as migration-service's
+    equivalent guard)."""
+    parsed = urlparse(base_url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise HTTPException(
+            status_code=422, detail=f"callback_base_url {base_url!r} ist keine gültige http(s)-URL"
+        )
+    try:
+        resolved_ips = {info[4][0] for info in socket.getaddrinfo(parsed.hostname, None)}
+    except OSError:
+        return
+    for ip_str in resolved_ips:
+        ip = ipaddress.ip_address(ip_str)
+        if (
+            ip.is_loopback
+            or ip.is_private
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"callback_base_url {base_url!r} löst zu einer privaten/internen Adresse "
+                    f"auf ({ip_str}) - nicht erlaubt"
+                ),
+            )
+
+
 @app.post("/installations", response_model=InstallationOut, status_code=status.HTTP_201_CREATED)
 async def register_installation(
     request: Request,
@@ -312,9 +369,13 @@ async def register_installation(
     parameter so that exactly these bytes (not a separately re-serialized
     object) are verified - same principle as
     `workflow_service.main.federation_inbound`, just in the reverse
-    direction."""
+    direction. **Since Phase 60 Session 1**: `callback_base_url` validated
+    via `_validate_callback_base_url` before signature verification even
+    runs (cheap syntactic/DNS check first, avoids the more expensive
+    cryptographic verification for an obviously-malformed target)."""
     body = await request.body()
     payload = _parse_body(InstallationRegister, body)
+    _validate_callback_base_url(payload.callback_base_url)
     try:
         installation = await repository.register_or_update_installation(
             session, payload, raw_body=body, presented_signature=x_installation_signature

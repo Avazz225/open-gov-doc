@@ -30,10 +30,25 @@ def test_healthz():
 
 
 def test_list_ocr_results_empty_for_unknown_document():
+    """Phase 60 Session 1: `document_id` now needs the caller's own
+    `document.read` (`_require_ocr_document_permission`), checked against a
+    real `permission-service` `ResourceNode` - a completely made-up
+    `document_id` is an UNREGISTERED resource and fails closed (`403`),
+    same convention as everywhere else in this project. Uses a real,
+    freshly uploaded document with no OCR result yet instead, which is
+    what this test actually means to cover: an empty list for a document
+    that legitimately has none, not an unregistered/nonexistent one."""
+    document_id = _upload_corrupt_pdf()
     with TestClient(app, headers={"X-DMS-Principal": "ocr-service-tests"}) as client:
-        response = client.get("/ocr-results", params={"document_id": "unbekannt"})
+        response = client.get("/ocr-results", params={"document_id": document_id})
     assert response.status_code == 200
     assert response.json() == []
+
+
+def test_list_ocr_results_unregistered_document_is_403():
+    with TestClient(app, headers={"X-DMS-Principal": "ocr-service-tests"}) as client:
+        response = client.get("/ocr-results", params={"document_id": "unbekannt"})
+    assert response.status_code == 403
 
 
 def test_list_ocr_results_without_document_id_is_accepted():
@@ -62,6 +77,40 @@ def test_retry_returns_404_for_unknown_result():
     assert response.status_code == 404
 
 
+async def test_get_ocr_result_without_document_permission_is_403(session):
+    """RBAC (Phase 60 Session 1, ADR 0183) - `GET /ocr-results/{id}`
+    previously checked only the coarse, "everyone"-granted `ocr.read`, so
+    any caller could read ANY OCR result's full text/confidence/pages
+    regardless of the underlying document's own ACL. An `OcrResult` row
+    pointing at an unregistered `document_id` (never created, or fully
+    purged) now fails closed at `403` once existence (the row itself) is
+    confirmed - same existence-then-permission ordering as everywhere else
+    in this project."""
+    document_id = f"gone-{uuid.uuid4().hex[:8]}"
+    result = await repository.record_failure(
+        session, document_id=document_id, version_number=1, engine="", error="e", max_attempts=5
+    )
+    await session.commit()
+
+    with TestClient(app, headers={"X-DMS-Principal": "ocr-service-tests"}) as client:
+        response = client.get(f"/ocr-results/{result.id}")
+
+    assert response.status_code == 403
+
+
+async def test_download_page_image_without_document_permission_is_403(session):
+    document_id = f"gone-{uuid.uuid4().hex[:8]}"
+    result = await repository.record_failure(
+        session, document_id=document_id, version_number=1, engine="", error="e", max_attempts=5
+    )
+    await session.commit()
+
+    with TestClient(app, headers={"X-DMS-Principal": "ocr-service-tests"}) as client:
+        response = client.get(f"/ocr-results/{result.id}/page-image")
+
+    assert response.status_code == 403
+
+
 async def test_retry_returns_409_for_a_still_retryable_result(session):
     document_id = _upload_corrupt_pdf()
     await repository.record_failure(
@@ -75,24 +124,24 @@ async def test_retry_returns_409_for_a_still_retryable_result(session):
     assert response.status_code == 409
 
 
-async def test_retry_for_a_permanently_missing_document_resets_attempts_but_stays_failed_permanent(
-    session,
-):
-    """Post-Roadmap Phase 20 Session 4 (ADR 0080): der Endpunkt setzt
-    `attempts` IMMER zuerst zurück (`repository.reset_for_retry`), bevor er
-    `process_version` erneut aufruft - sonst würde `record_failure` von der
-    bereits erschöpften `attempts`-Zahl weiterzählen und ein
-    `failed_permanent`-Ergebnis könnte nie wieder herauskommen (bei der
-    Live-Verifikation dieser Session als echter Bug gefunden). Ein
-    `document_id`, das gar nicht (mehr) existiert, lässt `process_version`
-    danach still mit `DocumentNotFoundError` abbrechen (kein Redelivery-
-    Endlosschleifen-Risiko, siehe pipeline.py) - `status` bleibt deshalb bei
-    `failed_permanent` stehen (kein Erfolg vorgetäuscht), aber `attempts` ist
-    bereits zurückgesetzt. Bewusst kein Test mit einem echten hochgeladenen
-    Dokument: dessen `document.created`-Event würde vom in `TestClient(app)`
-    startenden echten NATS-Konsumenten unabhängig verarbeitet und mit diesem
-    Testaufruf um die `attempts`-Buchführung konkurrieren (nicht
-    deterministisch)."""
+async def test_retry_for_an_unregistered_document_is_403(session):
+    """Phase 60 Session 1 (ADR 0183) deliberately changes this test's
+    outcome: `retry_ocr_result` now requires the caller's own
+    `document.write` on `result.document_id` (`_require_ocr_document_
+    permission`, mirroring `rendering-service`'s identical IDOR fix) -
+    previously only the coarse, "everyone"-granted `ocr.write` was checked,
+    so ANY caller could retry ANY OCR result regardless of their access to
+    the underlying document. A `document_id` that was never registered in
+    `permission-service` (never created via `document-service`, or already
+    fully purged - `document.resource.deleted` removes its `ResourceNode`
+    too) now fails closed at `403`, before `process_version` ever gets a
+    chance to run its own graceful `DocumentNotFoundError` handling
+    (previously reachable, `200`/`failed_permanent` with `attempts` reset,
+    see git history for the pre-Phase-60-S1 version of this test). A
+    permanently failed OCR result for a document with no permission record
+    left at all can no longer be retried via this endpoint - accepted,
+    since such a retry could never have succeeded anyway (nothing to OCR),
+    only ever reset bookkeeping with no real effect."""
     document_id = f"gone-{uuid.uuid4().hex[:8]}"
     await repository.record_failure(
         session, document_id=document_id, version_number=1, engine="", error="e", max_attempts=1
@@ -102,11 +151,7 @@ async def test_retry_for_a_permanently_missing_document_resets_attempts_but_stay
     with TestClient(app, headers={"X-DMS-Principal": "ocr-service-tests"}) as client:
         response = client.post(f"/ocr-results/{document_id}:1/retry")
 
-    assert response.status_code == 200
-    body = response.json()
-    assert body["status"] == "failed_permanent"
-    assert body["attempts"] == 0
-    assert body["error_message"] is None
+    assert response.status_code == 403
 
 
 def test_mark_reviewed_returns_404_for_unknown_result():
