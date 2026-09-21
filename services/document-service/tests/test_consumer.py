@@ -95,7 +95,7 @@ async def test_unrelated_action_type_is_ignored(engine):
     assert published == []
 
 
-async def test_approved_force_unlock_for_already_unlocked_document_is_logged_not_raised(engine):
+async def test_approved_force_unlock_for_already_unlocked_document_publishes_failure_event(engine):
     session_factory = _session_factory(engine)
     async with session_factory() as session:
         await repository.create_document(
@@ -134,7 +134,21 @@ async def test_approved_force_unlock_for_already_unlocked_document_is_logged_not
 
     await handler(event.to_bytes())  # darf nicht raisen, obwohl keine Sperre existiert
 
-    assert published == []
+    # P66-S3: previously asserted `published == []` - now a
+    # `document.force_unlock.failed` event makes the failure visible
+    # system-wide instead of only in a local log line (ADR 0022's own
+    # Consequences section named this as a known, previously-unclosed gap).
+    assert published == [
+        (
+            "document.force_unlock.failed",
+            "doc-2",
+            {
+                "approval_request_id": "req-3",
+                "released_by": "admin",
+                "reason": "Dokument 'doc-2' ist nicht gesperrt",
+            },
+        )
+    ]
 
 
 async def test_approved_event_without_document_id_is_logged_not_raised(engine):

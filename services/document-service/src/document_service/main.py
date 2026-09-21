@@ -4071,6 +4071,21 @@ async def checkin_version(
     if await app.state.license_limit_client.is_exceeded("storage_gb"):
         raise HTTPException(status_code=403, detail="Speicherlimit der Lizenz überschritten")
 
+    # P66-S3: previously the virus scan AND the full storage-service upload
+    # both ran unconditionally before this precondition was ever checked
+    # (only inside `repository.checkin_version` further down) - wasting
+    # both on a request that was always going to 409 anyway. Neither the
+    # lock-conflict check nor the underlying document's existence depends
+    # on file content, so both are checked here first; `checkin_version`
+    # below still re-checks the lock internally, unchanged (cheap,
+    # defense-in-depth).
+    try:
+        await repository.check_lock_for_checkin(session, document_id, created_by)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except repository.LockConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     data = await file.read()
     content_type = await _resolve_content_type(session, data)
 

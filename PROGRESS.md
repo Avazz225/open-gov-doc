@@ -2,7 +2,37 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P66-S2 (`workflow-service` bundle — second session of Phase 66), closing a
+**Last completed:** P66-S3 (`document-service` correctness bundle — third and last session of Phase 66).
+Two bundled fixes; the plan's own framing bundled a third claim ("four-eyes default `False` is a gap")
+that was checked against ADR 0022 and found to be the established, deliberate, project-wide convention
+(uniform across every four-eyes action type except the intentionally-pre-seeded `auth.superuser.activate`
+break-glass exception) — **not** a gap, no code change made for it, `docs/services/document-service.md`
+corrected to say so instead of leaving it looking outstanding. (a) `consumer.py`'s force-unlock failure
+branch (previously log-only, a known gap ADR 0022's own Consequences section already named) now publishes
+`document.force_unlock.failed`, visible system-wide via `audit-service`'s `document.>` subscription — the
+larger extension (permission-service consuming it to add an `"execution_failed"` `ApprovalRequest`
+status) remains accepted future work, not attempted here (no new ADR expected per the plan's own DoD).
+(b) `checkin_version`'s new `repository.check_lock_for_checkin()` now runs before the virus scan and the
+storage-service upload, not only inside `repository.checkin_version` afterward — a request that was
+always going to `409` on a lock conflict no longer pays for either. New ADR:
+[0196](docs/adr/0196-document-service-force-unlock-failure-event-and-checkin-lock-precheck.md). Tests:
+`document-service` 414/414 (was 413) — new `test_checkin_lock_conflict_returns_409_without_scanning_or_uploading`
+(spies on `virus_scan_client.scan`, asserts never called); `test_consumer.py`'s force-unlock-failure test
+renamed and its assertion changed from `published == []` to asserting the new event.
+`docs/services/document-service.md` updated (3 spots). Rebuilt/redeployed. Live-verified against the real
+running stack: a document locked by `alice`, check-in by `bob` returns `409` in ~11ms (fast enough to
+confirm scan/upload were skipped). **Phase 66 is now closed (3/3).**
+
+**Next session:** P67-S1 — wire `admin-ui`'s installation list (`lib/installations.ts`,
+`InstallationManager.tsx`, currently 100% `localStorage`) to the real `fleet-management-service`, which
+has fully existed since Phase 54 Session 1 with no `admin-ui` reference to it at all — the single
+highest-value finding of the whole Phase 65+ round. Needs an operator-key auth story for the cross-device
+provisioning use case. See `IMPLEMENTATION_PLAN.md`'s Phase 67 table for the full description, including
+P67-S2 (CLI tool completion) after it.
+
+---
+
+Immediately before P66-S3: **P66-S2** (`workflow-service` bundle — second session of Phase 66), closing a
 stale-premise gap: several docstrings/ADR 0131 asserted "no real process type sets `business_key` to a
 real document/case ID yet" — already false since Phase 14, when office-addin/libreoffice-addin's "start
 workflow from this document" feature shipped, unconditionally setting `business_key=documentId`. (a)
@@ -24,14 +54,6 @@ test family, confirmed unrelated by reproducing a failure in that same family on
 against the real running stack: `POST /instances` returns `422` for an unresolvable `business_key`, `201`
 when omitted; a claimed task's reassignment by an unrelated bystander returns `403`, by the claimant
 themselves `200`.
-
-**Next session:** P66-S3 — `document-service` correctness bundle (third and last session of Phase 66):
-force-unlock's four-eyes gate defaulting to `False` when unconfigured plus a missing feedback channel on
-a failed queued force-unlock execution, and `checkin_version` running the virus scan before checking for
-a lock conflict (reorder so the cheaper check runs first). See `IMPLEMENTATION_PLAN.md`'s Phase 66 table
-for the full description.
-
----
 
 Immediately before P66-S2: **P66-S1** (small security fixes bundle — first session of Phase 66). Three
 unrelated, small fixes bundled by size: (a) `webdav-connector`'s `handle_move()` now rejects `MOVE`

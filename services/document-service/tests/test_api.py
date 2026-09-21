@@ -643,6 +643,34 @@ def test_lock_conflict_returns_409(client):
     assert second.status_code == 409
 
 
+def test_checkin_lock_conflict_returns_409_without_scanning_or_uploading(client, monkeypatch):
+    """P66-S3: the lock-conflict precondition previously ran only inside
+    `repository.checkin_version`, AFTER the virus scan and the full
+    storage-service upload had already happened unconditionally - wasting
+    both on a request that was always going to 409. `check_lock_for_checkin`
+    now runs first; this asserts the scan is never even attempted."""
+    body = upload(client, content=b"v1").json()
+    document_id = body["id"]
+    client.post(f"/documents/{document_id}/lock", json={"locked_by": "alice", "session_id": "s1"})
+
+    scan_called = False
+
+    async def fake_scan(**kwargs):
+        nonlocal scan_called
+        scan_called = True
+
+    monkeypatch.setattr(app.state.virus_scan_client, "scan", fake_scan)
+
+    response = client.post(
+        f"/documents/{document_id}/versions",
+        data={"expected_base_version_number": 1, "created_by": "bob"},
+        files={"file": ("vertrag.pdf", b"v2", "application/pdf")},
+    )
+
+    assert response.status_code == 409
+    assert scan_called is False
+
+
 def test_release_lock_wrong_holder_returns_403(client):
     body = upload(client).json()
     document_id = body["id"]

@@ -802,6 +802,22 @@ def _conflict_filename(filename: str, *, created_by: str, now: datetime) -> str:
     return f"{filename}_conflict_{created_by}_{timestamp}"
 
 
+async def check_lock_for_checkin(session: AsyncSession, document_id: str, created_by: str) -> None:
+    """P66-S3: the same lock-conflict precondition `checkin_version` below
+    checks internally, split out so `main.checkin_version` can call it
+    BEFORE running the virus scan and uploading to storage-service -
+    neither depends on file content, so a request that was always going to
+    409 on a lock conflict previously wasted both anyway. `checkin_version`
+    itself still performs its own internal check unchanged (cheap, and a
+    genuine defense-in-depth against the lock being acquired by someone
+    else between this pre-check and the actual check-in within the same
+    request)."""
+    await get_document(session, document_id)  # raises NotFoundError for an unknown document_id
+    lock = await session.get(DocumentLock, document_id)
+    if lock is not None and _is_active(lock, datetime.now(UTC)) and lock.locked_by != created_by:
+        raise LockConflictError(f"Dokument {document_id!r} ist gesperrt von {lock.locked_by!r}")
+
+
 async def checkin_version(
     session: AsyncSession,
     document_id: str,

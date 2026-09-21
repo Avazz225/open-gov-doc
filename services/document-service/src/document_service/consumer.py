@@ -54,11 +54,31 @@ def make_handler(
         async with session_factory() as session:
             try:
                 original_lock = await repository.force_release_lock(session, document_id)
-            except repository.NotFoundError:
+            except repository.NotFoundError as exc:
+                # P66-S3: previously logged locally and returned with no
+                # trace anywhere else - ADR 0022's own Consequences section
+                # already named this as a known gap ("no execution feedback
+                # channel... a failed force-unlock is only logged locally").
+                # Publishing an event at least makes the failure visible
+                # system-wide (audit-service records every event
+                # unconditionally) - `ApprovalRequest.status` staying
+                # "approved" forever with no "executed"/"execution_failed"
+                # state is a larger state-machine change ADR 0022 itself
+                # deferred, not attempted here.
                 logger.warning(
                     "Genehmigter Force-Unlock für document_id=%r konnte nicht ausgeführt "
                     "werden (Sperre inzwischen anderweitig aufgelöst)",
                     document_id,
+                )
+                await publish_event(
+                    "document.force_unlock.failed",
+                    document_id,
+                    {
+                        "approval_request_id": event.payload.get("request_id"),
+                        "released_by": action_payload.get("released_by"),
+                        "reason": str(exc),
+                    },
+                    actor="system:document-service",
                 )
                 return
             await session.commit()
