@@ -2,11 +2,42 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P66-S1 (small security fixes bundle — first session of Phase 66). Three unrelated,
-small fixes bundled by size: (a) `webdav-connector`'s `handle_move()` now rejects `MOVE` outright for any
-edit-token-scoped session — closes the residual ADR 0189/P61-S4 explicitly left open (a token-scoped
-session could relocate its one authorized document into any folder the real underlying user has write
-access to). (b) `storage-service`'s three previously-ungated aggregate/maintenance endpoints
+**Last completed:** P66-S2 (`workflow-service` bundle — second session of Phase 66), closing a
+stale-premise gap: several docstrings/ADR 0131 asserted "no real process type sets `business_key` to a
+real document/case ID yet" — already false since Phase 14, when office-addin/libreoffice-addin's "start
+workflow from this document" feature shipped, unconditionally setting `business_key=documentId`. (a)
+`POST /instances` now validates a non-`None` `business_key` via the existing `_resolve_business_key_scope`
+helper, `422` if it resolves against neither case-service nor document-service (validated once at
+creation only — `business_key` is immutable afterward, no task-completion-time re-check needed). (b)
+`reassign_task` (ADR 0145's own docstring claimed "no such authorization primitive exists anywhere in
+this project yet" — also false, `POST .../org-hierarchy-grant` already resolves the supervisor chain)
+now requires the caller to be the current claimant or their supervisor (direct/transitive, new
+`PermissionServiceClient.is_supervisor_of()` reusing the existing read-only `GET
+/supervisor-chain/{id}`), `403` otherwise. New ADR:
+[0195](docs/adr/0195-workflow-service-business-key-validation-and-reassign-authorization.md). Corrected
+stale claims in `document_client.py`, `_resolve_business_key_scope`'s docstring, `models.py`, and ADR
+0131 (Decision/Rationale/Consequences all had a version of the same false premise). Tests:
+`workflow-service` 228/229 passed (one net-new test, plus fixes to three existing tests that used an
+unvalidated/unauthorized caller) — one pre-existing, unrelated flake in the federation/xdomea-dispatch
+test family, confirmed unrelated by reproducing a failure in that same family on the unmodified code via
+`git stash`. `docs/services/workflow-service.md` updated (5 spots). Rebuilt/redeployed. Live-verified
+against the real running stack: `POST /instances` returns `422` for an unresolvable `business_key`, `201`
+when omitted; a claimed task's reassignment by an unrelated bystander returns `403`, by the claimant
+themselves `200`.
+
+**Next session:** P66-S3 — `document-service` correctness bundle (third and last session of Phase 66):
+force-unlock's four-eyes gate defaulting to `False` when unconfigured plus a missing feedback channel on
+a failed queued force-unlock execution, and `checkin_version` running the virus scan before checking for
+a lock conflict (reorder so the cheaper check runs first). See `IMPLEMENTATION_PLAN.md`'s Phase 66 table
+for the full description.
+
+---
+
+Immediately before P66-S2: **P66-S1** (small security fixes bundle — first session of Phase 66). Three
+unrelated, small fixes bundled by size: (a) `webdav-connector`'s `handle_move()` now rejects `MOVE`
+outright for any edit-token-scoped session — closes the residual ADR 0189/P61-S4 explicitly left open (a
+token-scoped session could relocate its one authorized document into any folder the real underlying user
+has write access to). (b) `storage-service`'s three previously-ungated aggregate/maintenance endpoints
 (`GET /storage/usage`, `POST /replication/process-pending`, `POST /object-verify/process-pending`) now
 require `_require_storage_caller`, with `reporting-service` and `system:storage-replication-cronjob`
 added as new trusted callers. Incidentally discovered and fixed alongside: `reporting-service`'s
@@ -26,14 +57,6 @@ generic `HTTPError` the test initially asserted). `docs/services/webdav-connecto
 `storage-service.md`, `document-service.md` updated. Live-verified against the real running stack:
 storage-service's three endpoints reject an untrusted caller and accept `reporting-service`;
 document-service's role-override endpoint returns `422` for an unknown role.
-
-**Next session:** P66-S2 — `workflow-service` bundle (second session of Phase 66): `business_key`
-validation at `POST /instances`/task-completion time (reusing the existing
-`_resolve_business_key_scope` helper), and supervisor-only authorization for `reassign_task` (reusing the
-existing org-hierarchy-grant resolution). See `IMPLEMENTATION_PLAN.md`'s Phase 66 table for the full
-list, including P66-S3 after it.
-
----
 
 Immediately before P66-S1: **P65-S2** (`docs/services/*.md` documentation corrections bundle — second and
 last session of Phase 65, no code). Same failure mode as P65-S1, applied to service docs instead of ADRs:

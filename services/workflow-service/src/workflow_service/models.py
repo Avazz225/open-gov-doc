@@ -116,10 +116,15 @@ class ProcessInstance(Base):
     directly, only through ``spiff_adapter``).
 
     ``business_key``, like ``folder_id``/``object_type_id`` in other
-    services, is an opaque cross-service reference (e.g. a future
-    ``document_id``) without FK enforcement across service boundaries -
-    unlike there, as of P6-S1 no caller actually checks it against
-    another service yet.
+    services, is an opaque cross-service reference (a ``case_id`` for
+    every circulation-folder process, a ``document_id`` for the
+    office-addin/libreoffice-addin "start workflow from this document"
+    feature) without FK enforcement across service boundaries - since
+    P66-S2, ``POST /instances`` validates it against case-service/
+    document-service at creation time via ``_resolve_business_key_scope``
+    (rejecting an unresolvable value with ``422``); it is otherwise
+    immutable for the life of the instance, so no further check is needed
+    once created.
 
     ``workflow_version`` (Phase 60 Session 3, ADR 0185) is a SQLAlchemy
     optimistic-concurrency version column (``__mapper_args__``,

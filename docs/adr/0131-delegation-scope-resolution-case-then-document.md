@@ -12,17 +12,24 @@ to an `object_type_id`/`folder_resource_id` before calling `permission-service`'
 dead pending "an additional resolution step." The resolution (`_resolve_business_key_scope`) tries
 `case-service`'s `GET /cases/{business_key}` first (the real, exercised path — every circulation-folder
 process sets `business_key=case_id`), then falls back to `document-service`'s `GET
-/documents/{business_key}` (no real process sets a document business_key today, but the field's own
-docstring already names this as a "future" possibility, and this reuses an existing endpoint rather than
-adding new API surface). `user-ui`'s `DelegationsPane` gains a scope picker for both dimensions.
+/documents/{business_key}` (~~no real process sets a document business_key today, but the field's own
+docstring already names this as a "future" possibility~~ — **closed in P66-S2**: the
+office-addin/libreoffice-addin "start workflow from this document" feature sets `business_key=documentId`
+for any process definition, live and load-bearing since those features shipped; that same session also
+made `POST /instances` reuse this resolution to reject an unresolvable `business_key` outright, see
+below). `user-ui`'s `DelegationsPane` gains a scope picker for both dimensions.
 
 ## Rationale
 
 - **`business_key` is genuinely opaque, but in practice today is always either a case ID or unset** —
   confirmed by finding every real `start_instance` caller in the codebase (only `case-service`, always
-  `business_key=case_id`, and `migration-service`, which never sets one). No document-keyed process
+  `business_key=case_id`, and `migration-service`, which never sets one). ~~No document-keyed process
   exists yet, despite `ProcessInstance.business_key`'s own docstring aspirationally naming "a future
-  `document_id`." Given this codebase's own precedent of trying multiple resolution paths for a
+  `document_id`."~~ — **closed in P66-S2**: the office-addin/libreoffice-addin "start workflow from this
+  document" feature has always set `business_key=documentId` for any process definition the user picks;
+  this claim was already stale at the time this ADR was written, since those features had shipped in
+  Phase 14, before this ADR's own P32-S2. Given this codebase's own precedent of trying multiple
+  resolution paths for a
   genuinely ambiguous reference, and the marginal cost being one extra HTTP call against an
   already-existing endpoint (not new API surface), both paths are implemented now rather than only the
   one currently exercised — user's explicit choice when presented with the narrower alternative
@@ -67,10 +74,13 @@ adding new API surface). `user-ui`'s `DelegationsPane` gains a scope picker for 
 
 - **`scope_object_type_ids` is genuinely, verifiably active today** for the one real process type that
   sets a business key (circulation folders/cases) — confirmed live, not just in a mocked test.
-- **`scope_folder_resource_ids` is correctly wired but has no real caller yet**: no process type in this
+- ~~**`scope_folder_resource_ids` is correctly wired but has no real caller yet**: no process type in this
   codebase sets a document business key, so this dimension remains dormant in practice until one does —
-  a real, current limitation of the codebase's process types, not a resolution bug. Verified live via a
-  document-keyed instance created directly through the API, confirming the code path itself works.
+  a real, current limitation of the codebase's process types, not a resolution bug.~~ — **closed in
+  P66-S2**: this was already false at write time — office-addin/libreoffice-addin's "start workflow from
+  this document" feature is a real caller, unconditionally setting a document-keyed `business_key`.
+  Verified live via a document-keyed instance created directly through the API, confirming the code path
+  itself works.
 - **`workflow-service` gains two new cross-service dependencies** (`case_service_base_url`,
   `document_service_base_url`, new `case_client.py`/`document_client.py`) with no `depends_on` entry in
   `docker-compose.yml` for either — `case-service` already depends on `workflow-service`, so a mutual

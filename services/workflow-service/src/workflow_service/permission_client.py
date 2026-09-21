@@ -138,5 +138,18 @@ class PermissionServiceClient:
             return
         response.raise_for_status()
 
+    async def is_supervisor_of(self, principal_id: str, *, of_principal_id: str) -> bool:
+        """P66-S2: read-only supervisor check for `reassign_task`'s new
+        authorization gate - reuses `GET /supervisor-chain/{principal_id}`
+        (P31-S9, the same transitive-chain lookup `create_org_hierarchy_grant`'s
+        "supervisor chain" grant kind already resolves internally), rather
+        than `create_org_hierarchy_grant` itself, which has the side effect
+        of creating a `Delegation`. `supervisor_ids` is the full transitive
+        chain, not just the direct supervisor, so a skip-level supervisor is
+        also authorized."""
+        response = await self._client.get(f"/supervisor-chain/{of_principal_id}")
+        response.raise_for_status()
+        return principal_id in response.json()["supervisor_ids"]
+
     async def close(self) -> None:
         await self._client.aclose()

@@ -4,14 +4,15 @@ import httpx
 class DocumentServiceClient:
     """HTTP client against the Document Service (P32-S2) - fallback
     resolution path for `_resolve_business_key_scope` alongside
-    `CaseServiceClient`: no real process type sets `business_key` to a
-    document ID today (`ProcessInstance.business_key`'s own docstring only
-    aspirationally names "a future document_id"), but the field is
-    genuinely opaque per ADR 0048's own framing ("a document or a
-    circulation folder, depending on the process") - this activates
-    `scope_folder_resource_ids` for the day a document-keyed process type
-    exists, reusing the already-existing `GET /documents/{id}` rather than
-    adding new API surface.
+    `CaseServiceClient`: the office-addin/libreoffice-addin "start workflow
+    from this document" feature sets `business_key=documentId` for any
+    process definition the user picks, live since those features shipped
+    (an earlier version of this docstring claimed "no real process type
+    sets this yet" - false, corrected in P66-S2). The field is genuinely
+    opaque per ADR 0048's own framing ("a document or a circulation folder,
+    depending on the process") - this activates `scope_folder_resource_ids`
+    for document-keyed processes, reusing the already-existing
+    `GET /documents/{id}` rather than adding new API surface.
 
     Post-Roadmap Phase 38 Session 4: `GET /documents/{id}` now requires a
     non-empty `X-DMS-Principal` header (previously ungated) - asserts a

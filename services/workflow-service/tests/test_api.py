@@ -81,11 +81,11 @@ def _create_object_type(*, applies_to: str = "folder") -> int:
 
 def _create_document(*, folder_id: str = "root") -> dict:
     """Delegation scope resolution (P32-S2) - fallback document-service
-    path for `_resolve_business_key_scope` (no real process sets a document
-    business_key today, see `document_client.py`'s own docstring, but the
-    resolution path itself needs a real document to exercise). `folder_id`
-    defaults to `"root"`, already a registered permission-service resource
-    - no extra folder-service setup needed."""
+    path for `_resolve_business_key_scope`, and (since P66-S2) also the
+    real document any `business_key`-validated `POST /instances` call in
+    this file needs to resolve against. `folder_id` defaults to `"root"`,
+    already a registered permission-service resource - no extra
+    folder-service setup needed."""
     response = httpx.post(
         f"{DOCUMENT_SERVICE_URL}/documents",
         data={"title": "wf-delegation-scope-test", "created_by": "alice", "folder_id": folder_id},
@@ -627,13 +627,33 @@ def test_start_instance_with_manual_task_stays_running(client, manual_task_bpmn,
     definition_id = _upload_definition(
         client, manual_task_bpmn, name="Approval", headers=admin_headers
     ).json()["id"]
+    document = _create_document()
     response = client.post(
         f"/process-definitions/{definition_id}/instances",
-        json={"created_by": "alice", "business_key": "doc-1"},
+        json={"created_by": "alice", "business_key": document["id"]},
     )
     assert response.status_code == 201
     assert response.json()["status"] == "running"
-    assert response.json()["business_key"] == "doc-1"
+    assert response.json()["business_key"] == document["id"]
+
+
+def test_start_instance_with_unresolvable_business_key_is_422(
+    client, manual_task_bpmn, admin_headers
+):
+    """P66-S2: `business_key` was previously accepted as any opaque string
+    with no validation - now rejected outright if it resolves against
+    neither case-service nor document-service."""
+    definition_id = _upload_definition(
+        client, manual_task_bpmn, name="Approval", headers=admin_headers
+    ).json()["id"]
+    response = client.post(
+        f"/process-definitions/{definition_id}/instances",
+        json={
+            "created_by": "alice",
+            "business_key": f"not-a-real-reference-{uuid.uuid4().hex[:8]}",
+        },
+    )
+    assert response.status_code == 422
 
 
 def test_start_instance_fully_automatic_completes_immediately(client, no_tasks_bpmn, admin_headers):
@@ -902,15 +922,42 @@ def test_reassign_task_moves_claim_to_new_principal(client, manual_task_bpmn, ad
         json={"principal_id": "dora-assignee"},
     )
 
+    # P66-S2: reassignment is now restricted to the current claimant
+    # themselves or their supervisor - self-service handoff here.
     response = client.post(
         f"/instances/{instance['id']}/tasks/{task_id}/reassign",
         json={"new_principal_id": "erik-new-assignee"},
+        headers={"X-DMS-Principal": "dora-assignee"},
     )
 
     assert response.status_code == 200
     assert response.json()["principal_id"] == "erik-new-assignee"
     tasks = client.get(f"/instances/{instance['id']}/tasks").json()
     assert tasks[0]["claimed_by"] == "erik-new-assignee"
+
+
+def test_reassign_task_by_a_non_claimant_non_supervisor_is_403(
+    client, manual_task_bpmn, admin_headers
+):
+    """P66-S2: previously any caller with `workflow.write` (the "everyone"-
+    granted default) could reassign ANY claimed task to anyone - now
+    requires the current claimant themselves or their supervisor."""
+    instance = _start_instance_with_one_task(
+        client, manual_task_bpmn, admin_headers, name="Reassign1b"
+    )
+    task_id = client.get(f"/instances/{instance['id']}/tasks").json()[0]["id"]
+    client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/claim",
+        json={"principal_id": "dora-assignee-1b"},
+    )
+
+    response = client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/reassign",
+        json={"new_principal_id": "erik-new-assignee"},
+        headers={"X-DMS-Principal": "unrelated-bystander-1b"},
+    )
+
+    assert response.status_code == 403
 
 
 def test_reassign_task_without_existing_claim_returns_404(client, manual_task_bpmn, admin_headers):
@@ -964,9 +1011,12 @@ def test_reassign_task_revokes_the_old_org_hierarchy_grant(
         is True
     )
 
+    # P66-S2: reassignment now requires the claimant's supervisor (or the
+    # claimant themselves) - petra is dora's supervisor, set up above.
     client.post(
         f"/instances/{instance['id']}/tasks/{task_id}/reassign",
         json={"new_principal_id": "erik-new-assignee-r3"},
+        headers={"X-DMS-Principal": "petra-supervisor-r3"},
     )
 
     check = httpx.get(f"{PERMISSION_SERVICE_URL}/delegations/check", params=check_params).json()

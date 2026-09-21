@@ -1235,6 +1235,27 @@ async def start_instance(
 ) -> ProcessInstanceOut:
     await _reject_during_maintenance(x_dms_maintenance_active)
     await _require_workflow_permission(x_dms_principal, access_type="write")
+    if payload.business_key is not None:
+        # P66-S2: `business_key` was accepted as any opaque string with no
+        # validation, even though it has been a genuine, live cross-service
+        # reference since the office-addin/libreoffice-addin "start workflow
+        # from this document" feature shipped (`business_key=documentId`)
+        # and every circulation-folder process (`business_key=case_id`) -
+        # the "no real process sets this yet" premise `_resolve_business_key_
+        # scope`'s own docstring and ADR 0131 asserted was false. Reused
+        # here exactly as delegation scoping already does: unresolved
+        # against both case-service and document-service means neither.
+        object_type_id, folder_resource_id, case_resource_id = await _resolve_business_key_scope(
+            payload.business_key, x_dms_principal
+        )
+        if object_type_id is None and folder_resource_id is None and case_resource_id is None:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"business_key {payload.business_key!r} referenziert weder einen "
+                    "bestehenden Case noch ein bestehendes Dokument"
+                ),
+            )
     try:
         instance = await repository.start_instance(
             session,
@@ -1479,15 +1500,19 @@ async def _resolve_business_key_scope(
     enforcement), so this tries `case-service` first (the real, exercised
     path: every circulation-folder process sets `business_key=case_id`,
     see `case_service.workflow_client`) and falls back to `document-service`
-    (no real process sets a document business_key today, but the field's
-    own docstring already anticipates it and this reuses an existing
-    endpoint, not new API surface). Returns `(None, None, None)` if
-    `business_key` is unset or resolves against neither service - callers
-    then fall back to the existing fail-closed scope semantics
-    (`_delegation_scope_matches`), exactly as if the dimension had never
-    been supplied. When `business_key` resolves to a case, its own id IS
-    its `resource_id` (ADR 0144: cases are real `ResourceNode`s keyed by
-    their own id) - no extra field needed from case-service's response."""
+    (the office-addin/libreoffice-addin "start workflow from this document"
+    feature sets `business_key=documentId`, live since those features
+    shipped - an earlier version of this docstring claimed no real process
+    sets a document business_key yet; false, corrected in P66-S2, which
+    also made `POST /instances` reuse this same resolution to reject an
+    unresolvable `business_key` outright rather than silently accepting
+    it). Returns `(None, None, None)` if `business_key` is unset or resolves
+    against neither service - callers then fall back to the existing
+    fail-closed scope semantics (`_delegation_scope_matches`), exactly as if
+    the dimension had never been supplied. When `business_key` resolves to a
+    case, its own id IS its `resource_id` (ADR 0144: cases are real
+    `ResourceNode`s keyed by their own id) - no extra field needed from
+    case-service's response."""
     if not business_key:
         return None, None, None
     case = await app.state.case_client.get_case(business_key, x_dms_principal=x_dms_principal)
@@ -1641,17 +1666,47 @@ async def reassign_task(
     reassignment... not a general task-assignment feature"), motivated by
     `reviewer-ui`'s `TeamTaskList` (P31-S11, ADR 0122): a supervisor seeing
     a report's stuck claim can now move it to someone else instead of only
-    being able to look at it. Same authorization posture as
-    `claim_task`/`release_task_claim` above - gated by `workflow.write`
-    like every other task action, not a new "must be the claimant's
-    supervisor" check (no such authorization primitive exists anywhere in
-    this project yet, and task-claiming itself has never been restricted
-    to a specific assignee - see `claim_task`'s own docstring: "a claim can
-    be made on someone else's behalf"). `404` if the task has no existing
-    claim - a genuinely unclaimed task is claimed directly via the existing
-    `POST .../claim`, not "reassigned" (there is nothing to reassign FROM)."""
+    being able to look at it. `404` if the task has no existing claim - a
+    genuinely unclaimed task is claimed directly via the existing
+    `POST .../claim`, not "reassigned" (there is nothing to reassign FROM).
+
+    **Since P66-S2**: previously gated only by `workflow.write`, same as
+    `claim_task`/`release_task_claim` - any caller with that broad,
+    "everyone"-granted permission could reassign ANY claimed task to
+    anyone, not just the motivating "supervisor reassigns a report's stuck
+    task" scenario (the docstring here used to claim "no such authorization
+    primitive exists anywhere in this project yet" - false, `POST
+    .../org-hierarchy-grant` below already resolves the same supervisor
+    chain via `permission-service`, ADR 0121). Now additionally requires
+    `x_dms_principal` to be either the CURRENT claimant themselves
+    (self-service handoff, same spirit as delegation's own self-service
+    model) or a supervisor of the current claimant, direct or transitive
+    chain (`PermissionServiceClient.is_supervisor_of`, reusing `GET
+    /supervisor-chain/{principal_id}`, P31-S9) - `403` otherwise."""
     await _reject_during_maintenance(x_dms_maintenance_active)
     await _require_workflow_permission(x_dms_principal, access_type="write")
+    claim = await repository.get_task_claim(session, instance_id, task_id)
+    if claim is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"task_id {task_id!r} bei instance_id {instance_id!r} ist nicht beansprucht - "
+                "eine Neuzuweisung setzt einen bestehenden Claim voraus"
+            ),
+        )
+    if (
+        claim.principal_id != x_dms_principal
+        and not await app.state.permission_client.is_supervisor_of(
+            x_dms_principal, of_principal_id=claim.principal_id
+        )
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Nur der aktuelle Beanspruchende selbst oder dessen Vorgesetzte(r) dürfen "
+                "diese Aufgabe neu zuweisen"
+            ),
+        )
     try:
         new_claim, delegation_ids = await repository.reassign_task_claim(
             session, instance_id, task_id, payload.new_principal_id
