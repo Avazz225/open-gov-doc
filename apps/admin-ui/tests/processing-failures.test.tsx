@@ -38,13 +38,19 @@ vi.mock("@/lib/api", () => ({
   },
 }));
 
+// P63-S3: notification-service is the only one of the four sections gated by
+// a real capability (`admin.notification_read`) - default to holding it so
+// the existing tests below keep exercising the notification section's normal
+// behavior; the dedicated "missing permission" test overrides this to [].
+let mockPermissions: string[] = ["admin.notification_read"];
+
 vi.mock("@/lib/auth-context", async () => {
   const actual = await vi.importActual<typeof import("@/lib/auth-context")>("@/lib/auth-context");
   return {
     ...actual,
     useAuth: () => ({
       user: { sub: "u1", username: "admin", email: null, realm_roles: [] },
-      permissions: [],
+      permissions: mockPermissions,
       accessToken: "token-123",
       isLoading: false,
       login: vi.fn(),
@@ -128,6 +134,7 @@ function mockHandoverLists(byStatus: Record<string, unknown[]>) {
 
 describe("ProcessingFailuresView", () => {
   beforeEach(() => {
+    mockPermissions = ["admin.notification_read"];
     listNotificationsMock.mockReset();
     retryNotificationMock.mockReset();
     listRenditionsMock.mockReset();
@@ -165,6 +172,20 @@ describe("ProcessingFailuresView", () => {
     expect(screen.getByText("Keine dauerhaft fehlgeschlagenen Ersatzdarstellungen.")).toBeInTheDocument();
     expect(screen.getByText("Keine dauerhaft fehlgeschlagenen OCR-Ergebnisse.")).toBeInTheDocument();
     expect(screen.getByText("Keine dauerhaft fehlgeschlagenen Handover-Vermittlungen.")).toBeInTheDocument();
+  });
+
+  it("shows a missing-permission state for notifications without calling the API, while the other three sections still load", async () => {
+    mockPermissions = [];
+    listRenditionsMock.mockResolvedValue([FAILED_RENDITION]);
+    listOcrResultsMock.mockResolvedValue([FAILED_OCR_RESULT]);
+
+    renderView();
+
+    expect(
+      await screen.findByText("Keine Berechtigung, um fehlgeschlagene Benachrichtigungen einzusehen.")
+    ).toBeInTheDocument();
+    expect(screen.getByText("thumbnail")).toBeInTheDocument();
+    expect(listNotificationsMock).not.toHaveBeenCalled();
   });
 
   it("shows an unreachable state when notification-service cannot be reached", async () => {
@@ -278,9 +299,20 @@ describe("ProcessingFailuresView", () => {
     renderView();
     await screen.findByText("install-c");
 
+    // ADR 0162/Phase 44 Session 1: retry is gated by an operator-typed key,
+    // the retry button stays disabled (`operatorKey.length === 0`) until one
+    // is entered - this test pre-dates that change and was left stale
+    // (asserting a single-arg `retryHandover` call that could never have
+    // fired, since the button was never actually clickable). Fixed here as
+    // an incidental discovery while getting the frontend regression green
+    // for P63-S3, unrelated to that session's own scope.
+    fireEvent.change(
+      screen.getByPlaceholderText("Erforderlich für 'Erneut versuchen' (Phase 44 Session 1, ADR 0162)"),
+      { target: { value: "test-operator-key" } }
+    );
     fireEvent.click(screen.getByRole("button", { name: "Erneut versuchen" }));
 
-    expect(retryHandoverMock).toHaveBeenCalledWith("handover-2");
+    expect(retryHandoverMock).toHaveBeenCalledWith("handover-2", "test-operator-key");
     await vi.waitFor(() => expect(listHandoversMock).toHaveBeenCalledTimes(4));
   });
 });

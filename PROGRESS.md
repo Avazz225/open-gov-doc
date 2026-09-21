@@ -2,9 +2,93 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P63-S2 (`federation-hub-service` bundle — second session of Phase 63). **New ADR**
-([0191](docs/adr/0191-federation-hub-process-type-enforcement-and-handover-cleanup.md)) — a real
-validation-strictness decision for (a), reusing an already-proven pattern for (b).
+**Last completed:** P63-S3 (small fixes + ADR documentation corrections bundle — third and last session
+of Phase 63). **New ADR** ([0192](docs/adr/0192-document-service-kennzeichen-format-shape-validation.md))
+for (a) — turned out to be a genuine design decision, not the mechanical fix the plan expected.
+
+**The gaps.** (a) `document-service`'s `PATCH /documents/{id}` gates a manual `Kennzeichen` attribute
+change by role (`kennzeichen_admin_role`) but never validated the new value against the object type's
+own configured `kennzeichen_format` — a `dms-admin` could write an arbitrary string that breaks the
+reference-number contract other services rely on (mail-connector's candidate matching, migration-
+service). (b) `admin-ui`'s `/processing-failures/` page's notification section had no client-side
+permission gate, so a caller lacking `admin.notification_read` (added to `notification-service` in this
+same round's own P59-S1) only ever saw a raw backend 403 in the inline error text. (c) three ADRs
+(0116/0123/0154) were suspected to still be missing "closed in..." addenda for gaps actually closed by
+later sessions.
+
+**The fixes, all three scoped-corrected during implementation** (see `IMPLEMENTATION_PLAN.md`'s P63-S3
+row for the full detail):
+
+(a) **The plan's "reuse the existing regex validation" premise was wrong** — investigated first, found no
+value-matching mechanism existed anywhere in this codebase (`object-type-service`'s
+`_validate_kennzeichen_format` only validates the TEMPLATE's own shape; `_render_kennzeichen` only ever
+GENERATES a value, never validates one against the template). Built `_kennzeichen_format_to_pattern()`
+from scratch in `document-service` (deliberately duplicated per-service, ADR 0006 precedent, rather than
+a new cross-service call): fixed date/counter placeholders (`YYYY`/`YY`/`MM`/`DD`/`Laufende_Nummer`)
+matched exactly, mirroring `_render_kennzeichen`'s own formatting — `Laufende_Nummer` as a MINIMUM width
+(`\d{3,}`, not exactly 3 digits, since `f"{n:03d}"` doesn't cap the counter at 999); any other placeholder
+(an attribute reference, e.g. `{Federführung}`) matched permissively (`.*?`), its shape being genuinely
+unconstrained without a full per-attribute-type schema lookup. Applies only to the manual `PATCH` path,
+not creation (creation's `Kennzeichen` is always server-generated, already guaranteed to match). New
+tests: `test_update_kennzeichen_rejects_a_value_not_matching_the_configured_format`, `..._accepts_a_
+value_matching_...`, `..._accepts_a_larger_laufende_nummer_than_the_minimum_width`, `..._with_attribute_
+placeholder_accepts_any_shape_for_that_segment`, `..._clearing_the_value_needs_no_format_match`.
+`document-service` 407/407 (+5). Rebuilt/redeployed. **Live-verified**: a real object type
+(`kennzeichen_format="{YYYY}-{Laufende_Nummer}"`), a real document (auto-generated `Kennzeichen`
+"2026-001") — a garbage manual write confirmed `422` naming the configured format; "2026-999" confirmed
+`200`. See [ADR 0192](docs/adr/0192-document-service-kennzeichen-format-shape-validation.md).
+
+(b) **The plan's "wrap the whole page in `RequireCapability`" premise was also wrong** — `ProcessingFailuresView`
+aggregates four independent sections (notification/rendition/OCR/handover), each with a different backend
+access model; only notification is gated by `admin.notification_read` (ocr.read/rendition/handover remain
+"everyone" or have no admin-token model at all). Page-level gating would have hidden the other three
+sections from a caller missing only that one capability — a functional regression, caught before any wrong
+code was committed (the initial `AdminSidebar.tsx` whole-page-gate edit was made, then reverted). Fixed
+per-section instead: `NotificationFailuresSection` now destructures `permissions` from `useAuth()` and
+short-circuits to a graceful missing-permission message (new i18n key `processingFailures.
+notificationMissingPermission`, added to both `de.json`/`en.json`) instead of calling the API at all when
+the capability is absent — matching the precedent `RequireCapability.tsx`'s own docstring already
+documents for exactly this multi-section case (Phase 52 Session 1). `AdminSidebar.tsx`'s nav entry stays
+ungated, unchanged from before this session. New vitest coverage (+1 test, plus a module-level
+`mockPermissions` fixture pattern copied from `require-capability.test.tsx`'s established convention, so
+the other existing tests keep holding the capability by default). **Live-verified with a real Playwright
+browser session** against the running stack: logged in as `users-admin` (the project's existing
+bootstrapped E2E account, which does not carry `domain-admin-notification-read`) — confirmed the graceful
+message renders for the notification section while the other three sections load normally; temporary
+spec file removed afterward, same convention as every prior UI verification in this project.
+
+**Incidental fix, discovered while getting the frontend regression suite green, unrelated to this
+session's own scope**: `tests/processing-failures.test.tsx`'s pre-existing `"retries a failed handover
+(result leg) and reloads"` test was silently broken — confirmed via `git stash` that it failed on the
+pre-session baseline too. `retryHandover` gained an `operatorKey` second argument and the retry button
+gained a `disabled={... || operatorKey.length === 0}` guard back in ADR 0162/P44-S1, but this test was
+never updated: it asserted a single-arg call that could never have fired, since the button was never
+actually clickable. Fixed by filling the operator-key input before clicking and asserting the two-arg
+call.
+
+(c) **Two of three ADRs genuinely needed the addendum, one didn't.** ADR 0116 (search-service
+quarantine-awareness) and ADR 0123 (mail-connector per-mailbox RBAC) were missing their closure notes —
+both fixed with the same one-line "Closed (session, ADR)..." addendum pattern already used for ADR
+0053/0076 in an earlier round. **ADR 0154 turned out to already carry its own closure annotation**
+("closed in Phase 44 Session 2 (ADR 0163)") in its Rationale section, added when ADR 0163 itself closed
+that gap — this round's research agent apparently only read ADR 0154's "Consequences" section (which
+still shows the item struck through with the note) and mis-flagged it as unaddended. No action taken on
+ADR 0154; documented here as a corrected false positive, not a missed gap.
+
+`tsc`/`eslint`/`next build` clean for `admin-ui`. Full `admin-ui` vitest suite: 283/283 passing (43 test
+files). `ruff` clean for `document-service` (same pre-existing, unrelated repo-wide failures confirmed
+out of scope again, consistent with every prior session this round).
+
+**Next session:** P64-S1 — cross-service reference validation (first and only session of Phase 64):
+`object-type-service`'s `reference`-typed attributes, `workflow-service`'s DMN `decisionRef` re-check on
+deletion, `process-designer`'s `targetProcessType` validation. `graphify update .` once at the end of
+this session, closing the whole Phase 63-64 round.
+
+---
+
+Immediately before P63-S3: **P63-S2** (`federation-hub-service` bundle — second session of Phase 63).
+**New ADR** ([0191](docs/adr/0191-federation-hub-process-type-enforcement-and-handover-cleanup.md)) — a
+real validation-strictness decision for (a), reusing an already-proven pattern for (b).
 
 **The gaps.** (a) `Installation.supported_process_types`/`.supported_document_types` were stored at
 registration but never checked — a `POST /handovers` of an undeclared type succeeded at the hub and only
@@ -40,10 +124,6 @@ service's clean startup with the new lifespan-managed task confirmed via contain
 
 `docs/services/federation-hub-service.md` (Open Points bullet closed, new "Periodic cleanup of old
 `handover` rows" paragraph, API table row, model field description, test count).
-
-**Next session:** P63-S3 — small fixes + ADR documentation corrections bundle (`document-service`'s
-`Kennzeichen` format validation; `admin-ui`'s `/processing-failures/` `RequireCapability` wiring; three
-ADR closure addenda for ADR 0116/0123/0154). Third and last session of Phase 63.
 
 ---
 

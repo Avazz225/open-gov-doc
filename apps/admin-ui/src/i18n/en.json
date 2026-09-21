@@ -405,6 +405,7 @@
     "notificationHint": "Notifications (email/in-app/webhook) whose automatic delivery has finally failed after several attempts with backoff (Post-Roadmap Phase 20 Session 3, ADR 0079) - a manual restart retries delivery immediately.",
     "notificationUnreachable": "Notification service not reachable.",
     "notificationEmpty": "No permanently failed notifications.",
+    "notificationMissingPermission": "You don't have permission to view failed notifications.",
     "renditionHeading": "Renditions",
     "renditionHint": "Renditions (thumbnails, PDF/A, ...) whose automatic generation has finally failed after several attempts with backoff (Post-Roadmap Phase 20 Session 4, ADR 0080) - a manual restart only retries the affected renderer.",
     "renditionUnreachable": "Rendering service not reachable.",

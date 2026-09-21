@@ -42,15 +42,31 @@ export function ProcessingFailuresView() {
 }
 
 function NotificationFailuresSection() {
-  const { accessToken } = useAuth();
+  const { accessToken, permissions } = useAuth();
   const { t } = useI18n();
   const [items, setItems] = useState<Notification[]>([]);
   const [unreachable, setUnreachable] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [retryingId, setRetryingId] = useState<string | null>(null);
+  // P63-S3: unlike the three sibling sections below, `GET /notifications`
+  // requires a real, non-"everyone" capability (`admin.notification_read`,
+  // P59-S1) - previously this section had no client-side gate at all, so a
+  // caller without it only ever saw the backend's raw 403 in the inline
+  // error text. Checked here, not by wrapping the whole page in
+  // `RequireCapability` - `ProcessingFailuresView` aggregates four
+  // independent sections with different backend access models (the other
+  // three read `ocr.read`/`rendition`-equivalent capabilities still
+  // granted to "everyone"), so gating the whole page on this one
+  // capability would incorrectly hide the other three sections from a
+  // caller who can see everything except notifications.
+  const hasPermission = permissions.includes("admin.notification_read");
 
   const reload = useCallback(async () => {
+    if (!hasPermission) {
+      setIsLoading(false);
+      return;
+    }
     if (!accessToken) return;
     setIsLoading(true);
     setUnreachable(false);
@@ -66,7 +82,7 @@ function NotificationFailuresSection() {
     } finally {
       setIsLoading(false);
     }
-  }, [accessToken]);
+  }, [accessToken, hasPermission]);
 
   useEffect(() => {
     reload();
@@ -86,6 +102,14 @@ function NotificationFailuresSection() {
     }
   }
 
+  if (!hasPermission) {
+    return (
+      <div className="card">
+        <h2>{t("processingFailures.notificationHeading")}</h2>
+        <p className="empty-state">{t("processingFailures.notificationMissingPermission")}</p>
+      </div>
+    );
+  }
   if (isLoading) return <p>{t("common.loading")}</p>;
   if (unreachable) {
     return <p className="empty-state">{t("processingFailures.notificationUnreachable")}</p>;

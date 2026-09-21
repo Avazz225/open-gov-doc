@@ -97,3 +97,11 @@ document unless an active `LegalHold` on it blocks that, exactly like the loop's
   session (see `docs/services/user-ui.md` for exactly what was built) — a dedicated cross-document
   "records-quarantine holding area" browser, analogous to `TrashPane`'s `admin`/`admin_classified` scopes,
   is a reasonable follow-up but not required for the mechanism itself to work correctly.
+
+**Closed (Post-Roadmap Phase 36 Session 2)**: the "`search-service` is NOT made quarantine-aware" gap
+named above was closed — `reindex_document()` now denormalizes `records_quarantine_active` and `search()`/
+`facet_counts()` unconditionally exclude it, no opt-in query param. See "Records Quarantine Awareness" in
+`docs/services/search-service.md`. (Found and closed by an earlier session than the one that flagged it
+stale in this ADR — P63-S3's gap-analysis round caught that this ADR itself was never annotated with the
+closure, the same recurring "ADR names a gap, a later session silently closes it, nobody annotates the
+ADR" failure mode already corrected for ADR 0053/0076 in an earlier round.)

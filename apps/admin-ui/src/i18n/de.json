@@ -405,6 +405,7 @@
     "notificationHint": "Benachrichtigungen (E-Mail/In-App/Webhook), deren automatische Zustellung nach mehreren Versuchen mit Backoff endgültig fehlgeschlagen ist (Post-Roadmap Phase 20 Session 3, ADR 0079) - ein manueller Neustart versucht die Zustellung sofort erneut.",
     "notificationUnreachable": "Notification Service nicht erreichbar.",
     "notificationEmpty": "Keine dauerhaft fehlgeschlagenen Benachrichtigungen.",
+    "notificationMissingPermission": "Keine Berechtigung, um fehlgeschlagene Benachrichtigungen einzusehen.",
     "renditionHeading": "Ersatzdarstellungen",
     "renditionHint": "Ersatzdarstellungen (Thumbnails, PDF/A, ...), deren automatische Erzeugung nach mehreren Versuchen mit Backoff endgültig fehlgeschlagen ist (Post-Roadmap Phase 20 Session 4, ADR 0080) - ein manueller Neustart versucht nur den betroffenen Renderer erneut.",
     "renditionUnreachable": "Rendering Service nicht erreichbar.",

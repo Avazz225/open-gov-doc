@@ -104,3 +104,9 @@ configured mailbox each tick (one backend instance per mailbox, built once at st
   `folder_id`/`object_type_id` elsewhere in this project (config-space references aren't DB-enforced across
   the config/table boundary); removing a mailbox from `DMS_MAILBOXES` leaves its historical messages'
   `mailbox_id` pointing at a now-unconfigured id, still queryable, just no longer pollable.
+
+**Closed (P32-S3, [ADR 0132](0132-mail-connector-department-rbac-group-membership.md))**: the "No per-
+mailbox/department RBAC narrowing yet" gap named above was closed — `departmental` mailboxes now require
+real `permission-service` group membership in `owning_group_id`, via a new `is_group_member()` client
+call, in addition to `poststelle_role`. (Same annotation gap as ADR 0116 above — found by P63-S3's gap-
+analysis round, not by the closing session itself.)

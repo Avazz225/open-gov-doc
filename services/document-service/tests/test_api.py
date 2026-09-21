@@ -888,6 +888,116 @@ def test_removing_existing_kennzeichen_via_attribute_replace_needs_admin_role(cl
     assert response.status_code == 403
 
 
+def _kennzeichen_format_object_type_id(
+    kennzeichen_format: str, *, attributes: list | None = None
+) -> str:
+    """P63-S3: a fresh object type with a configured `kennzeichen_format`
+    but no REQUIRED attributes, so `upload()` without `attributes` still
+    succeeds - the format-shape check under test here only fires on the
+    manual `PATCH` path, not document creation. `attributes` still needs
+    to declare any attribute-name placeholder the format references
+    (`_validate_kennzeichen_format` rejects an unrecognized placeholder at
+    object-type save time otherwise), just not as `required`."""
+    response = httpx.post(
+        f"{OBJECT_TYPE_SERVICE_URL}/object-types",
+        json={
+            "name": f"kennzeichen-shape-test-type-{uuid.uuid4().hex[:8]}",
+            "applies_to": "document",
+            "kennzeichen_format": kennzeichen_format,
+            "attributes": attributes or [],
+        },
+        timeout=30.0,
+        headers=OBJECT_CONFIG_ADMIN_HEADERS,
+    )
+    response.raise_for_status()
+    return str(response.json()["id"])
+
+
+def test_update_kennzeichen_rejects_a_value_not_matching_the_configured_format(client):
+    """P63-S3 (ADR 0192): previously only role-gated, never validated
+    against the object type's own `kennzeichen_format` shape - a
+    `dms-admin` could write an arbitrary string that breaks the
+    reference-number contract other services rely on."""
+    object_type_id = _kennzeichen_format_object_type_id("{YYYY}-{Laufende_Nummer}")
+    document_id = upload(client, object_type_id=object_type_id).json()["id"]
+
+    response = client.patch(
+        f"/documents/{document_id}",
+        json={"attributes": {"Kennzeichen": "not-shaped-like-the-format-at-all"}},
+        headers={"X-DMS-Roles": "dms-admin"},
+    )
+    assert response.status_code == 422
+
+
+def test_update_kennzeichen_accepts_a_value_matching_the_configured_format(client):
+    object_type_id = _kennzeichen_format_object_type_id("{YYYY}-{Laufende_Nummer}")
+    document_id = upload(client, object_type_id=object_type_id).json()["id"]
+
+    response = client.patch(
+        f"/documents/{document_id}",
+        json={"attributes": {"Kennzeichen": "2026-001"}},
+        headers={"X-DMS-Roles": "dms-admin"},
+    )
+    assert response.status_code == 200
+    assert response.json()["attributes"]["Kennzeichen"] == "2026-001"
+
+
+def test_update_kennzeichen_accepts_a_larger_laufende_nummer_than_the_minimum_width(client):
+    """`Laufende_Nummer` renders as AT LEAST 3 digits
+    (`object_type_service.repository._render_kennzeichen`'s own
+    `f"{n:03d}"` is a minimum width, not a truncation) - a real counter
+    that has grown past 999 must still be accepted."""
+    object_type_id = _kennzeichen_format_object_type_id("{YYYY}-{Laufende_Nummer}")
+    document_id = upload(client, object_type_id=object_type_id).json()["id"]
+
+    response = client.patch(
+        f"/documents/{document_id}",
+        json={"attributes": {"Kennzeichen": "2026-12345"}},
+        headers={"X-DMS-Roles": "dms-admin"},
+    )
+    assert response.status_code == 200
+
+
+def test_update_kennzeichen_with_attribute_placeholder_accepts_any_shape_for_that_segment(client):
+    """A placeholder referencing an object-type attribute (P17-S2, e.g.
+    `{Federführung}`) has an unconstrained value shape - the format-shape
+    check must not reject a legitimate value just because it can't model
+    what that segment should look like."""
+    object_type_id = _kennzeichen_format_object_type_id(
+        "{Federführung}-{Laufende_Nummer}",
+        attributes=[{"name": "Federführung", "type": "string"}],
+    )
+    document_id = upload(
+        client, object_type_id=object_type_id, attributes='{"Federführung": "IT"}'
+    ).json()["id"]
+
+    response = client.patch(
+        f"/documents/{document_id}",
+        json={"attributes": {"Federführung": "IT", "Kennzeichen": "Any-Free-Form-Text-Here-001"}},
+        headers={"X-DMS-Roles": "dms-admin"},
+    )
+    assert response.status_code == 200
+
+
+def test_update_kennzeichen_clearing_the_value_needs_no_format_match(client):
+    """Clearing the field is a legitimate admin action - nothing to
+    validate a format-shape against. The object type's `kennzeichen_format`
+    auto-generates a real `Kennzeichen` on upload (see
+    `test_create_document_renders_kennzeichen_attribute_placeholder`) -
+    its exact value doesn't matter here, only that clearing it afterward
+    succeeds."""
+    object_type_id = _kennzeichen_format_object_type_id("{YYYY}-{Laufende_Nummer}")
+    document_id = upload(client, object_type_id=object_type_id).json()["id"]
+
+    response = client.patch(
+        f"/documents/{document_id}",
+        json={"attributes": {}},
+        headers={"X-DMS-Roles": "dms-admin"},
+    )
+    assert response.status_code == 200
+    assert "Kennzeichen" not in response.json()["attributes"]
+
+
 # --- Draft / pre-registration lifecycle (post-roadmap phase 31 session 2,
 # ADR 0113) -----------------------------------------------------------
 

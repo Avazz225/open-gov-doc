@@ -199,6 +199,13 @@ Legal hold management itself (set/lift) does **not** happen in the Admin UI, but
 - **Triggering records disposal itself** (object type deadline/manual trigger) does **not** happen here, but via the extended `ObjectTypeEditor` (`default_archive_after_days`/`archive_encryption_enabled`, see above) or directly on the document in the User UI — this page is pure observation/retrieval, no "dispose now" control (the automatic poll loop of `archival-service` already covers the normal case).
 - **The role gate for retrieval is enforced server-side** (`archival-service`'s `archive_retrieval_role`, default `dms-admin`, from the gateway-injected `X-DMS-Roles` header) — the Admin UI itself does not hide the button based on role, a click without the matching role returns `403`, shown in the page's `error` text.
 - **Second section "Case Records Disposal"** (`CaseArchivalSection`, same `/archival-transfers/` slug, since **P7-S3b**) — no new page slug, same multi-section pattern as `RetentionSettings` (documents + folders in one form). Contains two parts: **(a)** a configuration form for `CaseArchivalConfig` (`GET`/`PUT /api/case-service/case-archival-config`) — installation-wide disposal deadline after closure + encryption toggle, no counterpart in `ObjectTypeEditor`, since cases have no own `applies_to` category (see `docs/services/case-service.md`). **(b)** a status table (`GET /api/archival-service/case-archival-transfers?status=...`) with case ID, status (`pending`/`locked`/`packaged`/`verified`/`released`/`failed`), encrypted column, "archived at". A "download package" button appears only for status `released`, downloads the (optionally server-side decrypted) ZIP package via `GET .../case-archival-transfers/{id}/package` as a blob (`triggerBrowserDownload`, same pattern as `ReportsView`/`ForensicTraceView`) — **no** writing back to a live target as with document retrieval, since a case has no own live storage space.
+- **`NotificationFailuresSection` self-gated since P63-S3**: unlike the other three sections, `GET
+  /notifications` requires `admin.notification_read` (Phase 59 Session 1) — this section now checks
+  `permissions.includes("admin.notification_read")` from `useAuth()` and, if absent, shows
+  `processingFailures.notificationMissingPermission` instead of calling the API, skipping the call
+  entirely rather than surfacing the backend's raw `403` text as before. The other three sections and
+  the page's nav entry are unaffected — see the note under "Full alignment" above for why this is
+  per-section rather than a page-level `RequireCapability`.
 
 ## Standard Reports (5.4a, since P7-S2b)
 
@@ -378,6 +385,16 @@ Like the User UI: `src/i18n/de.json` + `useI18n()` (see [ADR 0007](../adr/0007-f
 
 `AdminSidebar`'s `requiresCapability` map was extended to match every newly-wrapped page, so the nav entry and the route-level guard now always agree.
 
+**`/processing-failures/` partially closed since P63-S3**: the blanket "no single clean capability to
+gate the whole page on" reasoning above no longer fully holds — `notification-service`'s `GET
+/notifications` gained `admin.notification_read` in Post-Roadmap Phase 59 Session 1, so one of the
+page's four sections now DOES have a real backend gate. Rather than wrap the whole page (which would
+incorrectly hide the other three, still-ungated sections from a caller missing only that one
+capability), `NotificationFailuresSection` gates ITSELF: checks `permissions.includes("admin.
+notification_read")` and shows a graceful missing-permission message instead of calling the API, while
+`RenditionFailuresSection`/`OcrResultFailuresSection`/`HandoverFailuresSection` and the page's
+`AdminSidebar` nav entry remain exactly as ungated as before. See "Processing Failure Visibility" below.
+
 **Since P6-S6 additionally for not-shutdown (4.8)**: `SuperuserBreakGlass` only shows the trigger form if `permissions` (from `auth-context.tsx`) contains the capability `system.not_shutdown.trigger` — purely client-side UX anticipation, actual enforcement happens at the Permission Service (`403` without the capability). The lift button is additionally tied to a second condition that is not purely role-based: it only appears if the currently logged-in principal (`user.sub`) matches `status.principal_id` (the active superuser) — any other person with `system.not_shutdown.trigger` does not see the button, even though they would be allowed to trigger maintenance mode (triggering and lifting are deliberately different permissions, 4.8).
 
 ## Build & Delivery
@@ -389,15 +406,18 @@ Two-stage Docker image (`apps/admin-ui/Dockerfile`), identical to the User UI. `
 ## Tests
 
 - `npm run typecheck` / `npm run lint` / `npm run build`.
-- `npm test` (Vitest + Testing Library, **282 tests since Phase 58 Session 2** — +2 in
+- `npm test` (Vitest + Testing Library, **283 tests since P63-S3** — +1 in `processing-failures.test.tsx`:
+  a new test for `NotificationFailuresSection`'s missing-permission state (shows the graceful message,
+  calls no API, other three sections unaffected). **Also fixed in this session, no test-count change**:
+  the long-standing `"retries a failed handover (result leg) and reloads"` flake (first noted Phase 47
+  Session 4, re-confirmed-but-deferred by several sessions since) — it never filled the operator-key
+  input ADR 0162 made required for the retry button to be clickable at all; fixed by filling it and
+  asserting the real two-arg `retryHandover` call. Zero known failures in the suite as of this session.
+
+Older history: 282 tests since Phase 58 Session 2 — +2 in
   `config-compare.test.tsx`: the new global ignore-regex field is sent as `ignore_regex: {"*":
   value}`, and expanding a differing item's new `<details>` disclosure reveals its per-field
-  `{base, compare}` table — see "Cross-Installation Config Compare" above. One known, unrelated,
-  independently-reproducible flake remains in `processing-failures.test.tsx` ("retries a failed
-  handover (result leg) and reloads" — confirmed to fail in isolation too, last touched at P40-S3,
-  untouched by this session, not investigated further here).
-
-Older history: 280 tests since P53-S3 — +1: a new
+  `{base, compare}` table — see "Cross-Installation Config Compare" above. Before that, 280 tests since P53-S3 — +1: a new
   `reports-view.test.tsx` test ("shows a visible status for each schedule's last delivery attempt")
   for the new `last_status`/`last_error`-driven status column in `ReportsView.tsx`'s schedule table
   (`.badge.ok`/`.badge.down`/never-run hint, incl. the `title` tooltip carrying `last_error` on the
@@ -494,8 +514,8 @@ Older history: 280 tests since P53-S3 — +1: a new
 ## Open Points
 
 - ~~**Authorization enforced only for `/users/`**~~ — **stale by Phase 45 Session 5**, and actually closed then: this bullet had already fallen behind several intervening sessions that quietly added `RequireCapability` gating to most other pages (`approval-settings`/`audit-trace-settings`/`config-packages`/`delegations`/`email-templates`/`export-settings`/`kennzeichen-settings`/`license`/`object-types`/`query-console`/`retention-settings`/`share-link-settings`/`signature-config`/`storage-guard`/`storage-operational-config`/`teamspaces`/`upload-settings`) without ever correcting this doc. Phase 45 Session 5 audited every remaining page and gated the four that had a real, cleanly-scoped backend permission to gate on: `/archival-transfers/` (`archival.read`), `/forensic-trace/` (`reporting.forensic_trace`), `/reports/` (`reporting.read`), `/superuser/` (`breakglass.approve` — the capability that actually gates this page's core request/approve flow server-side, not `system.not_shutdown.trigger`, which only conditionally shows one narrower button already client-gated inside `SuperuserBreakGlass` itself). `AdminSidebar.tsx`'s nav entries gained matching `requiresCapability` values for the same four (defense-in-depth, same pattern as every other gated entry).
-- **Deliberately left ungated: `/deletion-register/`, `/registry/`, `/installations/`, `/ocr-settings/`, `/processing-failures/`** (audited in Phase 45 Session 5) — the backend endpoints these pages call have no permission check of their own (`/installations/` calls no backend at all, being pure `localStorage`; `/processing-failures/` mixes two gated sources with two ungated ones, no single clean capability to gate the whole page on). Adding client-side gating with no server-side backing would imply a permission boundary that doesn't actually exist — left as-is rather than inventing one; a future backend-hardening session could add real permission checks to these endpoints first, then gate the page.
-- **Pre-existing, unrelated test failure found during Phase 45 Session 5's full test run**: `processing-failures.test.tsx`'s `"retries a failed handover (result leg) and reloads"` fails (`retryHandoverMock` never called after the button click) — reproduced in isolation, unrelated to this session's diff (no file this test depends on was touched), not investigated or fixed here since it falls outside this session's own scope (UI RBAC gating + case document titles). Worth a dedicated look in a future session.
+- **Deliberately left ungated: `/deletion-register/`, `/registry/`, `/installations/`, `/ocr-settings/`** (audited in Phase 45 Session 5) — the backend endpoints these pages call have no permission check of their own (`/installations/` calls no backend at all, being pure `localStorage`). Adding client-side gating with no server-side backing would imply a permission boundary that doesn't actually exist — left as-is rather than inventing one; a future backend-hardening session could add real permission checks to these endpoints first, then gate the page. `/processing-failures/` **removed from this list in P63-S3**: it still mixes gated and ungated sources so the PAGE stays ungated, but one of its four sources (notifications) gained a real capability in Phase 59 Session 1 — closed via a per-section client-side gate instead of a page-level one, see "Processing Failure Visibility" below.
+- ~~**Pre-existing, unrelated test failure found during Phase 45 Session 5's full test run**: `processing-failures.test.tsx`'s `"retries a failed handover (result leg) and reloads"` fails (`retryHandoverMock` never called after the button click) — reproduced in isolation, unrelated to this session's diff (no file this test depends on was touched), not investigated or fixed here since it falls outside this session's own scope (UI RBAC gating + case document titles). Worth a dedicated look in a future session.~~ — **fixed in P63-S3**: the test never filled in the operator-key input ADR 0162 (Phase 44 Session 1) made required for the retry button to even be clickable, and asserted a stale single-arg `retryHandover` call. Fixed by filling the field and asserting the real two-arg call. First noticed as a flake back in Phase 47 Session 4 and repeatedly re-confirmed-but-deferred across several later sessions (Phase 45 Session 5, Phase 52 Sessions 1/2, P53-S1/S3) — finally fixed here while getting the frontend regression suite green for this session's own (unrelated) UI change, not a dedicated session of its own.
 - ~~No "dispose now" control (5.6, since P7-S3) — `ArchivalTransfersView` is pure observation/retrieval; a manual trigger would have to go through `document-service`'s `POST /documents/{id}/archive-request`, for which there is no Admin UI integration yet~~ — **fixed in Post-Roadmap Phase 22 Session 1** (see "Records Disposal & Long-Term Archiving" above): a new form calls the endpoint by document ID. Still **no** button directly on the document in the User UI (the Admin UI has no document list/search, only free-text ID entry) — a possible future extension.
 - **Not-shutdown control (4.8, since P6-S6) is purely client-side for visibility, not enforcement** — `SuperuserBreakGlass` only hides the form/button, actual enforcement happens exclusively at the Permission Service; no new nav entry, since it is content-wise coupled to the existing break-glass page (4.8 itself references 4.6).
 - `naming_constraints`/`conditions` still have no guided UI form (only retained unchanged when editing) — free-text/JSON editing of these two fields is not part of P5b-S3 and remains an open point for a later session.

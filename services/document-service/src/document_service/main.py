@@ -2,6 +2,7 @@ import asyncio
 import base64
 import json
 import logging
+import re
 import time
 import uuid
 from collections.abc import AsyncIterator
@@ -136,6 +137,51 @@ KENNZEICHEN_ATTRIBUTE = "Kennzeichen"
 def _has_kennzeichen_admin_role(x_dms_roles: str) -> bool:
     roles = {role.strip() for role in x_dms_roles.split(",") if role.strip()}
     return settings.kennzeichen_admin_role in roles
+
+
+# Kennzeichen format-shape validation (P63-S3) - `update_document` previously
+# only role-gated a manual `Kennzeichen` change, never checked that the new
+# value actually matches the object type's configured `kennzeichen_format`
+# shape, so a `dms-admin` could write an arbitrary string that breaks the
+# reference-number contract other services rely on (mail-connector's
+# candidate matching, migration-service). Deliberately duplicated here
+# rather than calling out to object-type-service for this (same "duplicate
+# on purpose" convention this project already uses elsewhere, e.g. ADR
+# 0006) - this is a small, self-contained piece of logic, not worth a new
+# cross-service round trip for every attribute write.
+_KENNZEICHEN_PLACEHOLDER_RE = re.compile(r"\{(\w+)\}")
+# Mirrors `object_type_service.repository._render_kennzeichen`'s own
+# rendering rules for the five fixed date/counter placeholders - YYYY/YY/
+# MM/DD are always fixed-width digit groups, Laufende_Nummer is AT LEAST 3
+# digits (Python's `f"{n:03d}"` format spec is a minimum width, not a
+# truncation - the counter keeps growing past 999).
+_KENNZEICHEN_FIXED_PLACEHOLDER_PATTERNS = {
+    "YYYY": r"\d{4}",
+    "YY": r"\d{2}",
+    "MM": r"\d{2}",
+    "DD": r"\d{2}",
+    "Laufende_Nummer": r"\d{3,}",
+}
+
+
+def _kennzeichen_format_to_pattern(kennzeichen_format: str) -> re.Pattern:
+    """Converts a `kennzeichen_format` template (e.g.
+    `"{YYYY}-{Laufende_Nummer}"`) into a regex a manually-written
+    `Kennzeichen` value must match. Any placeholder OTHER than the five
+    fixed date/counter ones is assumed to reference an attribute of the
+    object type (P17-S2, 14.2, e.g. `{Federführung}`) - its actual value
+    shape is unconstrained here (a free-form attribute could legitimately
+    hold arbitrary text) and matched permissively (`.*?`) rather than
+    rejecting a genuinely valid value this function simply can't model."""
+    pattern_parts = ["^"]
+    last_end = 0
+    for match in _KENNZEICHEN_PLACEHOLDER_RE.finditer(kennzeichen_format):
+        pattern_parts.append(re.escape(kennzeichen_format[last_end : match.start()]))
+        pattern_parts.append(_KENNZEICHEN_FIXED_PLACEHOLDER_PATTERNS.get(match.group(1), r".*?"))
+        last_end = match.end()
+    pattern_parts.append(re.escape(kennzeichen_format[last_end:]))
+    pattern_parts.append("$")
+    return re.compile("".join(pattern_parts))
 
 
 def _has_quarantine_release_role(x_dms_roles: str) -> bool:
@@ -2146,6 +2192,29 @@ async def update_document(
                 detail=f"Nur die Rolle {settings.kennzeichen_admin_role!r} darf das "
                 f"Attribut {KENNZEICHEN_ATTRIBUTE!r} ändern",
             )
+        # Format-shape validation (P63-S3, ADR 0192) - only for an actual
+        # change to a non-empty value (clearing the field is a legitimate
+        # admin action with nothing to validate against) and only when the
+        # object type actually has a `kennzeichen_format` configured (no
+        # format means no shape contract to enforce, same precondition
+        # `next_kennzeichen`'s own generation path already has).
+        if (
+            new_kennzeichen
+            and new_kennzeichen != old_kennzeichen
+            and document.object_type_id is not None
+        ):
+            object_type = await app.state.object_type_client.get(document.object_type_id)
+            kennzeichen_format = (object_type or {}).get("kennzeichen_format")
+            if kennzeichen_format and not _kennzeichen_format_to_pattern(kennzeichen_format).match(
+                new_kennzeichen
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"Attribut {KENNZEICHEN_ATTRIBUTE!r} entspricht nicht dem konfigurierten "
+                        f"Format {kennzeichen_format!r} des Objekttyps"
+                    ),
+                )
 
     # Move (P12-S1, WebDAV connector user request): only if the folder
     # actually changes - existence/placement constraint check analogous to
