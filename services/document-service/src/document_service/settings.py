@@ -32,6 +32,11 @@ class Settings(BaseServiceSettings):
     # 0010) - called synchronously before content/metadata are persisted.
     virus_scan_service_base_url: str = "http://localhost:8010"
 
+    # P66-S1: `PUT /audit-trace-role-overrides/{role}` existence-checks the
+    # role name against Keycloak realm roles before this session had no
+    # such check at all (any free-text string was accepted).
+    auth_service_base_url: str = "http://localhost:8003"
+
     # Timeout without activity after which an editing lock is
     # automatically considered expired (4.2) - no background sweep needed,
     # see repository.py.

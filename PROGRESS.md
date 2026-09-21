@@ -2,8 +2,41 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P65-S2 (`docs/services/*.md` documentation corrections bundle — second and last
-session of Phase 65, no code). Same failure mode as P65-S1, applied to service docs instead of ADRs:
+**Last completed:** P66-S1 (small security fixes bundle — first session of Phase 66). Three unrelated,
+small fixes bundled by size: (a) `webdav-connector`'s `handle_move()` now rejects `MOVE` outright for any
+edit-token-scoped session — closes the residual ADR 0189/P61-S4 explicitly left open (a token-scoped
+session could relocate its one authorized document into any folder the real underlying user has write
+access to). (b) `storage-service`'s three previously-ungated aggregate/maintenance endpoints
+(`GET /storage/usage`, `POST /replication/process-pending`, `POST /object-verify/process-pending`) now
+require `_require_storage_caller`, with `reporting-service` and `system:storage-replication-cronjob`
+added as new trusted callers. Incidentally discovered and fixed alongside: `reporting-service`'s
+`StorageClient` never sent an `X-DMS-Principal` header at all on any of its three methods — a real,
+already-broken production bug (every one of its calls to storage-service's gated object-CRUD endpoints
+would have been silently `403`'d), unrelated to but surfaced by touching this code. (c) `document-
+service`'s `PUT /audit-trace-role-overrides/{role}` now validates the role exists as a Keycloak realm
+role via a new `AuthServiceClient.realm_role_exists()`, returning `422` otherwise — closes the gap this
+service's own docs used to describe as "the same existing gap as for every other role name in the
+system". New ADR: [0194](docs/adr/0194-p66s1-small-security-fixes-bundle.md). Tests: `webdav-connector`
+18/18, `storage-service` 166/166, `reporting-service` 79/79, `document-service` 413/413 — all green after
+rebuilding/redeploying the three touched containers (the first test run failed for `webdav-connector`/
+`reporting-service` purely because their live containers hadn't been rebuilt yet, confirmed by the
+rebuild fixing both; a second, independent issue in the new webdav-connector test was also found and
+fixed — the `webdav4` client library wraps any `MOVE` `403` into its own `ForbiddenOperation`, not the
+generic `HTTPError` the test initially asserted). `docs/services/webdav-connector.md`,
+`storage-service.md`, `document-service.md` updated. Live-verified against the real running stack:
+storage-service's three endpoints reject an untrusted caller and accept `reporting-service`;
+document-service's role-override endpoint returns `422` for an unknown role.
+
+**Next session:** P66-S2 — `workflow-service` bundle (second session of Phase 66): `business_key`
+validation at `POST /instances`/task-completion time (reusing the existing
+`_resolve_business_key_scope` helper), and supervisor-only authorization for `reassign_task` (reusing the
+existing org-hierarchy-grant resolution). See `IMPLEMENTATION_PLAN.md`'s Phase 66 table for the full
+list, including P66-S3 after it.
+
+---
+
+Immediately before P66-S1: **P65-S2** (`docs/services/*.md` documentation corrections bundle — second and
+last session of Phase 65, no code). Same failure mode as P65-S1, applied to service docs instead of ADRs:
 struck-through/reworded stale "Open Points" bullets across `webdav-connector.md` (sensor/`/metrics`),
 `user-ui.md` (4 bullets — FolderTree favorites marker/context menu, "no browser E2E possible", a
 duplicate trash-overview bullet), `object-type-service.md` (2 "follows only with P5b-S4" bullets),
@@ -18,12 +51,7 @@ service blocker), `fleet-management-service.md` (eGov-package blocker clause). O
 applied alongside process-designer.md's rollback bullet: `workflow-service.md` had the identical stale
 claim, fixed too even though not originally itemized. No tests, no rebuild, no new ADR.
 
-**Phase 65 is now closed (2/2).** **Next session:** P66-S1 — small security fixes bundle (first session
-of Phase 66): `webdav-connector`'s edit-token MOVE-destination scope bypass, `storage-service`'s three
-ungated aggregate/maintenance endpoints, `document-service`'s `AuditTraceRoleOverride` role-existence
-check. See `IMPLEMENTATION_PLAN.md`'s Phase 66 table for the full list.
-
----
+**Phase 65 is now closed (2/2).**
 
 Immediately before P65-S2: **P65-S1** (ADR documentation corrections bundle — first session of Phase 65,
 no code). Pure documentation: ~20 one-line "Closed in..." addenda across ADRs 0010/0023/0074/0081/0093/

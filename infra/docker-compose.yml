@@ -494,6 +494,7 @@ services:
       DMS_VIRUS_SCAN_SERVICE_BASE_URL: http://virus-scan-service:8000
       DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
+      DMS_AUTH_SERVICE_BASE_URL: http://auth-service:8000
       DMS_SELF_ADDRESS: http://document-service:8000
       # License limit block on new creations (concept 9.3, P9-S2). Deliberately
       # without depends_on: license-service itself depends on document-service

@@ -329,6 +329,19 @@ _TRUSTED_STORAGE_CALLERS = frozenset(
         "ocr-service",
         "virus-scan-service",
         "mail-connector",
+        # P66-S1: `reporting-service` was always a real, actively-used
+        # caller of `PUT`/`GET /objects/{key}` (report file storage/
+        # retrieval, `StorageClient.upload()`/`.download()`) but was never
+        # added here when ADR 0179 first gated the object-CRUD endpoints -
+        # a real, currently-broken bug (403 on every report-file store/
+        # fetch), found incidentally while adding the gate to the three
+        # aggregate/maintenance endpoints below. Fixed here rather than
+        # left for a dedicated session, since it's the same one-line fix.
+        "reporting-service",
+        # The Helm chart's storage CronJob (`storageCronJob`, ADR 0101) -
+        # already sends this exact identity, anticipating this gate before
+        # it existed ("even if storage-service later gates this endpoint").
+        "system:storage-replication-cronjob",
     }
 )
 
@@ -641,7 +654,11 @@ async def get_object_metadata(
         raise HTTPException(status_code=404, detail="Objekt nicht gefunden") from exc
 
 
-@app.get("/storage/usage", response_model=list[StorageUsageEntry])
+@app.get(
+    "/storage/usage",
+    response_model=list[StorageUsageEntry],
+    dependencies=[Depends(_require_storage_caller)],
+)
 async def get_storage_usage(
     session: AsyncSession = Depends(get_session),
 ) -> list[StorageUsageEntry]:
@@ -700,14 +717,21 @@ async def verify_object(key: str, session: AsyncSession = Depends(get_session)) 
     )
 
 
-@app.post("/replication/process-pending", response_model=ReplicationRunResult)
+@app.post(
+    "/replication/process-pending",
+    response_model=ReplicationRunResult,
+    dependencies=[Depends(_require_storage_caller)],
+)
 async def replication_process_pending(
     limit: int = 100, session: AsyncSession = Depends(get_session)
 ) -> ReplicationRunResult:
     """Retry queue for secondary copies to be asynchronously caught up
     (3.6) - deliberately an explicit endpoint instead of an in-process
     background task (see ADR 0004), intended for periodic invocation by
-    an external scheduler (not yet part of this session)."""
+    an external scheduler. **Since P66-S1**: gated via `_require_storage_
+    caller` (ADR 0101 already anticipated this - the Helm chart's
+    CronJob has sent `X-DMS-Principal: system:storage-replication-
+    cronjob` since it was built)."""
     operational_config = await _get_operational_config(session)
     result = await replication.process_pending(
         session,
@@ -720,7 +744,11 @@ async def replication_process_pending(
     return result
 
 
-@app.post("/object-verify/process-pending", response_model=BulkVerifyResult)
+@app.post(
+    "/object-verify/process-pending",
+    response_model=BulkVerifyResult,
+    dependencies=[Depends(_require_storage_caller)],
+)
 async def verify_pending_objects(
     limit: int = 100, session: AsyncSession = Depends(get_session)
 ) -> BulkVerifyResult:
@@ -733,8 +761,10 @@ async def verify_pending_objects(
     each of them - mirroring `POST /replication/process-pending`'s shape
     exactly: an explicit endpoint instead of an in-process background
     task (ADR 0004), intended for periodic invocation by an external
-    scheduler. Deliberately ungated, same rationale as
-    `/replication/process-pending` (see ADR 0101)."""
+    scheduler. **Since P66-S1**: gated via `_require_storage_caller`,
+    same as `/replication/process-pending` above - no longer deliberately
+    ungated (ADR 0101's own rationale for the exception no longer holds
+    now that this session closed it)."""
     result = await replication.verify_pending(
         session,
         backends=app.state.backends,

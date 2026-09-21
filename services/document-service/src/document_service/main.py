@@ -37,6 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from document_service import crypto, metrics, repository, retention_actions
 from document_service.approval_client import ApprovalClient
 from document_service.audit_client import AuditServiceClient
+from document_service.auth_client import AuthServiceClient
 from document_service.consumer import start_consuming
 from document_service.content_type_sniffer import sniff_content_type
 from document_service.folder_client import FolderClient
@@ -865,6 +866,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.virus_scan_client = VirusScanClient(settings.virus_scan_service_base_url)
     app.state.approval_client = ApprovalClient(settings.permission_service_base_url)
     app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
+    app.state.auth_client = AuthServiceClient(settings.auth_service_base_url)
 
     # Backfill (Post-Roadmap Phase 39 Session 4, ADR 0154): every document
     # created BEFORE this session has no `ResourceNode` in permission-service
@@ -1034,6 +1036,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await app.state.virus_scan_client.close()
     await app.state.approval_client.close()
     await app.state.permission_client.close()
+    await app.state.auth_client.close()
     await app.state.license_limit_client.close()
     await app.state.rendering_client.close()
     await app.state.audit_client.close()
@@ -1213,6 +1216,13 @@ async def put_audit_trace_role_override(
     session: AsyncSession = Depends(get_session),
 ) -> AuditTraceRoleOverrideOut:
     await _require_document_config_permission(x_dms_principal)
+    # P66-S1: previously accepted any free-text role name with no existence
+    # check at all - closes the gap this service's own docs already named
+    # ("the same existing gap as for every other role name in the system").
+    if not await app.state.auth_client.realm_role_exists(role):
+        raise HTTPException(
+            status_code=422, detail=f"Rolle {role!r} existiert nicht als Keycloak-Realm-Rolle"
+        )
     override = await repository.upsert_role_override(
         session, role, log_viewed=body.log_viewed, log_downloaded=body.log_downloaded
     )

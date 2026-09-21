@@ -5,6 +5,7 @@ from io import BytesIO
 import httpx
 import pytest
 from webdav4.client import Client
+from webdav4.client import ForbiddenOperation as WebdavForbiddenOperation
 from webdav4.client import HTTPError as WebdavHTTPError
 
 WEBDAV_CONNECTOR_URL = os.environ.get("TEST_WEBDAV_CONNECTOR_URL", "http://localhost:8027")
@@ -438,3 +439,42 @@ def test_edit_token_cannot_access_a_different_document(real_user):
     with pytest.raises(WebdavHTTPError) as exc_info:
         token_client.ls("/")
     assert exc_info.value.status_code == 403
+
+
+def test_edit_token_cannot_move_the_scoped_document(real_user):
+    """P66-S1: `get_resource_inst`'s scope check (ADR 0189/P61-S4, test
+    above) only ever confirmed the RESOURCE being accessed is the scoped
+    document - `handle_move`'s destination resolution (`resolve_path`)
+    still ran against the underlying real user's own, unrestricted folder
+    permissions, letting a token-scoped session move its one authorized
+    document into any folder that real user can write to. A token-scoped
+    session has no legitimate reason to move anything, so MOVE is now
+    rejected outright for it, not just re-scoped to a narrower target."""
+    filename = f"by-id-move-{uuid.uuid4().hex[:8]}.txt"
+    path_client = _dav_client(real_user)
+    path_client.upload_fileobj(BytesIO(b"Nicht verschiebbar per Token"), f"/{filename}")
+    matching = httpx.get(
+        f"{DOCUMENT_SERVICE_URL}/documents",
+        params={"folder_id": "root"},
+        headers={"X-DMS-Principal": "webdav-tests"},
+        timeout=30.0,
+    ).json()
+    document_id = next(d["id"] for d in matching if d["title"] == filename)
+    target_folder = _create_folder()
+
+    principal = f"webdav-edit-token-test-{uuid.uuid4().hex[:8]}"
+    _grant_document_write(principal)
+    token = _create_webdav_edit_token(document_id, principal)
+    token_client = Client(f"{WEBDAV_CONNECTOR_URL}/webdav", auth=(token, ""), timeout=30.0)
+
+    # webdav4's `move()` always wraps any 403 response into its own
+    # `ForbiddenOperation` (a `ClientError`, not `HTTPError`) with a fixed,
+    # generic message unrelated to the actual server-side reason - the real
+    # 403 is on its `__cause__`.
+    with pytest.raises(WebdavForbiddenOperation) as exc_info:
+        token_client.move(f"/by-id/{document_id}.txt", f"/{target_folder['name']}/{filename}")
+    assert isinstance(exc_info.value.__cause__, WebdavHTTPError)
+    assert exc_info.value.__cause__.status_code == 403
+
+    # The document was NOT moved - still reachable at its original scoped path.
+    assert _get_document(document_id)["folder_id"] == "root"

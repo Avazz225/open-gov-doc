@@ -292,6 +292,22 @@ class DmsDavDocument(DAVNonCollection):
         assert self.document is not None
         self.provider.check_license("write")
         actor = _actor(self.environ)
+        # P66-S1 (ADR 0189's own scope-check pattern, extended): a
+        # token-scoped session is authorized for exactly one document's
+        # content, not for reorganizing folders - `get_resource_inst`
+        # already confirmed `self.document` IS the scoped document, but
+        # `_tree.resolve_path(parent_path, ...)` below resolves against the
+        # underlying real user's OWN folder permissions with no scope
+        # restriction at all, letting a token-scoped session move its one
+        # authorized document into any folder that real user can write to.
+        # Reject outright rather than trying to further scope the
+        # destination - a token-scoped edit session has no legitimate
+        # reason to move anything.
+        if self.environ.get("dms.webdav_edit_token_document_id") is not None:
+            raise DAVError(
+                HTTP_FORBIDDEN,
+                "Dieses Edit-Token erlaubt keine Verschiebung des Dokuments.",
+            )
         parent_path, new_name = _split_dest_path(dest_path)
         try:
             target_parent = self._tree.resolve_path(parent_path, x_dms_principal=actor)

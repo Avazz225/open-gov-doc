@@ -80,22 +80,31 @@ class StorageClient:
     generated report files (3.6 principle: the actual content never lives
     in the Reporting Service itself)."""
 
+    # P66-S1: `storage-service`'s object-CRUD endpoints have required a
+    # trusted `X-DMS-Principal` since ADR 0179 (P59-S2) - this client never
+    # sent one, a real, currently-broken bug (every report-file store/
+    # fetch call would 403) found incidentally while closing a related
+    # gap on `storage-service`'s own aggregate/maintenance endpoints.
+    _PRINCIPAL_HEADERS = {"X-DMS-Principal": "reporting-service"}
+
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=30.0)
 
     async def get_usage(self) -> list[dict]:
-        response = await self._client.get("/storage/usage")
+        response = await self._client.get("/storage/usage", headers=self._PRINCIPAL_HEADERS)
         response.raise_for_status()
         return response.json()
 
     async def upload(self, key: str, data: bytes, content_type: str) -> None:
         response = await self._client.put(
-            f"/objects/{key}", content=data, headers={"Content-Type": content_type}
+            f"/objects/{key}",
+            content=data,
+            headers={"Content-Type": content_type, **self._PRINCIPAL_HEADERS},
         )
         response.raise_for_status()
 
     async def download(self, key: str) -> bytes:
-        response = await self._client.get(f"/objects/{key}")
+        response = await self._client.get(f"/objects/{key}", headers=self._PRINCIPAL_HEADERS)
         response.raise_for_status()
         return response.content
 

@@ -24,6 +24,7 @@ STORAGE_SERVICE_URL = os.environ.get("TEST_STORAGE_SERVICE_URL", "http://localho
 PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://localhost:8004")
 FOLDER_SERVICE_URL = os.environ.get("TEST_FOLDER_SERVICE_URL", "http://localhost:8008")
 OBJECT_TYPE_SERVICE_URL = os.environ.get("TEST_OBJECT_TYPE_SERVICE_URL", "http://localhost:8007")
+AUTH_SERVICE_URL = os.environ.get("TEST_AUTH_SERVICE_URL", "http://localhost:8003")
 # Muss mit conftest.py::ROLE_ADMIN_PRINCIPAL_ID übereinstimmen (dort per
 # `_grant_role_admin_permission`-Fixture berechtigt) - kein Cross-File-Import
 # von Test-Konstanten, gleiche Projektkonvention wie andernorts.
@@ -72,6 +73,23 @@ def _create_object_type(*, is_classified: bool = False) -> int:
     )
     response.raise_for_status()
     return response.json()["id"]
+
+
+def _create_realm_role(name: str) -> None:
+    """P66-S1: `PUT /audit-trace-role-overrides/{role}` now existence-checks
+    the role against auth-service's real Keycloak realm roles - tests that
+    exercise the happy path need a real role to exist first, same
+    cross-service test pattern as `_create_object_type` above.
+    `ROLE_ADMIN_PRINCIPAL_ID` already holds `admin.user_management`
+    (`_grant_role_admin_permission`), the same capability `POST
+    /realm-roles` itself requires."""
+    response = httpx.post(
+        f"{AUTH_SERVICE_URL}/realm-roles",
+        json={"names": [name]},
+        timeout=30.0,
+        headers={"X-DMS-Principal": ROLE_ADMIN_PRINCIPAL_ID},
+    )
+    response.raise_for_status()
 
 
 def _grant_root_permission(
@@ -1369,22 +1387,35 @@ def test_put_audit_trace_config_persists(client):
 
 
 def test_audit_trace_role_override_create_list_delete(client):
+    role = f"auditor-{uuid.uuid4().hex[:8]}"
+    _create_realm_role(role)
     create_response = client.put(
-        "/audit-trace-role-overrides/auditor",
+        f"/audit-trace-role-overrides/{role}",
         json={"log_viewed": True, "log_downloaded": None},
         headers=DOCUMENT_CONFIG_ADMIN_HEADERS,
     )
     assert create_response.status_code == 200
-    assert create_response.json()["role"] == "auditor"
+    assert create_response.json()["role"] == role
 
     list_response = client.get("/audit-trace-role-overrides")
-    assert [o["role"] for o in list_response.json()] == ["auditor"]
+    assert [o["role"] for o in list_response.json()] == [role]
 
     delete_response = client.delete(
-        "/audit-trace-role-overrides/auditor", headers=DOCUMENT_CONFIG_ADMIN_HEADERS
+        f"/audit-trace-role-overrides/{role}", headers=DOCUMENT_CONFIG_ADMIN_HEADERS
     )
     assert delete_response.status_code == 204
     assert client.get("/audit-trace-role-overrides").json() == []
+
+
+def test_audit_trace_role_override_with_unknown_role_returns_422(client):
+    # P66-S1: previously any free-text role name was accepted with no
+    # existence check against auth-service's real Keycloak realm roles.
+    response = client.put(
+        f"/audit-trace-role-overrides/definitely-not-a-real-role-{uuid.uuid4().hex[:8]}",
+        json={"log_viewed": True, "log_downloaded": None},
+        headers=DOCUMENT_CONFIG_ADMIN_HEADERS,
+    )
+    assert response.status_code == 422
 
 
 def test_delete_unknown_audit_trace_role_override_returns_404(client):
@@ -1466,6 +1497,7 @@ def test_role_override_can_disable_viewed_for_specific_role(client, monkeypatch)
 
     monkeypatch.setattr(app.state.event_bus, "publish", fake_publish)
 
+    _create_realm_role("quiet-role")
     client.put(
         "/audit-trace-role-overrides/quiet-role",
         json={"log_viewed": False, "log_downloaded": None},
@@ -1494,6 +1526,8 @@ def test_role_override_conflict_logging_wins(client, monkeypatch):
         json={"log_viewed": False, "log_downloaded": False},
         headers=DOCUMENT_CONFIG_ADMIN_HEADERS,
     )
+    _create_realm_role("quiet-role")
+    _create_realm_role("loud-role")
     client.put(
         "/audit-trace-role-overrides/quiet-role",
         json={"log_viewed": False, "log_downloaded": None},

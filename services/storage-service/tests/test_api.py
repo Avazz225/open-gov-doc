@@ -192,6 +192,41 @@ def test_object_endpoints_accept_every_documented_trusted_caller(client):
         assert response.status_code == 201, f"caller {caller!r} was unexpectedly rejected"
 
 
+def test_storage_usage_without_trusted_caller_is_403(client):
+    # P66-S1: `GET /storage/usage` previously had no `_require_storage_caller`
+    # gate at all, unlike every other endpoint in this module.
+    response = client.get("/storage/usage", headers={"X-DMS-Principal": "some-random-user"})
+    assert response.status_code == 403
+
+
+def test_replication_process_pending_without_trusted_caller_is_403(client):
+    response = client.post(
+        "/replication/process-pending", headers={"X-DMS-Principal": "some-random-user"}
+    )
+    assert response.status_code == 403
+
+
+def test_verify_pending_objects_without_trusted_caller_is_403(client):
+    response = client.post(
+        "/object-verify/process-pending", headers={"X-DMS-Principal": "some-random-user"}
+    )
+    assert response.status_code == 403
+
+
+def test_new_p66s1_trusted_callers_accepted(client):
+    """`reporting-service` (report-file storage, a real, pre-existing but
+    previously-uncovered caller) and `system:storage-replication-cronjob`
+    (the Helm chart's storage CronJob, ADR 0101) both now need to pass the
+    same gate the six original object-CRUD callers already had to."""
+    response = client.get("/storage/usage", headers={"X-DMS-Principal": "reporting-service"})
+    assert response.status_code == 200
+    response = client.post(
+        "/replication/process-pending",
+        headers={"X-DMS-Principal": "system:storage-replication-cronjob"},
+    )
+    assert response.status_code == 200
+
+
 def _local_usage(client) -> dict:
     body = client.get("/storage/usage").json()
     for entry in body:
