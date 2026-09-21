@@ -73,7 +73,6 @@
     "sourceFolderIdLabel": "Source folder ID",
     "targetInstallationLabel": "Target installation",
     "targetInstallationEmpty": "Pair an installation first",
-    "createdByLabel": "Started by",
     "dryRunLabel": "Dry run only (no data movement)",
     "retentionDaysLabel": "Deletion delay in days (empty = default)",
     "submit": "Start transfer",

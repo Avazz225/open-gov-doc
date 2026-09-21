@@ -22,11 +22,21 @@ DOCUMENT_SERVICE_URL = os.environ.get("TEST_DOCUMENT_SERVICE_URL", "http://local
 PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://localhost:8004")
 
 
-def _client() -> httpx.Client:
-    return httpx.Client(base_url=MIGRATION_SERVICE_URL, timeout=30.0)
-
-
 _DMS_PRINCIPAL_HEADERS = {"X-DMS-Principal": "migration-tests"}
+
+
+def _client() -> httpx.Client:
+    """Default `X-DMS-Principal`/`X-DMS-Username` (Phase 59 Session 5) -
+    `migration-tests` is granted `admin.migration_management` in
+    `conftest.py`; `folder.read` needs no separate grant since it's a
+    baseline "everyone" permission for ordinary folders (ADR 0149).
+    `X-DMS-Username` becomes the server-derived `created_by` on every
+    transfer - tests that need a distinct value override it per call."""
+    return httpx.Client(
+        base_url=MIGRATION_SERVICE_URL,
+        timeout=30.0,
+        headers={**_DMS_PRINCIPAL_HEADERS, "X-DMS-Username": "tester"},
+    )
 
 
 def _create_folder(*, parent_id: str = "root", name: str) -> dict:
@@ -176,7 +186,6 @@ def test_create_transfer_rejected_during_maintenance_mode():
             json={
                 "source_folder_id": "does-not-exist",
                 "target_installation_id": "does-not-exist",
-                "created_by": "tester",
             },
             headers={"X-DMS-Maintenance-Active": "true"},
         )
@@ -191,7 +200,6 @@ def test_transfer_to_unknown_target_returns_404():
             json={
                 "source_folder_id": folder["id"],
                 "target_installation_id": "does-not-exist",
-                "created_by": "tester",
             },
         )
     assert response.status_code == 404
@@ -216,7 +224,6 @@ def test_transfer_start_requires_approval_when_configured():
             json={
                 "source_folder_id": folder["id"],
                 "target_installation_id": installation["id"],
-                "created_by": "tester",
             },
         )
     assert response.status_code == 200
@@ -237,7 +244,6 @@ def test_dry_run_reports_ok_without_moving_any_data():
             json={
                 "source_folder_id": folder["id"],
                 "target_installation_id": installation["id"],
-                "created_by": "tester",
                 "dry_run": True,
             },
         )
@@ -271,7 +277,6 @@ def test_full_transfer_lifecycle_self_loopback():
             json={
                 "source_folder_id": folder["id"],
                 "target_installation_id": installation["id"],
-                "created_by": "tester",
                 "retention_days": 0,
             },
         )
@@ -328,3 +333,105 @@ def test_full_transfer_lifecycle_self_loopback():
 
     source_after_deletion = _get_document(document["id"])
     assert source_after_deletion["deleted_at"] is not None
+
+
+def test_create_paired_installation_without_principal_header_is_401():
+    with httpx.Client(base_url=MIGRATION_SERVICE_URL, timeout=30.0) as client:
+        response = client.post(
+            "/paired-installations",
+            json={"display_name": "Ohne Header", "base_url": "http://localhost:8000"},
+        )
+    assert response.status_code == 401
+
+
+def test_create_paired_installation_without_permission_is_403():
+    """RBAC (Phase 59 Session 5) - `POST /paired-installations` previously
+    had NO permission check at all (only `license_gate`, which checks the
+    installation's license, not the caller's identity)."""
+    with httpx.Client(
+        base_url=MIGRATION_SERVICE_URL,
+        timeout=30.0,
+        headers={"X-DMS-Principal": "some-random-authenticated-caller"},
+    ) as client:
+        response = client.post(
+            "/paired-installations",
+            json={"display_name": "Ohne Rolle", "base_url": "http://localhost:8000"},
+        )
+    assert response.status_code == 403
+
+
+def test_delete_paired_installation_without_permission_is_403():
+    with _client() as client:
+        created = client.post(
+            "/paired-installations",
+            json={"display_name": "Löschversuch", "base_url": "http://localhost:8000"},
+        ).json()
+    with httpx.Client(
+        base_url=MIGRATION_SERVICE_URL,
+        timeout=30.0,
+        headers={"X-DMS-Principal": "some-random-authenticated-caller"},
+    ) as client:
+        response = client.delete(f"/paired-installations/{created['id']}")
+    assert response.status_code == 403
+
+
+def test_create_paired_installation_rejects_ssrf_target():
+    """SSRF guard (Phase 59 Session 5) - `base_url` previously had no
+    validation at all; a private/internal address must now be rejected
+    even for an otherwise-authorized, permissioned caller."""
+    with _client() as client:
+        response = client.post(
+            "/paired-installations",
+            json={"display_name": "SSRF-Versuch", "base_url": "http://10.0.0.5:8000"},
+        )
+    assert response.status_code == 422
+
+
+def test_create_paired_installation_rejects_loopback_without_flag():
+    """Confirms the loopback exemption is genuinely gated by
+    `settings.allow_loopback_peers` (`true` in this dev/test stack, see
+    `infra/docker-compose.yml`) and not a blanket, unconditional carve-out -
+    verified indirectly via the metadata-style link-local address, which is
+    NEVER exempted by the flag (only `is_loopback` is)."""
+    with _client() as client:
+        response = client.post(
+            "/paired-installations",
+            json={"display_name": "Metadata-Versuch", "base_url": "http://169.254.169.254:8000"},
+        )
+    assert response.status_code == 422
+
+
+def test_create_transfer_without_principal_header_is_401():
+    folder = _create_folder(name=f"quelle-{uuid.uuid4().hex[:8]}")
+    with httpx.Client(base_url=MIGRATION_SERVICE_URL, timeout=30.0) as client:
+        response = client.post(
+            "/transfers",
+            json={"source_folder_id": folder["id"], "target_installation_id": "does-not-exist"},
+        )
+    assert response.status_code == 401
+
+
+def test_create_transfer_without_folder_read_permission_is_403():
+    """RBAC (Phase 59 Session 5) - `POST /transfers` previously had NO
+    permission check on the caller at all; `LocalDmsClient` always reads
+    the source folder as the fixed, elevated `migration-service` identity,
+    so without this check any caller could transfer a folder they have no
+    access to at all. Uses an unregistered `source_folder_id` (no
+    `ResourceNode` exists in `permission-service`) - fails closed by the
+    same "unregistered resource denies" default this project already
+    relies on elsewhere, reachable without a dedicated teamspace fixture.
+    **Scope note**: this does not prove denial for a REAL folder a caller
+    genuinely lacks access to - `folder.read` is a baseline "everyone"
+    grant for ordinary, non-teamspace folders (ADR 0149), so that case
+    would need a teamspace-scoped folder fixture, out of this session's
+    scope (same limitation as P59-S3's signature-service session)."""
+    with httpx.Client(base_url=MIGRATION_SERVICE_URL, timeout=30.0) as client:
+        response = client.post(
+            "/transfers",
+            json={
+                "source_folder_id": "does-not-exist-and-unregistered",
+                "target_installation_id": "does-not-exist",
+            },
+            headers={"X-DMS-Principal": "some-random-authenticated-caller"},
+        )
+    assert response.status_code == 403

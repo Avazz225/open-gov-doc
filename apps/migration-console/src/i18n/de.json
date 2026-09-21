@@ -73,7 +73,6 @@
     "sourceFolderIdLabel": "Quellordner-ID",
     "targetInstallationLabel": "Ziel-Installation",
     "targetInstallationEmpty": "Zuerst eine Installation paaren",
-    "createdByLabel": "Gestartet von",
     "dryRunLabel": "Nur Testlauf (Dry-Run, keine Datenbewegung)",
     "retentionDaysLabel": "Löschfrist in Tagen (leer = Standard)",
     "submit": "Transfer starten",

@@ -35,6 +35,36 @@ async def _clean_tables():
     await engine.dispose()
 
 
+MIGRATION_TESTS_PRINCIPAL_ID = "migration-tests"
+
+
+@pytest.fixture(scope="session", autouse=True)
+async def _grant_migration_admin_permission():
+    """Phase 59 Session 5: `POST`/`DELETE /paired-installations` now
+    require `admin.migration_management` - grants it to the same fixed
+    test principal `test_api.py`'s `_DMS_PRINCIPAL_HEADERS` already sends
+    on every request (kein Cross-File-Import von Test-Konstanten, gleiche
+    Projektkonvention wie andernorts)."""
+    async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL) as pc:
+        roles = (await pc.get("/roles")).json()
+        role_id = next(r["id"] for r in roles if r["name"] == "domain-admin-migration")
+        existing = (
+            await pc.get("/role-assignments", params={"principal_id": MIGRATION_TESTS_PRINCIPAL_ID})
+        ).json()
+        if any(a["role_id"] == role_id for a in existing):
+            return
+        response = await pc.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": MIGRATION_TESTS_PRINCIPAL_ID,
+                "role_id": role_id,
+                "resource_id": "root",
+            },
+        )
+        response.raise_for_status()
+
+
 @pytest.fixture(autouse=True)
 async def _reset_approval_config():
     """Vier-Augen (4.3) für `migration.transfer.start` bleibt per Default aus -

@@ -36,7 +36,7 @@ const PHASE_FIELDS: { key: keyof Transfer; labelKey: string }[] = [
 // implementation details of the workflow, see
 // docs/services/migration-console.md "Deliberate Boundaries").
 export function TransferConsole() {
-  const { accessToken, user } = useAuth();
+  const { accessToken } = useAuth();
   const { t } = useI18n();
 
   const [installations, setInstallations] = useState<PairedInstallation[]>([]);
@@ -48,7 +48,6 @@ export function TransferConsole() {
   const [showForm, setShowForm] = useState(false);
   const [sourceFolderId, setSourceFolderId] = useState("");
   const [targetInstallationId, setTargetInstallationId] = useState("");
-  const [createdBy, setCreatedBy] = useState("");
   const [dryRun, setDryRun] = useState(false);
   const [retentionDays, setRetentionDays] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
@@ -81,11 +80,6 @@ export function TransferConsole() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessToken, statusFilter]);
 
-  useEffect(() => {
-    if (user && !createdBy) setCreatedBy(user.username);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]);
-
   function installationName(id: string): string {
     return installations.find((i) => i.id === id)?.display_name ?? id;
   }
@@ -100,7 +94,6 @@ export function TransferConsole() {
       const result = await createTransfer(accessToken, {
         sourceFolderId,
         targetInstallationId,
-        createdBy,
         dryRun,
         retentionDays: retentionDays ? Number(retentionDays) : undefined,
       });
@@ -187,13 +180,6 @@ export function TransferConsole() {
               </option>
             ))}
           </select>
-          <label htmlFor="created-by">{t("transfers.createdByLabel")}</label>
-          <input
-            id="created-by"
-            value={createdBy}
-            onChange={(e) => setCreatedBy(e.target.value)}
-            required
-          />
           <label>
             <input
               type="checkbox"

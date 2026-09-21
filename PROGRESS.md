@@ -2,9 +2,71 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P59-S4 (`registry-service`'s `POST /instances` plus every other mutating instance
-endpoint were unauthenticated — service hijack/DoS risk — fourth session of Phase 59, "Critical
-Authorization Bugs", closing the phase's five criticals). **New ADR**
+**Last completed:** P59-S5 (`migration-service`'s `POST /transfers`/`POST /paired-installations` combined
+missing caller-permission checks, an SSRF-vulnerable `base_url`, and a forgeable `created_by` field — fifth
+and last session of Phase 59, "Critical Authorization Bugs". **Phase 59 is now fully closed** — all five
+criticals from this round's live-code security sweep are fixed, tested, and live-verified). **New ADR**
+([0182](docs/adr/0182-migration-service-transfer-and-pairing-authorization.md)) — a real authorization-model
+decision, per the plan's own DoD.
+
+**The gap.** The most complex exploit chain of the five criticals. `POST /transfers`/`POST
+/paired-installations` were gated only by `license_gate` (checks the INSTALLATION's license, never the
+caller). `LocalDmsClient` always reads/writes the source installation as the fixed, elevated
+`X-DMS-Principal: migration-service` identity, so the real caller's own folder ACL was never consulted —
+combined, any licensed user could transfer a folder they couldn't read, to an attacker-controlled
+`base_url` (`PeerClient` did `httpx.Client(base_url=base_url, ...)` with zero validation — a direct SSRF
+vector), with the audit-trail actor forgeable via a plain client-supplied `created_by` field throughout.
+
+**The fix.** Three independent sub-fixes. (1) `POST /transfers` now requires the caller's own
+`folder.read` on `source_folder_id`, checked directly against `permission-service`. (2) `POST`/`DELETE
+/paired-installations` now require a brand-new domain-admin capability, `admin.migration_management`
+(role `domain-admin-migration`) — pairing with another installation is an admin-level trust decision, no
+existing capability fit. (3) `base_url` SSRF validation at creation time — resolves the hostname, rejects
+loopback/private/link-local/reserved/multicast targets (`ipaddress`'s classification covers
+`169.254.169.254` metadata endpoints via the link-local check with no special case). `created_by` removed
+from `TransferCreate` entirely — derived server-side from the caller's own `X-DMS-Username`, never trusted
+from the request body again; `migration-console`'s "Started by" form field removed accordingly (frontend
+`next build` type-checked clean after the removal). New setting `allow_loopback_peers` (default `False`,
+`true` in this dev/test compose stack only) exempts ONLY loopback from the SSRF guard, needed by this
+project's own deliberate self-loopback test convention (no real second installation stack is feasible in
+this sandbox) — never something a real installation should need.
+
+New/updated tests: `migration-service` +7 (`test_create_paired_installation_without_principal_header_is_401`,
+`test_create_paired_installation_without_permission_is_403`,
+`test_delete_paired_installation_without_permission_is_403`,
+`test_create_paired_installation_rejects_ssrf_target`,
+`test_create_paired_installation_rejects_loopback_without_flag`,
+`test_create_transfer_without_principal_header_is_401`,
+`test_create_transfer_without_folder_read_permission_is_403`), 18/18 total. New `domain-admin-migration`
+role added to `permission-service`'s `DOMAIN_ADMIN_ROLES`. `ruff` clean (same pre-existing, unrelated
+repo-wide failures confirmed out of scope again). **Scope note**: the new `folder.read`-missing test uses
+an unregistered `source_folder_id` (fails closed by this project's existing "unregistered resource denies"
+default) rather than a real folder a caller genuinely lacks access to — same accepted limitation as
+P59-S3's `document.read`/`.write` (both are baseline "everyone" grants for ordinary, non-teamspace
+resources per ADR 0149; a true negative case needs a teamspace fixture, out of scope this session).
+
+`permission-service` rebuilt/redeployed first (new role's self-healing seed), then `migration-service`,
+then `migration-console` (its own Docker build's `next build` step served as the frontend type-check, no
+host-level Node tooling available in this environment). **Live-verified against the real running stack**:
+`curl` confirmed `401`/`403` for both new gates and `422` for both a private and a link-local `base_url`; a
+full real transfer (self-loopback pairing, dry run) succeeded end-to-end with `created_by` correctly
+showing the caller's own `X-DMS-Username`. Throwaway installation/folder cleaned up afterward. No
+interactive browser session was available to click through `migration-console`'s UI directly — frontend
+verification is limited to the successful type-checked build and the page serving `200` post-redeploy, said
+so explicitly rather than claiming a full interactive check.
+
+`docs/services/migration-service.md`: API table (all mutating rows annotated) + new "Authorization"
+section, `DMS_ALLOW_LOOPBACK_PEERS` added to the Configuration table, test count updated.
+
+**Next session:** none queued — Phase 59 is complete. Per this project's established pattern, check
+`IMPLEMENTATION_PLAN.md` for further queued phases (Phase 60 "High-Severity Findings" is next in the
+Phase 59+ gap-analysis round's plan) before self-initiating any new gap-analysis round.
+
+---
+
+Immediately before P59-S5: **P59-S4** (`registry-service`'s `POST /instances` plus every other mutating
+instance endpoint were unauthenticated — service hijack/DoS risk — fourth session of Phase 59, "Critical
+Authorization Bugs"). **New ADR**
 ([0181](docs/adr/0181-registry-service-instance-mutation-authorization.md)) — a real authorization-model
 decision, per the plan's own DoD.
 

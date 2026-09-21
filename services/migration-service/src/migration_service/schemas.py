@@ -30,9 +30,12 @@ class PairedInstallationCreateOut(PairedInstallationOut):
 
 
 class TransferCreate(BaseModel):
+    """`created_by` deliberately NOT a field here (Phase 59 Session 5) -
+    derived server-side from the caller's own verified `X-DMS-Username`,
+    see `main.create_transfer`."""
+
     source_folder_id: str
     target_installation_id: str
-    created_by: str
     dry_run: bool = False
     retention_days: int | None = None
 

@@ -1,9 +1,12 @@
 import asyncio
+import ipaddress
 import logging
 import os
+import socket
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from urllib.parse import urlparse
 
 import httpx
 from dms_common import configure_logging
@@ -15,6 +18,7 @@ from dms_metrics_client import (
     http_sensor_declarations,
     metrics_payload,
 )
+from dms_permission_client import PermissionServiceClient
 from dms_registry_client import maybe_start_registration
 from fastapi import (
     Depends,
@@ -93,6 +97,100 @@ async def _require_workflow_service_caller(x_dms_principal: str = Header(default
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Nur workflow-service darf diesen Endpunkt aufrufen",
         )
+
+
+async def _require_migration_admin_permission(x_dms_principal: str) -> None:
+    """RBAC (Phase 59 Session 5) - `POST`/`DELETE /paired-installations`
+    previously had NO permission check at all, only `license_gate` (which
+    checks the INSTALLATION's license status, not the caller's identity).
+    Pairing with another installation is an admin-level trust decision
+    (Konzept 7.2), so gated behind a dedicated new capability
+    (`admin.migration_management`, role `domain-admin-migration`) rather
+    than reusing an unrelated one - same "new domain per genuinely new
+    admin concern" precedent as `admin.legal_hold`/`admin.
+    records_quarantine`."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    if not await app.state.permission_client.has_permission(
+        x_dms_principal, "admin.migration_management"
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Fehlende Domain-Admin-Rolle 'Migrations-Installationspaarung'",
+        )
+
+
+async def _require_source_folder_read_permission(x_dms_principal: str, folder_id: str) -> None:
+    """RBAC (Phase 59 Session 5) - `POST /transfers` previously had NO
+    permission check on the caller at all. Every actual read during the
+    transfer itself (`LocalDmsClient`, see its own module docstring) always
+    authenticates as the fixed, elevated `X-DMS-Principal: migration-service`
+    identity, so without this check `folder-service` never learns who the
+    real caller actually was - any authenticated user with a non-demo
+    license could transfer ANY folder's entire subtree, including ones they
+    have no read access to at all. Mirrors `document_service.main.
+    _require_document_permission`'s shape, via the generic `check()` on the
+    shared `dms_permission_client` (this service has no folder-specific
+    convenience wrapper of its own)."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    allowed = await app.state.permission_client.check(
+        principal_id=x_dms_principal,
+        resource_id=folder_id,
+        permission="folder.read",
+        access_type="read",
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=403, detail=f"Fehlende Berechtigung 'folder.read' auf {folder_id!r}"
+        )
+
+
+def _validate_peer_base_url(base_url: str) -> None:
+    """SSRF guard (Phase 59 Session 5) - `PeerClient` previously did
+    `httpx.Client(base_url=base_url, ...)` with a completely unvalidated,
+    client-supplied `base_url`, and every transfer step (folder/document/
+    permission pushes) then sends real internal data to whatever this URL
+    resolves to. Rejects loopback/private/link-local/reserved/multicast
+    targets (covers `169.254.169.254` cloud-metadata endpoints via the
+    link-local check) at creation time - a coarse, one-time check, not a
+    per-request guard, so it does not protect against DNS rebinding between
+    creation and actual use (a real, accepted residual gap for a first
+    pass, not previously flagged by this round's research either).
+    `settings.allow_loopback_peers` exempts ONLY loopback (never private/
+    link-local/etc.) - this project's own test suite deliberately pairs an
+    installation with itself via `http://localhost:8000`, see the settings
+    field's own docstring."""
+    parsed = urlparse(base_url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise HTTPException(
+            status_code=422, detail=f"base_url {base_url!r} ist keine gültige http(s)-URL"
+        )
+    try:
+        resolved_ips = {info[4][0] for info in socket.getaddrinfo(parsed.hostname, None)}
+    except OSError as exc:
+        raise HTTPException(
+            status_code=422, detail=f"base_url-Host {parsed.hostname!r} nicht auflösbar"
+        ) from exc
+    for ip_str in resolved_ips:
+        ip = ipaddress.ip_address(ip_str)
+        if ip.is_loopback and settings.allow_loopback_peers:
+            continue
+        if (
+            ip.is_loopback
+            or ip.is_private
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"base_url {base_url!r} löst zu einer privaten/internen Adresse auf "
+                    f"({ip_str}) - nicht erlaubt"
+                ),
+            )
 
 
 _CONFIG_ADMIN_PRINCIPAL_ID = "migration-service"
@@ -216,6 +314,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     app.state.approval_client = ApprovalClient(settings.permission_service_base_url)
     app.state.workflow_client = WorkflowServiceClient(settings.workflow_service_base_url)
+    app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
 
     sensor_config_client = SensorConfigClient(settings.monitoring_service_base_url)
     await sensor_config_client.start()
@@ -273,6 +372,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await app.state.license_client.close()
     await app.state.approval_client.close()
     await app.state.workflow_client.close()
+    await app.state.permission_client.close()
     await engine.dispose()
 
 
@@ -345,8 +445,12 @@ def get_metrics() -> Response:
     dependencies=[Depends(license_gate("write"))],
 )
 async def create_paired_installation(
-    payload: PairedInstallationCreate, session: AsyncSession = Depends(get_session)
+    payload: PairedInstallationCreate,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> PairedInstallationCreateOut:
+    await _require_migration_admin_permission(x_dms_principal)
+    _validate_peer_base_url(payload.base_url)
     installation, api_key = await repository.create_paired_installation(
         session,
         display_name=payload.display_name,
@@ -380,8 +484,11 @@ async def list_paired_installations(
     dependencies=[Depends(license_gate("write"))],
 )
 async def delete_paired_installation(
-    installation_id: str, session: AsyncSession = Depends(get_session)
+    installation_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> None:
+    await _require_migration_admin_permission(x_dms_principal)
     try:
         await repository.delete_paired_installation(session, installation_id)
     except repository.NotFoundError as exc:
@@ -399,16 +506,27 @@ async def create_transfer(
     payload: TransferCreate,
     session: AsyncSession = Depends(get_session),
     x_dms_maintenance_active: str = Header(default="false"),
+    x_dms_principal: str = Header(default=""),
+    x_dms_username: str = Header(default=""),
 ) -> TransferStartResult:
+    """`created_by` (Phase 59 Session 5) - derived from the caller's own,
+    gateway-verified `X-DMS-Username`, never trusted from the request body
+    anymore (previously a plain client-supplied field, forgeable to
+    attribute a transfer - and everything it moves/deletes - to an
+    arbitrary identity in the audit trail)."""
     await _reject_during_maintenance(x_dms_maintenance_active)
+    await _require_source_folder_read_permission(x_dms_principal, payload.source_folder_id)
+    if not x_dms_username:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Username-Header")
+    created_by = x_dms_username
     if await app.state.approval_client.requires_approval(settings.approval_action_type):
         request = await app.state.approval_client.create_request(
             action_type=settings.approval_action_type,
-            initiated_by=payload.created_by,
+            initiated_by=created_by,
             payload={
                 "source_folder_id": payload.source_folder_id,
                 "target_installation_id": payload.target_installation_id,
-                "created_by": payload.created_by,
+                "created_by": created_by,
                 "dry_run": payload.dry_run,
                 "retention_days": payload.retention_days,
             },
@@ -420,7 +538,7 @@ async def create_transfer(
             session,
             source_folder_id=payload.source_folder_id,
             target_installation_id=payload.target_installation_id,
-            created_by=payload.created_by,
+            created_by=created_by,
             dry_run=payload.dry_run,
             retention_days=payload.retention_days,
         )

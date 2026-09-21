@@ -1344,6 +1344,11 @@ services:
       DMS_FOLDER_SERVICE_BASE_URL: http://folder-service:8000
       DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
       DMS_WORKFLOW_SERVICE_BASE_URL: http://workflow-service:8000
+      # Phase 59 Session 5 (ADR 0182): this dev/test stack pairs an
+      # installation with itself via localhost for the self-loopback smoke
+      # test (docs/services/migration-service.md "Deliberate limitations") -
+      # never needed by a real installation, never set true there.
+      DMS_ALLOW_LOOPBACK_PEERS: "true"
     ports:
       - "${MIGRATION_SERVICE_PORT:-8028}:8000"
     depends_on:

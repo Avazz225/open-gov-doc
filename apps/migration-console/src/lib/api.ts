@@ -244,7 +244,6 @@ export async function createTransfer(
   params: {
     sourceFolderId: string;
     targetInstallationId: string;
-    createdBy: string;
     dryRun: boolean;
     retentionDays?: number;
   }
@@ -258,7 +257,6 @@ export async function createTransfer(
       body: JSON.stringify({
         source_folder_id: params.sourceFolderId,
         target_installation_id: params.targetInstallationId,
-        created_by: params.createdBy,
         dry_run: params.dryRun,
         retention_days: params.retentionDays ?? null,
       }),

@@ -370,6 +370,18 @@ DOMAIN_ADMIN_ROLES: list[tuple[str, str, list[str]]] = [
         "Nutzerverzeichnis-Abfrage (Service-zu-Service)",
         ["service.user_lookup"],
     ),
+    # Phase 59 Session 5: `POST`/`DELETE /paired-installations` previously
+    # had no permission check at all (only `license_gate`) - any licensed
+    # caller could pair with an arbitrary, attacker-controlled installation.
+    # Dedicated new domain rather than reusing an unrelated one, same
+    # precedent as `domain-admin-legal-hold`/`domain-admin-records-
+    # quarantine` (a new capability domain when a genuinely new admin
+    # concern ships, not a forced reuse).
+    (
+        "domain-admin-migration",
+        "Migrations-Installationspaarung verwalten",
+        ["admin.migration_management"],
+    ),
 ]
 
 

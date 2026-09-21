@@ -17,9 +17,9 @@ this service can be both the source and the target of a transfer.
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/paired-installations` | Pair a target/source installation — leave `api_key` empty to generate a new one (returned once), or enter the key already issued by the counterpart |
-| `GET`/`DELETE` | `/paired-installations[/{id}]` | List (never with `api_key`) / remove |
-| `POST` | `/transfers` | Start a transfer — four-eyes-capable (4.3, `action_type=migration.transfer.start`), `404` for an unknown target, `dry_run`/`retention_days` optional. **Since P56-S1** ([ADR 0152](../adr/0152-maintenance-mode-service-to-service-enforcement-scoping.md) "Category A"): `503` while system-wide maintenance mode is active, checked first |
+| `POST` | `/paired-installations` | Pair a target/source installation — leave `api_key` empty to generate a new one (returned once), or enter the key already issued by the counterpart. **Since Phase 59 Session 5** ([ADR 0182](../adr/0182-migration-service-transfer-and-pairing-authorization.md)): `401`/`403` admin gate + `422` SSRF validation of `base_url`, see "Authorization" below |
+| `GET`/`DELETE` | `/paired-installations[/{id}]` | List (never with `api_key`) / remove. **Since Phase 59 Session 5**: `DELETE` requires the same admin gate as `POST` above |
+| `POST` | `/transfers` | Start a transfer — four-eyes-capable (4.3, `action_type=migration.transfer.start`), `404` for an unknown target, `dry_run`/`retention_days` optional. **Since P56-S1** ([ADR 0152](../adr/0152-maintenance-mode-service-to-service-enforcement-scoping.md) "Category A"): `503` while system-wide maintenance mode is active, checked first. **Since Phase 59 Session 5**: `401`/`403` caller-permission gate on `source_folder_id`, `created_by` now server-derived, see "Authorization" below |
 | `GET` | `/transfers[/{id}]` | Status/list, optionally filtered by `status` |
 | `POST` | `/transfers/{id}/steps/{lock\|copy\|verify\|release\|delete-source\|dry-run-check}` | Internal — target of the `connector_call` service tasks in `resources/*.bpmn`. **Since P54-S2** ([ADR 0173](../adr/0173-migration-service-step-endpoints-workflow-service-caller-gate.md)), actually enforced, not just documented as "not intended for external callers": requires `X-DMS-Principal: workflow-service`, `403` otherwise |
 | `POST` | `/inbound/transfers[/...]` | Target side — called by a paired source, `Authorization: Bearer <api_key>` |
@@ -104,11 +104,35 @@ bootstrapped `domain-admin-users` (`admin.user_management`) alongside the previo
 response in a `status`/`role` envelope — `apply_role_assignment` reads `create_response.json()["role"]["id"]`
 instead of the previous flat `["id"]`.
 
+## Authorization (Phase 59 Session 5, [ADR 0182](../adr/0182-migration-service-transfer-and-pairing-authorization.md))
+
+`POST /transfers` and `POST`/`DELETE /paired-installations` previously had **no caller-permission check
+of any kind**, only `license_gate` (which checks the INSTALLATION's license status, never the caller's
+identity) — combined with `LocalDmsClient` always reading/writing the source installation as the fixed,
+elevated `X-DMS-Principal: migration-service` identity, any authenticated licensed user could transfer a
+folder they had no read access to at all, and pair with an arbitrary attacker-controlled installation.
+
+- **`POST /transfers`**: now requires the caller's own `folder.read` on `source_folder_id`, checked
+  directly against `permission-service` (`401` without `X-DMS-Principal`, `403` without the permission).
+  `created_by` is no longer a request field at all — derived server-side from the caller's own,
+  gateway-verified `X-DMS-Username` (`401` if missing).
+- **`POST`/`DELETE /paired-installations`**: now require a new domain-admin capability,
+  `admin.migration_management` (role `domain-admin-migration`) — pairing with another installation is an
+  admin-level trust decision, not an ordinary licensed-user action.
+- **`base_url` SSRF validation**: `POST /paired-installations` resolves the hostname and rejects a
+  loopback/private/link-local/reserved/multicast/unspecified target (`422`) — `PeerClient` previously did
+  `httpx.Client(base_url=base_url, ...)` with a completely unvalidated value. `settings.
+  allow_loopback_peers` (`False` by default) exempts ONLY loopback, needed by this project's own
+  self-loopback test convention (see "Deliberate limitations" below) — `infra/docker-compose.yml` sets it
+  `true` explicitly for this dev/test stack, documented there as never something a real installation
+  should need.
+
 ## Deliberate limitations
 
 - **Self-loopback instead of a real two-installation test**: setting up a second independent
   stack is not practical in the sandbox — the same convention already established for
-  `federation-hub-service` (P6-S9).
+  `federation-hub-service` (P6-S9). **Since Phase 59 Session 5**: this needs `settings.
+  allow_loopback_peers=true` to pass the new SSRF guard, set in `infra/docker-compose.yml`.
 - **No historical timestamps for migrated versions** — `document-service`'s check-in sets
   `created_at`/`created_by` server-side; migrated versions carry the migration timestamp.
 - **`principal_id` remains opaque** for copied permissions — no identity reconciliation between
@@ -126,6 +150,7 @@ instead of the previous flat `["id"]`.
 | `DMS_PERMISSION_SERVICE_BASE_URL` | `http://localhost:8004` | Local permission-service (locks, roles) |
 | `DMS_WORKFLOW_SERVICE_BASE_URL` | `http://localhost:8014` | workflow-service (BPMN orchestration) |
 | `DMS_DEFAULT_RETENTION_DAYS` | `30` | Default transition period, if `POST /transfers` does not specify one explicitly |
+| `DMS_ALLOW_LOOPBACK_PEERS` | `false` | Phase 59 Session 5: exempts ONLY loopback `base_url` targets from the SSRF guard — `true` in this dev/test stack for the self-loopback smoke test, never needed by a real installation |
 | `MIGRATION_SERVICE_PORT` | `8028` | Host port in the dev compose stack |
 
 ## Licensing
@@ -143,7 +168,15 @@ covers the complete flow including deletion after a `retention_days=0` period ex
 this drives a real BPMN instance through a real, separately running `workflow-service` container,
 it also doubles as the live regression proof that `workflow-service`'s `connector_call` dispatcher
 correctly sends the new `X-DMS-Principal: workflow-service` header (P54-S2, see below): the whole
-lifecycle would 403 at the very first step otherwise. **11 tests since P56-S1** (+1:
+lifecycle would 403 at the very first step otherwise. **18 tests since Phase 59 Session 5** (+7:
+RBAC/SSRF coverage for `POST /transfers` and `POST`/`DELETE /paired-installations` — see
+"Authorization" above; `test_create_paired_installation_without_principal_header_is_401`,
+`test_create_paired_installation_without_permission_is_403`,
+`test_delete_paired_installation_without_permission_is_403`,
+`test_create_paired_installation_rejects_ssrf_target`,
+`test_create_paired_installation_rejects_loopback_without_flag`,
+`test_create_transfer_without_principal_header_is_401`,
+`test_create_transfer_without_folder_read_permission_is_403`). Before that, 11 tests since P56-S1 (+1:
 `test_create_transfer_rejected_during_maintenance_mode` — `X-DMS-Maintenance-Active: true` → `503`,
 fires before any validation, a nonexistent source folder still gets `503` not `404`, see
 [ADR 0152](../adr/0152-maintenance-mode-service-to-service-enforcement-scoping.md) "Category A". The

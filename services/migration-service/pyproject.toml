@@ -14,6 +14,7 @@ dependencies = [
     "dms-registry-client",
     "dms-connector-sdk",
     "dms-metrics-client",
+    "dms-permission-client",
 ]
 
 [tool.uv.sources]
@@ -23,6 +24,7 @@ dms-eventbus-client = { workspace = true }
 dms-registry-client = { workspace = true }
 dms-connector-sdk = { workspace = true }
 dms-metrics-client = { workspace = true }
+dms-permission-client = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]
