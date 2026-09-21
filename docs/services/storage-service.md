@@ -9,13 +9,13 @@
 
 | Method | Path | Description |
 |---|---|---|
-| `PUT` | `/objects/{key:path}?retain_until=...` | Upload, computes SHA-256, writes to the configured targets according to the write strategy, upserts metadata — `retain_until` (optional, since P7-S1) sets `ObjectCopy.retention_until` and activates real S3 Object Lock on targets with `object_lock_mode=governance` (see below) |
-| `GET` | `/objects/{key:path}` | Download - reads from the first copy with status `ok` in target priority order, automatic fallback (404 if no copy is available) |
-| `DELETE` | `/objects/{key:path}?bypass_governance=false` | Delete on all targets (idempotent), then metadata + copy entries — `403` if a locked copy (`retention_until` in the future, target in governance mode) is affected without a valid bypass. Bypass requires `bypass_governance=true` **and** a role from `Settings.governance_bypass_role` in the `X-DMS-Roles` header (since P7-S1, [ADR 0030](../adr/0030-storage-object-lock-governance-mode.md)) |
-| `GET` | `/object-metadata/{key:path}` | Read metadata |
-| `GET` | `/objects/{key:path}/copies` | Copy status per configured target (`pending`/`ok`/`failed`/`failed_permanent`) |
-| `GET` | `/object-verify/{key:path}` | Fixity check of the primary target: re-read the checksum, compare against the reference value |
-| `GET` | `/object-verify/{key:path}/all` | Fixity check across **all** configured targets, updates `object_copy` |
+| `PUT` | `/objects/{key:path}?retain_until=...` | Upload, computes SHA-256, writes to the configured targets according to the write strategy, upserts metadata — `retain_until` (optional, since P7-S1) sets `ObjectCopy.retention_until` and activates real S3 Object Lock on targets with `object_lock_mode=governance` (see below). **Since Phase 59 Session 2**: requires `X-DMS-Principal` from the trusted-caller set, see "Authorization" below |
+| `GET` | `/objects/{key:path}` | Download - reads from the first copy with status `ok` in target priority order, automatic fallback (404 if no copy is available). **Since Phase 59 Session 2**: trusted-caller gate, see below |
+| `DELETE` | `/objects/{key:path}?bypass_governance=false` | Delete on all targets (idempotent), then metadata + copy entries — `403` if a locked copy (`retention_until` in the future, target in governance mode) is affected without a valid bypass. Bypass requires `bypass_governance=true` **and** a role from `Settings.governance_bypass_role` in the `X-DMS-Roles` header (since P7-S1, [ADR 0030](../adr/0030-storage-object-lock-governance-mode.md)). **Since Phase 59 Session 2**: trusted-caller gate, see below |
+| `GET` | `/object-metadata/{key:path}` | Read metadata. **Since Phase 59 Session 2**: trusted-caller gate, see below |
+| `GET` | `/objects/{key:path}/copies` | Copy status per configured target (`pending`/`ok`/`failed`/`failed_permanent`). **Since Phase 59 Session 2**: trusted-caller gate, see below |
+| `GET` | `/object-verify/{key:path}` | Fixity check of the primary target: re-read the checksum, compare against the reference value. **Since Phase 59 Session 2**: trusted-caller gate, see below |
+| `GET` | `/object-verify/{key:path}/all` | Fixity check across **all** configured targets, updates `object_copy`. **Since Phase 59 Session 2**: trusted-caller gate, see below |
 | `POST` | `/object-verify/process-pending?limit=100` | Bulk fixity sweep (3.6 "regular fixity check", since **Phase 40 Session 1**, the shape [ADR 0101](../adr/0101-storage-cronjob-single-job-no-bulk-verify.md)'s Consequences section already recommended): re-verifies the `limit` objects verified longest ago (`ObjectMetadata.next_verify_at`, `NULL` = never verified = most overdue), rescheduling each at a fixed interval (`Settings.fixity_verify_interval_seconds`, default 24h) - no retry/backoff semantics (unlike the replication retry queue), a mismatch is simply picked up again at the next scheduled sweep |
 | `GET` | `/storage/usage` | Aggregated storage consumption per backend (`{backend, object_count, total_size_bytes}[]`, `GROUP BY backend` over `object_metadata`, since P7-S2b) — only consumer so far: the storage-consumption report of `reporting-service` (see `docs/services/reporting-service.md`), a live query rather than an own read model |
 | `POST` | `/replication/process-pending` | Process the retry queue - replicates pending copies, intended for periodic external invocation |
@@ -26,10 +26,10 @@
 | `GET` | `/guard-status` | Per configured target: last confirmed device ID, timestamp, number of not-yet-replicated copies (Admin UI status block) |
 | `POST` | `/guard-status/{target_id}/reidentify` | Accepts an intended storage device swap at runtime (no restart needed), P5c-S2 |
 | `PUT` | `/guard-status/{target_id}/config` | Live-edit target metadata (`object_lock_mode`, `role`, since **Post-Roadmap Phase 22 Session 7**, [ADR 0092](../adr/0092-storage-target-metadata-editable.md); `decommissioned`, since **Phase 40 Session 1**) — `404` on an unknown target, `422` if the change would leave no regular target left, would make the already-configured `quorum_count` unsatisfiable, or (decommissioning only) would strand an object's only confirmed copy on this target. Takes effect without a restart |
-| `PUT` | `/objects/{key:path}/archive-copy` | Writes **only** to the configured archive targets (`role="archive"`, 5.6, since P7-S3) — `503` without a configured archive target |
-| `GET` | `/objects/{key:path}/archive-copy` | Reads exclusively from archive targets (retrieval, since P7-S3) — independent of the live state of the same key |
-| `GET` | `/objects/{key:path}/archive-copy/verify` | Fixity check of the archive copy, filtered to archive targets (since P7-S3) |
-| `DELETE` | `/objects/{key:path}/live-copies` | "Dehydrate" (5.6, since P7-S3) — removes copies only from the regular live targets, the archive copy remains untouched. Same governance-lock gate as the regular delete |
+| `PUT` | `/objects/{key:path}/archive-copy` | Writes **only** to the configured archive targets (`role="archive"`, 5.6, since P7-S3) — `503` without a configured archive target. **Since Phase 59 Session 2**: trusted-caller gate, see below |
+| `GET` | `/objects/{key:path}/archive-copy` | Reads exclusively from archive targets (retrieval, since P7-S3) — independent of the live state of the same key. **Since Phase 59 Session 2**: trusted-caller gate, see below |
+| `GET` | `/objects/{key:path}/archive-copy/verify` | Fixity check of the archive copy, filtered to archive targets (since P7-S3). **Since Phase 59 Session 2**: trusted-caller gate, see below |
+| `DELETE` | `/objects/{key:path}/live-copies` | "Dehydrate" (5.6, since P7-S3) — removes copies only from the regular live targets, the archive copy remains untouched. Same governance-lock gate as the regular delete. **Since Phase 59 Session 2**: trusted-caller gate, see below |
 | `GET` | `/healthz` | Health check incl. active targets and write strategy |
 
 ## Backend Plugin Interface (3.6)
@@ -100,6 +100,8 @@ Protects against an accidentally swapped/reset storage device that would otherwi
 - **Correction mechanism for intended storage device swaps** (since **P5c-S2**): `POST /guard-status/{target_id}/reidentify` adopts an already-present marker file of the new device, or stamps a new one (like the first-start bootstrap), updates `backend_identity`, and resets all previous copies of the target to `pending` via `reset_copies_for_backend` — functionally the same recovery as the automatic degraded start, but explicitly triggered by the admin and **without a restart** (Admin UI: "Accept storage device swap" button per row in `/storage-guard/`). Replaces the previously required direct correction in the `backend_identity` table.
 
 **Authorization (Post-Roadmap Phase 38 Session 3)**: `PUT /guard-config`, `POST /guard-status/{id}/reidentify`, `PUT /guard-status/{id}/config`, and `PUT /operational-config` previously had NO permission check at all — this service had no `permission_client` of any kind before this session. All four now require `X-DMS-Principal` + the capability `admin.storage` (role `domain-admin-storage`) — this capability had been seeded since P9-S1 but never actually enforced anywhere in the codebase until now. `GET` endpoints (`/guard-config`, `/guard-status`, `/operational-config`) remain ungated. See [ADR 0148](../adr/0148-admin-ui-authorization-full-alignment.md).
+
+**Object-CRUD data-plane authorization (Phase 59 Session 2, [ADR 0179](../adr/0179-storage-service-object-crud-trusted-caller-gate.md))**: all eleven object-CRUD endpoints (upload/download/delete, metadata, copies, both fixity-check endpoints, and the three archive-copy endpoints — see the API table above) previously had **no permission check of any kind**, unauthenticated by any measure — a real, unexploited-in-practice-but-genuinely-exploitable bypass found by this round's live-code security sweep, letting any authenticated user through the gateway read/write/delete any object by key, completely bypassing `document-service`'s per-document ACL. Now requires `X-DMS-Principal` to be one of six known trusted internal callers (`document-service`, `archival-service`, `rendering-service`, `ocr-service`, `virus-scan-service`, `mail-connector`) — `403` otherwise, including for a missing header. Deliberately NOT the existing `admin.storage` capability (a human-administrator concern, wrong semantic for six backend services doing their normal job on an already-authorized end user's behalf, see ADR 0179's own rationale) — a fixed-caller-set check instead, the same "trusted system identity" convention this project uses for its single-caller precedents, extended to accept several literal identities. Each of the six calling services' own `StorageClient`/equivalent now sends its fixed identity as a default header on every request, confirmed unspoofable for a real end user the same way as those precedents (the gateway always overwrites any client-supplied `X-DMS-Principal` with the verified JWT claims). `GET /storage/usage` and the two `/process-pending` maintenance endpoints remain ungated — out of scope for this finding, a materially lower-risk aggregate-statistics/internal-maintenance surface, not itemized by this round's research.
 
 ## Target Metadata Live-Editable (Post-Roadmap Phase 22 Session 7, [ADR 0092](../adr/0092-storage-target-metadata-editable.md))
 
@@ -193,7 +195,15 @@ One custom gauge, `storage.replication.backlog` (group `reliability`) — the su
 
 ## Tests
 
-- `uv run pytest services/storage-service/tests` (**156 tests since Phase 50 Session 1** — +2 over
+- `uv run pytest services/storage-service/tests` (**162 tests since Phase 59 Session 2** — +6:
+  `test_upload_object_without_trusted_caller_is_403`/`.._without_principal_header_is_403`,
+  `test_download_object_without_trusted_caller_is_403`,
+  `test_delete_object_without_trusted_caller_is_403`,
+  `test_get_object_metadata_without_trusted_caller_is_403`, and
+  `test_object_endpoints_accept_every_documented_trusted_caller` (a positive-path regression proving
+  each of the six real callers independently passes the gate) — see "Authorization" above.
+
+  Older history: 156 tests since Phase 50 Session 1 — +2 over
   the previous 154: `test_process_pending_propagates_lock_until_for_a_lock_target`/
   `test_process_pending_omits_lock_until_for_a_non_lock_target` (`test_replication.py`), proving
   `lock_until` now reaches the backend `write()` call on catch-up replication exactly when the target

@@ -2,7 +2,68 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P59-S1 (`notification-service`'s `GET /notifications`/`GET /notifications/{id}`
+**Last completed:** P59-S2 (`storage-service`'s entire object-CRUD API had zero authorization — second
+session of Phase 59, "Critical Authorization Bugs"). **New ADR**
+([0179](docs/adr/0179-storage-service-object-crud-trusted-caller-gate.md)) — a real authorization-model
+decision, per the plan's own DoD.
+
+**The gap.** Found by this round's live-code security sweep. All eleven object-CRUD endpoints (upload/
+download/delete, metadata, copies, both fixity-check endpoints, the three archive-copy endpoints) had NO
+permission check of any kind — only the admin/config endpoints (`operational-config`/`guard-config`/
+`guard-status`) were retrofitted with `admin.storage` at Post-Roadmap Phase 38 Session 3; the actual data
+plane, this service's reason to exist, was left out entirely. Since `storage-service` self-registers with
+`registry-service` and is reachable through the gateway like any other service, any authenticated user of
+any role could `GET`/`PUT`/`DELETE /objects/{any_key}` directly — completely bypassing
+`document-service`'s per-document ACL and the WORM/retention guard's intent for non-governance-locked
+targets. Structured, predictable storage keys made enumeration practical, not just theoretical. The
+largest blast radius of this round's five criticals.
+
+**The fix.** Traced every real caller first: `apps/admin-ui` (the only frontend caller of this service at
+all) never touches the object endpoints, only the already-gated config/guard ones. The object endpoints'
+only legitimate callers are six backend services (`document-service`, `archival-service`,
+`rendering-service`, `ocr-service`, `virus-scan-service`, `mail-connector`), each already having checked
+the real end user's own permission before ever reaching `storage-service`. New `_require_storage_caller`
+dependency checks `X-DMS-Principal` against exactly that set — `403` otherwise, including for a missing
+header. Deliberately NOT the existing `admin.storage` capability, which would have meant granting six
+ordinary backend services a human-administrator right just to do their normal job (wrong semantic,
+conflates two genuinely separate concerns). Each of the six services' own `StorageClient` now sends its
+fixed identity as a default header on every request (set once at `httpx.AsyncClient` construction, same
+established pattern used for this project's single-caller precedents, extended here to a set of six).
+`GET /storage/usage` and the two `/process-pending` maintenance endpoints deliberately left ungated — a
+materially lower-risk aggregate-statistics/internal-maintenance surface, out of scope for this specific
+finding.
+
+New/updated tests: `storage-service` +6 (`test_upload_object_without_trusted_caller_is_403`,
+`.._without_principal_header_is_403`, `test_download_object_without_trusted_caller_is_403`,
+`test_delete_object_without_trusted_caller_is_403`,
+`test_get_object_metadata_without_trusted_caller_is_403`, and a positive-path regression proving each of
+the six trusted callers independently passes the gate), 162/162 total. The default test-fixture principal
+was changed from a synthetic string to the literal `"document-service"` (still separately granted
+`admin.storage` for the config tests) — satisfies both gates at once without touching ~60 individual
+object-CRUD test call sites. The six calling services' own test suites (document-service 398/398,
+virus-scan-service 38/38, rendering-service 103/103, ocr-service 57/57+9 skipped, mail-connector 78/78,
+archival-service 145/145) all needed no new tests — their existing real upload/download round trips
+implicitly prove the new header is sent correctly; a missing header would have surfaced as a widespread
+`403` failure across each suite, and none did. All 7 services `ruff` clean (same pre-existing, unrelated
+repo-wide failures in `libreoffice-addin`/`federation-hub-service` confirmed out of scope again).
+
+All 7 services rebuilt/redeployed. **Live-verified against the real running stack**: direct `curl` against
+`storage-service` confirmed `403` with no header and with a random authenticated identity, `201` with the
+literal `document-service` identity; separately, a real end-to-end document upload + content download
+through `document-service`'s own public API (not a synthetic identity header) succeeded, proving the
+client-side header wiring works through a real caller, not just a direct test. Test data cleaned up
+afterward on both paths.
+
+`docs/services/storage-service.md`: API table (all eleven rows annotated) + a new "Object-CRUD data-plane
+authorization" paragraph extending the existing "Authorization" section, test count updated.
+
+**Next session:** P59-S3 — `signature-service`'s `POST /signatures` has no authorization check AND
+trusts a client-supplied `signer_principal_id` with no identity validation — enables signature forgery
+under another user's name plus a document-ACL bypass. Third session of Phase 59.
+
+---
+
+Immediately before P59-S2: **P59-S1** (`notification-service`'s `GET /notifications`/`GET /notifications/{id}`
 unauthenticated-read fix — first session of Phase 59, "Critical Authorization Bugs"). **New ADR**
 ([0178](docs/adr/0178-notification-service-read-endpoints-rbac-gate.md)) — a real authorization-model
 decision, per the plan's own DoD.

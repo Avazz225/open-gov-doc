@@ -12,8 +12,10 @@ from storage_service.settings import BackendTargetConfig
 
 # Muss mit conftest.py::STORAGE_ADMIN_PRINCIPAL_ID übereinstimmen (dort per
 # `_grant_storage_permission`-Fixture berechtigt) - kein Cross-File-Import
-# von Test-Konstanten, gleiche Projektkonvention wie andernorts.
-STORAGE_ADMIN_PRINCIPAL_ID = "storage-service-tests"
+# von Test-Konstanten, gleiche Projektkonvention wie andernorts. Since
+# Phase 59 Session 2 (ADR 0179): deliberately a real trusted-caller
+# identity (`"document-service"`), see conftest.py's own comment.
+STORAGE_ADMIN_PRINCIPAL_ID = "document-service"
 
 
 def _extract_metric_value(exposition_text: str, metric_name: str) -> float:
@@ -131,6 +133,63 @@ def test_upload_download_roundtrip(client):
     assert download.status_code == 200
     assert download.content == content
     assert download.headers["content-type"].startswith("text/plain")
+
+
+# --- Object-CRUD caller-identity gate (Phase 59 Session 2, ADR 0179) ------
+
+
+def test_upload_object_without_trusted_caller_is_403(client):
+    response = client.put(
+        f"/objects/{_key()}", content=b"x", headers={"X-DMS-Principal": "some-random-user"}
+    )
+    assert response.status_code == 403
+
+
+def test_upload_object_without_principal_header_is_403(client):
+    response = client.put(f"/objects/{_key()}", content=b"x", headers={"X-DMS-Principal": ""})
+    assert response.status_code == 403
+
+
+def test_download_object_without_trusted_caller_is_403(client):
+    key = _key()
+    client.put(f"/objects/{key}", content=b"x")
+    response = client.get(f"/objects/{key}", headers={"X-DMS-Principal": "some-random-user"})
+    assert response.status_code == 403
+
+
+def test_delete_object_without_trusted_caller_is_403(client):
+    key = _key()
+    client.put(f"/objects/{key}", content=b"x")
+    response = client.delete(f"/objects/{key}", headers={"X-DMS-Principal": "some-random-user"})
+    assert response.status_code == 403
+
+
+def test_get_object_metadata_without_trusted_caller_is_403(client):
+    key = _key()
+    client.put(f"/objects/{key}", content=b"x")
+    response = client.get(
+        f"/object-metadata/{key}", headers={"X-DMS-Principal": "some-random-user"}
+    )
+    assert response.status_code == 403
+
+
+def test_object_endpoints_accept_every_documented_trusted_caller(client):
+    """Regression proof that the allowlist itself is correct, not just that
+    SOME identity works - each of the six real internal callers this
+    session wired a fixed `X-DMS-Principal` header into must independently
+    pass the gate."""
+    for caller in (
+        "document-service",
+        "archival-service",
+        "rendering-service",
+        "ocr-service",
+        "virus-scan-service",
+        "mail-connector",
+    ):
+        response = client.put(
+            f"/objects/{_key()}", content=b"x", headers={"X-DMS-Principal": caller}
+        )
+        assert response.status_code == 201, f"caller {caller!r} was unexpectedly rejected"
 
 
 def _local_usage(client) -> dict:

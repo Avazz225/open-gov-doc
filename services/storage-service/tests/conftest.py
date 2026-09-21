@@ -31,8 +31,13 @@ PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://l
 # `admin.storage` - most tests in this file exercise exactly these
 # endpoints, so `client` (test_api.py) carries this principal as its
 # default `X-DMS-Principal` header rather than every test passing it
-# explicitly.
-STORAGE_ADMIN_PRINCIPAL_ID = "storage-service-tests"
+# explicitly. Since Phase 59 Session 2 (ADR 0179), the value is
+# deliberately one of `_TRUSTED_STORAGE_CALLERS` (`"document-service"`,
+# not a synthetic test-only string) so the SAME default principal also
+# satisfies the new object-CRUD `_require_storage_caller` gate - avoids
+# touching the ~60 existing object-endpoint test call sites individually,
+# which vastly outnumber the admin/config-endpoint ones in this file.
+STORAGE_ADMIN_PRINCIPAL_ID = "document-service"
 
 
 @pytest.fixture(scope="session", autouse=True)

@@ -300,14 +300,62 @@ async def get_metrics(session: AsyncSession = Depends(get_session)) -> Response:
     return Response(content=body, media_type=content_type)
 
 
-@app.get("/objects/{key:path}/copies", response_model=list[ObjectCopyOut])
+# Trusted internal callers of the object-CRUD data plane (Phase 59 Session 2,
+# ADR 0179). storage-service is never called directly by any frontend for
+# these endpoints - confirmed via grep, `apps/admin-ui`'s only calls into
+# this service target the already-gated `admin.storage` config/guard
+# endpoints below. Every legitimate caller is one of these six services,
+# each already having checked the real end user's own permission (e.g.
+# `document.read`/`.write`) before ever reaching storage-service - the same
+# "fixed system-identity header" convention this project already uses
+# repeatedly (`migration-service`'s `_require_workflow_service_caller`,
+# `teamspace-service`'s `_require_auth_service_caller`), extended here to
+# accept a SET of known callers instead of exactly one, since the object
+# data plane genuinely has several legitimate machine callers, unlike those
+# single-caller precedents.
+_TRUSTED_STORAGE_CALLERS = frozenset(
+    {
+        "document-service",
+        "archival-service",
+        "rendering-service",
+        "ocr-service",
+        "virus-scan-service",
+        "mail-connector",
+    }
+)
+
+
+async def _require_storage_caller(x_dms_principal: str = Header(default="")) -> None:
+    """Gates every object-CRUD endpoint below - these previously had NO
+    permission check of any kind, reachable by any authenticated user
+    through the gateway (whose own verified `X-DMS-Principal` is their own
+    Keycloak `sub`, never one of the literal service-name strings checked
+    here - unspoofable for a real end user, same reasoning as the
+    single-caller precedents this mirrors)."""
+    if x_dms_principal not in _TRUSTED_STORAGE_CALLERS:
+        raise HTTPException(
+            status_code=403,
+            detail="Nur bekannte interne Dienste dürfen auf Objekte zugreifen",
+        )
+
+
+@app.get(
+    "/objects/{key:path}/copies",
+    response_model=list[ObjectCopyOut],
+    dependencies=[Depends(_require_storage_caller)],
+)
 async def list_object_copies(
     key: str, session: AsyncSession = Depends(get_session)
 ) -> list[ObjectCopyOut]:
     return await repository.list_copies(session, key)
 
 
-@app.put("/objects/{key:path}/archive-copy", response_model=ObjectMetadataOut, status_code=201)
+@app.put(
+    "/objects/{key:path}/archive-copy",
+    response_model=ObjectMetadataOut,
+    status_code=201,
+    dependencies=[Depends(_require_storage_caller)],
+)
 async def upload_archive_copy(
     key: str, request: Request, session: AsyncSession = Depends(get_session)
 ) -> ObjectMetadataOut:
@@ -354,7 +402,7 @@ async def upload_archive_copy(
     return metadata
 
 
-@app.get("/objects/{key:path}/archive-copy")
+@app.get("/objects/{key:path}/archive-copy", dependencies=[Depends(_require_storage_caller)])
 async def download_archive_copy(key: str, session: AsyncSession = Depends(get_session)) -> Response:
     """Retrieval (5.6, since P7-S3) - reads exclusively from archive
     targets, independent of the live state of the same object key."""
@@ -375,7 +423,11 @@ async def download_archive_copy(key: str, session: AsyncSession = Depends(get_se
     return Response(content=data, media_type=metadata.content_type or "application/octet-stream")
 
 
-@app.get("/objects/{key:path}/archive-copy/verify", response_model=list[FixityEntry])
+@app.get(
+    "/objects/{key:path}/archive-copy/verify",
+    response_model=list[FixityEntry],
+    dependencies=[Depends(_require_storage_caller)],
+)
 async def verify_archive_copy(
     key: str, session: AsyncSession = Depends(get_session)
 ) -> list[FixityEntry]:
@@ -394,7 +446,11 @@ async def verify_archive_copy(
     return [r for r in results if r["backend_id"] in app.state.archive_targets]
 
 
-@app.delete("/objects/{key:path}/live-copies", status_code=204)
+@app.delete(
+    "/objects/{key:path}/live-copies",
+    status_code=204,
+    dependencies=[Depends(_require_storage_caller)],
+)
 async def delete_live_copies(
     key: str,
     bypass_governance: bool = False,
@@ -442,7 +498,12 @@ async def delete_live_copies(
     await session.commit()
 
 
-@app.put("/objects/{key:path}", response_model=ObjectMetadataOut, status_code=201)
+@app.put(
+    "/objects/{key:path}",
+    response_model=ObjectMetadataOut,
+    status_code=201,
+    dependencies=[Depends(_require_storage_caller)],
+)
 async def upload_object(
     key: str,
     request: Request,
@@ -489,7 +550,7 @@ async def upload_object(
     return metadata
 
 
-@app.get("/objects/{key:path}")
+@app.get("/objects/{key:path}", dependencies=[Depends(_require_storage_caller)])
 async def download_object(key: str, session: AsyncSession = Depends(get_session)) -> Response:
     try:
         metadata = await repository.get_metadata(session, key)
@@ -508,7 +569,7 @@ async def download_object(key: str, session: AsyncSession = Depends(get_session)
     return Response(content=data, media_type=metadata.content_type or "application/octet-stream")
 
 
-@app.delete("/objects/{key:path}", status_code=204)
+@app.delete("/objects/{key:path}", status_code=204, dependencies=[Depends(_require_storage_caller)])
 async def delete_object(
     key: str,
     bypass_governance: bool = False,
@@ -558,7 +619,11 @@ async def delete_object(
     await session.commit()
 
 
-@app.get("/object-metadata/{key:path}", response_model=ObjectMetadataOut)
+@app.get(
+    "/object-metadata/{key:path}",
+    response_model=ObjectMetadataOut,
+    dependencies=[Depends(_require_storage_caller)],
+)
 async def get_object_metadata(
     key: str, session: AsyncSession = Depends(get_session)
 ) -> ObjectMetadataOut:
@@ -581,7 +646,11 @@ async def get_storage_usage(
     ]
 
 
-@app.get("/object-verify/{key:path}/all", response_model=list[FixityEntry])
+@app.get(
+    "/object-verify/{key:path}/all",
+    response_model=list[FixityEntry],
+    dependencies=[Depends(_require_storage_caller)],
+)
 async def verify_object_all_copies(
     key: str, session: AsyncSession = Depends(get_session)
 ) -> list[FixityEntry]:
@@ -603,7 +672,11 @@ async def verify_object_all_copies(
     return results
 
 
-@app.get("/object-verify/{key:path}", response_model=VerifyResult)
+@app.get(
+    "/object-verify/{key:path}",
+    response_model=VerifyResult,
+    dependencies=[Depends(_require_storage_caller)],
+)
 async def verify_object(key: str, session: AsyncSession = Depends(get_session)) -> VerifyResult:
     """Fixity check basis (3.6): read the primary target's checksum fresh
     from the backend and compare it against the reference value stored in

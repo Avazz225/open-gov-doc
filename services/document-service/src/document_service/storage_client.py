@@ -26,8 +26,17 @@ class StorageClient:
     communication via the public API, no access to Storage Service
     internals."""
 
+    _SYSTEM_PRINCIPAL_HEADERS = {"X-DMS-Principal": "document-service"}
+
     def __init__(self, base_url: str) -> None:
-        self._client = httpx.AsyncClient(base_url=base_url, timeout=30.0)
+        """Phase 59 Session 2 (ADR 0179): storage-service's object-CRUD
+        endpoints now require a known trusted-caller identity - applied via
+        the client's own default headers so every request automatically
+        carries it, same pattern already used by `mail_connector.
+        document_client.DocumentClient`."""
+        self._client = httpx.AsyncClient(
+            base_url=base_url, timeout=30.0, headers=self._SYSTEM_PRINCIPAL_HEADERS
+        )
 
     async def upload(
         self,

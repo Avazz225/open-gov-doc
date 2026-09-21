@@ -11,8 +11,14 @@ class StorageClient:
     scope to the equally named client of the Document Service - the virus
     scan service also never holds file contents itself."""
 
+    _SYSTEM_PRINCIPAL_HEADERS = {"X-DMS-Principal": "virus-scan-service"}
+
     def __init__(self, base_url: str) -> None:
-        self._client = httpx.AsyncClient(base_url=base_url, timeout=30.0)
+        """Phase 59 Session 2 (ADR 0179): storage-service's object-CRUD
+        endpoints now require a known trusted-caller identity."""
+        self._client = httpx.AsyncClient(
+            base_url=base_url, timeout=30.0, headers=self._SYSTEM_PRINCIPAL_HEADERS
+        )
 
     async def upload(self, key: str, data: bytes, content_type: str | None) -> None:
         headers = {"Content-Type": content_type} if content_type else {}

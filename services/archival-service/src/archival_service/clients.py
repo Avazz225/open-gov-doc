@@ -144,8 +144,17 @@ class StorageClient:
     target (retrieval, `upload`) and the new archive-target endpoints
     (P7-S3)."""
 
+    _SYSTEM_PRINCIPAL_HEADERS = {"X-DMS-Principal": "archival-service"}
+
     def __init__(self, base_url: str) -> None:
-        self._client = httpx.AsyncClient(base_url=base_url, timeout=60.0)
+        """Phase 59 Session 2 (ADR 0179): storage-service's object-CRUD
+        endpoints now require a known trusted-caller identity - applied via
+        default headers so every request automatically carries it (unlike
+        `DocumentClient` above, whose per-call headers predate this
+        convention)."""
+        self._client = httpx.AsyncClient(
+            base_url=base_url, timeout=60.0, headers=self._SYSTEM_PRINCIPAL_HEADERS
+        )
 
     async def upload(self, key: str, data: bytes, content_type: str) -> None:
         response = await self._client.put(
