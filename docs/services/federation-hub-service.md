@@ -12,7 +12,7 @@
 | `GET` | `/public-key` | Public signature key of the hub (RSA-2048) — installations fetch this once on first registration (trust-on-first-use, see ADR 0028) |
 | `GET` | `/ca-certificate` | Self-signed root CA certificate of the hub (since **Post-Roadmap Phase 21 Session 2**, [ADR 0085](../adr/0085-federation-hub-certificate-layer-not-transport-mtls.md)) — counterpart to `/public-key`, certificate-pinning equivalent (trust-on-first-use), see "Certificate Layer" below |
 | `POST` | `/installations` | Register (new `id`) or update (known `id`) — since P13-S4 (ADR 0039) signature-based instead of API-key-based: `X-Installation-Signature` must match the submitted `public_key_pem` for a new registration (self-consistency), or the already-stored one for a known `id` (`public_key_pem` itself is **not** taken over on an update, see `rotate-key`). Since **P21-S2** the hub additionally issues a certificate for the submitted key (`certificate_pem` in the response). **Since Phase 60 Session 1** ([ADR 0183](../adr/0183-federation-hub-callback-ssrf-and-ocr-service-document-idor.md)): `callback_base_url` validated via `_validate_callback_base_url` (`422` for a loopback/private/link-local/reserved/multicast target), checked before signature verification |
-| `GET` | `/installations` | Address book — ungated |
+| `GET` | `/installations` | Address book — ungated. `limit`/`offset` since P62-S1 (previously fully unbounded, default `limit=100`) |
 | `DELETE` | `/installations/{id}` | Deregister — `X-Installation-Signature` over the UTF-8 bytes of `installation_id` itself |
 | `POST` | `/installations/{id}/rotate-key` | Key rotation (P13-S4/ADR 0039) — body `{new_public_key_pem}`, signed with the still-**current** private key (proof of continuity). Since **P21-S2** the certificate is also reissued (bound to the new key) |
 | `POST` | `/installations/{id}/revoke` | Operator revocation (P13-S4/ADR 0039) — gated via `Authorization: Bearer <DMS_HUB_OPERATOR_KEY>`, **not** via the affected installation's own signature (which could be compromised) |
@@ -160,3 +160,6 @@ the hub CA is self-signed and stable across repeated calls, registration issues 
   `POST /installations/{id}/revoke`, `403` without it (fail-closed by default, since no environment
   configures the key today). `GET /handovers`/`GET /handovers/{id}` stay deliberately ungated — pure
   metadata, same rationale as `GET /installations` — that half of this bullet was never a real gap.
+  **Since P62-S1**: `GET /handovers` gained `limit`/`offset` (previously fully unbounded, default
+  `limit=100`), and the `hub_operator_key` comparison at both gates now uses `hmac.compare_digest`
+  instead of plain `!=` (theoretical timing-attack surface, no reported real-world exploit).

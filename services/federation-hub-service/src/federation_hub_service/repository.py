@@ -212,8 +212,13 @@ async def revoke_installation(
     return installation
 
 
-async def list_installations(session: AsyncSession) -> list[Installation]:
-    result = await session.execute(select(Installation).order_by(Installation.id))
+async def list_installations(
+    session: AsyncSession, *, limit: int = 100, offset: int = 0
+) -> list[Installation]:
+    """`limit`/`offset` since P62-S1 - previously fully unbounded."""
+    result = await session.execute(
+        select(Installation).order_by(Installation.id).limit(limit).offset(offset)
+    )
     return list(result.scalars().all())
 
 
@@ -408,16 +413,21 @@ async def reset_for_result_retry(session: AsyncSession, handover: Handover) -> N
     await session.flush()
 
 
-async def list_handovers(session: AsyncSession, *, status: str | None = None) -> list[Handover]:
+async def list_handovers(
+    session: AsyncSession, *, status: str | None = None, limit: int = 100, offset: int = 0
+) -> list[Handover]:
     """Collection endpoint basis (Phase 40 Session 3) - previously only a
     single-``id`` `GET` existed, no way to list e.g. every
     ``delivery_failed``/``result_delivery_failed`` handover for the admin
     UI's failure-visibility view, unlike the equivalent list-with-status-
     filter endpoints in `rendering-service`/`ocr-service`/
     `notification-service`. Most-recent-first, same convention as an
-    admin-facing failure list is typically read (newest problem first)."""
+    admin-facing failure list is typically read (newest problem first).
+    `limit`/`offset` since P62-S1 - previously fully unbounded."""
     query = select(Handover)
     if status is not None:
         query = query.where(Handover.status == status)
-    result = await session.execute(query.order_by(Handover.created_at.desc()))
+    result = await session.execute(
+        query.order_by(Handover.created_at.desc()).limit(limit).offset(offset)
+    )
     return list(result.scalars().all())

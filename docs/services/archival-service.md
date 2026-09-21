@@ -32,7 +32,7 @@ exhausted, since Post-Roadmap Phase 20 Session 2, [ADR 0078](../adr/0078-archiva
 | `copied` | Archive copy written | Rendition downloaded, optionally encrypted (`ObjectType.archive_encryption_enabled`), written to the archive targets via `PUT /objects/{key}/archive-copy` |
 | `verified` | Fixity check passed | `GET /objects/{key}/archive-copy/verify` — all returned copies must be `ok`, otherwise the phase is retained (see below) |
 | `released` | Document marked as archived | `PUT /documents/{id}/archived` (document-service publishes `document.archived`) |
-| `dehydrated` | Live copy removed | Second, independent tick phase (`run_dehydration_tick`): `released_at + dehydration_delay_days <= now`, no active legal hold (`GET /documents/{id}/has-active-hold`) → `DELETE /objects/{key}/live-copies` + `PUT /documents/{id}/dehydrated` |
+| `dehydrated` | Live copy removed | Second, independent tick phase (`run_dehydration_tick`): `released_at + dehydration_delay_days <= now`, no active legal hold (`GET /documents/{id}/has-active-hold`) → `DELETE /objects/{key}/live-copies` + `PUT /documents/{id}/dehydrated`. **Since P62-S1**: the hold is re-checked a SECOND time, immediately before the deletion call — the first check and the deletion are separated by two more awaited cross-service calls (`get_document`/`get_version`), a real (if narrow, not attacker-triggerable-on-demand) TOCTOU window in which a hold could be placed in between |
 | `failed_permanent` | `max_archival_attempts` exhausted | A technical failure (conversion, verification, unexpected exception) increments `attempts`; below the limit, `status` stays in its current phase (only `error_message`/`next_retry_at` change, see "Retry & Backoff" below) — only on the last permitted attempt does `status` switch here |
 
 ### Retry & Backoff (Post-Roadmap Phase 20 Session 2, [ADR 0078](../adr/0078-archival-service-retry-backoff-failed-permanent.md))
@@ -357,7 +357,10 @@ None yet — follows in Phase 11.
 
 ## Tests
 
-- `uv run pytest services/archival-service/tests` (**147 tests**, +2 since **Phase 60 Session 2** ([ADR 0184](../adr/0184-archival-service-xxe-hardening.md)): `test_untrusted_xml_parser_does_not_expand_entities` in both `test_xdomea.py`/`test_xjustiz.py`, a real XXE regression test (billion-laughs-style entity chain confirmed to stay unexpanded) rather than treating the new parser-flag hardening as self-evidently sufficient. Before that, 142 tests, of which 4 new since **Post-Roadmap
+- `uv run pytest services/archival-service/tests` (**148 tests**, +1 since **P62-S1**:
+  `test_run_dehydration_tick_re_checks_hold_immediately_before_deletion` (`get_document` places the hold
+  as a side effect, simulating a hold arriving inside the TOCTOU window — the second, immediately-before-
+  deletion check must catch it). Before that, 147 tests, +2 since **Phase 60 Session 2** ([ADR 0184](../adr/0184-archival-service-xxe-hardening.md)): `test_untrusted_xml_parser_does_not_expand_entities` in both `test_xdomea.py`/`test_xjustiz.py`, a real XXE regression test (billion-laughs-style entity chain confirmed to stay unexpanded) rather than treating the new parser-flag hardening as self-evidently sufficient. Before that, 142 tests, of which 4 new since **Post-Roadmap
   Phase 42 Session 1**: `test_xdomea.py` — a top-level `Akte` with no Betreff of its own falls back to a
   nested `Teilvorgang`'s Betreff for case naming, that fallback does NOT override an already-usable
   primary Betreff, a `DokumentMitSchriftstueck`'s real `Schriftstueck` content is actually imported (not

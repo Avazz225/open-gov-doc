@@ -256,10 +256,18 @@ async def get_plugin_manifest(
 async def report_resource_usage(
     plugin_type: str,
     payload: ResourceUsageReportIn,
+    x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> None:
     """Selbstmeldung einer laufenden Plugin-Instanz (analog Registry-
-    Heartbeat) - ungegatet, service-zu-service, kein Principal."""
+    Heartbeat). Seit P62-S1 gegatet via `_require_orchestration_permission` -
+    exakt dasselbe Gate wie das bereits als "symmetrisch" dokumentierte
+    `POST /nodes/{node_id}` unten, vorher eine Asymmetrie: ein ungegateter
+    Aufruf konnte per Fantasie-`instance_id` einen dauerhaft zu hohen
+    `median(report.cpu_cores ...)`-Schaetzwert erzwingen (`placement.py`)
+    und damit die Platzierung eines `scaling_type="singleton"`-Plugins
+    dauerhaft blockieren, da immer ein (gefaelschter) Report existiert."""
+    await _require_orchestration_permission(x_dms_principal)
     now = datetime.now(UTC)
     report = await session.get(PluginResourceReport, payload.instance_id)
     if report is None:
@@ -366,10 +374,14 @@ async def create_placement(
 
 @app.get("/placements", response_model=list[PlacementDecisionOut])
 async def list_placements(
-    plugin_type: str | None = None, session: AsyncSession = Depends(get_session)
+    plugin_type: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+    session: AsyncSession = Depends(get_session),
 ) -> list[PlacementDecision]:
+    """`limit`/`offset` since P62-S1 (previously fully unbounded)."""
     query = select(PlacementDecision).order_by(PlacementDecision.decided_at.desc())
     if plugin_type is not None:
         query = query.where(PlacementDecision.plugin_type == plugin_type)
-    result = await session.execute(query)
+    result = await session.execute(query.limit(limit).offset(offset))
     return list(result.scalars().all())

@@ -1,5 +1,9 @@
 from dms_common import BaseServiceSettings
 
+# P62-S1: named so `main.py`'s startup guard can compare against it without
+# duplicating the literal string - see `dry_run_secret`'s own docstring.
+INSECURE_DEFAULT_DRY_RUN_SECRET = "dev-only-dry-run-secret-do-not-use-in-production"
+
 
 class Settings(BaseServiceSettings):
     service_name: str = "query-service"
@@ -25,7 +29,7 @@ class Settings(BaseServiceSettings):
     # lokale Entwicklung. Eine echte Installation setzt dies ueber ein
     # Secret, gleiches Muster wie archival-service's
     # DMS_ARCHIVE_ENCRYPTION_KEY (ADR 0029).
-    dry_run_secret: str = "dev-only-dry-run-secret-do-not-use-in-production"
+    dry_run_secret: str = INSECURE_DEFAULT_DRY_RUN_SECRET
     dry_run_token_ttl_seconds: int = 300
 
     # ADR 0031: `pglast` (GPL-3.0-or-later) wird nicht ins Standardimage

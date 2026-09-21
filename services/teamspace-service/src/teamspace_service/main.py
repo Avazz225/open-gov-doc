@@ -296,20 +296,26 @@ async def list_teamspaces(
 
 @app.get("/admin/teamspaces", response_model=list[TeamspaceAdminOut])
 async def list_all_teamspaces(
-    x_dms_principal: str = Header(default=""), session: AsyncSession = Depends(get_session)
+    limit: int = 100,
+    offset: int = 0,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> list[TeamspaceAdminOut]:
     """Installation-wide overview (Post-Roadmap Phase 22 Session 5,
     admin UI) - unlike `GET /teamspaces`, NOT filtered by membership,
     hence a real `permission-service` permission check instead of the
     `_require_member`/`_require_manager` check against the service's own
-    `teamspace_member` table otherwise used in this service."""
+    `teamspace_member` table otherwise used in this service. `limit`/
+    `offset` since P62-S1 (previously fully unbounded)."""
     if not x_dms_principal:
         raise HTTPException(status_code=403, detail="X-DMS-Principal fehlt")
     if not await app.state.permission_client.has_permission(
         x_dms_principal, "admin.teamspace_management"
     ):
         raise HTTPException(status_code=403, detail="admin.teamspace_management erforderlich")
-    rows = await repository.list_all_teamspaces_with_member_counts(session)
+    rows = await repository.list_all_teamspaces_with_member_counts(
+        session, limit=limit, offset=offset
+    )
     return [
         TeamspaceAdminOut(
             id=teamspace.id,

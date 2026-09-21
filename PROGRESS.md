@@ -2,8 +2,80 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P61-S4 (two connector-layer findings, bundled — fourth and last session of Phase 61,
-"Medium-Severity Findings", closing Phase 61). **New ADR**
+**Last completed:** P62-S1 (Low-Severity Security Findings, bundled — first session of Phase 62,
+"Low-Priority Security Cleanup + Selected Functional Completions"). No new ADR — mechanical
+gating/pagination/bounds additions and one narrow TOCTOU re-check, per the plan's own DoD ("no new ADR
+expected... mechanical completions of already-designed patterns, or trivial hardening").
+
+**The gaps, six unrelated low-severity findings bundled opportunistically:**
+(a) `plugin-orchestration-service`'s `POST /plugins/{type}/resource-usage` was unauthenticated and
+accepted unbounded `cpu_cores`/`ram_mb` — a fake report could permanently skew the `observed_median`
+resource estimate above every node's real capacity, denying placement for a `scaling_type="singleton"`
+plugin (a fake report always exists). (b) `federation-hub-service`'s `hub_operator_key` comparison used
+plain `!=` instead of `hmac.compare_digest` (theoretical timing-attack surface). (c) Several endpoints
+returned fully unbounded, unpaginated result sets: `GET /admin/teamspaces` (teamspace-service),
+`GET /installations`/`GET /handovers` (federation-hub-service), `GET /placements`
+(plugin-orchestration-service), `GET /tasks`/`GET /instances` (workflow-service). (d) `query-service`:
+`GET /manipulation-mode/status` had no auth check (minor reconnaissance aid); `dry_run_secret` defaulted
+to an insecure, hardcoded dev value with no startup guard; `/manipulate/execute` decoded but never
+compared the dry-run token's `principal_id` against the actual caller (audit-trail attribution gap, not
+a privilege escalation). (e) `mail-connector`'s inbound-message dedup was check-then-act, not atomic
+(only matters with >1 replica; the DB's own unique constraint prevents an actual duplicate row, but the
+loser's `IntegrityError` was previously uncaught, logged as a scary stack trace). (f) `archival-service`'s
+dehydration tick re-checked `has_active_hold` only once, with two more awaited cross-service calls before
+the actual live-copy deletion — a narrow, not-attacker-triggerable-on-demand TOCTOU window.
+
+**The fixes.** (a) Gated behind `admin.orchestration` (matching the sibling `POST /nodes/{node_id}`,
+already gated and already documented as "symmetrisch"); `cpu_cores`/`ram_mb` bounded to
+`(0, 1024]`/`(0, 1_048_576]`. (b) New `_operator_key_valid()` helper using `hmac.compare_digest`, reused
+at both call sites (`POST /installations/{id}/revoke`, `POST /handovers/{id}/retry`). (c) `limit`/`offset`
+added to all six endpoints (default `limit=100`), EXCEPT `workflow-service`'s internal `list_instances`
+calls (the SLA timer poll loop, `GET /tasks`'s own instance scan) which deliberately keep `limit=None`
+(unbounded) — both need every matching instance for correctness, not just a page; `GET /tasks`'s own
+`limit`/`offset` is applied to the flattened OUTPUT task list instead. (d) `GET /manipulation-mode/status`
+now requires `admin.query_console` (the base read permission, not the stricter manipulate permission).
+New `INSECURE_DEFAULT_DRY_RUN_SECRET` sentinel + a loud `WARNING` log at startup if still in effect (not
+a hard failure — the shared dev/test stack deliberately runs with this exact default).
+`/manipulate/execute` now compares `claims["principal_id"]` against the actual `X-DMS-Principal`, `403`
+on mismatch (superuser exempt). (e) New `_ingest_message_or_skip_duplicate()` helper (extracted from
+`_poll_loop` for testability) catches `IntegrityError` and logs a benign no-op. Investigated whether a
+losing replica could leave an orphaned storage object (the originally suspected risk) — it can't with
+this function's actual statement order: `create_inbound_message`'s `INSERT` is flushed, and its
+unique-constraint conflict raised, BEFORE any virus-scan/storage-upload call. (f) `has_active_hold`
+re-checked a second time, immediately before `delete_live_copies`.
+
+New tests: `plugin-orchestration-service` 49/49 (+3), `federation-hub-service` 77/77 (+2),
+`teamspace-service` 57/57 (+1), `query-service` 56/56 (+2), `mail-connector` 80/80 (+1),
+`archival-service` 148/148 (+1), `workflow-service` 220/220 (+2). `ruff` clean across all seven services
+(same pre-existing, unrelated repo-wide failures in `apps/libreoffice-addin`/`loadtest/notebook/
+analysis.ipynb` confirmed out of scope again).
+
+All seven services rebuilt/redeployed. **Live-verified against the real running stack**: (a)
+`resource-usage` `403` without a header/permission, `422` for `cpu_cores=100000`, `204` once
+`admin.orchestration` granted. (b) `revoke` still `403` with no `hub_operator_key` configured (functional
+behavior unchanged after the `hmac.compare_digest` swap). (c) all six `?limit=1` calls confirmed to
+return exactly one row against a dev stack with more than one. (d) `manipulation-mode/status` `403`
+without/`200` with `admin.query_console`; the insecure-default `WARNING` confirmed in the container's own
+startup logs; a dry-run token issued as one principal and executed as a different one confirmed `403`
+("Dieser Dry-Run-Token wurde von einer anderen Person angefordert."), executed by the SAME principal
+confirmed `200`. (e)/(f) narrow, hard-to-reproduce-live races/windows — relied on the passing, deterministic
+automated regression tests (both simulate the race/window directly rather than via true concurrency).
+
+`docs/services/plugin-orchestration-service.md`, `docs/services/federation-hub-service.md`,
+`docs/services/teamspace-service.md`, `docs/services/query-service.md`, `docs/services/mail-connector.md`,
+`docs/services/archival-service.md`, `docs/services/workflow-service.md` all updated (API tables, Open
+Points, test counts).
+
+**Next session:** P62-S2 — highest-value small items from the ADR self-named-scope sweep, bundled
+(un-pseudonymize endpoint, `create_dmn_definition`'s cross-family race, workflow-service's ungated
+`POST /instances/{id}/retry`, federation-hub-service's result-path retry/backoff, mail-connector's
+unprotected `root` folder, optionally a WebDAV edit-token admin-UI surface). Second and last session of
+Phase 62, closing the whole Phase 59+ round.
+
+---
+
+Immediately before P62-S1: **P61-S4** (two connector-layer findings, bundled — fourth and last session of
+Phase 61, "Medium-Severity Findings", closing Phase 61). **New ADR**
 ([0189](docs/adr/0189-webdav-edit-token-scope-and-mail-connector-size-limit.md)) — two real
 security/correctness fixes, per the plan's own DoD.
 

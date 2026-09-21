@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from mail_connector import repository
 from mail_connector.backends.interface import RawIncomingMessage
-from mail_connector.main import _ingest_message, app, settings
+from mail_connector.main import _ingest_message, _ingest_message_or_skip_duplicate, app, settings
 from mail_connector.settings import MailboxConfig
 
 OBJECT_TYPE_SERVICE_URL = os.environ.get("TEST_OBJECT_TYPE_SERVICE_URL", "http://localhost:8007")
@@ -401,6 +401,46 @@ async def test_ingest_rejects_oversized_message_without_parsing_it(client, sessi
     # Not parsed at all - the synthetic body-text attachment that a normal
     # ingest would have created is absent.
     assert message["attachments"] == []
+
+
+async def test_ingest_or_skip_duplicate_swallows_race_against_another_replica(client, session):
+    """P62-S1: `_poll_loop`'s own idempotency check (`get_by_source_uid`) is
+    check-then-act, not atomic - only reachable with >1 replica polling the
+    same mailbox concurrently. Simulated here by seeding a conflicting row
+    directly (same `(mailbox_id, uid)`) before calling
+    `_ingest_message_or_skip_duplicate` - the resulting `IntegrityError`
+    from `create_inbound_message`'s own unique constraint must be swallowed,
+    not raised, and must not create a second row."""
+    await repository.create_inbound_message(
+        session,
+        mailbox_id="central",
+        source_uid="uid-replica-race",
+        from_address="erste-replika@example.com",
+        subject="Zuerst gewonnen",
+        body_text="",
+        received_at=datetime.now(UTC),
+        match_type=None,
+        match_value=None,
+        proposed_target_type=None,
+        proposed_target_id=None,
+        match_candidates=[],
+    )
+    await session.commit()
+
+    raw = RawIncomingMessage(
+        uid="uid-replica-race",
+        raw_bytes=_build_raw_message(subject="Verlierer der Race"),
+    )
+    await _ingest_message_or_skip_duplicate(session, "central", raw)
+
+    response = client.get("/inbound", headers=ADMIN_HEADERS)
+    matching = [
+        m
+        for m in response.json()
+        if m["from_address"] == "erste-replika@example.com" or m["subject"] == "Verlierer der Race"
+    ]
+    assert len(matching) == 1
+    assert matching[0]["subject"] == "Zuerst gewonnen"
 
 
 def test_outbound_requires_poststelle_role(client):

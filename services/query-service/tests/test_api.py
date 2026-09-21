@@ -213,14 +213,24 @@ def test_activate_and_deactivate_manipulation_mode(client):
     assert body["active"] is True
     assert body["activated_by"] == "alice"
 
-    status_response = client.get("/manipulation-mode/status")
+    status_response = client.get("/manipulation-mode/status", headers={"x-dms-principal": "alice"})
     assert status_response.json()["active"] is True
 
     deactivate_response = client.post(
         "/manipulation-mode/deactivate", headers={"x-dms-principal": "alice"}
     )
     assert deactivate_response.json()["active"] is False
-    assert client.get("/manipulation-mode/status").json()["active"] is False
+    status_response_2 = client.get(
+        "/manipulation-mode/status", headers={"x-dms-principal": "alice"}
+    )
+    assert status_response_2.json()["active"] is False
+
+
+def test_manipulation_mode_status_requires_principal_header(client):
+    """P62-S1: previously ungated - a minor reconnaissance aid (whether
+    manipulation mode is currently on, and who turned it on)."""
+    response = client.get("/manipulation-mode/status")
+    assert response.status_code == 403
 
 
 def test_dry_run_requires_active_manipulation_mode(client):
@@ -369,6 +379,38 @@ def test_superuser_bypasses_manipulation_mode_schutzschalter(client):
         headers={"x-dms-principal": "root-admin"},
     )
     assert response.status_code == 200
+
+
+def test_execute_rejects_dry_run_token_issued_by_a_different_principal(client):
+    """P62-S1: the token's own `principal_id` (whoever ran the dry-run) was
+    previously decoded and never compared against the actual executing
+    caller - not a privilege escalation, but an audit-trail attribution
+    gap (the preview a human reviewed might not match who executes it)."""
+    client.post(
+        "/manipulation-mode/activate",
+        json={"duration_minutes": 10},
+        headers={"x-dms-principal": "alice"},
+    )
+    app.state.document_client.get_document.return_value = {
+        "id": "doc-1",
+        "attributes": {"notiz": "alt"},
+    }
+    params = {"document_id": "doc-1", "attribute_key": "notiz"}
+
+    dry_run = client.post(
+        "/manipulate/dry-run",
+        json={"action_type": "document.attribute_reset", "params": params},
+        headers={"x-dms-principal": "alice"},
+    )
+    assert dry_run.status_code == 200
+
+    execute = client.post(
+        "/manipulate/execute",
+        json={"dry_run_token": dry_run.json()["dry_run_token"]},
+        headers={"x-dms-principal": "bob"},
+    )
+    assert execute.status_code == 403
+    app.state.document_client.update_document.assert_not_called()
 
 
 def test_execute_rejects_invalid_dry_run_token(client):

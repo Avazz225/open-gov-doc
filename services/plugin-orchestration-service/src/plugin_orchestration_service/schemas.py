@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 ScalingType = Literal["stateless_horizontal", "singleton"]
 PlacementSource = Literal["manifest", "observed_median", "default_fallback"]
@@ -32,9 +32,17 @@ class PluginManifestOut(BaseModel):
 
 
 class ResourceUsageReportIn(BaseModel):
+    """Bounds since P62-S1: `placement.py`'s `median(report.cpu_cores ...)`
+    consumes this value directly for the "observed_median" resource
+    estimate - previously unbounded, so a single out-of-range report could
+    permanently skew that estimate above every node's real capacity. Upper
+    bounds are deliberately generous (far above any realistic single-plugin
+    footprint), just enough to rule out an absurd outlier value, not to
+    model a real capacity ceiling."""
+
     instance_id: str
-    cpu_cores: float
-    ram_mb: float
+    cpu_cores: float = Field(gt=0, le=1024)
+    ram_mb: float = Field(gt=0, le=1_048_576)
 
 
 class ClusterNodeIn(BaseModel):

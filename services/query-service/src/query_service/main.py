@@ -40,7 +40,7 @@ from query_service.schemas import (
     QueryResult,
     QueryTextRequest,
 )
-from query_service.settings import Settings
+from query_service.settings import INSECURE_DEFAULT_DRY_RUN_SECRET, Settings
 
 settings = Settings()
 configure_logging(settings)
@@ -207,6 +207,21 @@ async def _run_query(
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     startup_start = time.time()
+
+    # P62-S1: dry-run tokens are the only thing standing between "preview
+    # this action" and "execute this action" (concept 6.1 item 2) - a
+    # startup running with the still-unmodified, publicly-known default
+    # secret means anyone could forge a valid dry-run token for any
+    # action/params without ever calling `POST /manipulate/dry-run` first,
+    # silently defeating the mandatory-dry-run guarantee. Logged loudly, not
+    # a hard failure - the shared dev/test stack deliberately runs with this
+    # exact default, same tradeoff as every other "dev-only" default secret
+    # in this project (`postgres_dsn` etc.).
+    if settings.dry_run_secret == INSECURE_DEFAULT_DRY_RUN_SECRET:
+        logger.warning(
+            "dry_run_secret_is_insecure_default - set DMS_DRY_RUN_SECRET to a real "
+            "secret before running this installation with real data."
+        )
 
     # Genuinely own state (safety switch, since P8-S2) - not a read model of
     # a foreign service, does not reverse the P8-S1 decision "no own data
@@ -410,8 +425,18 @@ async def deactivate_manipulation_mode(
 
 @app.get("/manipulation-mode/status", response_model=ManipulationModeStatusOut)
 async def manipulation_mode_status(
+    x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> ManipulationModeStatusOut:
+    """P62-S1: previously ungated (a minor reconnaissance aid - `active`/
+    `activated_by` reveal whether manipulation mode is currently on and,
+    if so, who turned it on). Gated behind the base read permission
+    (`admin.query_console`), not the stricter manipulate permission - this
+    endpoint is read-only, same distinction `_require_query_console` vs.
+    `_require_manipulate_permission` already draws elsewhere in this
+    file."""
+    is_superuser = await _is_active_superuser(x_dms_principal)
+    await _require_query_console(x_dms_principal, is_superuser)
     mode = await manipulation_mode.get_status(session)
     return ManipulationModeStatusOut(
         active=manipulation_mode.is_active(mode),
@@ -472,6 +497,23 @@ async def manipulate_execute(
         claims = dry_run_tokens.decode(payload.dry_run_token, secret=settings.dry_run_secret)
     except dry_run_tokens.InvalidDryRunTokenError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    # P62-S1: the token's own `principal_id` (whoever ran the dry-run that
+    # produced this token) was previously decoded and then silently
+    # ignored - any caller with their own `admin.query_console.manipulate`
+    # permission could execute a dry-run token someone else issued. Not a
+    # privilege escalation (executing still requires the caller's own valid
+    # permission), but an audit-trail attribution gap: the preview a human
+    # reviewed before this token was issued might not have been reviewed by
+    # the same identity now executing it. Superuser exempted from this
+    # check like every other gate in this file - the activated superuser
+    # (4.6) is meant to act "without restriction" outside concept 6.1 item
+    # 4's own explicit critical-action exception above.
+    if not is_superuser and claims["principal_id"] != x_dms_principal:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Dieser Dry-Run-Token wurde von einer anderen Person angefordert.",
+        )
 
     action_type = claims["action_type"]
     params = claims["params"]

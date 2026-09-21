@@ -721,6 +721,21 @@ def test_list_ready_tasks_spans_multiple_running_instances(client, manual_task_b
     assert all(t["instance_id"] != to_complete["id"] for t in all_tasks)
 
 
+def test_list_ready_tasks_respects_limit(client, manual_task_bpmn, admin_headers):
+    """P62-S1: previously fully unbounded - applied to the flattened task
+    list, not the underlying instance scan (see `list_ready_tasks`'s own
+    docstring for why)."""
+    definition_id = _upload_definition(
+        client, manual_task_bpmn, name="LimitTasks", headers=admin_headers
+    ).json()["id"]
+    client.post(f"/process-definitions/{definition_id}/instances", json={"created_by": "alice"})
+    client.post(f"/process-definitions/{definition_id}/instances", json={"created_by": "alice"})
+
+    response = client.get("/tasks", params={"limit": 1})
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+
+
 def test_complete_task_rejected_during_maintenance_mode(client, manual_task_bpmn, admin_headers):
     definition_id = _upload_definition(
         client, manual_task_bpmn, name="Approval", headers=admin_headers
@@ -1578,6 +1593,19 @@ def test_list_instances_filters_by_status(client, manual_task_bpmn, no_tasks_bpm
     completed = client.get("/instances", params={"status": "completed"}).json()
     assert len(running) == 1
     assert len(completed) == 1
+
+
+def test_list_instances_respects_limit(client, manual_task_bpmn, admin_headers):
+    """P62-S1: previously fully unbounded."""
+    definition_id = _upload_definition(
+        client, manual_task_bpmn, name="LimitTest", headers=admin_headers
+    ).json()["id"]
+    client.post(f"/process-definitions/{definition_id}/instances", json={"created_by": "alice"})
+    client.post(f"/process-definitions/{definition_id}/instances", json={"created_by": "alice"})
+
+    response = client.get("/instances", params={"limit": 1})
+    assert response.status_code == 200
+    assert len(response.json()) == 1
 
 
 def test_instance_with_connector_service_task_completes_via_stub(

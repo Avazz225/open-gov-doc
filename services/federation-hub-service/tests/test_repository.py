@@ -370,9 +370,10 @@ async def test_rotate_key_reissues_a_certificate_bound_to_the_new_key(session):
 
     assert rotated.certificate_pem != original_certificate_pem
     new_cert = x509.load_pem_x509_certificate(rotated.certificate_pem.encode("utf-8"))
-    assert new_cert.public_key().public_numbers() == serialization.load_pem_public_key(
-        new_public_pem.encode("utf-8")
-    ).public_numbers()
+    assert (
+        new_cert.public_key().public_numbers()
+        == serialization.load_pem_public_key(new_public_pem.encode("utf-8")).public_numbers()
+    )
 
 
 async def test_list_installations_without_certificate(session):

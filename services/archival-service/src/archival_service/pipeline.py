@@ -235,6 +235,16 @@ async def run_dehydration_tick(
             version = await document_client.get_version(
                 transfer.document_id, document["current_version_number"]
             )
+            # P62-S1: re-checked immediately before the actual deletion -
+            # the first check above and this point are separated by two
+            # more awaited cross-service calls (`get_document`/
+            # `get_version`), a real TOCTOU window in which a legal hold
+            # could be placed between the two. Narrow (not
+            # attacker-triggerable on demand - the window only exists
+            # during this poll tick's own processing of THIS transfer) but
+            # real, since `delete_live_copies` below is irreversible.
+            if await document_client.has_active_hold(transfer.document_id):
+                continue
             await storage_client.delete_live_copies(version["storage_object_key"])
             await document_client.mark_dehydrated(transfer.document_id)
             async with session_factory() as session:

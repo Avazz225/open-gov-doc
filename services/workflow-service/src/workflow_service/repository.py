@@ -518,7 +518,15 @@ async def list_instances(
     process_definition_id: int | None = None,
     status: str | None = None,
     business_key: str | None = None,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[ProcessInstance]:
+    """`limit`/`offset` since P62-S1 - `None` (the default) means unbounded,
+    deliberately preserved for this function's two INTERNAL callers
+    (`advance_timers`'s SLA poll loop, `list_ready_tasks`'s cross-instance
+    task scan) which both need every matching instance for correctness, not
+    just a page of them. Only `main.py`'s `GET /instances` HTTP endpoint
+    passes an explicit `limit`."""
     query = select(ProcessInstance)
     if process_definition_id is not None:
         query = query.where(ProcessInstance.process_definition_id == process_definition_id)
@@ -526,7 +534,10 @@ async def list_instances(
         query = query.where(ProcessInstance.status == status)
     if business_key is not None:
         query = query.where(ProcessInstance.business_key == business_key)
-    result = await session.execute(query.order_by(ProcessInstance.created_at.desc()))
+    query = query.order_by(ProcessInstance.created_at.desc())
+    if limit is not None:
+        query = query.limit(limit).offset(offset)
+    result = await session.execute(query)
     return list(result.scalars().all())
 
 

@@ -1,4 +1,5 @@
 import asyncio
+import hmac
 import ipaddress
 import json
 import logging
@@ -44,6 +45,21 @@ from federation_hub_service.settings import Settings
 settings = Settings()
 configure_logging(settings)
 logger = logging.getLogger(__name__)
+
+
+def _operator_key_valid(authorization: str) -> bool:
+    """P62-S1: `hmac.compare_digest` instead of plain `!=` - both call sites
+    below previously compared the bearer secret with `!=`, a
+    variable-time comparison (theoretical timing-attack surface, no
+    reported real-world exploit against this project). `not
+    settings.hub_operator_key` is checked separately (fully locked with no
+    key configured) rather than folded into the digest comparison itself -
+    `compare_digest` on an empty expected value would still be constant-time
+    but the "operator explicitly opted in" intent reads more clearly as its
+    own check."""
+    if not settings.hub_operator_key:
+        return False
+    return hmac.compare_digest(authorization, f"Bearer {settings.hub_operator_key}")
 
 
 def _parse_body(model: type[BaseModel], body: bytes):
@@ -398,12 +414,15 @@ async def register_installation(
 
 
 @app.get("/installations", response_model=list[InstallationOut])
-async def list_installations(session: AsyncSession = Depends(get_session)) -> list[InstallationOut]:
+async def list_installations(
+    limit: int = 100, offset: int = 0, session: AsyncSession = Depends(get_session)
+) -> list[InstallationOut]:
     """The address book is deliberately readable without gating (per 7.4, a
     process designer only needs the public identifiers/display names to
     select a target) - analogous to `registry-service`'s open
-    `GET /instances`."""
-    return await repository.list_installations(session)
+    `GET /instances`. `limit`/`offset` since P62-S1 (previously fully
+    unbounded)."""
+    return await repository.list_installations(session, limit=limit, offset=offset)
 
 
 @app.delete("/installations/{installation_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -472,7 +491,7 @@ async def revoke_installation(
     revoke_installation`). Fully locked (`403`) without a configured
     `hub_operator_key` - a hub operator must deliberately enable
     revocation."""
-    if not settings.hub_operator_key or authorization != f"Bearer {settings.hub_operator_key}":
+    if not _operator_key_valid(authorization):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Fehlender oder ungültiger Hub-Operator-Schlüssel",
@@ -798,7 +817,10 @@ async def submit_handover_result(
 
 @app.get("/handovers", response_model=list[HandoverOut])
 async def list_handovers(
-    status: str | None = None, session: AsyncSession = Depends(get_session)
+    status: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+    session: AsyncSession = Depends(get_session),
 ) -> list[HandoverOut]:
     """Collection endpoint (Phase 40 Session 3) - previously only a
     single-``id`` `GET` existed. Basis for the admin UI's failure-
@@ -806,8 +828,9 @@ async def list_handovers(
     result_delivery_failed``), analogous to `rendering-service`/
     `ocr-service`/`notification-service`'s equivalent list-with-status-
     filter endpoints. Deliberately ungated, same rationale as
-    `GET /installations` (7.4: metadata, not content)."""
-    return await repository.list_handovers(session, status=status)
+    `GET /installations` (7.4: metadata, not content). `limit`/`offset`
+    since P62-S1 (previously fully unbounded)."""
+    return await repository.list_handovers(session, status=status, limit=limit, offset=offset)
 
 
 @app.get("/handovers/{handover_id}", response_model=HandoverOut)
@@ -912,7 +935,7 @@ async def retry_handover(
     action reachable by anyone who can reach this service's network address,
     and this service has no admin-JWT/capability model of its own to check
     against instead (see `docs/services/federation-hub-service.md`)."""
-    if not settings.hub_operator_key or authorization != f"Bearer {settings.hub_operator_key}":
+    if not _operator_key_valid(authorization):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Fehlender oder ungültiger Hub-Operator-Schlüssel",

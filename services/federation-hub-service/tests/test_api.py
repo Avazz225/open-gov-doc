@@ -178,6 +178,16 @@ def test_register_then_update_requires_matching_signature(client):
     assert entry["display_name"] == "Neu"
 
 
+def test_list_installations_respects_limit(client):
+    """P62-S1: previously fully unbounded."""
+    register_installation(client)
+    register_installation(client)
+
+    response = client.get("/installations", params={"limit": 1})
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+
+
 def test_reregister_ignores_submitted_public_key_change(client):
     """Ein Schlüsselwechsel läuft ausschließlich über `rotate-key` (ADR 0039)
     - eine reguläre Re-Registrierung mit einem abweichenden `public_key_pem`
@@ -988,6 +998,30 @@ def test_list_handovers_filters_by_status(client):
     filtered_ids = {h["id"] for h in filtered.json()}
     assert failed["id"] in filtered_ids
     assert delivered["id"] not in filtered_ids
+
+
+def test_list_handovers_respects_limit(client):
+    """P62-S1: previously fully unbounded."""
+    sender, sender_key = register_installation(client)
+    stub, _ = _make_stub_receiver()
+    app.state.http_client = httpx.AsyncClient(transport=httpx.ASGITransport(app=stub))
+    target, _ = register_installation(client)
+
+    for _ in range(2):
+        payload = {
+            "handover_id": str(uuid.uuid4()),
+            "to_installation_id": target["id"],
+            "process_type": "test-process",
+            "encrypted_payload": "opaque",
+        }
+        response = _signed_post(
+            client, "/handovers", payload, sender_key, installation_id=sender["id"]
+        )
+        assert response.json()["status"] == "delivered"
+
+    response = client.get("/handovers", params={"limit": 1})
+    assert response.status_code == 200
+    assert len(response.json()) == 1
 
 
 def test_get_handover_unknown_returns_404(client):

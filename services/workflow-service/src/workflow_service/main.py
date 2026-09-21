@@ -1298,13 +1298,18 @@ async def list_instances(
     process_definition_id: int | None = None,
     status: str | None = None,
     business_key: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
     session: AsyncSession = Depends(get_session),
 ) -> list[ProcessInstanceOut]:
+    """`limit`/`offset` since P62-S1 (previously fully unbounded)."""
     return await repository.list_instances(
         session,
         process_definition_id=process_definition_id,
         status=status,
         business_key=business_key,
+        limit=limit,
+        offset=offset,
     )
 
 
@@ -1314,6 +1319,8 @@ async def list_instances(
     dependencies=[Depends(_license_gate("read"))],
 )
 async def list_ready_tasks(
+    limit: int = 100,
+    offset: int = 0,
     session: AsyncSession = Depends(get_session),
 ) -> list[ReadyTaskWithInstanceOut]:
     """Cross-instance task list (8, P14-S2 reviewer/approval UI) - until now
@@ -1325,7 +1332,13 @@ async def list_ready_tasks(
     (`_reject_manual_federated_completion`), a human could never
     successfully complete them via this list anyway. No additional role
     gate beyond the license check, same as for instance start/task
-    completion itself."""
+    completion itself.
+
+    `limit`/`offset` since P62-S1 (previously fully unbounded) - applied to
+    the flattened TASK list at the end, not to the instance scan above:
+    every `running` instance still needs to be scanned to find all ready
+    tasks system-wide, a page of instances could silently omit ready tasks
+    that legitimately exist beyond that page."""
     instances = await repository.list_instances(session, status="running")
     tasks: list[ReadyTaskWithInstanceOut] = []
     for instance in instances:
@@ -1352,7 +1365,7 @@ async def list_ready_tasks(
                     created_by=instance.created_by,
                 )
             )
-    return tasks
+    return tasks[offset : offset + limit]
 
 
 @app.get(

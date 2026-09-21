@@ -98,7 +98,7 @@ async def list_all_root_folder_ids(session: AsyncSession) -> list[str]:
 
 
 async def list_all_teamspaces_with_member_counts(
-    session: AsyncSession,
+    session: AsyncSession, *, limit: int = 100, offset: int = 0
 ) -> list[tuple[Teamspace, int]]:
     """Installation-wide overview (Post-Roadmap Phase 22 Session 5) -
     unlike `list_teamspaces_for_principal`, NOT filtered by membership,
@@ -107,12 +107,15 @@ async def list_all_teamspaces_with_member_counts(
     rest of this service's endpoints are). `outerjoin` so that, while a
     teamspace could in principle never appear without a member (see
     `create_teamspace`), the count would still not silently omit the
-    entire row if the member list were ever empty in the future."""
+    entire row if the member list were ever empty in the future.
+    `limit`/`offset` since P62-S1 - previously fully unbounded."""
     result = await session.execute(
         select(Teamspace, func.count(TeamspaceMember.principal_id))
         .outerjoin(TeamspaceMember, TeamspaceMember.teamspace_id == Teamspace.id)
         .group_by(Teamspace.id)
         .order_by(Teamspace.name)
+        .limit(limit)
+        .offset(offset)
     )
     return [(row[0], row[1]) for row in result.all()]
 

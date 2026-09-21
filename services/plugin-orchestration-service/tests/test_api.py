@@ -108,12 +108,40 @@ def test_get_unknown_manifest_returns_404(client):
     assert response.status_code == 404
 
 
-def test_report_resource_usage_is_ungated(client):
+def test_report_resource_usage_requires_orchestration_permission(client):
+    """P62-S1: previously ungated - a fake report could permanently skew
+    `placement.py`'s `median(report.cpu_cores ...)` estimate, see main.py's
+    docstring on `report_resource_usage`."""
     response = client.post(
         "/plugins/cmis-connector/resource-usage",
         json={"instance_id": "cmis-connector-abc123", "cpu_cores": 0.5, "ram_mb": 128.0},
     )
+    assert response.status_code == 403
+
+
+def test_report_resource_usage_succeeds_with_orchestration_permission(client):
+    response = client.post(
+        "/plugins/cmis-connector/resource-usage",
+        json={"instance_id": "cmis-connector-abc123", "cpu_cores": 0.5, "ram_mb": 128.0},
+        headers={"x-dms-principal": "alice"},
+    )
     assert response.status_code == 204
+
+
+def test_report_resource_usage_rejects_out_of_range_values(client):
+    response = client.post(
+        "/plugins/cmis-connector/resource-usage",
+        json={"instance_id": "cmis-connector-abc123", "cpu_cores": 0, "ram_mb": 128.0},
+        headers={"x-dms-principal": "alice"},
+    )
+    assert response.status_code == 422
+
+    response = client.post(
+        "/plugins/cmis-connector/resource-usage",
+        json={"instance_id": "cmis-connector-abc123", "cpu_cores": 100_000, "ram_mb": 128.0},
+        headers={"x-dms-principal": "alice"},
+    )
+    assert response.status_code == 422
 
 
 def test_placement_requires_orchestration_permission(client):
@@ -173,6 +201,32 @@ async def test_placement_decision_is_created_and_listed(client, session):
     assert len(list_response.json()) == 1
 
 
+async def test_list_placements_respects_limit(client, session):
+    """P62-S1: previously fully unbounded."""
+    await _seed_node(session)
+    client.post(
+        "/plugins/cmis-connector",
+        json={
+            "version": "1.0.0",
+            "scaling_type": "stateless_horizontal",
+            "resource_cpu_cores": 0.1,
+            "resource_ram_mb": 64.0,
+        },
+        headers={"x-dms-principal": "alice"},
+    )
+    for _ in range(2):
+        response = client.post(
+            "/placements",
+            json={"plugin_type": "cmis-connector"},
+            headers={"x-dms-principal": "alice"},
+        )
+        assert response.status_code == 201
+
+    list_response = client.get("/placements", params={"limit": 1})
+    assert list_response.status_code == 200
+    assert len(list_response.json()) == 1
+
+
 async def test_singleton_second_placement_conflicts(client, session):
     await _seed_node(session)
     client.post(
@@ -188,6 +242,7 @@ async def test_singleton_second_placement_conflicts(client, session):
     client.post(
         "/plugins/signature-connector/resource-usage",
         json={"instance_id": "signature-connector-1", "cpu_cores": 0.5, "ram_mb": 128.0},
+        headers={"x-dms-principal": "alice"},
     )
 
     response = client.post(

@@ -258,6 +258,17 @@ def test_list_all_teamspaces_shows_every_teamspace_with_member_count(client):
     assert by_name["Bob-Admin-Space"]["member_count"] == 2
 
 
+def test_list_all_teamspaces_respects_limit(client):
+    """P62-S1: previously fully unbounded."""
+    _grant_teamspace_admin_permission("dana")
+    _create_teamspace(client, name="Limit-Space-1", principal="alice")
+    _create_teamspace(client, name="Limit-Space-2", principal="alice")
+
+    response = client.get("/admin/teamspaces", params={"limit": 1}, headers=_headers("dana"))
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+
+
 def test_invite_member_by_non_manager_is_forbidden(client):
     teamspace = _create_teamspace(client)
     client.post(

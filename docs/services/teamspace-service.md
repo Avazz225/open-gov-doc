@@ -16,7 +16,7 @@
 |---|---|---|
 | `POST` | `/teamspaces` | Create (`name`, `description`) — any authenticated principal may, no capability gate. Automatically creates a `folder-service` root folder and makes the creator the first member (`can_manage_members=true`) |
 | `GET` | `/teamspaces` | Only teamspaces the caller is a member of |
-| `GET` | `/admin/teamspaces` | Installation-wide overview (since **Post-Roadmap Phase 22 Session 5**, [ADR 0090](../adr/0090-teamspaces-admin-overview.md)) — ALL teamspaces incl. `member_count`, independent of the caller's own membership. `403` without `X-DMS-Principal`/without the capability `admin.teamspace_management`, see below |
+| `GET` | `/admin/teamspaces` | Installation-wide overview (since **Post-Roadmap Phase 22 Session 5**, [ADR 0090](../adr/0090-teamspaces-admin-overview.md)) — ALL teamspaces incl. `member_count`, independent of the caller's own membership. `403` without `X-DMS-Principal`/without the capability `admin.teamspace_management`, see below. `limit`/`offset` since P62-S1 (previously fully unbounded, default `limit=100`) |
 | `GET` | `/teamspaces/{id}` | Detail — `404` unknown, `403` not a member |
 | `DELETE` | `/teamspaces/{id}` | Deletes only the teamspace metadata (members/appointments/contacts); the root folder remains — `403` without `can_manage_members` |
 | `POST` | `/teamspaces/{id}/members` | Invite (`principal_id`, `can_manage_members`) — `403` without `can_manage_members`, `409` if membership already exists. Also creates the `permission-service` role assignment |

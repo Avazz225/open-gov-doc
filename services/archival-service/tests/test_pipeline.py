@@ -311,6 +311,45 @@ async def test_run_dehydration_tick_skips_document_with_active_hold(session_fact
         assert transfer.status == "released"
 
 
+async def test_run_dehydration_tick_re_checks_hold_immediately_before_deletion(session_factory):
+    """P62-S1: `has_active_hold` was previously only checked ONCE, with two
+    more awaited cross-service calls (`get_document`/`get_version`) between
+    that check and the actual `delete_live_copies` deletion - a real TOCTOU
+    window. Simulated here by having `get_document` place the hold as a
+    side effect (a hold arriving exactly inside that window) - the second,
+    immediately-before-deletion check must catch it."""
+
+    class HoldPlacedDuringLookupDocumentClient(FakeDocumentClient):
+        async def get_document(self, document_id):
+            self.holds[document_id] = True
+            return await super().get_document(document_id)
+
+    async with session_factory() as session:
+        transfer = await repository.create_transfer(session, "doc-1")
+        await repository.update_status(
+            session, transfer, status="released", released_at=datetime.now(UTC) - timedelta(days=31)
+        )
+        await session.commit()
+        transfer_id = transfer.id
+
+    doc_client = HoldPlacedDuringLookupDocumentClient(
+        documents={"doc-1": {"id": "doc-1", "current_version_number": 1}},
+        versions={("doc-1", 1): {"storage_object_key": "documents/doc-1/abc"}},
+        holds={"doc-1": False},
+    )
+    storage_client = FakeStorageClient()
+
+    await pipeline.run_dehydration_tick(
+        session_factory, document_client=doc_client, storage_client=storage_client, delay_days=30
+    )
+
+    assert storage_client.deleted_live_keys == []
+    assert doc_client.dehydrated_calls == []
+    async with session_factory() as session:
+        transfer = await repository.get_transfer(session, transfer_id)
+        assert transfer.status == "released"
+
+
 async def test_run_dehydration_tick_removes_live_copy_and_marks_dehydrated(session_factory):
     async with session_factory() as session:
         transfer = await repository.create_transfer(session, "doc-1")

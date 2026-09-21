@@ -47,6 +47,7 @@ from mail_connector.settings import MailboxConfig, Settings
 from mail_connector.storage_client import ObjectNotFoundError, StorageClient
 from mail_connector.virus_scan_client import VirusScanClient
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 settings = Settings()
@@ -318,6 +319,35 @@ async def _load_candidate_pattern() -> "re.Pattern[str]":
     return matching.build_candidate_pattern(formats)
 
 
+async def _ingest_message_or_skip_duplicate(
+    session: AsyncSession, mailbox_id: str, raw: RawIncomingMessage
+) -> None:
+    """P62-S1: `_poll_loop`'s own `get_by_source_uid` idempotency check
+    (this function's only caller) is check-then-act, not atomic - only
+    reachable with >1 replica polling the same mailbox concurrently (this
+    service currently runs single-replica, so this is a defensive guard,
+    not a currently-observed failure mode). `create_inbound_message`'s own
+    `(mailbox_id, source_uid)` unique constraint is the real safety net
+    against an actual duplicate row - this just turns the inevitable
+    loser's error from a scary, uncaught-looking stack trace into an
+    expected, logged no-op. Investigated whether the losing replica could
+    leave an orphaned storage object (the originally suspected risk here) -
+    it can't with `_ingest_message`'s actual statement order:
+    `create_inbound_message`'s `INSERT` is flushed, and its
+    unique-constraint conflict raised, BEFORE any virus-scan/storage-upload
+    call - a losing replica never reaches storage at all."""
+    try:
+        await _ingest_message(session, mailbox_id, raw)
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        logger.info(
+            "inbound_message_already_ingested_by_another_replica mailbox_id=%s uid=%s",
+            mailbox_id,
+            raw.uid,
+        )
+
+
 async def _poll_loop(session_factory) -> None:
     """Cyclically retrieves new messages (2.5/3.3) - same poll-loop idiom as
     document-service's `_retention_poll_loop` (ADR 0020), here at a
@@ -359,8 +389,7 @@ async def _poll_loop(session_factory) -> None:
                             is not None
                         ):
                             continue
-                        await _ingest_message(session, mailbox_id, raw)
-                        await session.commit()
+                        await _ingest_message_or_skip_duplicate(session, mailbox_id, raw)
             except Exception:
                 logger.exception(
                     "Posteingang-Poll-Tick fuer Postfach %r fehlgeschlagen - wird beim "
