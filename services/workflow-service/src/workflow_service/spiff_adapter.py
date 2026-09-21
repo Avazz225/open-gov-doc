@@ -116,6 +116,7 @@ from the docs:
   startup.
 """
 
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, Protocol
@@ -339,6 +340,30 @@ def _new_parser(xml: str, dmn_definitions: list[str] | None = None) -> DmsBpmnPa
     except Exception as exc:  # SpiffWorkflow/lxml raise various types of their own
         raise BpmnParseError(f"BPMN-Datei nicht parsbar: {exc}") from exc
     return parser
+
+
+_CAMUNDA_NS = "http://camunda.org/schema/1.0/bpmn"
+
+
+def extract_decision_refs(bpmn_xml: str) -> set[str]:
+    """P64-S1 (4.5): every distinct `camunda:decisionRef` value present
+    anywhere in a BPMN file, regardless of which task element carries it
+    (namespace-qualified attribute lookup via the standard library's
+    `ElementTree`, not a `businessRuleTask`-specific walk - robust against
+    any task type Camunda Modeler might attach the attribute to). Used by
+    `repository.delete_dmn_definition` to reject deleting a DMN version
+    still referenced by a saved process definition, mirroring how
+    `BusinessRuleTaskParser.create_task()` itself reads this same
+    attribute at parse time (see module docstring above) - deliberately a
+    separate, lightweight text-based lookup rather than a full
+    `DmsBpmnParser` parse, since this only needs to know WHICH ids are
+    referenced, not build an executable task spec."""
+    try:
+        root = ET.fromstring(bpmn_xml)
+    except ET.ParseError:
+        return set()
+    attr = f"{{{_CAMUNDA_NS}}}decisionRef"
+    return {el.get(attr) for el in root.iter() if el.get(attr)}
 
 
 def parse_dmn(xml: str) -> str:

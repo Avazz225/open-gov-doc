@@ -44,6 +44,15 @@ class ProcessDefinitionInUseError(Exception):
     """Deletion rejected because process instances still exist."""
 
 
+class DmnDefinitionInUseError(Exception):
+    """P64-S1 (4.5): deletion rejected because a saved process definition's
+    BPMN still references this DMN family's `decision_id` via
+    `camunda:decisionRef`, AND the version being deleted is currently the
+    LATEST version of its family - an already-superseded version is never
+    loaded by `list_latest_dmn_xml()` (see its own docstring), so deleting
+    one is always safe regardless of references."""
+
+
 class InvalidDmnError(Exception):
     """The uploaded DMN file cannot be parsed or does not contain exactly
     one `<decision>` (P14-S4). Wraps `spiff_adapter.DmnParseError`, analogous
@@ -318,17 +327,34 @@ async def list_dmn_definitions(
 
 
 async def delete_dmn_definition(session: AsyncSession, dmn_definition_id: int) -> None:
-    """Deliberately NO "in use" check (unlike `delete_process_definition`) -
-    that would require searching all BPMN XML texts for
-    `camunda:decisionRef` to determine whether a `businessRuleTask`
-    references this family. A documented, deliberate limitation of this
-    reference implementation (see docs/services/workflow-service.md) - a
-    deletion can cause an existing process definition to fail at the next
-    instance start with a SpiffWorkflow `ValidationException` (translated:
-    `InvalidBpmnError`); already-running instances are unaffected (their
+    """**P64-S1 (4.5)**: now DOES check "in use", closing the gap this
+    docstring used to document as a deliberate limitation. Only blocks
+    when the version being deleted is the LATEST of its family AND its
+    `decision_id` is still referenced by some saved process definition's
+    `camunda:decisionRef` (`spiff_adapter.extract_decision_refs`) -
+    deleting an already-superseded version stays unrestricted, since
+    `list_latest_dmn_xml()` never loads it anyway (see its own docstring),
+    so it cannot be the thing a `businessRuleTask` actually resolves
+    against. Already-running instances remain unaffected either way (their
     `workflow_state` already fully contains the decision loaded at start
-    time)."""
+    time) - this only prevents a FUTURE `start_instance` from failing with
+    a SpiffWorkflow `ValidationException` (translated: `InvalidBpmnError`)
+    at the next attempt."""
     definition = await get_dmn_definition(session, dmn_definition_id)
+    latest = await list_latest_dmn_definitions(session)
+    is_latest_of_family = any(d.id == definition.id for d in latest)
+    if is_latest_of_family:
+        process_definitions = await list_process_definitions(session)
+        referenced = any(
+            definition.decision_id in spiff_adapter.extract_decision_refs(pd.bpmn_xml)
+            for pd in process_definitions
+        )
+        if referenced:
+            raise DmnDefinitionInUseError(
+                f"DMN-Definition {dmn_definition_id!r} (decision_id="
+                f"{definition.decision_id!r}) wird noch von einer gespeicherten "
+                f"Prozessdefinition referenziert - Löschung abgelehnt"
+            )
     await session.delete(definition)
     await session.flush()
 

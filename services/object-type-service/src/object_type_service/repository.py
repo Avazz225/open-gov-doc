@@ -115,6 +115,34 @@ def _validate_status_transitions(attributes: list[dict], status_transitions: lis
             )
 
 
+_REFERENCE_TARGETS = ("document", "folder")
+
+
+def _validate_reference_targets(attributes: list[dict]) -> None:
+    """P64-S1 (4.5): a `type: "reference"` attribute may optionally carry
+    `reference_target` naming WHAT it references - `"document"` or
+    `"folder"`, the only two instance-holding services that call this
+    engine (`dms_constraint_engine` itself stays a pure, stateless library
+    per ADR 0003 and never resolves it; `document-service`/`folder-service`
+    perform the actual existence check using this field once `/validate`
+    has confirmed the value's own shape). Omitting `reference_target`
+    preserves the pre-existing, still-supported behavior of a pure
+    format-only check (non-empty string) - not every reference is
+    necessarily to a document or folder, and a caller not ready to declare
+    a target isn't forced to. This function only checks the DEFINITION
+    (object-type save time), never a value - value-shape checking for
+    `type: "reference"` remains entirely in `dms_constraint_engine`."""
+    for attribute in attributes:
+        if attribute.get("type") != "reference":
+            continue
+        target = attribute.get("reference_target")
+        if target is not None and target not in _REFERENCE_TARGETS:
+            raise InvalidFieldError(
+                f"reference_target von Attribut {attribute.get('name')!r} muss "
+                f"eines von {_REFERENCE_TARGETS} sein, nicht {target!r}"
+            )
+
+
 def _validate_icon(applies_to: str, icon: str | None) -> None:
     if icon is not None and applies_to != "folder":
         raise InvalidFieldError("icon ist nur für Ordnerklassen (applies_to='folder') zulässig")
@@ -207,6 +235,7 @@ async def create_object_type(session: AsyncSession, payload: ObjectTypeCreate) -
     _validate_default_archive_after_days(payload.default_archive_after_days)
     _validate_classification_level(payload.applies_to, payload.classification_level)
     _validate_status_transitions(payload.attributes, payload.status_transitions)
+    _validate_reference_targets(payload.attributes)
 
     now = datetime.now(UTC)
     object_type = ObjectType(
@@ -276,6 +305,7 @@ async def update_object_type(
     _validate_default_archive_after_days(payload.default_archive_after_days)
     _validate_classification_level(object_type.applies_to, payload.classification_level)
     _validate_status_transitions(payload.attributes, payload.status_transitions)
+    _validate_reference_targets(payload.attributes)
     object_type.attributes = payload.attributes
     object_type.naming_constraints = payload.naming_constraints
     object_type.conditions = payload.conditions

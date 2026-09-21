@@ -35,6 +35,10 @@ import { useService } from "bpmn-js-properties-panel";
 export interface FederationInstallation {
   id: string;
   display_name: string;
+  // P64-S1 (4.5): mirrors `lib/api.ts`'s `FederationInstallationSummary` -
+  // already present in the wire payload since P63-S2 (ADR 0191), only
+  // narrowed away by this type until now.
+  supported_process_types: string[];
 }
 
 function findExtensionElement(businessObject: any, type: string): any {
@@ -66,6 +70,23 @@ function getTargetInstallationId(element: any): string {
 
 function getTargetProcessType(element: any): string {
   return getFederatedPropertyValue(element, "targetProcessType") ?? "";
+}
+
+/** P64-S1 (4.5): pure logic extracted from `TargetProcessTypeField`'s
+ * `validate` closure so it can be unit-tested without a real bpmn-js/DOM
+ * environment (same "pure read helpers" testing precedent already
+ * established in this file/test suite) - a client-side WARNING only, see
+ * that field's own docstring for why this is deliberately non-blocking. */
+function validateTargetProcessType(
+  value: string,
+  installations: FederationInstallation[],
+  targetInstallationId: string
+): string | undefined {
+  if (!value) return undefined;
+  const target = installations.find((i) => i.id === targetInstallationId);
+  if (!target || target.supported_process_types.length === 0) return undefined;
+  if (target.supported_process_types.includes(value)) return undefined;
+  return `Zielinstallation deklariert diesen Prozesstyp nicht (bekannt: ${target.supported_process_types.join(", ")})`;
 }
 
 /** Writes `taskType`/`targetInstallationId`/`targetProcessType` as a
@@ -186,6 +207,22 @@ function TargetProcessTypeField(props: { element: any }) {
   const bpmnFactory = useService("bpmnFactory");
   const commandStack = useService("commandStack");
   const translate = useService("translate");
+  const installations: FederationInstallation[] = useService("federationInstallations");
+  // P64-S1: found live in a real browser - `TextFieldEntry`'s own
+  // `Textfield` unconditionally calls `useDebounce(onInput, debounce)`,
+  // which calls `debounce` AS A FUNCTION with no fallback (`@bpmn-io/
+  // properties-panel`'s own `useDebounce`); every other real caller of
+  // `TextFieldEntry` (e.g. `bpmn-js-properties-panel`'s built-in
+  // `CalledElement` binding) resolves this the same way, via the
+  // `debounceInput` service `BpmnPropertiesPanelModule` already registers
+  // internally (`__depends__: [Commands, DebounceInputModule, ...]`) -
+  // this field simply never injected it. Previously silently never
+  // rendered (crashed on first mount with an opaque "t is not a function"
+  // before this field's very first live browser check, P64-S1) - this app
+  // had no prior e2e coverage of the federated-step properties panel at
+  // all, only of pure XML read/write helpers (unit tests) and unrelated
+  // designer flows (`designer.spec.ts`).
+  const debounce = useService("debounceInput");
 
   const getValue = () => getTargetProcessType(element);
   const setValue = (value: string) => {
@@ -195,6 +232,20 @@ function TargetProcessTypeField(props: { element: any }) {
       targetProcessType: value,
     });
   };
+  // P64-S1 (4.5): a client-side WARNING, not a hard save-time rejection -
+  // the actual enforcement already happens at the hub (`POST /handovers`,
+  // ADR 0191/P63-S2), this only surfaces the same mismatch earlier, at
+  // design time, instead of only at runtime once a real handover is
+  // attempted. Deliberately non-blocking (`validate` on `TextFieldEntry`
+  // only renders an inline message, it cannot prevent saving the diagram)
+  // - a resolvable-later mismatch (e.g. the target installation declares
+  // its catalog only AFTER this diagram is drawn) must not lock out the
+  // BPMN editor. Empty `supported_process_types` = no restriction
+  // declared, same convention the hub itself already uses when actually
+  // enforcing this field - most installations today declare nothing yet
+  // (P63-S2), so silence here is the common case, not a fallback.
+  const validate = (value: string) =>
+    validateTargetProcessType(value, installations, getTargetInstallationId(element));
 
   return TextFieldEntry({
     element,
@@ -202,6 +253,8 @@ function TargetProcessTypeField(props: { element: any }) {
     label: translate("Ziel-Prozesstyp"),
     getValue,
     setValue,
+    validate,
+    debounce,
   });
 }
 
@@ -267,4 +320,9 @@ export const FederatedStepPropertiesProviderModule = {
 };
 
 // For tests: pure read functions without DOM/bpmn-js instantiation.
-export { getTargetInstallationId, getTargetProcessType, isFederatedStepEnabled };
+export {
+  getTargetInstallationId,
+  getTargetProcessType,
+  isFederatedStepEnabled,
+  validateTargetProcessType,
+};

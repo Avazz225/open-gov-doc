@@ -2,9 +2,97 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P63-S3 (small fixes + ADR documentation corrections bundle — third and last session
-of Phase 63). **New ADR** ([0192](docs/adr/0192-document-service-kennzeichen-format-shape-validation.md))
-for (a) — turned out to be a genuine design decision, not the mechanical fix the plan expected.
+**Last completed:** P64-S1 (cross-service reference validation — first and only session of Phase 64,
+**closes the entire Phase 63-64 round**, the seventh gap-analysis round). **New ADR**
+([0193](docs/adr/0193-cross-service-reference-validation.md)) covering all three sub-parts — each turned
+out to be a genuine design decision, not the mechanical/obvious fix the plan's own DoD text anticipated.
+
+**The gaps** — the last three instances of the "declared cross-service reference/type stored but never
+checked against its actual target" pattern (the fourth, `federation-hub-service`'s handover
+`process_type`, closed in P63-S2/ADR 0191): (a) `object-type-service`'s `type:"reference"` attributes
+only checked a value's shape (non-empty string), never that it actually exists anywhere. (b)
+`workflow-service`'s DMN `decisionRef` was checked at process-definition save/instance-start time, but a
+DMN definition could be deleted out from under a process definition still referencing it, only surfacing
+as a runtime `422` the next time that task was reached. (c) `process-designer`'s `targetProcessType` on a
+federated BPMN step was never checked against the target installation's own declared catalog at design
+time.
+
+**The fixes, all three scoped differently than the plan assumed:**
+
+(a) **The plan's "just add an existence check" framing understated the real gap**: investigation found no
+sibling field even NAMING what a reference points at — `type:"reference"` had zero real usage anywhere in
+this codebase (confirmed via grep across every test file), and `dms_constraint_engine` deliberately stays
+DB/HTTP-free (ADR 0003), so it structurally cannot check existence itself. Built a new, deliberately
+SCOPED optional `reference_target` field (`"document"`/`"folder"` only — the two instance-holding
+services that call this engine, not a generic "reference type → any service" resolution, which would have
+been a materially bigger, unjustified design commitment). `object-type-service` format-validates the new
+field at save time (`_validate_reference_targets`); `document-service`/`folder-service` perform the actual
+existence check themselves right after the shape check passes (`document-service`: own-DB lookup or
+`folder_client.get()`; `folder-service`: symmetric, own-DB lookup or `document_client.get()`).
+
+(b) `delete_dmn_definition` now blocks (`409`, new `DmnDefinitionInUseError`) exactly when the version
+being deleted is the LATEST of its family and a saved process definition's `camunda:decisionRef` still
+references its `decision_id` (new `spiff_adapter.extract_decision_refs()`, namespace-aware `ElementTree`
+scan) — an already-superseded version stays deletable regardless, since `list_latest_dmn_xml()` never
+loads it anyway.
+
+(c) **Cheaper than the plan assumed**: the plan expected a new fetch/endpoint would be needed; the hub's
+`GET /installations` has carried `supported_process_types` per installation since P63-S2/ADR 0191
+already — only the TypeScript types on both hops (`workflow-service`'s proxy pass-through,
+`process-designer`'s own types) had narrowed it away. Widening two interfaces needed no backend change.
+`TargetProcessTypeField` gained a client-side, non-blocking WARNING (`validateTargetProcessType`, a
+standalone pure function) via `@bpmn-io/properties-panel`'s own `validate` prop — never a hard rejection,
+since real enforcement already lives at the hub.
+
+**A real, pre-existing bug found live during (c)'s own browser verification, unrelated to the actual
+feature added**: `TargetProcessTypeField`'s call to `TextFieldEntry({...})` never passed a `debounce`
+prop. The library's `Textfield` unconditionally calls `useDebounce(onInput, debounce)`, which calls
+`debounce` itself as a function — undefined, this throws on first mount, silently crashing the ENTIRE
+"Ziel-Prozesstyp" field. Root-caused via `productionBrowserSourceMaps` temporarily enabled + manual
+source-map decoding of the minified stack (`t is not a function`) after Playwright's raw `pageerror` gave
+no usable location. Every other real caller of `TextFieldEntry` in the wider bpmn-io ecosystem resolves
+this via the `debounceInput` service `BpmnPropertiesPanelModule` already registers internally
+(`__depends__: [Commands, DebounceInputModule, FeelPopupModule]`) — this field simply never injected it.
+This bug has existed since the federated-step feature shipped (P6-S9) — invisible until now because no
+prior session had ever opened this specific properties-panel group in a real browser (this app's own
+unit tests mock `@bpmn-io/properties-panel` out entirely, and `designer.spec.ts` only exercises generic
+task creation/save). Fixed with one line: `const debounce = useService("debounceInput")`.
+
+New tests: `object-type-service` 109/109 (+5), `document-service` 412/412 (+5), `folder-service` 167/167
+(+3), `workflow-service` 227/227 (+6), `process-designer` 47/47 (+6 — `validateTargetProcessType` unit
+coverage). `ruff`/`tsc`/`eslint` clean across all five services/apps (same pre-existing, unrelated
+`ogdoc_addin.py`/`analysis.ipynb` ruff-format findings confirmed out of scope again, and a
+consistently-reproducing-but-pre-existing `test_federation.py` flake in `workflow-service` confirmed via
+`git stash` to fail identically on the pre-session baseline — unrelated to this session, not
+investigated further). All five rebuilt/redeployed.
+
+**Live-verified against the real running stack, all three sub-parts**: (a) a real reference-typed
+attribute on both a document and a folder object type — a nonexistent target rejected (`422`), a real
+target (an existing document id / the seeded `"root"` folder) accepted; an invalid `reference_target`
+value rejected at object-type save time. (b) a real DMN definition + a real referencing process
+definition uploaded — delete blocked (`409`) while referenced, succeeds once the process definition is
+removed. (c) **a real Playwright browser session** against `process-designer` (temporary spec, removed
+afterward): logged in, placed a Manual Task, enabled the federated step, selected a real installation
+from the dev stack's own address book (`supported_process_types: ["dms.contact-directory.v1"]`), typed
+an undeclared process type (inline warning appeared), then the declared one (warning cleared) — this run
+is what surfaced the pre-existing `debounce` crash, fixed before this verification could pass. All
+temporary test data/permission grants created during live verification cleaned up afterward.
+
+`docs/services/object-type-service.md`, `document-service.md`, `folder-service.md`, `workflow-service.md`,
+`process-designer.md` all updated (Open Points closed, new sections, test counts, two other stale test-count
+histories found drifted and corrected transparently as an aside, same pattern as prior sessions this round).
+
+**Round closed.** Phase 64 was the last phase queued in `IMPLEMENTATION_PLAN.md` — no Phase 65 exists.
+`graphify update .` run to close out the whole Phase 63-64 round per its own Definition of Done. Per this
+project's established pattern, the next gap-analysis round is NOT self-initiated — status is reported to
+the user, a new round only starts on explicit request.
+
+---
+
+Immediately before P64-S1: **P63-S3** (small fixes + ADR documentation corrections bundle — third and
+last session of Phase 63). **New ADR**
+([0192](docs/adr/0192-document-service-kennzeichen-format-shape-validation.md)) for (a) — turned out to be
+a genuine design decision, not the mechanical fix the plan expected.
 
 **The gaps.** (a) `document-service`'s `PATCH /documents/{id}` gates a manual `Kennzeichen` attribute
 change by role (`kennzeichen_admin_role`) but never validated the new value against the object type's
@@ -78,11 +166,6 @@ ADR 0154; documented here as a corrected false positive, not a missed gap.
 `tsc`/`eslint`/`next build` clean for `admin-ui`. Full `admin-ui` vitest suite: 283/283 passing (43 test
 files). `ruff` clean for `document-service` (same pre-existing, unrelated repo-wide failures confirmed
 out of scope again, consistent with every prior session this round).
-
-**Next session:** P64-S1 — cross-service reference validation (first and only session of Phase 64):
-`object-type-service`'s `reference`-typed attributes, `workflow-service`'s DMN `decisionRef` re-check on
-deletion, `process-designer`'s `targetProcessType` validation. `graphify update .` once at the end of
-this session, closing the whole Phase 63-64 round.
 
 ---
 

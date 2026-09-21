@@ -270,6 +270,49 @@ async def test_delete_dmn_definition_succeeds(session, approval_level_dmn):
         await repository.get_dmn_definition(session, definition.id)
 
 
+async def test_delete_dmn_definition_referenced_by_a_saved_process_definition_raises(
+    session, business_rule_task_bpmn, approval_level_dmn
+):
+    """P64-S1 (4.5): closes the gap `delete_dmn_definition`'s own previous
+    docstring used to document as deliberate - a `businessRuleTask`'s
+    `camunda:decisionRef` referencing this DMN's `decision_id` in a saved
+    process definition must now block the deletion instead of only
+    failing later, at the next `start_instance` attempt."""
+    await repository.create_dmn_definition(
+        session, name="Freigabestufe", dmn_xml=approval_level_dmn
+    )
+    definition = await repository.create_dmn_definition(
+        session, name="Freigabestufe", dmn_xml=approval_level_dmn
+    )
+    await repository.create_process_definition(
+        session, name="Freigabe-Workflow", bpmn_xml=business_rule_task_bpmn, process_id=None
+    )
+    with pytest.raises(repository.DmnDefinitionInUseError):
+        await repository.delete_dmn_definition(session, definition.id)
+
+
+async def test_delete_a_superseded_dmn_definition_version_always_succeeds(
+    session, business_rule_task_bpmn, approval_level_dmn
+):
+    """The version being deleted is NOT the latest of its family -
+    `list_latest_dmn_xml()` never loads it, so it cannot be what a
+    `businessRuleTask` actually resolves against; deletion stays
+    unrestricted regardless of any process definition referencing the
+    family's `decision_id`."""
+    first = await repository.create_dmn_definition(
+        session, name="Freigabestufe", dmn_xml=approval_level_dmn
+    )
+    await repository.create_dmn_definition(
+        session, name="Freigabestufe", dmn_xml=approval_level_dmn
+    )
+    await repository.create_process_definition(
+        session, name="Freigabe-Workflow", bpmn_xml=business_rule_task_bpmn, process_id=None
+    )
+    await repository.delete_dmn_definition(session, first.id)
+    with pytest.raises(repository.NotFoundError):
+        await repository.get_dmn_definition(session, first.id)
+
+
 async def test_create_process_definition_referencing_dmn_succeeds_when_dmn_exists(
     session, business_rule_task_bpmn, approval_level_dmn
 ):

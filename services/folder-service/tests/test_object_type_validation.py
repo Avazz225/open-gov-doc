@@ -275,3 +275,79 @@ def test_move_folder_to_allowed_parent_succeeds(client, top_level_type_id, secon
 def test_folder_without_object_type_is_unaffected_by_parent_constraints(client):
     response = client.post("/folders", json={"name": "Untypisiert", "created_by": "alice"})
     assert response.status_code == 201
+
+
+@pytest.fixture
+def reference_type_id():
+    """P64-S1 (4.5): a fresh folder object type with one non-required
+    `type: "reference"` attribute pointing at `reference_target: "folder"` -
+    symmetric to `document-service.tests.test_api._reference_object_type_id`."""
+    with httpx.Client(
+        base_url=OBJECT_TYPE_SERVICE_URL, timeout=10.0, headers=OBJECT_CONFIG_ADMIN_HEADERS
+    ) as oc:
+        response = oc.post(
+            "/object-types",
+            json={
+                "name": "Referenzordner",
+                "applies_to": "folder",
+                "attributes": [
+                    {"name": "Verweis", "type": "reference", "reference_target": "folder"}
+                ],
+            },
+        )
+        response.raise_for_status()
+        type_id = response.json()["id"]
+        yield type_id
+        oc.delete(f"/object-types/{type_id}")
+
+
+def test_create_folder_rejects_a_reference_attribute_pointing_at_a_nonexistent_folder(
+    client, reference_type_id
+):
+    response = client.post(
+        "/folders",
+        json={
+            "name": "Mit Verweis",
+            "created_by": "alice",
+            "object_type_id": reference_type_id,
+            "attributes": {"Verweis": "00000000-0000-0000-0000-000000000000"},
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_create_folder_accepts_a_reference_attribute_pointing_at_an_existing_folder(
+    client, reference_type_id
+):
+    # "root" (settings.ROOT_FOLDER_ID) is a real, always-seeded row.
+    response = client.post(
+        "/folders",
+        json={
+            "name": "Mit Verweis",
+            "created_by": "alice",
+            "object_type_id": reference_type_id,
+            "attributes": {"Verweis": "root"},
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["attributes"]["Verweis"] == "root"
+
+
+def test_update_folder_rejects_a_reference_attribute_pointing_at_a_nonexistent_folder(
+    client, reference_type_id
+):
+    folder = client.post(
+        "/folders",
+        json={
+            "name": "Mit Verweis",
+            "created_by": "alice",
+            "object_type_id": reference_type_id,
+            "attributes": {"Verweis": "root"},
+        },
+    ).json()
+
+    response = client.patch(
+        f"/folders/{folder['id']}",
+        json={"attributes": {"Verweis": "00000000-0000-0000-0000-000000000000"}},
+    )
+    assert response.status_code == 422

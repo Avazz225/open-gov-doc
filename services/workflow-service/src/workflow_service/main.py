@@ -1111,6 +1111,8 @@ async def delete_dmn_definition(
         await repository.delete_dmn_definition(session, dmn_definition_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except repository.DmnDefinitionInUseError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     await session.commit()
 
 

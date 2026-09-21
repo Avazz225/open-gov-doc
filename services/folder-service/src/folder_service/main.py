@@ -452,10 +452,12 @@ async def publish_event(
 async def _validate_against_object_type(
     object_type_id: int | None,
     *,
+    session: AsyncSession,
     name: str,
     attributes: dict,
     parent_object_type_id: int | None = None,
     parent_is_root: bool = False,
+    x_dms_principal: str = "",
 ):
     if object_type_id is None:
         return
@@ -468,6 +470,34 @@ async def _validate_against_object_type(
     )
     if errors:
         raise HTTPException(status_code=400, detail={"errors": errors})
+
+    # Reference-existence check (P64-S1, 4.5) - `object_type_client.
+    # validate()` above only checks the VALUE's shape (non-empty string,
+    # via `dms_constraint_engine`, which stays DB/HTTP-free per ADR 0003);
+    # existence against `reference_target` ("document"/"folder") is this
+    # caller's own responsibility, symmetric to `document_service.main.
+    # _check_reference_attributes`.
+    object_type = await app.state.object_type_client.get(object_type_id)
+    reference_errors: list[str] = []
+    for attribute in (object_type or {}).get("attributes") or []:
+        if attribute.get("type") != "reference" or attribute.get("reference_target") is None:
+            continue
+        attr_name = attribute.get("name")
+        value = attributes.get(attr_name)
+        if not value:
+            continue
+        target = attribute["reference_target"]
+        if target == "document":
+            exists = await app.state.document_client.get(value, x_dms_principal=x_dms_principal)
+            exists = exists is not None
+        else:
+            exists = await repository.folder_exists(session, value)
+        if not exists:
+            reference_errors.append(
+                f"Attribut {attr_name!r} referenziert {target} {value!r}, das nicht existiert"
+            )
+    if reference_errors:
+        raise HTTPException(status_code=422, detail={"errors": reference_errors})
 
 
 @app.get("/healthz")
@@ -495,10 +525,12 @@ async def create_folder(
 
     await _validate_against_object_type(
         payload.object_type_id,
+        session=session,
         name=payload.name,
         attributes=payload.attributes,
         parent_object_type_id=parent_folder.object_type_id,
         parent_is_root=payload.parent_id == ROOT_FOLDER_ID,
+        x_dms_principal=x_dms_principal,
     )
     try:
         folder = await repository.create_folder(
@@ -705,8 +737,10 @@ async def update_folder(
             }
         await _validate_against_object_type(
             current.object_type_id,
+            session=session,
             name=payload.name if payload.name is not None else current.name,
             attributes=payload.attributes if payload.attributes is not None else current.attributes,
+            x_dms_principal=x_dms_principal,
             **placement_kwargs,
         )
 

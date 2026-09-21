@@ -160,6 +160,22 @@ Builds on the Object-Type Service (see `docs/services/object-type-service.md` "R
 - **First real role check in the entire system**: `PATCH /documents/{id}` detects a change to `attributes["Kennzeichen"]` by comparing old (`document.attributes`) against new (`payload.attributes`, a full replacement rather than a merge, see below) — if they differ (even omitting the key without comment in an otherwise complete attribute replace counts as a change, since it effectively sets the value to `null`), the gateway-injected `X-DMS-Roles` header (comma-separated) must contain the role from `Settings.kennzeichen_admin_role` (default `"dms-admin"`), otherwise `403`. Until now, **no** service anywhere in the system evaluated this header (see `PROGRESS.md` "Authorization") — the role is created idempotently in the realm by the Auth Service (`ensure_realm_and_client`), assignment to specific users currently happens outside the system, via the Keycloak Admin Console (no own role-management API/UI, see `docs/services/auth-service.md` "Open Points"). **Since P63-S3** ([ADR 0192](../adr/0192-document-service-kennzeichen-format-shape-validation.md)): a role-authorized, non-empty new value is additionally validated against the object type's configured `kennzeichen_format` shape (`422` on mismatch) — `_kennzeichen_format_to_pattern` converts the format template into a regex, mirroring `object_type_service.repository._render_kennzeichen`'s own rendering rules for the fixed date/counter placeholders (`YYYY`/`YY`/`MM`/`DD`/`Laufende_Nummer`); any OTHER placeholder (an attribute reference, e.g. `{Federführung}`) is matched permissively, its value shape is unconstrained. Previously only role-gated, never format-validated — a `dms-admin` could write an arbitrary string that breaks the reference-number contract other services rely on (`mail-connector`'s candidate matching, `migration-service`).
 - **Where `Kennzeichen` is displayed** (before the filename, globally or with per-object-type override) is still open — follows with **P5e-S3**.
 
+## Reference Attribute Existence Check (4.5, P64-S1, [ADR 0193](../adr/0193-cross-service-reference-validation.md))
+
+`object-type-service`'s constraint engine only checks a `type: "reference"` attribute value's SHAPE
+(non-empty string) — it stays DB/HTTP-free by design (ADR 0003). If the attribute definition additionally
+declares `reference_target: "document"`, this service performs the actual existence check itself, right
+after `object_type_client.validate()` confirms the shape: `_check_reference_attributes()` (`main.py`)
+looks up the object type's own attribute list (`object_type_client.get()`), and for each present
+`reference`-typed value with a declared target, checks `repository.document_exists()` (target
+`"document"`, a plain same-DB lookup) or `folder_client.get()` (target `"folder"`, the same cross-service
+client already used for parent-folder existence checks) — `422` if the referenced value doesn't exist.
+Runs on `POST /documents` (via the shared `_prepare_document_fields`) and on `PATCH /documents/{id}` only
+when `payload.attributes` is actually supplied (a pure move re-validates the SAME already-accepted
+attributes against placement rules only, nothing there could have newly gone stale). An attribute with no
+`reference_target` declared is left entirely unchecked — the pre-existing, still-supported format-only
+behavior.
+
 ## Draft / Pre-Registration Lifecycle (Post-Roadmap Phase 31 Session 2, [ADR 0113](../adr/0113-draft-registration-lifecycle.md))
 
 `POST /documents` accepts an optional `draft` form field (`bool`, default `false`). When `true`, the

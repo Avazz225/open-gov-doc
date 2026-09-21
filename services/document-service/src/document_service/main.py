@@ -1395,6 +1395,48 @@ async def mark_document_rehydrated(
     return document
 
 
+async def _check_reference_attributes(
+    session: AsyncSession,
+    object_type: dict | None,
+    attributes: dict,
+    *,
+    x_dms_principal: str = "",
+) -> list[str]:
+    """P64-S1 (4.5): existence check for `type: "reference"` attributes
+    that also declare `reference_target` (`"document"`/`"folder"`, see
+    `object_type_service.repository._validate_reference_targets`). The
+    value's own SHAPE (non-empty string) is already checked by
+    `object_type_client.validate()` via `dms_constraint_engine`, which
+    stays a pure, stateless library with no DB/HTTP access (ADR 0003) and
+    therefore cannot check existence itself - this is the caller-side half
+    of that split, same division of labor `allowed_parent_types`/
+    `kennzeichen_format` already have between object-type-service
+    (shape/config) and the calling service (instance data). An attribute
+    with no `reference_target` declared is left entirely unchecked, the
+    same pre-existing, still-supported behavior as before P64-S1."""
+    if not object_type:
+        return []
+    errors: list[str] = []
+    for attribute in object_type.get("attributes") or []:
+        if attribute.get("type") != "reference" or attribute.get("reference_target") is None:
+            continue
+        name = attribute.get("name")
+        value = attributes.get(name)
+        if not value:
+            continue
+        target = attribute["reference_target"]
+        if target == "document":
+            exists = await repository.document_exists(session, value)
+        else:
+            exists = (
+                await app.state.folder_client.get(value, x_dms_principal=x_dms_principal)
+                is not None
+            )
+        if not exists:
+            errors.append(f"Attribut {name!r} referenziert {target} {value!r}, das nicht existiert")
+    return errors
+
+
 async def _prepare_document_fields(
     session: AsyncSession,
     *,
@@ -1469,6 +1511,11 @@ async def _prepare_document_fields(
         # concrete date, no manual entry needed at creation time (can be
         # overridden at any time afterwards via PUT .../retention).
         object_type = await app.state.object_type_client.get(object_type_id)
+        reference_errors = await _check_reference_attributes(
+            session, object_type, parsed_attributes, x_dms_principal=x_dms_principal
+        )
+        if reference_errors:
+            raise HTTPException(status_code=422, detail={"errors": reference_errors})
         if object_type and object_type.get("default_retention_days") is not None:
             retention_until = datetime.now(UTC) + timedelta(
                 days=object_type["default_retention_days"]
@@ -2243,16 +2290,30 @@ async def update_document(
             if is_move
             else {}
         )
+        effective_attributes = (
+            payload.attributes if payload.attributes is not None else document.attributes
+        )
         errors = await app.state.object_type_client.validate(
             document.object_type_id,
             name=payload.title if payload.title is not None else document.title,
-            attributes=payload.attributes
-            if payload.attributes is not None
-            else document.attributes,
+            attributes=effective_attributes,
             **placement_kwargs,
         )
         if errors:
             raise HTTPException(status_code=400, detail={"errors": errors})
+
+        # Reference-existence check (P64-S1, 4.5): only when attribute
+        # VALUES are actually being supplied - not on a pure move
+        # (`is_move` re-validates the SAME already-accepted `document.
+        # attributes` against the new parent's placement rules only,
+        # nothing there could have newly gone stale).
+        if payload.attributes is not None:
+            object_type = await app.state.object_type_client.get(document.object_type_id)
+            reference_errors = await _check_reference_attributes(
+                session, object_type, effective_attributes, x_dms_principal=x_dms_principal
+            )
+            if reference_errors:
+                raise HTTPException(status_code=422, detail={"errors": reference_errors})
 
     updated = await repository.update_document_metadata(
         session,

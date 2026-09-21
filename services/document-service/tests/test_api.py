@@ -998,6 +998,98 @@ def test_update_kennzeichen_clearing_the_value_needs_no_format_match(client):
     assert "Kennzeichen" not in response.json()["attributes"]
 
 
+def _reference_object_type_id(reference_target: str | None) -> str:
+    """P64-S1 (4.5): a fresh document object type with one non-required
+    `type: "reference"` attribute, optionally declaring `reference_target`
+    (`"document"`/`"folder"`) - non-required so uploading without setting
+    it still succeeds (the value's own presence/shape is what
+    `dms_constraint_engine` already checked before P64-S1; the existence
+    check under test here is layered on top, only for a NON-empty value)."""
+    attribute: dict = {"name": "Verweis", "type": "reference"}
+    if reference_target is not None:
+        attribute["reference_target"] = reference_target
+    response = httpx.post(
+        f"{OBJECT_TYPE_SERVICE_URL}/object-types",
+        json={
+            "name": f"reference-test-type-{uuid.uuid4().hex[:8]}",
+            "applies_to": "document",
+            "attributes": [attribute],
+        },
+        timeout=30.0,
+        headers=OBJECT_CONFIG_ADMIN_HEADERS,
+    )
+    response.raise_for_status()
+    return str(response.json()["id"])
+
+
+def test_create_document_rejects_a_reference_attribute_pointing_at_a_nonexistent_document(client):
+    """P64-S1 (4.5): existence check for `reference_target: "document"` -
+    the value's own shape (non-empty string) is already accepted by
+    `dms_constraint_engine`, which stays DB-free per ADR 0003 and cannot
+    check existence itself - this is the caller-side half of that split."""
+    object_type_id = _reference_object_type_id("document")
+
+    response = upload(
+        client,
+        object_type_id=object_type_id,
+        attributes='{"Verweis": "00000000-0000-0000-0000-000000000000"}',
+    )
+    assert response.status_code == 422
+
+
+def test_create_document_accepts_a_reference_attribute_pointing_at_an_existing_document(client):
+    object_type_id = _reference_object_type_id("document")
+    target_document_id = upload(client).json()["id"]
+
+    response = upload(
+        client,
+        object_type_id=object_type_id,
+        attributes=f'{{"Verweis": "{target_document_id}"}}',
+    )
+    assert response.status_code == 201
+    assert response.json()["attributes"]["Verweis"] == target_document_id
+
+
+def test_update_document_rejects_a_reference_attribute_pointing_at_a_nonexistent_folder(client):
+    object_type_id = _reference_object_type_id("folder")
+    document_id = upload(client, object_type_id=object_type_id).json()["id"]
+
+    response = client.patch(
+        f"/documents/{document_id}",
+        json={"attributes": {"Verweis": "00000000-0000-0000-0000-000000000000"}},
+    )
+    assert response.status_code == 422
+
+
+def test_update_document_accepts_a_reference_attribute_pointing_at_an_existing_folder(client):
+    # "root" (settings.ROOT_FOLDER_ID) is a real, always-seeded row in
+    # folder-service, not a sentinel this check would need to special-case.
+    object_type_id = _reference_object_type_id("folder")
+    document_id = upload(client, object_type_id=object_type_id).json()["id"]
+
+    response = client.patch(
+        f"/documents/{document_id}",
+        json={"attributes": {"Verweis": "root"}},
+    )
+    assert response.status_code == 200
+    assert response.json()["attributes"]["Verweis"] == "root"
+
+
+def test_reference_attribute_without_reference_target_is_left_unchecked(client):
+    """No `reference_target` declared on the attribute definition -
+    pre-existing, still-supported format-only behavior, no existence
+    check performed at all (a value that couldn't possibly exist is
+    nonetheless accepted)."""
+    object_type_id = _reference_object_type_id(None)
+
+    response = upload(
+        client,
+        object_type_id=object_type_id,
+        attributes='{"Verweis": "definitely-does-not-exist-anywhere"}',
+    )
+    assert response.status_code == 201
+
+
 # --- Draft / pre-registration lifecycle (post-roadmap phase 31 session 2,
 # ADR 0113) -----------------------------------------------------------
 

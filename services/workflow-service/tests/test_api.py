@@ -464,6 +464,25 @@ def test_delete_dmn_definition_succeeds(client, approval_level_dmn, admin_header
     assert client.get(f"/dmn-definitions/{dmn_definition_id}").status_code == 404
 
 
+def test_delete_dmn_definition_referenced_by_a_process_definition_returns_409(
+    client, business_rule_task_bpmn, approval_level_dmn, admin_headers
+):
+    """P64-S1 (4.5): API-level translation of
+    `repository.DmnDefinitionInUseError`, same `409` convention already
+    used for `DELETE /process-definitions/{id}`'s own in-use check."""
+    dmn_definition_id = _upload_dmn(
+        client, approval_level_dmn, name="Freigabestufe", headers=admin_headers
+    ).json()["id"]
+    _upload_definition(
+        client, business_rule_task_bpmn, name="Freigabe-Workflow", headers=admin_headers
+    )
+
+    response = _delete_dmn(client, dmn_definition_id, headers=admin_headers)
+
+    assert response.status_code == 409
+    assert client.get(f"/dmn-definitions/{dmn_definition_id}").status_code == 200
+
+
 def test_business_rule_task_process_definition_evaluates_dmn_end_to_end(
     client, business_rule_task_bpmn, approval_level_dmn, admin_headers
 ):

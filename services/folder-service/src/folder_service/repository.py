@@ -126,6 +126,19 @@ async def get_folder_any_state(session: AsyncSession, folder_id: str) -> Folder:
     return await _get_folder_row(session, folder_id)
 
 
+async def folder_exists(session: AsyncSession, folder_id: str) -> bool:
+    """P64-S1 (4.5): existence check for a `reference_target: "folder"`
+    attribute value - deliberately WITHOUT the trash filter `get_folder`
+    applies (same "a reference survives the deletion of its original,
+    traceably" reasoning `document_service.repository.document_exists`
+    gives for the symmetric document case)."""
+    try:
+        await _get_folder_row(session, folder_id)
+        return True
+    except NotFoundError:
+        return False
+
+
 async def list_children(session: AsyncSession, folder_id: str) -> list[Folder]:
     await get_folder(session, folder_id)
     result = await session.execute(

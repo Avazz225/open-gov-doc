@@ -315,6 +315,13 @@ export async function deleteDmnDefinition(token: string, id: number): Promise<vo
 export interface FederationInstallationSummary {
   id: string;
   display_name: string;
+  // P64-S1 (4.5): already present in the wire payload since P63-S2 (ADR
+  // 0191, the hub's own `InstallationOut.supported_process_types`) - the
+  // workflow-service proxy above forwards the raw JSON unfiltered, only
+  // this TS type was narrowing it away. Empty list = no restriction
+  // declared (same "empty means unrestricted" convention the hub itself
+  // uses when actually enforcing this field on `POST /handovers`).
+  supported_process_types: string[];
 }
 
 export async function listFederationInstallations(

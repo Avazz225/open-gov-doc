@@ -170,6 +170,62 @@ async def test_create_with_identical_from_and_to_raises(session):
         )
 
 
+async def test_create_with_reference_attribute_and_valid_reference_target_succeeds(session):
+    created = await repository.create_object_type(
+        session,
+        ObjectTypeCreate(
+            name="Umlaufmappe",
+            applies_to="document",
+            attributes=[{"name": "Verweis", "type": "reference", "reference_target": "document"}],
+        ),
+    )
+    assert created.attributes == [
+        {"name": "Verweis", "type": "reference", "reference_target": "document"}
+    ]
+
+
+async def test_create_with_reference_attribute_without_reference_target_succeeds(session):
+    # P64-S1: omitting `reference_target` preserves the pre-existing,
+    # still-supported format-only behavior - not a required field.
+    created = await repository.create_object_type(
+        session,
+        ObjectTypeCreate(
+            name="Umlaufmappe",
+            applies_to="document",
+            attributes=[{"name": "Verweis", "type": "reference"}],
+        ),
+    )
+    assert created.attributes == [{"name": "Verweis", "type": "reference"}]
+
+
+async def test_create_with_reference_attribute_and_invalid_reference_target_raises(session):
+    with pytest.raises(repository.InvalidFieldError):
+        await repository.create_object_type(
+            session,
+            ObjectTypeCreate(
+                name="Umlaufmappe",
+                applies_to="document",
+                attributes=[{"name": "Verweis", "type": "reference", "reference_target": "case"}],
+            ),
+        )
+
+
+async def test_create_with_reference_target_on_a_non_reference_attribute_is_ignored(session):
+    # `reference_target` is only meaningful (and only validated) on a
+    # `type: "reference"` attribute - a stray key on another type is
+    # harmless, matching this codebase's general "extra dict keys are
+    # ignored" convention for the untyped `attributes` list.
+    created = await repository.create_object_type(
+        session,
+        ObjectTypeCreate(
+            name="Umlaufmappe",
+            applies_to="document",
+            attributes=[{"name": "Titel", "type": "string", "reference_target": "case"}],
+        ),
+    )
+    assert created.attributes == [{"name": "Titel", "type": "string", "reference_target": "case"}]
+
+
 async def test_update_replaces_status_transitions(session):
     created = await repository.create_object_type(
         session,
@@ -190,6 +246,25 @@ async def test_update_replaces_status_transitions(session):
     assert updated.status_transitions == [
         {"from": "open", "to": "closed", "requiredAttributes": ["Grund"]}
     ]
+
+
+async def test_update_with_invalid_reference_target_raises(session):
+    created = await repository.create_object_type(
+        session,
+        ObjectTypeCreate(
+            name="Umlaufmappe",
+            applies_to="document",
+            attributes=[{"name": "Verweis", "type": "reference"}],
+        ),
+    )
+    with pytest.raises(repository.InvalidFieldError):
+        await repository.update_object_type(
+            session,
+            created.id,
+            ObjectTypeUpdate(
+                attributes=[{"name": "Verweis", "type": "reference", "reference_target": "user"}],
+            ),
+        )
 
 
 async def test_create_icon_on_document_type_raises(session):

@@ -59,6 +59,8 @@ If a folder carries an `object_type_id`, `POST /object-types/{id}/validate` of t
 
 **Bug fix — move-cycle detection (Post-Roadmap Phase 38 Session 1)**: `repository.update_folder` previously only rejected a folder being moved directly under itself (`new_parent_id == folder_id`) — a deeper cycle (e.g. `A` moved under its own child `B`, having previously moved `B` under `A`) went through unchecked, permanently making every folder in the cycle undeletable (`delete_folder`'s not-empty check sees the other as a child either way) and unreachable from any root-anchored tree walk. Already found and documented live at P23-S4 (drag-and-drop's own client-side guard only protects the currently-loaded part of the tree, not direct API calls), but deliberately left unfixed there as out of that session's frontend-only scope. Now closed: before applying a move, `update_folder` checks whether the intended new parent appears in the folder's own active subtree (`list_active_subtree_ids`, the same helper the trash cascade already uses) and rejects with a `ValueError`/`400` if so — since a folder is always the first element of its own subtree, this one check also covers the original direct-self-parent case, replacing the narrower `new_parent_id == folder_id` guard entirely.
 
+**Reference attribute existence check (4.5, P64-S1, [ADR 0193](../adr/0193-cross-service-reference-validation.md))**: `object-type-service`'s constraint engine only checks a `type: "reference"` attribute value's shape (non-empty string) — it stays DB/HTTP-free by design (ADR 0003). If the attribute definition additionally declares `reference_target` (`"document"`/`"folder"`), `_validate_against_object_type()` performs the actual existence check itself, right after the shape check passes: `"folder"` via `repository.folder_exists()` (a plain same-DB lookup, deliberately WITHOUT the trash filter `get_folder` applies — a reference survives the deletion of its original, same reasoning `document_service.repository.document_exists()` uses symmetrically), `"document"` via `document_client.get()` (the same cross-service client already used for subtree document counting). `422` if the referenced value doesn't exist. An attribute with no `reference_target` declared is left entirely unchecked.
+
 ## Hand Folders (14.2, Post-Roadmap Phase 31 Session 7, [ADR 0118](../adr/0118-hand-folders-and-work-trays.md))
 
 "Assembles references (not copies) to records from different cases into one working compilation" — a
@@ -190,7 +192,12 @@ None yet — to follow in Phase 11.
 
 ## Tests
 
-**164 tests since Phase 58 Session 1** (previously 143, +21: new `test_attribute_pseudonymization.py`,
+**167 tests since P64-S1** (previously 164, +3 in `test_object_type_validation.py`: `reference_target:
+"folder"` existence check — a nonexistent target rejected (`422`) on create, an existing one (`"root"`)
+accepted on create, a nonexistent target rejected on a subsequent update — same
+`_reference_object_type_id`-style fixture pattern as `document-service`'s own new tests).
+
+Older history: **164 tests since Phase 58 Session 1** (previously 143, +21: new `test_attribute_pseudonymization.py`,
 mirroring `document-service`'s own test file 1:1 — RBAC/eligibility/round-trip/409 for the manual
 endpoints, plus direct unit tests of the retention-poll-loop auto-trigger helper).
 

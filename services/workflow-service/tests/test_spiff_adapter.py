@@ -298,6 +298,18 @@ def test_parse_dmn_multiple_decisions_raises(multi_decision_dmn):
         sa.parse_dmn(multi_decision_dmn)
 
 
+def test_extract_decision_refs_finds_the_referenced_decision_id(business_rule_task_bpmn):
+    assert sa.extract_decision_refs(business_rule_task_bpmn) == {"approval-level"}
+
+
+def test_extract_decision_refs_empty_for_a_bpmn_without_any_business_rule_task(manual_task_bpmn):
+    assert sa.extract_decision_refs(manual_task_bpmn) == set()
+
+
+def test_extract_decision_refs_empty_for_invalid_xml():
+    assert sa.extract_decision_refs("not valid xml") == set()
+
+
 def test_parse_bpmn_business_rule_task_without_dmn_definitions_raises(business_rule_task_bpmn):
     """`camunda:decisionRef="approval-level"` referenziert eine Decision, die hier
     nicht geladen wird - `get_spec()` muss dabei mit einer SpiffWorkflow-eigenen

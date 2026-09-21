@@ -3,7 +3,9 @@ import {
   getTargetInstallationId,
   getTargetProcessType,
   isFederatedStepEnabled,
+  validateTargetProcessType,
 } from "@/components/FederatedStepPropertiesProvider";
+import type { FederationInstallation } from "@/components/FederatedStepPropertiesProvider";
 
 // Gleiches Mock-Muster wie signature-task-properties-provider.test.ts - nur
 // die reinen Lesefunktionen werden hier getestet, kein echtes DOM/bpmn-js.
@@ -72,5 +74,41 @@ describe("FederatedStepPropertiesProvider - pure read helpers", () => {
       { name: "targetProcessType", value: "external-review" },
     ]);
     expect(getTargetProcessType(element)).toBe("external-review");
+  });
+});
+
+// P64-S1 (4.5): the process-designer half of the cross-service reference
+// validation pattern - a client-side WARNING against the target
+// installation's own declared `supported_process_types` catalog (never a
+// hard rejection, see the function's own docstring).
+describe("validateTargetProcessType", () => {
+  const installations: FederationInstallation[] = [
+    { id: "install-a", display_name: "A", supported_process_types: ["external-review"] },
+    { id: "install-b", display_name: "B", supported_process_types: [] },
+  ];
+
+  it("is silent for an empty value (nothing entered yet)", () => {
+    expect(validateTargetProcessType("", installations, "install-a")).toBeUndefined();
+  });
+
+  it("is silent when the target installation declares no restriction (empty catalog)", () => {
+    expect(
+      validateTargetProcessType("anything-at-all", installations, "install-b")
+    ).toBeUndefined();
+  });
+
+  it("is silent when no target installation is selected yet", () => {
+    expect(validateTargetProcessType("external-review", installations, "")).toBeUndefined();
+  });
+
+  it("is silent when the value matches the target's declared catalog", () => {
+    expect(
+      validateTargetProcessType("external-review", installations, "install-a")
+    ).toBeUndefined();
+  });
+
+  it("warns when the value is not in the target's declared, non-empty catalog", () => {
+    const message = validateTargetProcessType("unknown-type", installations, "install-a");
+    expect(message).toContain("external-review");
   });
 });

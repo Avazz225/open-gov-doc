@@ -110,6 +110,18 @@ async def get_document(session: AsyncSession, document_id: str) -> Document:
     return document
 
 
+async def document_exists(session: AsyncSession, document_id: str) -> bool:
+    """P64-S1 (4.5): existence check for a `reference_target: "document"`
+    attribute value - deliberately a plain existence check, not
+    `get_document` (no need to load/return the full row), and deliberately
+    NOT excluding a trashed/soft-deleted document (same "a reference
+    survives the deletion of its original, traceably" reasoning
+    `folder_service.DocumentClient.get()`'s own docstring already gives for
+    the symmetric hand-folder-reference case, ADR 0118)."""
+    result = await session.get(Document, document_id)
+    return result is not None
+
+
 async def list_all_documents(session: AsyncSession) -> list[Document]:
     """Every document row regardless of state (Post-Roadmap Phase 39
     Session 4, ADR 0154) - basis for the startup backfill that registers a
