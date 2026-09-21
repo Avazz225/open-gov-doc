@@ -1347,6 +1347,118 @@ non-trivial decisions (see per-phase notes above for which sessions need one), `
 regression (`tsc`/`eslint`/`vitest`/`next build`) before completion, real browser verification for any
 UI-visible change (P61-S4(a)'s WebDAV scope fix and any admin-UI work in P62 if scheduled).
 
+## Phase 63+: Gap Analysis After Phase 62
+
+After Phase 62 completed (closing the entire Phase 59-62 round), a seventh gap-analysis round ran on
+user request ("nächste Runde Gap-Analyse") — the same four-research-dimension methodology as every
+prior round: ADR self-named open scope (all ~189 ADRs), `docs/services/*.md` Open Points (all 40
+files), `Konzept.md` coverage + phantom-section-reference check, and reassessment of every previously
+"Deliberately Not Included" item across all six prior rounds' lists for staleness.
+
+**The Konzept/staleness agent found nothing new** — same conclusion as the last round, independent
+confirmation the system remains mature. No phantom concept-section references found either (the
+`3.2a`/`3.2b`/`5.4a`/`5.4b` shorthand notation used throughout the codebase for lettered sub-items is
+an established, internally consistent convention, not stale drift).
+
+**The ADR sweep found three MORE instances of the recurring "ADR names a gap, an unrelated later
+session silently closes it, the ADR text is never annotated" failure mode** (ADR 0116's search-service
+quarantine-awareness claim — closed in Phase 36 Session 2; ADR 0123's mail-connector per-mailbox RBAC
+claim — closed by ADR 0132/P32-S3; ADR 0154's folder-service deletion-event-publishing claim — closed
+by ADR 0163/Phase 44 Session 2) — the same pattern already found and corrected for ADR 0053/0076 and
+ADR 0116/quarantine in earlier rounds. These get one-line "closed in..." addenda in P63-S3 rather than
+new sessions, the same treatment those earlier corrections got.
+
+**The deferred-item reassessment found one genuinely stale blocking reason**: the Phase 59+ round's own
+"`admin-ui`'s five ungated pages... still correctly blocked on their respective backends having no
+permission check" claim is now wrong for exactly one of the five, `/processing-failures/` — its backend
+(`notification-service`'s `GET /notifications`) got a real, non-"everyone" capability
+(`admin.notification_read`) in this same Phase 59+ round's own P59-S1, but nobody went back and updated
+the deferred-list bullet or wired the frontend gate. The other four pages remain genuinely blocked
+(`ocr.read`/`.write` still "everyone"-granted, `registry-service`'s `GET /instances` still fully open,
+`/deletion-register`/`/installations` still have zero backend permission surface to gate on at all).
+
+**The docs/services sweep found no new critical/unauthenticated-bypass class findings** (that category
+was exhausted by the Phase 59-62 round) but surfaced a real, if lower-severity, correctness/hardening
+tail: `federation-hub-service` stores but never enforces `supported_process_types`/
+`supported_document_types` on a handover, and has no cleanup for its own unboundedly-growing `handover`
+metadata table (the exact same shape `registry-service` already fixed for its own instance table in
+Phase 58 Session 2 — a pattern to copy, not invent); `document-service` gates `Kennzeichen` attribute
+writes by role but never validates the new value against the configured `kennzeichen_format` pattern,
+so an admin can write a value that breaks the reference-number contract other services rely on;
+`permission-service` has no general superuser/break-glass bypass for `require_capability` (only
+`POST /maintenance-mode/lift` special-cases it) — an activated break-glass superuser genuinely cannot
+manage roles or scope locks without also holding an explicit role assignment, undermining the point of
+break-glass; `auth-service` gives a superuser session no elevated audit priority and no rolling-
+inactivity timeout (only a fixed absolute expiry) — the same "superuser session has weaker downstream
+controls than the emergency-access model implies" theme as the permission-service finding, worth one
+bundled hardening session. A smaller, cross-cutting theme also emerged: **the same "a declared
+cross-service reference/type is stored but never checked against its actual target" gap shape appears
+in four places** — `federation-hub-service`'s handover process/document types (closed in P63-S2 below),
+`object-type-service`'s `reference`-typed attributes (no existence check at the target service),
+`workflow-service`'s DMN `decisionRef` (checked at save/start, never re-validated when the referenced
+DMN definition is deleted), and `process-designer`'s `targetProcessType` on a federated BPMN step (not
+checked against the target installation's declared catalog) — bundled into their own session (P64-S1)
+since closing three more instances of an already-understood pattern is cheap once the first is done.
+
+### Phase 63 — Security/Correctness Hardening + Documentation Corrections
+
+| Session | Deliverable |
+|---|---|
+| P63-S1 | ✅ ~~Superuser/break-glass session hardening, bundled since both target the same "same actor, same emergency-access session, weaker downstream controls than the model implies" theme: (a) `permission-service`'s `require_capability` has no general bypass for an activated break-glass superuser — only `POST /maintenance-mode/lift` special-cases it — so a superuser genuinely cannot manage roles/scope locks unless they ALSO hold an explicit role assignment, defeating the point of "emergency access without needing prior provisioning." Fix: add the same `_is_active_superuser`-style short-circuit already used throughout `workflow-service`/`query-service`/etc. to `require_capability` itself, not just individual call sites. (b) `auth-service`: actions taken during an active superuser session get no elevated audit priority (indistinguishable from ordinary actions in the audit log, even though this is exactly the access mode most worth flagging for review) and the session has only a fixed absolute expiry, no rolling-inactivity timeout — a session left open but genuinely idle stays active until the fixed deadline. Session decides the concrete mechanism for both (e.g. an `is_superuser_session` flag forwarded to `audit-service` at publish time; a last-activity timestamp checked alongside the existing absolute-expiry poll loop).~~ **Done, half as scoped.** (a) built exactly as described: `_is_active_superuser` helper + `require_capability`'s new `is_superuser` bypass parameter, all six direct call sites updated. (b) investigated and DROPPED: both auth-service items turned out to be already-named, deliberately-scoped limitations in ADR 0023's own "Consequences" section ("No 'real' rolling inactivity deactivation"; "No increased audit priority for individual actions during activation"), each with real justification already recorded there — not a newly-discovered gap, this session's own finding simply hadn't cross-checked ADR 0023. `permission-service` 185/185 (+3), rebuilt/redeployed, live-verified. See [ADR 0190](docs/adr/0190-permission-service-general-superuser-bypass.md). |
+| P63-S2 | `federation-hub-service` bundle, same service: (a) `Installation.supported_process_types`/`.supported_document_types` are stored at registration but never checked in `create_handover` — a handover of an undeclared type currently succeeds at the hub and only fails downstream once the target installation itself rejects it, defeating the point of declaring supported types at all. Fix: validate `payload.process_type` (and, if present, a document-type equivalent) against the target installation's declared lists before accepting the handover, `422`/`409` on mismatch. (b) No cleanup mechanism exists for old `handover` metadata rows — unbounded growth over the installation's lifetime, confirmed via grep (no delete/archive logic anywhere in `federation_hub_service`). Fix: a periodic cleanup job, reusing `registry-service`'s already-built periodic-cleanup-of-old-rows pattern from Phase 58 Session 2 as closely as possible rather than designing a new one. |
+| P63-S3 | Small fixes + ADR documentation corrections bundle: (a) `document-service`: `Kennzeichen` attribute writes are gated by the `dms-admin` role but never validated against the target object type's configured `kennzeichen_format` pattern — a `dms-admin` can currently write an arbitrary string that breaks the reference-number contract other services (mail-connector's candidate matching, migration-service) rely on. Fix: reuse the existing `kennzeichen_format` regex validation already built for the auto-generation path, applied to the manual-write path too. (b) `admin-ui`: wire `RequireCapability(admin.notification_read)` around `/processing-failures/` — the ONE of the five previously-"ungated, correctly blocked" admin pages whose backend blocker no longer holds (`notification-service`'s `GET /notifications` got a real capability in this same round's own P59-S1, but the frontend gate was never wired and the deferred-list bullet was never updated to reflect it). The other four ungated pages remain genuinely blocked, not touched here. (c) Three ADR documentation-only corrections, no code change: add a "closed in..." addendum to ADR 0116 (search-service quarantine-awareness — actually closed in Phase 36 Session 2), ADR 0123 (mail-connector per-mailbox RBAC — actually closed by ADR 0132/P32-S3), and ADR 0154 (folder-service deletion-event publishing — actually closed by ADR 0163/Phase 44 Session 2) — same one-line-addendum treatment already applied to ADR 0053/0076 in an earlier round. |
+
+**Definition of Done**: regression test per code fix (a break-glass superuser successfully managing a role without a prior explicit assignment; a handover of an undeclared process type rejected; `Kennzeichen` writes rejected when they don't match the configured pattern); new ADR for P63-S1 (a real authorization-model decision for the superuser-bypass shape) and P63-S2(a) (a real validation-strictness decision, same category as the SSRF-guard-strictness decisions in the prior round); no new ADR for P63-S2(b) (mechanical reuse of an already-proven pattern) or P63-S3 (mechanical fixes + pure documentation); docs and `PROGRESS.md` updated per session; real browser verification for the P63-S3(b) `admin-ui` change.
+
+### Phase 64 — Cross-Service Reference Validation
+
+| Session | Deliverable |
+|---|---|
+| P64-S1 | Closes the remaining three instances of the "declared cross-service reference/type stored but never checked against its actual target" pattern (the fourth instance, `federation-hub-service`'s handover types, closes in P63-S2 above): (a) `object-type-service`'s `type:"reference"` attributes only validate that a value is present/non-empty, never that it actually exists at the target service/object type it claims to reference. (b) `workflow-service`'s DMN `decisionRef` (Business Rule Task) is checked when a process definition is saved and when an instance starts, but never re-validated if the referenced DMN definition is later deleted — a process definition can end up silently pointing at a decision table that no longer exists, only surfacing as a runtime failure the next time that task is reached. (c) `process-designer`'s `targetProcessType` on a federated BPMN step (`taskType=federated`) is never checked against the target installation's own declared `supported_process_types` catalog at design time — the mismatch is only caught at runtime by the hub (once P63-S2(a) above closes that check), long after the process designer already saved the diagram. Session decides the validation shape per case (client-side warning vs. hard save-time rejection) given each is a different service/frontend with its own existing validation conventions to match. |
+
+**Definition of Done**: regression test per fix (an attribute pointing at a nonexistent reference target rejected/flagged; deleting a DMN definition still referenced by a saved process definition either rejected or the process definition flagged; a federated step's `targetProcessType` checked against the real target installation's catalog); a short new ADR only if a session's chosen validation shape (hard rejection vs. warning) is a genuine design decision rather than an obvious mechanical fix; docs and `PROGRESS.md` updated; `graphify update .` once at the end of the whole Phase 63-64 round, not after every session.
+
+## Deliberately Not Included in Phase 63+
+
+Carried over from Phase 59+ (re-confirmed this round, no new trigger for any of them): `storage-service`'s
+local/Azure WORM gap, `signature-service`'s QES, PDF/UA formal conformance validation (ADR 0136/0119/0158),
+XDOMEA nested-hierarchy import redesign (ADR 0142), case-browsing UI + process-definition-picker
+(ADR 0141), storage-target rebalancing on redundancy-set membership change (ADR 0004), org-unit automatic
+AD-group inference + bulk-flagging admin UI (ADR 0143), `query-service`'s free-text SQL manipulation, the
+`GET /users/lookup` existence-oracle pattern, a dedicated four-eyes-toggle admin capability +
+`auth-service` realm-role assignment UI, CheckMK/SAML 2.0/PKCS#11/OCSP/XAdES/office-format items.
+
+New this round:
+- **`admin-ui`'s remaining four ungated pages** (`/deletion-register/`, `/registry/`, `/installations/`,
+  `/ocr-settings/`) — still correctly blocked on their respective backends having no permission check to
+  gate the frontend on (only `/processing-failures/` was unblocked this round, closed in P63-S3(b)).
+- **`case-service`'s missing `retention_until` mechanism** (ADR 0177's own named boundary) — the
+  pseudonymization retention auto-trigger deliberately doesn't extend to cases for this reason; a real
+  fix would need a genuine case-level retention concept, not a small follow-up.
+- **`workflow-service`'s lack of supervisor-only reassignment authorization** (ADR 0145's own named gap)
+  — task reassignment is currently flat `workflow.write`, no relationship-aware (supervisor-of-assignee)
+  check; real, but a design question orthogonal to this round's hardening focus.
+- **`storage-service`'s per-object-type/per-folder write-strategy override** — conceptually intended per
+  the service's own docs, but needs an Object-Type/Folder Service linkage that doesn't exist yet; the
+  service-wide `Settings.write_strategy` default remains the only configuration surface.
+- **`workflow-service`'s unvalidated `business_key`** — currently a fully opaque, unchecked reference;
+  low current impact since no real process type sets it to an actual document/case ID yet, worth
+  revisiting once one does.
+- **`ocr-service`'s PaddleOCR engine** (plugin interface exists, no implementation) and **page-1-only
+  text-layer detection** (mixed native/scanned PDFs can be mis-routed) — both real, both deliberate
+  simplifications with no new trigger this round.
+- **`auth-service`'s superuser session: no elevated audit priority, no rolling-inactivity deactivation**
+  (both ADR 0023's own named, deliberately-scoped limitations, re-confirmed during P63-S1 — see that
+  session's own entry above for why they were dropped from the session rather than built) — genuine
+  design questions (rolling inactivity would need new instrumentation in every service/gateway; the
+  audit hash-chain model has no priority concept at all), not session-sized fixes.
+
+**Definition of Done for Phase 63+** (unchanged, `CONTRIBUTING.md`): tests green per session, new ADR for
+non-trivial decisions (see per-phase notes above for which sessions need one), `PROGRESS.md` updated,
+`graphify update .` once at the end of the whole Phase 63-64 round, backend regression
+(`scripts/run-tests.sh --build`) + frontend regression (`tsc`/`eslint`/`vitest`/`next build`) before
+completion, real browser verification for the P63-S3(b) `admin-ui` change.
+
 ## PROGRESS.md — Resume Mechanism
 
 `dms/PROGRESS.md` is created as the first order of business in P0-S1 and is the entry point for every new session:

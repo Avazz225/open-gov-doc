@@ -1033,12 +1033,26 @@ async def set_approval_config(
     return config
 
 
-async def require_capability(session: AsyncSession, principal_id: str, permission: str) -> None:
+async def require_capability(
+    session: AsyncSession, principal_id: str, permission: str, *, is_superuser: bool = False
+) -> None:
     """Direct baseline permission check at the root resource - unlike
     `_require_permission_if_configured` below (which only applies *in the
     context of an approval request*), also usable for endpoints without
     any four-eyes involvement (e.g. `POST /maintenance-mode/trigger`, when
-    `requires_approval=False`, 4.8/P6-S6)."""
+    `requires_approval=False`, 4.8/P6-S6).
+
+    `is_superuser` (P63-S1): the caller (`main.py`) has already resolved
+    whether `principal_id` is the currently active break-glass superuser
+    via `AuthServiceClient.get_active_superuser()` - an HTTP round trip
+    that has no place in this DB-only repository module, same separation
+    every other call site in this file already keeps. Defaults `False` so
+    every pre-existing caller that doesn't pass it keeps its previous,
+    unbypassable behavior (only `_require_permission_if_configured`'s
+    four-eyes-initiation-eligibility path deliberately does NOT pass this -
+    see its own docstring for why)."""
+    if is_superuser:
+        return
     entry = await get_effective_permissions(session, principal_id, ROOT_RESOURCE_ID)
     if permission not in entry.permissions:
         raise MissingRequiredPermissionError(
@@ -1049,6 +1063,16 @@ async def require_capability(session: AsyncSession, principal_id: str, permissio
 async def _require_permission_if_configured(
     session: AsyncSession, config: ApprovalActionConfig, principal_id: str
 ) -> None:
+    """P63-S1: deliberately does NOT pass `is_superuser` through to
+    `require_capability` - this gates who may INITIATE a four-eyes-
+    protected action, and the project's own established convention
+    (`query-service`'s critical-action four-eyes, concept 6.1 item 4) is
+    that an activated superuser does not bypass four-eyes protections,
+    only the ordinary permission model outside of them. Bypassing
+    initiation eligibility here would let a superuser start an approval
+    flow they'd otherwise need a real role for, undermining that
+    invariant - the general bypass added this session is scoped to
+    `require_capability`'s other, non-four-eyes callers only."""
     if config.required_permission is None:
         return
     await require_capability(session, principal_id, config.required_permission)

@@ -256,6 +256,20 @@ def get_metrics() -> Response:
     return Response(content=body, media_type=content_type)
 
 
+async def _is_active_superuser(principal_id: str) -> bool:
+    """P63-S1: general-purpose superuser check, same shape as every other
+    service's own `_is_active_superuser` (`workflow-service`/`query-
+    service`/`plugin-orchestration-service`/etc.) - `lift_maintenance_mode`
+    below already did this inline, ad hoc, for itself alone; every OTHER
+    caller of `repository.require_capability` in this file had no bypass
+    at all, meaning an activated break-glass superuser (4.6) could not
+    actually manage roles/scope locks/delegations unless they ALSO held an
+    explicit `admin.user_management` role assignment - defeating the
+    point of "emergency access without needing prior provisioning"."""
+    active, superuser_principal_id = await app.state.auth_client.get_active_superuser()
+    return active and bool(principal_id) and superuser_principal_id == principal_id
+
+
 async def _require_role_management(session: AsyncSession, x_dms_principal: str) -> None:
     """Self-gating (Post-Roadmap Phase 19 Session 6, ADR 0071) - `POST`/
     `PUT /roles` had been ungated since the beginning (ADR 0023 explicitly
@@ -268,8 +282,11 @@ async def _require_role_management(session: AsyncSession, x_dms_principal: str) 
     `_require_case_permission`."""
     if not x_dms_principal:
         raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    is_superuser = await _is_active_superuser(x_dms_principal)
     try:
-        await repository.require_capability(session, x_dms_principal, "admin.user_management")
+        await repository.require_capability(
+            session, x_dms_principal, "admin.user_management", is_superuser=is_superuser
+        )
     except repository.MissingRequiredPermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 
@@ -908,8 +925,11 @@ async def create_scope_lock(
     source for the four-eyes branch here (`initiated_by`); the same source
     is reused for the new check instead of an additional `X-DMS-Principal`
     header."""
+    is_superuser = await _is_active_superuser(payload.locked_by)
     try:
-        await repository.require_capability(session, payload.locked_by, "admin.user_management")
+        await repository.require_capability(
+            session, payload.locked_by, "admin.user_management", is_superuser=is_superuser
+        )
     except repository.MissingRequiredPermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 
@@ -961,8 +981,11 @@ async def release_scope_lock(
 ) -> ScopeLockActionResult:
     """Self-gating since P19-S6 (ADR 0071) - see `create_scope_lock` above
     for the rationale behind the ordering and actor source."""
+    is_superuser = await _is_active_superuser(payload.released_by)
     try:
-        await repository.require_capability(session, payload.released_by, "admin.user_management")
+        await repository.require_capability(
+            session, payload.released_by, "admin.user_management", is_superuser=is_superuser
+        )
     except repository.MissingRequiredPermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 
@@ -1023,9 +1046,13 @@ async def trigger_maintenance_mode(
     requires a baseline permission check - "freely configurable who may
     trigger it, no hard-wired role" (4.8) is not an optional addition like
     for 4.3, but mandatory from the outset."""
+    is_superuser = await _is_active_superuser(payload.triggered_by)
     try:
         await repository.require_capability(
-            session, payload.triggered_by, "system.not_shutdown.trigger"
+            session,
+            payload.triggered_by,
+            "system.not_shutdown.trigger",
+            is_superuser=is_superuser,
         )
     except repository.MissingRequiredPermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
@@ -1060,9 +1087,11 @@ async def lift_maintenance_mode(
 ) -> MaintenanceModeOut:
     """Only the currently active superuser may lift it (4.8) - their
     identity lives in auth-service (P6-S5), hence the cross-service check
-    instead of a second, independent source of truth here."""
-    active, superuser_id = await app.state.auth_client.get_active_superuser()
-    if not active or superuser_id != payload.lifted_by:
+    instead of a second, independent source of truth here. Since P63-S1,
+    reuses the shared `_is_active_superuser` helper (this endpoint was the
+    original, one-off inline version every other direct
+    `require_capability` call site was missing)."""
+    if not await _is_active_superuser(payload.lifted_by):
         raise HTTPException(
             status_code=403,
             detail="Nur der aktuell aktive Superuser darf den Wartungsmodus aufheben",
@@ -1143,8 +1172,11 @@ async def list_delegations(
         bool(delegator_principal_id or deputy_principal_id) and filters_are_own_principal
     )
     if not is_self_service:
+        is_superuser = await _is_active_superuser(x_dms_principal)
         try:
-            await repository.require_capability(session, x_dms_principal, "admin.user_management")
+            await repository.require_capability(
+                session, x_dms_principal, "admin.user_management", is_superuser=is_superuser
+            )
         except repository.MissingRequiredPermissionError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
     return await repository.list_delegations(
@@ -1223,8 +1255,11 @@ async def revoke_delegation(
         raise HTTPException(status_code=404, detail=f"Delegation {delegation_id!r} unbekannt")
     is_admin = True
     if delegation.delegator_principal_id != x_dms_principal:
+        is_superuser = await _is_active_superuser(x_dms_principal)
         try:
-            await repository.require_capability(session, x_dms_principal, "admin.user_management")
+            await repository.require_capability(
+                session, x_dms_principal, "admin.user_management", is_superuser=is_superuser
+            )
         except repository.MissingRequiredPermissionError:
             is_admin = False
     if not is_admin:

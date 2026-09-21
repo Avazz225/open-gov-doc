@@ -2,9 +2,68 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P62-S2 (highest-value small items from the ADR self-named-scope sweep — second and
-last session of Phase 62, closing the WHOLE Phase 59+ gap-closure round). No new ADR (mechanical
-completion) — ADR 0156 got a "Built in P62-S2" addendum instead.
+**Last completed:** P63-S1 (superuser/break-glass session hardening — first session of the newly-created
+Phase 63, the seventh gap-analysis round). **New ADR**
+([0190](docs/adr/0190-permission-service-general-superuser-bypass.md)) — a real authorization-model
+decision.
+
+**The gap.** `permission-service`'s `require_capability` (the direct, non-four-eyes baseline check used
+by role/role-assignment management, scope-lock create/release, emergency-shutdown trigger, and the
+admin branches of delegation listing/revocation) had no superuser bypass anywhere — only
+`POST /maintenance-mode/lift` special-cased an activated break-glass superuser, ad hoc, for itself
+alone. An activated superuser (4.6) could therefore not actually manage roles, scope locks, or
+delegations unless they ALSO held an explicit `admin.user_management` role assignment — defeating the
+point of break-glass as "emergency access without needing prior provisioning."
+
+**The fix.** New `main._is_active_superuser(principal_id)` helper (same shape as every other service's
+own version), resolving `AuthServiceClient.get_active_superuser()` and matching the returned superuser's
+ID against the SPECIFIC principal being checked — not just "is some superuser active anywhere".
+`repository.require_capability` gained an `is_superuser: bool = False` keyword parameter, short-
+circuiting to return immediately when `True` — the repository module stays HTTP-free, the caller
+(`main.py`) resolves `is_superuser` before calling. All six direct call sites updated;
+`lift_maintenance_mode`'s own pre-existing inline version refactored to reuse the new shared helper.
+**Deliberately NOT extended** to the four-eyes-initiation-eligibility check
+(`_require_permission_if_configured`) — bypassing who may INITIATE a four-eyes-protected action would
+undermine this project's own established "superuser doesn't bypass four-eyes" invariant (concept 6.1
+item 4, already precedented in `query-service`).
+
+**Investigated and dropped the plan's originally-bundled auth-service half of this session** (elevated
+audit priority for actions during an active superuser session; a rolling-inactivity timeout to
+complement the existing absolute-expiry-only timer): both turned out to be already-named, deliberately-
+scoped limitations in **ADR 0023's own "Consequences" section** ("No 'real' rolling inactivity
+deactivation"; "No increased audit priority for individual actions during activation"), each with real
+justification already recorded there (rolling inactivity would need new instrumentation in every
+service/gateway; the audit hash-chain model has no priority concept at all). Not a newly-discovered gap
+— the `docs/services/*.md` sweep that surfaced this finding apparently read `auth-service.md`'s own
+Open Points bullets without cross-checking that ADR 0023 already named and justified both as deliberate.
+Re-confirmed as correctly deferred, not built here — `docs/services/auth-service.md` already correctly
+documents both as deliberate, no doc change needed.
+
+New tests: `permission-service` 185/185 (+3: bypass succeeds for the matching active superuser with no
+explicit role, bypass does NOT apply to a different principal even while a superuser is active
+elsewhere, and the same for the body-field-actor `create_scope_lock` path). All three boundary-patch
+`app.state.auth_client.get_active_superuser` for the duration of one test (a full real Keycloak
+superuser activation flow is orthogonal to what these tests verify) — same "patch the client, not the
+mechanism it wraps" convention already used elsewhere in this project. `ruff` clean (same pre-existing,
+unrelated repo-wide failures confirmed out of scope again).
+
+Rebuilt/redeployed. **Live-verified against the real running stack**: the ordinary (non-superuser) path
+confirmed unregressed via curl (`403` without a grant, `201` with a real, already-granted admin
+principal) — the bypass logic itself is exercised end to end by the new automated tests (real
+`permission-service` HTTP round trip via `TestClient`, real database state change on success), which is
+sufficient given a full live Keycloak superuser activation is outside this session's scope.
+
+`docs/services/permission-service.md` (Open Points bullet closed, cross-referenced to the new ADR).
+
+**Next session:** P63-S2 — `federation-hub-service` bundle (enforce `supported_process_types`/
+`supported_document_types` on `POST /handovers`; periodic cleanup of unboundedly-growing `handover`
+metadata rows, reusing `registry-service`'s Phase 58 Session 2 pattern). Second session of Phase 63.
+
+---
+
+Immediately before P63-S1: **P62-S2** (highest-value small items from the ADR self-named-scope sweep —
+second and last session of Phase 62, closing the WHOLE Phase 59+ gap-closure round). No new ADR
+(mechanical completion) — ADR 0156 got a "Built in P62-S2" addendum instead.
 
 **Three of the plan's six bundled items were investigated and found ALREADY CLOSED by earlier, unrelated
 sessions** the plan's own research apparently didn't cross-check against current code:
@@ -68,10 +127,13 @@ header, `404` (meaning the gate passed) once one is sent.
 **`graphify update .` run once at the very end of this whole Phase 59-62 round** (not after every
 session/phase), per the plan's own Definition of Done.
 
-**Next session:** Phase 62 is now closed (2/2 sessions), closing the entire Phase 59+ gap-closure round
-this plan covers. Per the established project pattern, check `IMPLEMENTATION_PLAN.md` for further queued
-phases; if none remain, report status to the user rather than self-initiating another gap-analysis round
-unprompted.
+**Next session:** P63-S1 — superuser/break-glass session hardening bundle (`permission-service`'s
+`require_capability` general superuser bypass; `auth-service`'s elevated audit priority + rolling-
+inactivity timeout for an active superuser session). First session of the newly-created **Phase 63+**
+gap-analysis round (a seventh round, on explicit user request "nächste Runde Gap-Analyse") — see
+`IMPLEMENTATION_PLAN.md`'s "Phase 63+: Gap Analysis After Phase 62" for the full plan (Phase 63:
+security/correctness hardening + ADR documentation corrections, 3 sessions; Phase 64: cross-service
+reference validation, 1 session).
 
 ---
 

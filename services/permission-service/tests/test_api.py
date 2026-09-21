@@ -63,6 +63,53 @@ def test_create_role_returns_403_without_permission(client):
     assert response.status_code == 403
 
 
+def test_create_role_bypassed_by_active_superuser_without_explicit_role(client, monkeypatch):
+    """P63-S1: `require_capability`'s six direct call sites previously had
+    NO superuser bypass at all (only `POST /maintenance-mode/lift` special-
+    cased it, ad hoc) - an activated break-glass superuser genuinely could
+    not manage roles unless they ALSO held an explicit `admin.user_
+    management` role assignment. Boundary-patches `app.state.auth_client`'s
+    `get_active_superuser` (a full real activation would need a genuine
+    Keycloak superuser login flow, orthogonal to what this test verifies -
+    `require_capability`'s own bypass logic, not auth-service's activation
+    mechanism) - same "patch the client, not the mechanism it wraps"
+    convention already used elsewhere in this project (e.g. workflow-
+    service's XDOMEA handoff tests)."""
+
+    async def fake_get_active_superuser():
+        return True, "root-admin"
+
+    monkeypatch.setattr(app.state.auth_client, "get_active_superuser", fake_get_active_superuser)
+
+    response = client.post(
+        "/roles",
+        json={"name": "SuperuserBypassRole", "description": "", "permissions": ["read"]},
+        headers={"X-DMS-Principal": "root-admin"},
+    )
+    assert response.status_code == 201
+    assert response.json()["status"] == "created"
+
+
+def test_create_role_not_bypassed_by_a_different_principal_than_the_active_superuser(
+    client, monkeypatch
+):
+    """The bypass must check that the SPECIFIC caller is the currently
+    active superuser, not merely that some superuser is active somewhere -
+    same "actor must match" check `lift_maintenance_mode` already had."""
+
+    async def fake_get_active_superuser():
+        return True, "root-admin"
+
+    monkeypatch.setattr(app.state.auth_client, "get_active_superuser", fake_get_active_superuser)
+
+    response = client.post(
+        "/roles",
+        json={"name": "NotTheSuperuserRole", "description": "", "permissions": ["read"]},
+        headers={"X-DMS-Principal": "someone-else"},
+    )
+    assert response.status_code == 403
+
+
 def test_create_role(client, role_management_headers):
     """Antwort-Envelope seit P32-S1 (ADR 0130) - `status`/`role`, analog zu
     `RoleAssignmentActionResult` seit P17-S3, immer gesetzt unabhängig von
@@ -766,6 +813,27 @@ def test_scope_lock_with_unknown_resource_returns_404(client, role_management_he
         "/scope-locks",
         json={"resource_id": "does-not-exist", "locked_by": "admin"},
     )
+    assert response.status_code == 404
+
+
+def test_create_scope_lock_bypassed_by_active_superuser_without_explicit_role(client, monkeypatch):
+    """P63-S1: `create_scope_lock`'s actor source is `payload.locked_by`
+    (a body field), not the `X-DMS-Principal` header - a distinct code
+    path from `test_create_role_bypassed_by_active_superuser...` above,
+    worth its own regression test."""
+
+    async def fake_get_active_superuser():
+        return True, "root-admin"
+
+    monkeypatch.setattr(app.state.auth_client, "get_active_superuser", fake_get_active_superuser)
+
+    response = client.post(
+        "/scope-locks",
+        json={"resource_id": "does-not-exist", "locked_by": "root-admin"},
+    )
+    # No explicit `admin.user_management` grant for "root-admin" anywhere in
+    # this test - a `404` (not `403`) proves the capability check itself
+    # was bypassed and the request proceeded to the resource lookup.
     assert response.status_code == 404
 
 
