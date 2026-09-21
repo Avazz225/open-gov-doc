@@ -2,10 +2,54 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P60-S3 (`workflow-service`'s `ProcessInstance.workflow_state` had no locking/
-optimistic-concurrency protection — third and last session of Phase 60, "High-Severity Findings". **Phase
-60 is now fully closed** — all three findings from this round's live-code security sweep are fixed,
-tested, and verified). **New ADR**
+**Last completed:** P61-S1 (`notification-service`'s `POST /notifications/{id}/retry` had no authorization
+check, and `channel="webhook"` sent an outbound POST with zero target validation — first session of Phase
+61, "Medium-Severity Findings"). **New ADR**
+([0186](docs/adr/0186-notification-service-retry-gate-and-webhook-ssrf-guard.md)) — a real
+authorization/security-model decision, per the plan's own DoD.
+
+**The gaps.** (a) `retry` was completely ungated — any caller could force a manual retry of any
+`failed_permanent` notification by ID, and its distinct `404`/`409`/`200` responses doubled as an
+ID/status enumeration oracle even after P59-S1 closed the `GET` side. (b) `channel="webhook"`'s
+`recipient` IS the outbound target URL, sent to with zero validation — `notification.write` (intended for
+a narrow automated caller) could target arbitrary internal addresses, a real SSRF vector.
+
+**The fix.** (a) `retry` now requires `admin.notification_read` — the SAME capability as the two `GET`
+endpoints (P59-S1), not a new one, since `admin-ui`'s `ProcessingFailuresView` is the one real caller of
+all three. (b) New `_validate_webhook_url` — resolves the hostname, rejects loopback/private/link-local/
+reserved/multicast targets, AND rejects an unresolvable hostname outright (deliberately stricter than
+P60-S1's federation-hub-service guard — a real webhook target should be genuinely resolvable, matching
+P59-S5's migration-service guard's design instead). New `allow_loopback_webhooks` setting exempts ONLY
+loopback, needed by this project's own existing test convention (`http://127.0.0.1:1/nope`). **Real
+gotcha caught by actually running the tests**: unlike migration-service's real-container-HTTP test suite,
+this service's suite uses an in-process `TestClient(app)`, so `docker-compose.yml`'s own env var addition
+alone had NO effect on the test run's own `settings` instance (module-level, instantiated by the local
+pytest process at import time) — fixed by also setting the env var in `tests/conftest.py` before import,
+the same pattern already used there for `DMS_POSTGRES_DSN`/`DMS_NATS_URL`.
+
+New tests: `notification-service` +4 (`test_retry_without_principal_header_is_401`,
+`test_retry_without_read_permission_is_403`, `test_create_webhook_notification_rejects_private_ip_target`,
+`test_create_webhook_notification_rejects_metadata_ip_target`), 100/100 total. `ruff` clean (same
+pre-existing, unrelated repo-wide failures confirmed out of scope again).
+
+Rebuilt/redeployed. **Live-verified against the real running stack**: `curl` confirmed `404` for an
+unknown notification's retry (existence-first), `401`/`403` for a real notification's retry without/with
+the wrong identity, `422` for both a private and a metadata-range webhook target, and a real loopback
+webhook notification still creating and recording its genuine delivery failure correctly (the real
+container's own `DMS_ALLOW_LOOPBACK_WEBHOOKS=true` matching the dev/test convention).
+
+`docs/services/notification-service.md`: API table rows annotated, "Authorization" section extended, both
+related Open Points bullets closed, test count updated.
+
+**Next session:** P61-S2 — unbounded file uploads before expensive processing, same pattern across
+`virus-scan-service`/`rendering-service`/`storage-service`. Second session of Phase 61.
+
+---
+
+Immediately before P61-S1: **P60-S3** (`workflow-service`'s `ProcessInstance.workflow_state` had no
+locking/optimistic-concurrency protection — third and last session of Phase 60, "High-Severity Findings".
+**Phase 60 is now fully closed** — all three findings from this round's live-code security sweep are
+fixed, tested, and verified). **New ADR**
 ([0185](docs/adr/0185-workflow-service-process-instance-optimistic-concurrency.md)) — a real
 locking-strategy design decision, per the plan's own DoD.
 
@@ -51,9 +95,8 @@ passing end-to-end served as the meaningful verification for a persistence-layer
 `ProcessInstance`" section, Open Points bullet closed (explicitly distinguished from the still-deferred,
 unrelated "no distributed lock across replicas" item), test count updated.
 
-**Next session:** none queued — Phase 60 is complete. Per this project's established pattern, check
-`IMPLEMENTATION_PLAN.md` for further queued phases (Phase 61 "Medium-Severity Findings" is next in the
-Phase 59+ gap-analysis round's plan) before self-initiating any new gap-analysis round.
+**Next session:** P61-S1 — `notification-service`'s `POST /notifications/{id}/retry` unauthenticated plus
+a `channel="webhook"` SSRF gap, bundled. First session of Phase 61.
 
 ---
 

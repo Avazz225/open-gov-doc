@@ -1,8 +1,11 @@
 import asyncio
+import ipaddress
 import logging
+import socket
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
+from urllib.parse import urlparse
 
 from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
@@ -221,6 +224,55 @@ async def _require_notification_permission(x_dms_principal: str) -> None:
         raise HTTPException(status_code=403, detail="Fehlende Berechtigung 'notification.write'")
 
 
+def _validate_webhook_url(url: str) -> None:
+    """SSRF guard (Phase 61 Session 1, ADR 0186) - `channel="webhook"`'s
+    `recipient` IS the outbound target URL (`delivery.send_webhook` posts
+    to it as-is), previously with zero validation. `notification.write`
+    is intended for a narrow automated caller (`reporting-service`'s
+    scheduler, per `_require_notification_permission`'s own docstring),
+    not a general trust boundary - any holder could otherwise target
+    arbitrary internal addresses. Rejects loopback/private/link-local/
+    reserved/multicast/unspecified after DNS resolution, and (unlike
+    `federation_hub_service.main._validate_callback_base_url`'s more
+    permissive design for a materially different real caller/test
+    convention) also rejects an UNRESOLVABLE hostname outright - a real
+    webhook target should be a genuine, resolvable endpoint, same
+    reasoning as `migration_service.main._validate_peer_base_url`.
+    `settings.allow_loopback_webhooks` exempts ONLY loopback, needed by
+    this project's own test suite (`http://127.0.0.1:1/nope`, "guaranteed
+    unreachable")."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise HTTPException(
+            status_code=422, detail=f"Webhook-URL {url!r} ist keine gültige http(s)-URL"
+        )
+    try:
+        resolved_ips = {info[4][0] for info in socket.getaddrinfo(parsed.hostname, None)}
+    except OSError as exc:
+        raise HTTPException(
+            status_code=422, detail=f"Webhook-Host {parsed.hostname!r} nicht auflösbar"
+        ) from exc
+    for ip_str in resolved_ips:
+        ip = ipaddress.ip_address(ip_str)
+        if ip.is_loopback and settings.allow_loopback_webhooks:
+            continue
+        if (
+            ip.is_loopback
+            or ip.is_private
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Webhook-URL {url!r} löst zu einer privaten/internen Adresse auf "
+                    f"({ip_str}) - nicht erlaubt"
+                ),
+            )
+
+
 @app.post("/notifications", response_model=NotificationOut, status_code=status.HTTP_201_CREATED)
 async def create_notification(
     payload: NotificationCreate,
@@ -230,13 +282,17 @@ async def create_notification(
     """Retrofit P6-S6 (call authorization): since this session, the public
     endpoint checks that `recipient` for `channel in {"email","in_app"}` is
     a real `auth-service` account, instead of accepting it blindly -
-    `channel="webhook"` remains unchecked (the target is a URL, not an identity).
+    `channel="webhook"` remains unchecked for identity (the target is a
+    URL, not an identity) but IS validated as a safe target since Phase 61
+    Session 1 (`_validate_webhook_url`, SSRF guard, see ADR 0186).
     The internal alerting path (SLA/break-glass/emergency-shutdown) never runs
     through this endpoint, see `auth_client.py`. Post-Roadmap Phase 38
     Session 2: caller permission (`_require_notification_permission`) and a
     per-recipient rate limit, defense in depth against a misconfigured/
     fast-cycling caller."""
     await _require_notification_permission(x_dms_principal)
+    if payload.channel == "webhook":
+        _validate_webhook_url(payload.recipient)
     if not await app.state.auth_client.recipient_exists(payload.recipient, channel=payload.channel):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -325,16 +381,29 @@ async def get_notification(
 
 @app.post("/notifications/{notification_id}/retry", response_model=NotificationOut)
 async def retry_notification(
-    notification_id: int, session: AsyncSession = Depends(get_session)
+    notification_id: int,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> NotificationOut:
     """Manual restart of a permanently failed delivery
     (post-roadmap Phase 20 Session 3, ADR 0079) - only useful for
     `failed_permanent` (409 otherwise); immediately makes a new synchronous
-    delivery attempt instead of waiting for the next poll tick."""
+    delivery attempt instead of waiting for the next poll tick. **Since
+    Phase 61 Session 1** (ADR 0186): gated by `_require_notification_read_
+    permission`, same capability as `GET /notifications`/`GET
+    /notifications/{id}` (P59-S1) rather than a new, dedicated one -
+    `admin-ui`'s `ProcessingFailuresView` is the one real caller of ALL
+    THREE endpoints, the same admin actor who can already see a
+    `failed_permanent` entry is the one who should be able to retry it.
+    Previously completely ungated - any caller could force a retry of any
+    notification by ID, and the distinct `404`/`409`/`200` responses
+    doubled as an ID/status enumeration oracle even after P59-S1 closed
+    the `GET` side."""
     try:
         notification = await repository.get_notification(session, notification_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await _require_notification_read_permission(x_dms_principal)
     if notification.status != "failed_permanent":
         raise HTTPException(
             status_code=409,

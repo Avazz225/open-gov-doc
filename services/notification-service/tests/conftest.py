@@ -22,6 +22,14 @@ SMTP_HOST = os.environ.get("TEST_SMTP_HOST", "localhost")
 SMTP_PORT = int(os.environ.get("TEST_SMTP_PORT", "1025"))
 os.environ["DMS_SMTP_HOST"] = SMTP_HOST
 os.environ["DMS_SMTP_PORT"] = str(SMTP_PORT)
+# Phase 61 Session 1 (ADR 0186): this test suite's own webhook tests use a
+# loopback target ("guaranteed unreachable") - must be set before
+# `notification_service.main` (and its module-level `settings = Settings()`)
+# is imported, same pattern as DMS_POSTGRES_DSN/DMS_NATS_URL above. This
+# `TestClient(app)`-based suite runs in-process, unlike migration-service's
+# real-container-HTTP test suite, so docker-compose.yml's own env var alone
+# (which only reaches the CONTAINER process) has no effect here.
+os.environ["DMS_ALLOW_LOOPBACK_WEBHOOKS"] = "true"
 
 
 @pytest.fixture(autouse=True)

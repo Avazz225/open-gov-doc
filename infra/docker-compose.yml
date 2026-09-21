@@ -782,6 +782,10 @@ services:
       DMS_USER_UI_PUBLIC_BASE_URL: ${USER_UI_PUBLIC_BASE_URL:-http://localhost:3000}
       DMS_REVIEWER_UI_PUBLIC_BASE_URL: ${REVIEWER_UI_PUBLIC_BASE_URL:-http://localhost:3005}
       DMS_ADMIN_UI_PUBLIC_BASE_URL: ${ADMIN_UI_PUBLIC_BASE_URL:-http://localhost:3001}
+      # Phase 61 Session 1 (ADR 0186): this dev/test stack's own test suite
+      # uses a loopback webhook target ("guaranteed unreachable") - never
+      # needed by a real installation, never set true there.
+      DMS_ALLOW_LOOPBACK_WEBHOOKS: "true"
     ports:
       - "${NOTIFICATION_SERVICE_PORT:-8015}:8000"
     depends_on:

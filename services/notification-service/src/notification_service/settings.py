@@ -124,3 +124,13 @@ class Settings(BaseServiceSettings):
     user_ui_public_base_url: str | None = None
     reviewer_ui_public_base_url: str | None = None
     admin_ui_public_base_url: str | None = None
+
+    # SSRF guard escape hatch (Phase 61 Session 1, ADR 0186) - `_validate_
+    # webhook_url` rejects loopback/private/link-local targets by default.
+    # This project's OWN test suite deliberately uses a loopback address
+    # (`http://127.0.0.1:1/nope`) as a "syntactically valid, guaranteed
+    # unreachable" webhook target across several tests (same convention
+    # `migration-service`'s `allow_loopback_peers` was built for, ADR
+    # 0182). `False` in production; the docker-compose dev/test stack sets
+    # this `True` explicitly, documented there as a test-only relaxation.
+    allow_loopback_webhooks: bool = False

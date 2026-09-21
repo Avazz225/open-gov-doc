@@ -282,6 +282,68 @@ def test_retry_returns_404_for_unknown_notification(client):
     assert response.status_code == 404
 
 
+def test_retry_without_principal_header_is_401(client):
+    """RBAC (Phase 61 Session 1, ADR 0186) - `POST /notifications/{id}/
+    retry` previously had NO permission check at all; this and the next
+    test prove the new gate actually fires. Uses a real, existing
+    notification so the check reaches the permission gate rather than
+    404ing first (existence-before-permission, same convention as
+    elsewhere in this project)."""
+    created = client.post(
+        "/notifications",
+        json={
+            "channel": "webhook",
+            "recipient": "http://127.0.0.1:1/nope",
+            "subject": "S",
+            "body": "B",
+        },
+    ).json()
+    response = client.post(f"/notifications/{created['id']}/retry", headers={"X-DMS-Principal": ""})
+    assert response.status_code == 401
+
+
+def test_retry_without_read_permission_is_403(client, notification_read_role_removed):
+    created = client.post(
+        "/notifications",
+        json={
+            "channel": "webhook",
+            "recipient": "http://127.0.0.1:1/nope",
+            "subject": "S",
+            "body": "B",
+        },
+    ).json()
+    response = client.post(f"/notifications/{created['id']}/retry")
+    assert response.status_code == 403
+
+
+def test_create_webhook_notification_rejects_private_ip_target(client):
+    """SSRF guard (Phase 61 Session 1, ADR 0186) - `recipient` for
+    `channel="webhook"` previously had zero validation."""
+    response = client.post(
+        "/notifications",
+        json={
+            "channel": "webhook",
+            "recipient": "http://10.0.0.5/hook",
+            "subject": "S",
+            "body": "B",
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_create_webhook_notification_rejects_metadata_ip_target(client):
+    response = client.post(
+        "/notifications",
+        json={
+            "channel": "webhook",
+            "recipient": "http://169.254.169.254/hook",
+            "subject": "S",
+            "body": "B",
+        },
+    )
+    assert response.status_code == 422
+
+
 def test_retry_returns_409_for_still_retryable_notification(client):
     created = client.post(
         "/notifications",
