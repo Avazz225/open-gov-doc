@@ -2,20 +2,38 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P65-S1 (ADR documentation corrections bundle — first session of Phase 65, no code).
-Pure documentation: ~20 one-line "Closed in..." addenda across ADRs 0010/0023/0074/0081/0093/0113/0126/
-0140/0141/0142/0144/0147/0149/0153/0157/0159/0164/0165/0168/0178, each correcting the recurring
+**Last completed:** P65-S2 (`docs/services/*.md` documentation corrections bundle — second and last
+session of Phase 65, no code). Same failure mode as P65-S1, applied to service docs instead of ADRs:
+struck-through/reworded stale "Open Points" bullets across `webdav-connector.md` (sensor/`/metrics`),
+`user-ui.md` (4 bullets — FolderTree favorites marker/context menu, "no browser E2E possible", a
+duplicate trash-overview bullet), `object-type-service.md` (2 "follows only with P5b-S4" bullets),
+`document-service.md` (kennzeichen frontend display, four-eyes admin-UI toggle), `folder-service.md`
+(scope locks, deletion-register backup-independence), `case-service.md` (records-disposal retry),
+`process-designer.md` (config export/import, browser E2E, rollback-endpoint reword), `permission-
+service.md` (Category A maintenance-mode coverage, AD-sync framing reword), `auth-service.md` (user-
+tracking admin-UI page — the same closure ADR 0157 got in P65-S1, this doc's own body text already said
+so at a different line, just never struck at the Open Points bullet), `admin-ui.md` (3 rewordings —
+ocr-settings permission-check nuance, group-management scoping, installation-list/fleet-management-
+service blocker), `fleet-management-service.md` (eGov-package blocker clause). One bonus fix found and
+applied alongside process-designer.md's rollback bullet: `workflow-service.md` had the identical stale
+claim, fixed too even though not originally itemized. No tests, no rebuild, no new ADR.
+
+**Phase 65 is now closed (2/2).** **Next session:** P66-S1 — small security fixes bundle (first session
+of Phase 66): `webdav-connector`'s edit-token MOVE-destination scope bypass, `storage-service`'s three
+ungated aggregate/maintenance endpoints, `document-service`'s `AuditTraceRoleOverride` role-existence
+check. See `IMPLEMENTATION_PLAN.md`'s Phase 66 table for the full list.
+
+---
+
+Immediately before P65-S2: **P65-S1** (ADR documentation corrections bundle — first session of Phase 65,
+no code). Pure documentation: ~20 one-line "Closed in..." addenda across ADRs 0010/0023/0074/0081/0093/
+0113/0126/0140/0141/0142/0144/0147/0149/0153/0157/0159/0164/0165/0168/0178, each correcting the recurring
 "ADR names a gap, an unrelated later session silently closes it, nobody annotates the ADR" failure mode —
 full list and exact closure evidence in `IMPLEMENTATION_PLAN.md`'s Phase 65 table, not duplicated here.
 Two items initially suspected closed were investigated and found still genuinely open while writing the
 addenda (ADR 0141's reviewer-ui case-browsing UI; ADR 0157's four-eyes-on-the-toggle gap) — both left
 unstruck and added to the Phase 65+ plan's "Deliberately Not Included" list instead of being incorrectly
 closed. No tests, no rebuild, no new ADR (pure documentation).
-
-**Next session:** P65-S2 — `docs/services/*.md` documentation corrections bundle (second session of
-Phase 65, no code). See `IMPLEMENTATION_PLAN.md`'s Phase 65 table for the full list (webdav-connector,
-user-ui, object-type-service, document-service, folder-service, case-service, process-designer,
-permission-service, auth-service, admin-ui, fleet-management-service).
 
 ---
 
