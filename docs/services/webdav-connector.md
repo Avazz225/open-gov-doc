@@ -4,7 +4,7 @@
 
 **Concept reference:** 3.3, 4.2
 **Own Postgres schema:** none (stateless — every request translates live into HTTP calls against `folder-service`/`document-service`, see `libs/dms-connector-sdk`)
-**ADR:** [0033 — Server direction, `wsgidav`+`WsgiToAsgi`, synchronous connector SDK](../adr/0033-webdav-connector-server-direction-and-wsgidav.md)
+**ADR:** [0033 — Server direction, `wsgidav`+`WsgiToAsgi`, synchronous connector SDK](../adr/0033-webdav-connector-server-direction-and-wsgidav.md), [0189 — Edit-token session scope](../adr/0189-webdav-edit-token-scope-and-mail-connector-size-limit.md)
 
 ## Direction decision (server vs. client)
 
@@ -52,6 +52,8 @@ Two additive extensions, without changing the existing path-based flow:
 - **`DmsAuthDomainController.basic_auth_user()`** treats an empty password as a sign that the provided username is a `document-service` `WebdavEditToken`, not a real username: resolves it against `GET /internal/webdav-edit-tokens/{token}` (east-west, directly against `document_service_base_url`, no detour via `/login`) and overwrites `environ["wsgidav.auth.user_name"]` with the resolved `principal_id` — not leaving the raw token in place, otherwise a later check-in would incorrectly use the token instead of the real identity as the lock holder. The existing username+password branch (real network drive mount) remains unchanged.
 
 Together these two produce the target address for the Office URI handler (`user-ui`): `https://<token>:@<host>/webdav/by-id/<document-id>.<ext>`.
+
+**Edit-token sessions are scoped to a single document (since P61-S4, [ADR 0189](../adr/0189-webdav-edit-token-scope-and-mail-connector-size-limit.md))**: `basic_auth_user()` resolving the token to the real underlying user's identity previously made the rest of that session indistinguishable from that user's real password login — browsable/writable/deletable for anything that principal has permission on via any WebDAV client, not just the one document the token was minted for. `basic_auth_user()` now also stores the token's `document_id` on `environ["dms.webdav_edit_token_document_id"]`; `get_resource_inst()` rejects (`403`) any request whose path does not resolve to exactly `by-id/<that document_id>` for such a session (the bare `by-id/` namespace path itself stays reachable — it reveals nothing, `_ByIdVirtualCollection.get_member_names()` always returns an empty list). Accepted, documented residual: a `MOVE` request for the one scoped document itself can still relocate it into any folder the real underlying user has write access to (destination-path resolution uses the real identity's own permissions, not a second scope check) — narrower than the original gap (arbitrary cross-document read/write), and Office's own check-in flow only ever issues `PUT`, never `MOVE`.
 
 ## Licensing (3.3, P9-S2 pattern)
 

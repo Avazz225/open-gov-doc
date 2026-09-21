@@ -337,6 +337,20 @@ class DmsDavProvider(DAVProvider):
     def get_resource_inst(self, path: str, environ: dict):
         self.check_license("read")
         actor = _actor(environ)
+        # ADR 0189/P61-S4: a token-authenticated session (see
+        # `domain_controller.py`'s `basic_auth_user`) resolves to the real
+        # underlying user's identity - without this check the session would
+        # otherwise be indistinguishable from that user's real password
+        # login, browsable/writable/deletable for anything that principal
+        # has permission on via any WebDAV client, not just the one
+        # document this token was minted for.
+        scoped_document_id = environ.get("dms.webdav_edit_token_document_id")
+        if scoped_document_id is not None and path.strip("/") != "by-id":
+            if _parse_by_id_path(path) != scoped_document_id:
+                raise DAVError(
+                    HTTP_FORBIDDEN,
+                    "Dieses Edit-Token ist nur für ein einzelnes Dokument gültig.",
+                )
         if path.strip("/") == "by-id":
             # wsgidav's `do_PUT` handler resolves the target's parent path
             # and checks `is_collection` before every write access - for

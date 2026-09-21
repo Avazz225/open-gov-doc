@@ -380,6 +380,29 @@ async def test_reject_message(client, session):
     assert response.json()["rejected_reason"] == "Werbung"
 
 
+async def test_ingest_rejects_oversized_message_without_parsing_it(client, session, monkeypatch):
+    """ADR 0189/P61-S4: `_parse_message` previously decoded every MIME part
+    fully into memory with no size cap at all - a real DoS vector against a
+    service with genuine unauthenticated-adjacent external attack surface.
+    `settings.max_message_size_bytes` lowered to a small value so a
+    realistically-sized test message trips it, without needing an actual
+    25 MiB payload in the test."""
+    monkeypatch.setattr(settings, "max_message_size_bytes", 100)
+    await _ingest(session, uid="uid-oversized", subject="Zu gross", body="x" * 500)
+
+    response = client.get("/inbound", headers=ADMIN_HEADERS)
+    [message] = [
+        m
+        for m in response.json()
+        if m["subject"] == "(Nachricht überschreitet die maximal zulässige Größe)"
+    ]
+    assert message["status"] == "rejected"
+    assert "100" in message["rejected_reason"]
+    # Not parsed at all - the synthetic body-text attachment that a normal
+    # ingest would have created is absent.
+    assert message["attachments"] == []
+
+
 def test_outbound_requires_poststelle_role(client):
     response = client.post(
         "/outbound",

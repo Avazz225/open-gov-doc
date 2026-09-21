@@ -2,10 +2,66 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P61-S3 (three independent, bundled findings — third and final session of Phase 61,
+**Last completed:** P61-S4 (two connector-layer findings, bundled — fourth and last session of Phase 61,
 "Medium-Severity Findings", closing Phase 61). **New ADR**
-([0188](docs/adr/0188-config-service-export-gating-search-facet-leak-and-query-limit-clamp.md)) — three
-real security/correctness fixes, per the plan's own DoD.
+([0189](docs/adr/0189-webdav-edit-token-scope-and-mail-connector-size-limit.md)) — two real
+security/correctness fixes, per the plan's own DoD.
+
+**The gaps.** (a) `webdav-connector`'s Office direct-edit token flow resolves a `WebdavEditToken` to the
+REAL underlying user's identity and sets that as the WSGI session's authenticated user with no scope
+restriction — from that point the session is indistinguishable from that user's real password login,
+able to browse/read/write/delete anything that principal has permission on via any WebDAV client, not
+just the one document (`by-id/{document_id}`) the token was minted for. (b) `mail-connector`'s
+`_parse_message` decoded every MIME part of an inbound message fully into memory with no size cap
+anywhere in `Settings` — a real DoS vector against a service with genuine unauthenticated-adjacent
+external attack surface (any external sender able to reach a configured mailbox).
+
+**The fixes.** (a) `basic_auth_user()` now also stores the token's `document_id` on
+`environ["dms.webdav_edit_token_document_id"]`; `get_resource_inst()` — the single choke point every
+WebDAV verb resolves through — rejects (`403`) any path that doesn't resolve to exactly
+`by-id/<that document_id>` for such a session, before any tree traversal or downstream call. Accepted,
+documented residual: a `MOVE` of the one scoped document can still relocate it into any folder the real
+user has write access to (destination-path resolution isn't re-scoped) — narrower than the original gap,
+and Office's own check-in flow only ever issues `PUT`. (b) New `settings.max_message_size_bytes` (25 MiB
+default), checked against the raw message's byte length in `_ingest_message` BEFORE `_parse_message` is
+even called — an oversized message is never parsed; a minimal `InboundMessage` row is still created and
+immediately marked `status="rejected"` (reusing the existing manual-reject mechanism) so the per-mailbox
+idempotency check doesn't retry it every poll tick. Accepted residual: the IMAP/POP3 fetch itself (before
+this check runs) isn't avoided, only the materially larger downstream parsing/decode/scan/upload cost.
+
+New tests: `webdav-connector` +1 (`test_edit_token_cannot_access_a_different_document` — scoped document
+stays reachable, a different document by ID AND ordinary root browsing both `403`), `mail-connector` +1
+(`test_ingest_rejects_oversized_message_without_parsing_it` — low cap monkeypatched, asserts
+`status="rejected"` with zero attachments). `mail-connector` 79/79. `webdav-connector` 13/17 — the 4
+failures are pre-existing, already-documented root-`PROPFIND` timeouts against this shared dev stack's
+121-document `root` folder (`_dav_client`'s own docstring already names this exact scenario), unrelated
+to this session's changed code paths; this session's own new test passed. `ruff` clean across both
+services (same pre-existing, unrelated repo-wide failure in `apps/libreoffice-addin` confirmed out of
+scope again).
+
+Both services rebuilt/redeployed. **Live-verified against the real running stack**: webdav-connector — a
+real user, two real documents, one edit token minted for the first — confirmed `200` for the scoped
+document, `403` for the other document by ID, `403` for a root `PROPFIND`. mail-connector — a real small
+message sent via SMTP to the dev `mailpit` instance was polled and ingested normally, confirming the new
+check doesn't interfere with the golden path (the oversized-rejection path itself is covered by the
+automated regression test).
+
+`docs/services/webdav-connector.md` (new "Edit-token sessions are scoped..." paragraph, ADR list
+updated), `docs/services/mail-connector.md` (ingestion-pipeline step 3 extended, new Open Points bullet
+for the accepted fetch-cost residual, test count updated).
+
+**Also corrected in this update**: the previous "Last completed" entry below (P61-S3) had incorrectly
+called itself "closing Phase 61" — the plan's own P61-S4 row was still open at that point; this entry
+(P61-S4) is the one that actually closes Phase 61.
+
+**Next session:** Phase 61 is now closed (4/4 sessions). Continue with Phase 62 ("Low-Priority Security
+Cleanup + Selected Functional Completions") per the plan.
+
+---
+
+Immediately before P61-S4: **P61-S3** (three independent, bundled findings — third session of Phase 61).
+**New ADR** ([0188](docs/adr/0188-config-service-export-gating-search-facet-leak-and-query-limit-clamp.md))
+— three real security/correctness fixes, per the plan's own DoD.
 
 **The gaps.** (a) `config-service`'s `GET /config/export`/`POST /config/compare` were completely ungated
 — their own docstrings claimed "does not expose any installation-specific data", but `export_config`

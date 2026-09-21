@@ -393,3 +393,48 @@ def test_by_id_access_with_unknown_token_is_rejected():
     with pytest.raises(WebdavHTTPError) as exc_info:
         token_client.ls(f"/by-id/{document_id}.txt")
     assert exc_info.value.status_code == 401
+
+
+def test_edit_token_cannot_access_a_different_document(real_user):
+    """ADR 0189/P61-S4: `_resolve_edit_token` resolves to the REAL
+    underlying user's identity - without the `get_resource_inst` scope
+    check, this makes the token-authenticated session indistinguishable
+    from that user's real password login, able to browse/read/write ANY
+    document that principal has permission on, not just the one the token
+    was minted for. Two documents, one token minted for the first - the
+    token must not be able to read the second via `by-id/{other_id}`."""
+    scoped_filename = f"by-id-scoped-{uuid.uuid4().hex[:8]}.txt"
+    other_filename = f"by-id-other-{uuid.uuid4().hex[:8]}.txt"
+    path_client = _dav_client(real_user)
+    path_client.upload_fileobj(BytesIO(b"Fuer das Token freigegeben"), f"/{scoped_filename}")
+    path_client.upload_fileobj(BytesIO(b"NICHT fuer das Token freigegeben"), f"/{other_filename}")
+    matching = httpx.get(
+        f"{DOCUMENT_SERVICE_URL}/documents",
+        params={"folder_id": "root"},
+        headers={"X-DMS-Principal": "webdav-tests"},
+        timeout=30.0,
+    ).json()
+    scoped_document_id = next(d["id"] for d in matching if d["title"] == scoped_filename)
+    other_document_id = next(d["id"] for d in matching if d["title"] == other_filename)
+
+    principal = f"webdav-edit-token-test-{uuid.uuid4().hex[:8]}"
+    _grant_document_write(principal)
+    token = _create_webdav_edit_token(scoped_document_id, principal)
+    token_client = Client(f"{WEBDAV_CONNECTOR_URL}/webdav", auth=(token, ""), timeout=30.0)
+
+    # The scoped document remains reachable.
+    buffer = BytesIO()
+    token_client.download_fileobj(f"/by-id/{scoped_document_id}.txt", buffer)
+    assert buffer.getvalue() == b"Fuer das Token freigegeben"
+
+    # A different document, by ID, is rejected.
+    with pytest.raises(WebdavHTTPError) as exc_info:
+        token_client.ls(f"/by-id/{other_document_id}.txt")
+    assert exc_info.value.status_code == 403
+
+    # Ordinary folder-path-based browsing is rejected outright, not just
+    # `by-id/` access to a different document - the whole point being that
+    # the token must not be usable as a general-purpose login.
+    with pytest.raises(WebdavHTTPError) as exc_info:
+        token_client.ls("/")
+    assert exc_info.value.status_code == 403

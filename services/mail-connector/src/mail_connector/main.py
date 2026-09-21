@@ -133,6 +133,48 @@ async def _ingest_message(session: AsyncSession, mailbox_id: str, raw: RawIncomi
     reply `Future` awaited from a different loop than the one whose
     background read-loop task resolves it just never wakes up instead of
     raising immediately."""
+    # ADR 0189/P61-S4: checked against the RAW byte length BEFORE
+    # `_parse_message` is even called - see `settings.max_message_size_bytes`'s
+    # own docstring for why this is the right point to reject, rather than
+    # during/after MIME parsing. The message row is still created (marked
+    # `rejected` immediately) so the mailbox's own idempotency check
+    # (`get_by_source_uid`, this function's only caller) does not retry it
+    # forever.
+    if len(raw.raw_bytes) > settings.max_message_size_bytes:
+        logger.warning(
+            "inbound_message_exceeds_max_size mailbox_id=%s uid=%s size=%d limit=%d",
+            mailbox_id,
+            raw.uid,
+            len(raw.raw_bytes),
+            settings.max_message_size_bytes,
+        )
+        message = await repository.create_inbound_message(
+            session,
+            mailbox_id=mailbox_id,
+            source_uid=raw.uid,
+            from_address="unbekannt",
+            subject="(Nachricht überschreitet die maximal zulässige Größe)",
+            body_text="",
+            received_at=datetime.now(UTC),
+            match_type=None,
+            match_value=None,
+            proposed_target_type=None,
+            proposed_target_id=None,
+            match_candidates=[],
+        )
+        await repository.mark_rejected(
+            session,
+            message.id,
+            rejected_by="mail-connector",
+            reason=(
+                f"Nachricht ({len(raw.raw_bytes)} Bytes) überschreitet die maximal zulässige "
+                f"Größe von {settings.max_message_size_bytes} Bytes - automatische Verarbeitung "
+                "(MIME-Parsing, Virenscan) wurde nicht durchgeführt."
+            ),
+        )
+        await session.commit()
+        return
+
     from_address, subject, received_at, body_text, attachment_parts = _parse_message(raw.raw_bytes)
 
     document_client = DocumentClient(settings.document_service_base_url)

@@ -157,3 +157,18 @@ class Settings(BaseServiceSettings):
     # narrowing is a deliberately deferred, separate RBAC design question,
     # see this session's ADR "Open Points".
     poststelle_role: str = "dms-poststelle"
+
+    # ADR 0189/P61-S4: `_parse_message` (`main.py`) previously decoded every
+    # MIME part fully into memory with no cap anywhere - a real DoS vector
+    # against a service with genuine unauthenticated-adjacent external
+    # attack surface (any external sender able to reach a configured
+    # mailbox). Checked against the RAW message's total byte length BEFORE
+    # `_parse_message` is even called, not per-attachment - the majority of
+    # an oversized message's memory cost comes from the MIME structure/
+    # base64-decode step itself, which a raw-length check upfront avoids
+    # entirely, same "reject before the expensive step" principle as
+    # `dms_common.MaxBodySizeMiddleware` (ADR 0187). 25 MiB default - a
+    # common real-world mail-server attachment ceiling (matches Gmail's/
+    # Microsoft 365's own default), well above legitimate correspondence but
+    # far below what would meaningfully strain this service's memory.
+    max_message_size_bytes: int = 26_214_400
