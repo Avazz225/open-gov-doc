@@ -1684,6 +1684,8 @@ services:
         # Federation Hub (Phase 40 Session 3) - reached directly, not
         # through the gateway above, see apps/admin-ui/src/lib/config.ts.
         NEXT_PUBLIC_FEDERATION_HUB_BASE_URL: ${ADMIN_UI_FEDERATION_HUB_BASE_URL:-http://localhost:8018}
+        # Fleet Management (P67-S1) - same reasoning as Federation Hub above.
+        NEXT_PUBLIC_FLEET_MANAGEMENT_SERVICE_BASE_URL: ${ADMIN_UI_FLEET_MANAGEMENT_SERVICE_BASE_URL:-http://localhost:8031}
     restart: "no"
     ports:
       - "${ADMIN_UI_PORT:-3001}:80"

@@ -88,6 +88,23 @@ def test_healthz_stays_ungated_without_operator_key(client):
     assert response.status_code == 200
 
 
+def test_cors_preflight_allows_admin_ui_origin(client):
+    """P67-S1: admin-ui now calls this service directly from the browser
+    (same reasoning as `federation-hub-service`'s own CORS setup) - this was
+    never needed before this session, since no admin-ui ever called this
+    service at all. Asserts the preflight OPTIONS response actually carries
+    the allow-origin header, not just that CORSMiddleware was imported."""
+    response = client.options(
+        "/installations",
+        headers={
+            "Origin": "http://localhost:3001",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost:3001"
+
+
 def _register(client, **overrides) -> dict:
     payload = {
         "display_name": "Kunde Nord GmbH",

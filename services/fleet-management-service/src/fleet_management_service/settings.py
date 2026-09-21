@@ -30,3 +30,10 @@ class Settings(BaseServiceSettings):
     # (ADR 0039/0162). `None` by default - fully locks the API until an
     # operator deliberately configures this, same fail-closed default.
     fleet_operator_key: str | None = None
+
+    # P67-S1: this service is now called directly by a browser (admin-ui),
+    # bypassing the gateway (which normally handles CORS for every other
+    # admin-ui-visible service) - same reasoning/same default as
+    # `federation-hub-service.settings.Settings.cors_allowed_origins`, never
+    # needed before this session since no admin-ui ever called this service.
+    cors_allowed_origins: list[str] = ["http://localhost:3000", "http://localhost:3001"]

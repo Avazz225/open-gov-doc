@@ -317,6 +317,22 @@ The Admin UI can manage several fully independent DMS installations, without nee
 - **No single sign-on across installation boundaries** — deliberate, matches the full isolation from Concept 3a.
 - `lib/api.ts`'s gateway address has, since this session, been a mutable module variable (`setGatewayBaseUrl()`) instead of a fixed constant, set synchronously by the `InstallationProvider` on every switch.
 
+**Not to be confused with Fleet Management (below)**: this section's "installation" is which gateway THIS browser's admin session logs into — a completely different concept from `fleet-management-service`'s `ManagedInstallation`, an installation a fleet operator remotely administers with no login of its own.
+
+## Fleet Management (P67-S1, [ADR 0197](../adr/0197-admin-ui-fleet-management-view.md))
+
+`FleetManagementView` (`/fleet-management/`) wires up `fleet-management-service`, reached directly at a
+fixed base URL (`lib/config.ts`'s `FLEET_MANAGEMENT_SERVICE_BASE_URL`) rather than through the gateway —
+same reasoning as Federation Hub below: the service deliberately doesn't self-register with
+`registry-service`. Every endpoint (including the plain list) requires the operator secret
+(`Authorization: Bearer <key>`, `fleet-management-service`'s own `_require_operator_key`), kept only in
+component state, never persisted, same convention as `ProcessingFailuresView`'s
+`HandoverFailuresSection`. Covers: registering a new managed installation (shows the plaintext
+`fleet_agent_api_key` exactly once, never re-fetchable afterward), listing, deletion, a live status check
+(`GET /installations/status`), and pushing a license token (`POST /installations/{id}/license`). Groups,
+update plans, and rollouts — the rest of `fleet-management-service`'s API — are not built here, a
+separate, larger UI surface left for a future session.
+
 ## Theming (Concept 8, since P4-S6)
 
 `src/lib/theme-context.tsx` (`ThemeProvider`/`useTheme()`) — identical pattern to the User UI (deliberately duplicated instead of shared, ADR 0006), toggleable via the `ThemeSwitcher` in the header. Stored across devices on the user account of the **active installation** (`GET/PUT /api/auth-service/me/preferences`, `accessToken` comes from the installation-bound `AuthProvider`, ADR 0008), see [ADR 0009](../adr/0009-cross-ui-theming-profile-persistence.md). The `localStorage` cache key (`dms.theme`) is deliberately **not** installation-specific — switching installations briefly still shows the last-cached theme choice, until the new installation's own preference has been loaded (see ADR 0009 "Consequences").
@@ -406,13 +422,24 @@ Two-stage Docker image (`apps/admin-ui/Dockerfile`), identical to the User UI. `
 ## Tests
 
 - `npm run typecheck` / `npm run lint` / `npm run build`.
-- `npm test` (Vitest + Testing Library, **283 tests since P63-S3** — +1 in `processing-failures.test.tsx`:
+- `npm test` (Vitest + Testing Library, **290 tests since P67-S1** — +7 in the new `fleet-management.test.tsx`
+  (mocked API): no list before a key is loaded, loads/lists once submitted, unreachable/invalid-key state,
+  registers an installation and shows the one-time plaintext key, deletes and reloads, checks status of
+  all installations, pushes a license token. Previously 283 tests since P63-S3 — +1 in `processing-failures.test.tsx`:
   a new test for `NotificationFailuresSection`'s missing-permission state (shows the graceful message,
   calls no API, other three sections unaffected). **Also fixed in this session, no test-count change**:
   the long-standing `"retries a failed handover (result leg) and reloads"` flake (first noted Phase 47
   Session 4, re-confirmed-but-deferred by several sessions since) — it never filled the operator-key
   input ADR 0162 made required for the retry button to be clickable at all; fixed by filling it and
   asserting the real two-arg `retryHandover` call. Zero known failures in the suite as of this session.
+- **New `e2e/fleet-management.spec.ts` (P67-S1)**: Playwright, against the real running stack — logs in,
+  loads the fleet list with a real operator key, registers an installation, asserts the one-time plaintext
+  key is shown, asserts the row appears, deletes it, asserts it's gone. **Found, during this session, four
+  pre-existing `e2e/` specs (`login.spec.ts`, `user-management.spec.ts`, `object-types.spec.ts`,
+  `email-templates.spec.ts`) that currently fail against this stack** — confirmed via trace inspection to
+  be stale UI-text assertions unrelated to fleet management (e.g. `login.spec.ts` looks for a nav link
+  named "Nutzer & Rollen", the app's actual current text is "Nutzende & Rollen"), not a real regression.
+  Not fixed here, flagged for a future session.
 
 Older history: 282 tests since Phase 58 Session 2 — +2 in
   `config-compare.test.tsx`: the new global ignore-regex field is sent as `ignore_regex: {"*":
@@ -525,7 +552,7 @@ Older history: 282 tests since Phase 58 Session 2 — +2 in
 - ~~No group management, only individual users (Permission Service already supports `principal_type=group`, the UI only offers `user`).~~ — **reworded during Phase 65+'s gap-analysis round**: group ENTITY management (create/delete groups, add/remove members) has existed since Post-Roadmap Phase 22 Session 2 — the blanket "no group management" claim was stale. The narrower gap remains real: `UserManagement.tsx`'s `createRoleAssignment` hardcodes `principalType: "user"`, so a ROLE ASSIGNMENT can still only ever target a `user` principal, never a `group`, even though Groups are now real, manageable entities.
 - ~~Workflow designer, license overview, audit trail view, configuration import/export (Concept 8 names these for the Admin UI) are not part of this base scaffold — the underlying services do not yet exist.~~ — **closed in Phase 57 Session 1**: license overview (`app/license/page.tsx`), audit trail view (`app/audit-trace-settings/page.tsx`), and configuration import/export (`components/ConfigPackages.tsx`) all shipped in later sessions and are stale here. Workflow designer remains correctly out of scope for admin-ui specifically — it is a separate app, `process-designer` (Phase 24), not an embedded admin-ui page.
 - ~~i18n only structurally prepared (ADR 0007), no second language and no UI language switch.~~ — **closed in Phase 47 Session 4**: full English translation (`en.json`, 754 keys) plus `LocaleSwitcher` in `AdminShell.tsx`'s header, see "i18n: English Translation + Locale Switcher" above. Stale bullet, left un-struck when that session shipped — corrected during a later gap-analysis round.
-- **Installation list is stored purely locally in the browser, no cross-device provisioning** (see ADR 0008 "Consequences"). **Corrected during Phase 65+'s gap-analysis round**: the "optional, not-yet-built Fleet/License Management Service" this bullet blamed is stale — `fleet-management-service` has fully existed since Phase 54 Session 1 (full CRUD: `POST`/`GET /installations`, `/installations/{id}/license`, group/rollout management), it was simply never wired into `admin-ui` (confirmed via grep: `apps/admin-ui/src` has zero references to it). The underlying gap (no cross-device installation provisioning) is genuinely still open, but it's now a real, scoped "wire `InstallationManager.tsx`/`installations.ts` to the existing service" task, not a "wait for the service to exist" one — see `IMPLEMENTATION_PLAN.md`'s Phase 67 for the planned session.
+- ~~**Installation list is stored purely locally in the browser, no cross-device provisioning** (see ADR 0008 "Consequences"). The "optional, not-yet-built Fleet/License Management Service" this bullet blamed is stale — `fleet-management-service` has fully existed since Phase 54 Session 1 (full CRUD: `POST`/`GET /installations`, `/installations/{id}/license`, group/rollout management), it was simply never wired into `admin-ui`.~~ — **closed in P67-S1** ([ADR 0197](../adr/0197-admin-ui-fleet-management-view.md)): a new, separate `FleetManagementView` (`/fleet-management/`) now wires up registration/listing/deletion/status/license-push against the real service. Deliberately NOT a change to `InstallationManager.tsx`/`installations.ts` — those manage an unrelated concept (which gateway THIS browser's admin session logs into, Concept 8), not the operator's fleet inventory; conflating the two would have merged two data models that don't correspond field-for-field. Groups/plans/rollouts (the rest of `fleet-management-service`'s API) remain unbuilt in `admin-ui` — a separate, larger UI surface, scoped out of this session, not yet scheduled.
 - Theme preference has no conflict resolution mechanism between devices/installations (last fetch wins) and no retry on a failed `PUT /me/preferences` (see ADR 0009 "Consequences").
 - `ocrEnabled` is not editable on the new OCR settings page, only indirectly visible (reachable/unreachable) — actual on/off switching remains a deployment action (Compose profile), see ADR 0016.
 - The Storage Service's target set (which backends/credentials are configured) is likewise not editable on the storage guard page, only the admin override — target-set changes remain deployment configuration (`DMS_TARGETS`), see ADR 0017.

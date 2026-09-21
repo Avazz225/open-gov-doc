@@ -1,4 +1,8 @@
-import { FEDERATION_HUB_BASE_URL, GATEWAY_BASE_URL as DEFAULT_GATEWAY_BASE_URL } from "./config";
+import {
+  FEDERATION_HUB_BASE_URL,
+  FLEET_MANAGEMENT_SERVICE_BASE_URL,
+  GATEWAY_BASE_URL as DEFAULT_GATEWAY_BASE_URL,
+} from "./config";
 
 // Mutable instead of a fixed import (P4-S5, multi-installation, Concept 8):
 // the admin UI can manage multiple installations, each with its own gateway
@@ -86,6 +90,26 @@ async function requestAt(
 // `retryHandover` below), not a token this module carries around.
 async function federationHubRequest(path: string, init: RequestInit = {}): Promise<Response> {
   const response = await fetch(`${FEDERATION_HUB_BASE_URL}/${path}`, init);
+  if (!response.ok) {
+    throw new ApiError(response.status, await extractErrorMessage(response));
+  }
+  return response;
+}
+
+// Fleet Management (P67-S1) - same shape as `federationHubRequest` above,
+// EXCEPT fleet-management-service gates EVERY endpoint but `/healthz` with
+// its operator secret (`_require_operator_key`, ADR 0172) - unlike the hub,
+// which leaves plain reads (e.g. `GET handovers`) ungated. Every caller
+// below therefore always supplies `operatorKey`, including the plain list.
+function fleetOperatorHeaders(operatorKey: string): HeadersInit {
+  return { Authorization: `Bearer ${operatorKey}` };
+}
+
+async function fleetManagementRequest(
+  path: string,
+  init: RequestInit = {}
+): Promise<Response> {
+  const response = await fetch(`${FLEET_MANAGEMENT_SERVICE_BASE_URL}/${path}`, init);
   if (!response.ok) {
     throw new ApiError(response.status, await extractErrorMessage(response));
   }
@@ -2256,6 +2280,91 @@ export async function retryHandover(id: string, operatorKey: string): Promise<Ha
   const response = await federationHubRequest(`handovers/${id}/retry`, {
     method: "POST",
     headers: { Authorization: `Bearer ${operatorKey}` },
+  });
+  return response.json();
+}
+
+// Fleet Management (P67-S1) - `fleet-management-service` has fully existed
+// since Phase 54 Session 1 with real installation-provisioning CRUD, but no
+// admin-ui ever called it (confirmed by three independent research agents
+// during the Phase 65+ gap-analysis round) - `docs/services/
+// fleet-management-service.md` itself said so explicitly. Deliberately a
+// SEPARATE concept from `lib/installations.ts`'s `Installation` (which
+// installation THIS browser logs into, Concept 8) - `ManagedInstallation`
+// here is an entirely different thing: an installation the fleet OPERATOR
+// remotely administers, with no login/RBAC of its own, gated only by the
+// shared operator secret above.
+export interface ManagedInstallation {
+  id: string;
+  display_name: string;
+  gateway_base_url: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ManagedInstallationCreateOut extends ManagedInstallation {
+  // Plaintext, returned exactly once at creation time - never re-exposed
+  // by any later `GET`, same "shown once" convention as every other
+  // generated-secret flow in this project.
+  fleet_agent_api_key: string;
+}
+
+export interface InstallationStatus {
+  id: string;
+  display_name: string;
+  reachable: boolean;
+  installation_id?: string | null;
+  installation_display_name?: string | null;
+  license_status?: Record<string, unknown> | null;
+  error?: string | null;
+}
+
+export async function listManagedInstallations(
+  operatorKey: string
+): Promise<ManagedInstallation[]> {
+  const response = await fleetManagementRequest("installations", {
+    headers: fleetOperatorHeaders(operatorKey),
+  });
+  return response.json();
+}
+
+export async function createManagedInstallation(
+  payload: { display_name: string; gateway_base_url: string },
+  operatorKey: string
+): Promise<ManagedInstallationCreateOut> {
+  const response = await fleetManagementRequest("installations", {
+    method: "POST",
+    headers: { ...fleetOperatorHeaders(operatorKey), "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return response.json();
+}
+
+export async function deleteManagedInstallation(id: string, operatorKey: string): Promise<void> {
+  await fleetManagementRequest(`installations/${id}`, {
+    method: "DELETE",
+    headers: fleetOperatorHeaders(operatorKey),
+  });
+}
+
+export async function getManagedInstallationsStatus(
+  operatorKey: string
+): Promise<InstallationStatus[]> {
+  const response = await fleetManagementRequest("installations/status", {
+    headers: fleetOperatorHeaders(operatorKey),
+  });
+  return response.json();
+}
+
+export async function pushInstallationLicense(
+  id: string,
+  licenseToken: string,
+  operatorKey: string
+): Promise<Record<string, unknown>> {
+  const response = await fleetManagementRequest(`installations/${id}/license`, {
+    method: "POST",
+    headers: { ...fleetOperatorHeaders(operatorKey), "Content-Type": "application/json" },
+    body: JSON.stringify({ license_token: licenseToken }),
   });
   return response.json();
 }

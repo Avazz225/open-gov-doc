@@ -2,19 +2,55 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P66-S3 (`document-service` correctness bundle — third and last session of Phase 66).
-Two bundled fixes; the plan's own framing bundled a third claim ("four-eyes default `False` is a gap")
-that was checked against ADR 0022 and found to be the established, deliberate, project-wide convention
-(uniform across every four-eyes action type except the intentionally-pre-seeded `auth.superuser.activate`
-break-glass exception) — **not** a gap, no code change made for it, `docs/services/document-service.md`
-corrected to say so instead of leaving it looking outstanding. (a) `consumer.py`'s force-unlock failure
-branch (previously log-only, a known gap ADR 0022's own Consequences section already named) now publishes
-`document.force_unlock.failed`, visible system-wide via `audit-service`'s `document.>` subscription — the
-larger extension (permission-service consuming it to add an `"execution_failed"` `ApprovalRequest`
-status) remains accepted future work, not attempted here (no new ADR expected per the plan's own DoD).
-(b) `checkin_version`'s new `repository.check_lock_for_checkin()` now runs before the virus scan and the
-storage-service upload, not only inside `repository.checkin_version` afterward — a request that was
-always going to `409` on a lock conflict no longer pays for either. New ADR:
+**Last completed:** P67-S1 (first session of Phase 67 — "Blocked on X, X Now Exists"). Wired `admin-ui` to
+the real `fleet-management-service`, which has fully existed since Phase 54 Session 1 with no `admin-ui`
+reference to it at all — the single highest-value finding of the whole Phase 65+ round. **The plan's own
+premise needed correcting first**: `lib/installations.ts`/`InstallationManager.tsx` are NOT a fake
+fleet-management UI — they manage an unrelated concept (which gateway this browser's admin session logs
+into, Concept 8), with a data model (`{id, name, gatewayBaseUrl}`) that doesn't correspond field-for-field
+to `fleet-management-service`'s `ManagedInstallation`. Left unchanged; built a new, separate
+`FleetManagementView` (`/fleet-management/`) instead, reusing `ProcessingFailuresView`'s
+`HandoverFailuresSection` precedent (operator key in component state, never persisted) for auth. Covers
+registration (shows the plaintext `fleet_agent_api_key` exactly once), listing, deletion, live status
+check, and license push — groups/plans/rollouts (the rest of the API) intentionally left for a future
+session. **Incidentally discovered and fixed**: `fleet-management-service` had no `CORSMiddleware` at all
+(never needed before — no browser had ever called it), which silently broke the very first live
+verification attempt (masked as "service unreachable", confirmed via `curl` succeeding in parallel); fixed
+by adding the same CORS setup `federation-hub-service` already has, plus switched
+`_require_operator_key`'s comparison to `hmac.compare_digest` (a timing-safety fix federation-hub-service's
+own equivalent check already got at P62-S1, never ported here). New ADR:
+[0197](docs/adr/0197-admin-ui-fleet-management-view.md). Tests: `admin-ui` 290/290 vitest (new
+`fleet-management.test.tsx`, 7 tests), `tsc`/`eslint`/`next build` all clean; `fleet-management-service`
+34/34 (new `test_cors_preflight_allows_admin_ui_origin`). **Live-verified** via a new
+`e2e/fleet-management.spec.ts` (Playwright, real stack): register → one-time key shown → appears in list →
+delete, round trip confirmed; operator key was set TEMPORARILY in `infra/docker-compose.yml` for this,
+then removed again, confirmed back to its fail-closed default. **Incidentally found, not fixed**: four
+pre-existing `e2e/` specs (`login`/`user-management`/`object-types`/`email-templates`) fail against the
+current stack due to stale UI-text assertions (e.g. "Nutzer & Rollen" vs. current "Nutzende & Rollen") —
+confirmed unrelated to this session, flagged for a future one. `docs/services/admin-ui.md`/
+`fleet-management-service.md` updated.
+
+**Next session:** P67-S2 — wire `docs/tools/cli.md`'s CLI tool (6.2) to `migration-service`/
+`license-service`/`plugin-orchestration-service`/the backup mechanism, all of which have existed for many
+phases with no CLI command ever added for them. Second and last session of Phase 67. See
+`IMPLEMENTATION_PLAN.md`'s Phase 67 table for the full description.
+
+---
+
+Immediately before P67-S1: **P66-S3** (`document-service` correctness bundle — third and last session of
+Phase 66). Two bundled fixes; the plan's own framing bundled a third claim ("four-eyes default `False` is
+a gap") that was checked against ADR 0022 and found to be the established, deliberate, project-wide
+convention (uniform across every four-eyes action type except the intentionally-pre-seeded
+`auth.superuser.activate` break-glass exception) — **not** a gap, no code change made for it,
+`docs/services/document-service.md` corrected to say so instead of leaving it looking outstanding. (a)
+`consumer.py`'s force-unlock failure branch (previously log-only, a known gap ADR 0022's own Consequences
+section already named) now publishes `document.force_unlock.failed`, visible system-wide via
+`audit-service`'s `document.>` subscription — the larger extension (permission-service consuming it to add
+an `"execution_failed"` `ApprovalRequest` status) remains accepted future work, not attempted here (no new
+ADR expected per the plan's own DoD). (b) `checkin_version`'s new `repository.check_lock_for_checkin()`
+now runs before the virus scan and the storage-service upload, not only inside
+`repository.checkin_version` afterward — a request that was always going to `409` on a lock conflict no
+longer pays for either. New ADR:
 [0196](docs/adr/0196-document-service-force-unlock-failure-event-and-checkin-lock-precheck.md). Tests:
 `document-service` 414/414 (was 413) — new `test_checkin_lock_conflict_returns_409_without_scanning_or_uploading`
 (spies on `virus_scan_client.scan`, asserts never called); `test_consumer.py`'s force-unlock-failure test
@@ -22,15 +58,6 @@ renamed and its assertion changed from `published == []` to asserting the new ev
 `docs/services/document-service.md` updated (3 spots). Rebuilt/redeployed. Live-verified against the real
 running stack: a document locked by `alice`, check-in by `bob` returns `409` in ~11ms (fast enough to
 confirm scan/upload were skipped). **Phase 66 is now closed (3/3).**
-
-**Next session:** P67-S1 — wire `admin-ui`'s installation list (`lib/installations.ts`,
-`InstallationManager.tsx`, currently 100% `localStorage`) to the real `fleet-management-service`, which
-has fully existed since Phase 54 Session 1 with no `admin-ui` reference to it at all — the single
-highest-value finding of the whole Phase 65+ round. Needs an operator-key auth story for the cross-device
-provisioning use case. See `IMPLEMENTATION_PLAN.md`'s Phase 67 table for the full description, including
-P67-S2 (CLI tool completion) after it.
-
----
 
 Immediately before P66-S3: **P66-S2** (`workflow-service` bundle — second session of Phase 66), closing a
 stale-premise gap: several docstrings/ADR 0131 asserted "no real process type sets `business_key` to a

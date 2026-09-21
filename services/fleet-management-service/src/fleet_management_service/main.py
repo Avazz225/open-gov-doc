@@ -1,4 +1,5 @@
 import asyncio
+import hmac
 import logging
 import time
 from collections.abc import AsyncIterator
@@ -7,6 +8,7 @@ from contextlib import asynccontextmanager
 from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
 from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -68,6 +70,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title=settings.service_name, lifespan=lifespan)
 
+# P67-S1: admin-ui now calls this service directly from the browser (the
+# gateway can't proxy to it, same reasoning as `federation-hub-service`, see
+# settings.py) - Starlette must intercept preflight OPTIONS requests before
+# any route, so this is registered before the routes below, same ordering
+# `federation-hub-service`/`gateway-service` already use.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_allowed_origins,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    allow_credentials=False,
+)
+
 
 async def get_session() -> AsyncIterator[AsyncSession]:
     async with app.state.session_factory() as session:
@@ -79,8 +94,14 @@ async def _require_operator_key(authorization: str = Header(default="")) -> None
     `hub_operator_key` mechanism `federation-hub-service` already uses
     (ADR 0039/0162) - fully locked (403) without a configured
     `fleet_operator_key`, a deliberate fail-closed default, not a
-    regression."""
-    if not settings.fleet_operator_key or authorization != f"Bearer {settings.fleet_operator_key}":
+    regression. P67-S1: switched to `hmac.compare_digest` - the plain `!=`
+    this had until now was a timing-safety gap `federation-hub-service`'s
+    own `hub_operator_key` check already closed for itself back at P62-S1,
+    just never ported here (this function's own docstring already named
+    that check as the precedent to follow, but not this exact detail)."""
+    if not settings.fleet_operator_key or not hmac.compare_digest(
+        authorization, f"Bearer {settings.fleet_operator_key}"
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Fehlender oder ungültiger Fleet-Operator-Schlüssel",

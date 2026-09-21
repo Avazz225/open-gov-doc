@@ -13,3 +13,12 @@ export const GATEWAY_BASE_URL =
 // way workflow-service/auth-service already do, via a direct base URL.
 export const FEDERATION_HUB_BASE_URL =
   process.env.NEXT_PUBLIC_FEDERATION_HUB_BASE_URL ?? "http://localhost:8018";
+
+// Fleet Management (P67-S1) - same reasoning as Federation Hub above:
+// fleet-management-service deliberately does NOT self-register with
+// registry-service either (it manages installations from OUTSIDE any one
+// of them, see its own settings docstring), so it's reached directly at a
+// fixed base URL, gated by its own operator secret rather than this
+// module's admin JWT (see lib/api.ts's `fleetManagementRequest`).
+export const FLEET_MANAGEMENT_SERVICE_BASE_URL =
+  process.env.NEXT_PUBLIC_FLEET_MANAGEMENT_SERVICE_BASE_URL ?? "http://localhost:8031";

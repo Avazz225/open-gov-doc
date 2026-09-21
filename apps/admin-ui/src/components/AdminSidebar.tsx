@@ -60,7 +60,10 @@ const GROUPS: NavGroup[] = [
   {
     id: "installations",
     labelKey: "nav.groupInstallations",
-    items: [{ href: "/installations/", labelKey: "nav.installations" }],
+    items: [
+      { href: "/installations/", labelKey: "nav.installations" },
+      { href: "/fleet-management/", labelKey: "nav.fleetManagement" },
+    ],
   },
   {
     id: "processing",

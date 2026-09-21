@@ -18,6 +18,10 @@ ENV NEXT_PUBLIC_GATEWAY_BASE_URL=$NEXT_PUBLIC_GATEWAY_BASE_URL
 # gateway above, see lib/config.ts.
 ARG NEXT_PUBLIC_FEDERATION_HUB_BASE_URL=http://localhost:8018
 ENV NEXT_PUBLIC_FEDERATION_HUB_BASE_URL=$NEXT_PUBLIC_FEDERATION_HUB_BASE_URL
+# Fleet Management (P67-S1) - reached directly, same reasoning as
+# Federation Hub above, see lib/config.ts.
+ARG NEXT_PUBLIC_FLEET_MANAGEMENT_SERVICE_BASE_URL=http://localhost:8031
+ENV NEXT_PUBLIC_FLEET_MANAGEMENT_SERVICE_BASE_URL=$NEXT_PUBLIC_FLEET_MANAGEMENT_SERVICE_BASE_URL
 RUN npm run build --prefix apps/admin-ui
 
 FROM nginx:1.27-alpine
