@@ -63,14 +63,24 @@ async def test_heartbeat_updates_timestamp(session):
     req = make_request()
     await repository.register(session, req)
 
-    result = await repository.heartbeat(session, req.instance_id)
+    result = await repository.heartbeat(session, req.instance_id, req.service_type)
 
     assert result.instance_id == req.instance_id
 
 
 async def test_heartbeat_unknown_instance_raises(session):
     with pytest.raises(repository.InstanceNotFoundError):
-        await repository.heartbeat(session, "does-not-exist")
+        await repository.heartbeat(session, "does-not-exist", "document-service")
+
+
+async def test_heartbeat_with_wrong_principal_raises(session):
+    """RBAC (Phase 59 Session 4) - the caller's own identity must match the
+    target instance's own `service_type`."""
+    req = make_request()
+    await repository.register(session, req)
+
+    with pytest.raises(repository.PermissionDeniedError):
+        await repository.heartbeat(session, req.instance_id, "some-other-service")
 
 
 async def test_mark_draining_sets_status(session):
@@ -94,7 +104,7 @@ async def test_heartbeat_does_not_reset_draining(session):
     await repository.register(session, req)
     await repository.mark_draining(session, req.instance_id)
 
-    result = await repository.heartbeat(session, req.instance_id)
+    result = await repository.heartbeat(session, req.instance_id, req.service_type)
 
     assert result.status == "draining"
 
@@ -120,7 +130,7 @@ async def test_deregister_removes_instance(session):
     req = make_request()
     await repository.register(session, req)
 
-    result = await repository.deregister(session, req.instance_id)
+    result = await repository.deregister(session, req.instance_id, req.service_type)
 
     assert result.service_type == req.service_type
     assert await session.get(ServiceInstance, req.instance_id) is None
@@ -128,7 +138,15 @@ async def test_deregister_removes_instance(session):
 
 async def test_deregister_unknown_instance_raises(session):
     with pytest.raises(repository.InstanceNotFoundError):
-        await repository.deregister(session, "does-not-exist")
+        await repository.deregister(session, "does-not-exist", "document-service")
+
+
+async def test_deregister_with_wrong_principal_raises(session):
+    req = make_request()
+    await repository.register(session, req)
+
+    with pytest.raises(repository.PermissionDeniedError):
+        await repository.deregister(session, req.instance_id, "some-other-service")
 
 
 async def test_list_active_by_type_excludes_stale_instances(session):

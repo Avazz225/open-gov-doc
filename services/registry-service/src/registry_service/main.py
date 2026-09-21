@@ -14,7 +14,7 @@ from dms_metrics_client import (
     run_gauge_sampler_loop,
 )
 from dms_registry_client import maybe_start_registration
-from fastapi import Depends, FastAPI, HTTPException, Response, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -47,7 +47,13 @@ async def _cleanup_poll_loop(session_factory) -> None:
                 for instance in stale:
                     instance_id = instance.instance_id
                     service_type = instance.service_type
-                    await repository.deregister(session, instance_id)
+                    # Internal caller (Phase 59 Session 4): passes the
+                    # instance's own `service_type` as its identity - the
+                    # new `X-DMS-Principal` check on `repository.deregister`
+                    # exists to stop an EXTERNAL caller deregistering an
+                    # instance it doesn't own, not to gate this trusted,
+                    # already-instance-scoped internal cleanup loop.
+                    await repository.deregister(session, instance_id, service_type)
                     await session.commit()
                     await publish_event(
                         "registry.instance.deregistered",
@@ -229,10 +235,48 @@ def get_metrics() -> Response:
     return Response(content=body, media_type=content_type)
 
 
+def _require_operator_key(authorization: str) -> None:
+    """Operator gate for drain/activate (Phase 59 Session 4) - same bearer-
+    secret pattern as `federation_hub_service.main`'s `hub_operator_key`
+    check (ADR 0039): fully locked (`403`) without a configured
+    `registry_operator_key`, a registry operator must deliberately enable
+    drain/rollback. Not an `X-DMS-Principal` check like register/heartbeat/
+    deregister below - the real caller is an external ops tool/human
+    operator (`scripts/rolling-update.sh`), not a self-registering service,
+    confirmed by tracing every real caller before choosing a gate shape."""
+    if (
+        not settings.registry_operator_key
+        or authorization != f"Bearer {settings.registry_operator_key}"
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Fehlender oder ungültiger Registry-Operator-Schlüssel",
+        )
+
+
 @app.post("/instances", response_model=InstanceOut, status_code=status.HTTP_201_CREATED)
 async def register_instance(
-    payload: RegisterRequest, session: AsyncSession = Depends(get_session)
+    payload: RegisterRequest,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> InstanceOut:
+    """Self-registration only (Phase 59 Session 4) - the caller's own
+    `X-DMS-Principal` must equal the `service_type` it is registering as
+    (`dms_registry_client.RegistryRegistration` now sends this as a fixed
+    default header, one shared-library change covering every self-
+    registering service at once). Previously ungated: any caller reachable
+    through the gateway could register a fake instance of an arbitrary
+    `service_type` at an attacker-controlled `address`, with a real chance
+    of being selected for real user traffic by `gateway_service.upstream.
+    InstanceResolver` - a traffic-hijack/credential-harvesting vector, not
+    just a routing curiosity."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    if x_dms_principal != payload.service_type:
+        raise HTTPException(
+            status_code=403,
+            detail="X-DMS-Principal muss dem registrierten service_type entsprechen",
+        )
     result = await repository.register(session, payload)
     await session.commit()
     result.license_status = await app.state.license_cache.status_for(result.service_type)
@@ -247,12 +291,28 @@ async def register_instance(
 
 @app.post("/instances/{instance_id}/heartbeat", response_model=InstanceOut)
 async def send_heartbeat(
-    instance_id: str, session: AsyncSession = Depends(get_session)
+    instance_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> InstanceOut:
+    """Same self-service gate as `register_instance` above (Phase 59
+    Session 4) - the caller's own `X-DMS-Principal` must equal the target
+    instance's own `service_type`. Existence (`404`) is checked before
+    identity, same ordering convention as the rest of this project - unlike
+    `register_instance` (which has no existing row to protect), a missing
+    header here is indistinguishable from a mismatched one (both fail the
+    same `!=` comparison against a real `service_type`), so this collapses
+    to a single `403` rather than a separate `401` pre-check that would
+    have to run before the existence check to keep the same ordering."""
     try:
-        result = await repository.heartbeat(session, instance_id)
+        result = await repository.heartbeat(session, instance_id, x_dms_principal)
     except repository.InstanceNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Instance not registered") from exc
+    except repository.PermissionDeniedError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail="X-DMS-Principal muss dem service_type der Instanz entsprechen",
+        ) from exc
     await session.commit()
     result.license_status = await app.state.license_cache.status_for(result.service_type)
     return result
@@ -260,11 +320,18 @@ async def send_heartbeat(
 
 @app.post("/instances/{instance_id}/drain", response_model=InstanceOut)
 async def drain_instance(
-    instance_id: str, session: AsyncSession = Depends(get_session)
+    instance_id: str,
+    authorization: str = Header(default="", alias="Authorization"),
+    session: AsyncSession = Depends(get_session),
 ) -> InstanceOut:
-    """Drain mechanism (10.5/3.8, P10-S2) - ungated like every other registry
-    endpoint: WHEN draining happens is decided by an external deploy
-    tool/P10-S3, not by the registry itself."""
+    """Drain mechanism (10.5/3.8, P10-S2). **Since Phase 59 Session 4**:
+    gated via `_require_operator_key` - WHEN draining happens is decided
+    by an external deploy tool/operator (`scripts/rolling-update.sh`), not
+    by the registry itself or by the instance's own service identity, so
+    this uses the same operator-bearer-secret shape as
+    `federation-hub-service`'s `hub_operator_key`, not an `X-DMS-Principal`
+    check."""
+    _require_operator_key(authorization)
     try:
         result = await repository.mark_draining(session, instance_id)
     except repository.InstanceNotFoundError as exc:
@@ -276,10 +343,14 @@ async def drain_instance(
 
 @app.post("/instances/{instance_id}/activate", response_model=InstanceOut)
 async def activate_instance(
-    instance_id: str, session: AsyncSession = Depends(get_session)
+    instance_id: str,
+    authorization: str = Header(default="", alias="Authorization"),
+    session: AsyncSession = Depends(get_session),
 ) -> InstanceOut:
     """Reversal of `/drain` (10.5, P10-S3) - enables a genuine rollback path
-    as long as the old instance has not yet been stopped."""
+    as long as the old instance has not yet been stopped. **Since Phase 59
+    Session 4**: same `_require_operator_key` gate as `/drain` above."""
+    _require_operator_key(authorization)
     try:
         result = await repository.activate(session, instance_id)
     except repository.InstanceNotFoundError as exc:
@@ -291,12 +362,22 @@ async def activate_instance(
 
 @app.delete("/instances/{instance_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def deregister_instance(
-    instance_id: str, session: AsyncSession = Depends(get_session)
+    instance_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> None:
+    """Same self-service gate as `register_instance`/`send_heartbeat` above
+    (Phase 59 Session 4) - same missing-header-collapses-into-403 reasoning
+    as `send_heartbeat`."""
     try:
-        deregistered = await repository.deregister(session, instance_id)
+        deregistered = await repository.deregister(session, instance_id, x_dms_principal)
     except repository.InstanceNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Instance not registered") from exc
+    except repository.PermissionDeniedError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail="X-DMS-Principal muss dem service_type der Instanz entsprechen",
+        ) from exc
     await session.commit()
     await publish_event(
         "registry.instance.deregistered",

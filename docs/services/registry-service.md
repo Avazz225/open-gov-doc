@@ -9,11 +9,11 @@
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/instances` | Register/update (upsert by `instance_id`) |
-| `POST` | `/instances/{instance_id}/heartbeat` | Heartbeat, updates `last_heartbeat_at` |
-| `DELETE` | `/instances/{instance_id}` | Deregister |
-| `POST` | `/instances/{instance_id}/drain` | Drain mechanism (10.5/3.8, P10-S2): sets `status="draining"` — ungated; WHEN draining happens is decided by an external deploy tool/`scripts/rolling-update.sh`, not by the registry itself. |
-| `POST` | `/instances/{instance_id}/activate` | Reversal of `/drain` (10.5, P10-S3): resets `status="active"` — the basis for a real rollback path, see `docs/operations/rolling-updates.md`. |
+| `POST` | `/instances` | Register/update (upsert by `instance_id`). **Since Phase 59 Session 4** ([ADR 0181](../adr/0181-registry-service-instance-mutation-authorization.md)): `401`/`403` self-service gate, see "Authorization" below |
+| `POST` | `/instances/{instance_id}/heartbeat` | Heartbeat, updates `last_heartbeat_at`. **Since Phase 59 Session 4**: `403` self-service gate |
+| `DELETE` | `/instances/{instance_id}` | Deregister. **Since Phase 59 Session 4**: `403` self-service gate |
+| `POST` | `/instances/{instance_id}/drain` | Drain mechanism (10.5/3.8, P10-S2): sets `status="draining"`. **Since Phase 59 Session 4**: gated via `registry_operator_key` (`Authorization: Bearer ...`) — WHEN draining happens is still decided by an external deploy tool/`scripts/rolling-update.sh`, not by the registry itself, now with an actual operator secret proving that caller is legitimate. |
+| `POST` | `/instances/{instance_id}/activate` | Reversal of `/drain` (10.5, P10-S3): resets `status="active"` — the basis for a real rollback path, see `docs/operations/rolling-updates.md`. **Since Phase 59 Session 4**: same `registry_operator_key` gate as `/drain` |
 | `GET` | `/instances/{service_type}` | Only currently reachable instances of this type |
 | `GET` | `/instances` | All instances incl. computed `healthy` flag |
 | `GET` | `/license-status/{service_type}` | Computed license status (`licensed`/`demo`/`unlicensed`) for this service type — ungated, for internal poll clients (e.g. `workflow-service`, see below). |
@@ -29,7 +29,7 @@
 
 - **State, no automatic trigger**: `POST /instances/{instance_id}/drain` sets `status="draining"` — the registry itself does not decide *when* draining happens. Since P10-S3 this is handled by `scripts/rolling-update.sh`, which reuses the same mechanism for update rollouts instead of building it anew (Concept 10.5: "the same drain mechanism... just for a different occasion").
 - **Effect only in routing**: a `draining` instance remains visible in `GET /instances/{type}` (not deregistered, no kill) but disappears from the gateway's selection pool for **new** requests (`gateway_service.upstream.InstanceResolver.resolve()` filters on `status == "active"` in addition to `healthy`). Already-running requests are never affected — this literally matches 10.5 ("no longer accepts new tasks but completes running operations").
-- **Ungated**, like every other registry endpoint — the registry has no role gate anywhere, and this would not be a consistency improvement here.
+- **Since Phase 59 Session 4**: gated via `registry_operator_key`, see "Authorization" below — not "ungated like every other endpoint" anymore, since every mutating endpoint now has a real gate.
 - A **new** registration (row does not yet exist) always starts with `status="active"`; a re-registration of the same `instance_id` (self-healing after `404`, not a real restart, see `dms-registry-client`) leaves an existing `status` unchanged — only heartbeat/register never automatically revert it, only `/drain`/`/activate` set it.
 - **Rollback (10.5, P10-S3)**: `POST /instances/{instance_id}/activate` resets `status` back to `"active"` — without this reversal there would be no way to make an already-drained instance reachable for new requests again. Concept 10.5 explicitly requires that a rollback remains possible as long as the drain is not yet fully completed (i.e. the instance has not yet stopped). Used by `scripts/rolling-update.sh`'s manual rollback procedure, see `docs/operations/rolling-updates.md`.
 
@@ -53,6 +53,13 @@ rows whose `last_heartbeat_at` age exceeds `unreachable_cleanup_after_seconds` (
   days old was removed on the next poll tick (forced via a container restart); an otherwise-identical
   row only 1 hour old (`healthy: false`, still within the 7-day cleanup window) was confirmed to
   survive the same tick.
+
+## Authorization (Phase 59 Session 4, [ADR 0181](../adr/0181-registry-service-instance-mutation-authorization.md))
+
+Previously every mutating instance endpoint had **zero authorization** — any authenticated caller reachable through the gateway could register a fake instance of an arbitrary `service_type` at an attacker-controlled `address` (a traffic-hijack/credential-harvesting vector via `gateway_service.upstream.InstanceResolver`'s unvalidated `random.choice()` pool), or drain/deregister any REAL instance (a fleet-wide denial-of-service). Two gate shapes, chosen by tracing every real caller first:
+
+- **`POST /instances`, `POST /instances/{id}/heartbeat`, `DELETE /instances/{id}` — self-service gate**: the caller's own `X-DMS-Principal` must equal the `service_type` it is acting on (for register: the payload's `service_type`; for heartbeat/deregister: the target instance's own `service_type`, existence-checked first). `libs/dms-registry-client`'s `RegistryRegistration` now sends `X-DMS-Principal: <its own service_type>` as a default header on every request — **one shared-library change automatically covers all ~31 self-registering services**, no per-service source change needed. `401` with no header (register only — heartbeat/deregister collapse a missing header into the same `403` as a mismatched one, since existence is checked first and an empty header can never match a real `service_type` anyway), `403` on mismatch.
+- **`POST /instances/{id}/drain`, `.../activate` — operator-key gate**: the real caller (`scripts/rolling-update.sh`, an external ops script/human operator, confirmed via grep — never a backend service or `admin-ui`) has no natural service identity of its own, so these reuse `federation-hub-service`'s exact `hub_operator_key` shape: `403` unless `Authorization: Bearer <registry_operator_key>` matches `DMS_REGISTRY_OPERATOR_KEY`, `None`/fully locked by default. `scripts/rolling-update.sh` reads the same value from `REGISTRY_OPERATOR_KEY` in the operator's own shell.
 
 ## License Brokering (3.2b/9.3, P9-S2)
 
@@ -95,4 +102,5 @@ statically configuring backend addresses.
 ## Open Points
 
 - Actively pinging the reported `health_endpoint` (instead of pure heartbeat push) as a possible later addition, not part of this session.
+- ~~**Zero authorization on every mutating instance endpoint** — any authenticated caller could register a fake instance at an attacker-controlled address, or drain/deregister a real one.~~ — **closed in Phase 59 Session 4**, see "Authorization" above ([ADR 0181](../adr/0181-registry-service-instance-mutation-authorization.md)). 54/54 tests (+9).
 - ~~**No cleanup of permanently unreachable instances** (observed since P4-S1: container restarts without a clean `DELETE /instances/{id}`, e.g. on `docker compose down` without prior deregistration, leave permanent `healthy=false` rows behind). Not critical for routing (`GET /instances/{service_type}` already filters them out), but they accumulate unbounded in the table — periodic cleanup (e.g. deletion after X days without a heartbeat) is not part of this session.~~ — **closed in Phase 58 Session 2**, see "Periodic Cleanup of Unreachable Instances" below.

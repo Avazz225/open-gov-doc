@@ -3,12 +3,37 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 from registry_service.main import app
+from registry_service.main import settings as registry_settings
+
+# Muss mit dem `Authorization: Bearer ...`-Header übereinstimmen, den die
+# Tests unten für /drain und /activate setzen - kein Cross-File-Import von
+# Test-Konstanten, gleiche Projektkonvention wie andernorts.
+_OPERATOR_KEY = "operator-secret-for-test"
 
 
 @pytest.fixture
 def client():
-    with TestClient(app) as c:
+    """Default `X-DMS-Principal: document-service` (Phase 59 Session 4) -
+    matches `make_payload`'s own default `service_type`, so every existing
+    call site using the default payload already satisfies the new
+    self-service gate with no per-call header needed. Tests that pick a
+    different `service_type` pass a matching header explicitly (same
+    pattern as `real_signer` overrides elsewhere in this project)."""
+    with TestClient(app, headers={"X-DMS-Principal": "document-service"}) as c:
         yield c
+
+
+@pytest.fixture
+def operator_key():
+    """Enables the drain/activate operator gate (Phase 59 Session 4) for a
+    single test, then resets it - same mutate-then-reset pattern as
+    `federation-hub-service`'s `hub_operator_key` tests, since `Settings()`
+    is a shared module-level singleton, not re-created per test."""
+    registry_settings.registry_operator_key = _OPERATOR_KEY
+    try:
+        yield {"Authorization": f"Bearer {_OPERATOR_KEY}"}
+    finally:
+        registry_settings.registry_operator_key = None
 
 
 def make_payload(**overrides) -> dict:
@@ -43,7 +68,9 @@ def test_register_and_list_active(client):
     service_type = f"type-{uuid.uuid4().hex[:8]}"
     payload = make_payload(service_type=service_type)
 
-    register_response = client.post("/instances", json=payload)
+    register_response = client.post(
+        "/instances", json=payload, headers={"X-DMS-Principal": service_type}
+    )
     assert register_response.status_code == 201
     assert register_response.json()["healthy"] is True
 
@@ -96,26 +123,38 @@ def test_new_instance_registers_as_active(client):
     assert response.json()["status"] == "active"
 
 
-def test_drain_sets_status_to_draining(client):
+def test_drain_sets_status_to_draining(client, operator_key):
     payload = make_payload()
     client.post("/instances", json=payload)
 
-    response = client.post(f"/instances/{payload['instance_id']}/drain")
+    response = client.post(f"/instances/{payload['instance_id']}/drain", headers=operator_key)
 
     assert response.status_code == 200
     assert response.json()["status"] == "draining"
 
 
-def test_drain_unknown_instance_returns_404(client):
-    response = client.post("/instances/does-not-exist/drain")
+def test_drain_without_operator_key_is_403(client):
+    """RBAC (Phase 59 Session 4) - `/drain` previously had no gate at all;
+    this proves it now actually fires, same coverage shape as the sibling
+    P59-S1/S2/S3 sessions' own `.._without_permission_is_403` tests."""
+    payload = make_payload()
+    client.post("/instances", json=payload)
+
+    response = client.post(f"/instances/{payload['instance_id']}/drain")
+
+    assert response.status_code == 403
+
+
+def test_drain_unknown_instance_returns_404(client, operator_key):
+    response = client.post("/instances/does-not-exist/drain", headers=operator_key)
     assert response.status_code == 404
 
 
-def test_draining_instance_still_listed(client):
+def test_draining_instance_still_listed(client, operator_key):
     service_type = f"type-{uuid.uuid4().hex[:8]}"
     payload = make_payload(service_type=service_type)
-    client.post("/instances", json=payload)
-    client.post(f"/instances/{payload['instance_id']}/drain")
+    client.post("/instances", json=payload, headers={"X-DMS-Principal": service_type})
+    client.post(f"/instances/{payload['instance_id']}/drain", headers=operator_key)
 
     list_response = client.get(f"/instances/{service_type}")
 
@@ -123,38 +162,50 @@ def test_draining_instance_still_listed(client):
     assert ids_to_status[payload["instance_id"]] == "draining"
 
 
-def test_reregistering_same_instance_does_not_reset_draining(client):
+def test_reregistering_same_instance_does_not_reset_draining(client, operator_key):
     payload = make_payload()
     client.post("/instances", json=payload)
-    client.post(f"/instances/{payload['instance_id']}/drain")
+    client.post(f"/instances/{payload['instance_id']}/drain", headers=operator_key)
 
     response = client.post("/instances", json=payload)
 
     assert response.json()["status"] == "draining"
 
 
-def test_activate_resets_draining_to_active(client):
+def test_activate_resets_draining_to_active(client, operator_key):
     payload = make_payload()
     client.post("/instances", json=payload)
-    client.post(f"/instances/{payload['instance_id']}/drain")
+    client.post(f"/instances/{payload['instance_id']}/drain", headers=operator_key)
 
-    response = client.post(f"/instances/{payload['instance_id']}/activate")
+    response = client.post(f"/instances/{payload['instance_id']}/activate", headers=operator_key)
 
     assert response.status_code == 200
     assert response.json()["status"] == "active"
 
 
-def test_activate_unknown_instance_returns_404(client):
-    response = client.post("/instances/does-not-exist/activate")
+def test_activate_without_operator_key_is_403(client, operator_key):
+    payload = make_payload()
+    client.post("/instances", json=payload)
+    client.post(f"/instances/{payload['instance_id']}/drain", headers=operator_key)
+
+    response = client.post(f"/instances/{payload['instance_id']}/activate")
+
+    assert response.status_code == 403
+
+
+def test_activate_unknown_instance_returns_404(client, operator_key):
+    response = client.post("/instances/does-not-exist/activate", headers=operator_key)
     assert response.status_code == 404
 
 
 def test_deregister_removes_instance(client):
     service_type = f"type-{uuid.uuid4().hex[:8]}"
     payload = make_payload(service_type=service_type)
-    client.post("/instances", json=payload)
+    client.post("/instances", json=payload, headers={"X-DMS-Principal": service_type})
 
-    delete_response = client.delete(f"/instances/{payload['instance_id']}")
+    delete_response = client.delete(
+        f"/instances/{payload['instance_id']}", headers={"X-DMS-Principal": service_type}
+    )
     assert delete_response.status_code == 204
 
     list_response = client.get(f"/instances/{service_type}")
@@ -165,6 +216,49 @@ def test_deregister_removes_instance(client):
 def test_deregister_unknown_instance_returns_404(client):
     response = client.delete("/instances/does-not-exist")
     assert response.status_code == 404
+
+
+def test_deregister_with_wrong_principal_is_403(client):
+    """RBAC (Phase 59 Session 4) - a caller may only deregister an instance
+    of its OWN `service_type`, not an arbitrary one - previously any
+    authenticated caller could deregister any instance, a fleet-wide DoS
+    vector."""
+    service_type = f"type-{uuid.uuid4().hex[:8]}"
+    payload = make_payload(service_type=service_type)
+    client.post("/instances", json=payload, headers={"X-DMS-Principal": service_type})
+
+    response = client.delete(f"/instances/{payload['instance_id']}")
+
+    assert response.status_code == 403
+
+
+def test_register_without_principal_header_is_401(client):
+    response = client.post("/instances", json=make_payload(), headers={"X-DMS-Principal": ""})
+    assert response.status_code == 401
+
+
+def test_register_with_mismatched_principal_is_403(client):
+    """RBAC (Phase 59 Session 4) - `X-DMS-Principal` must equal the
+    registered `service_type` - previously any caller could register a fake
+    instance of an arbitrary `service_type` at an attacker-controlled
+    `address`, a traffic-hijack vector via `gateway_service.upstream.
+    InstanceResolver`."""
+    response = client.post(
+        "/instances",
+        json=make_payload(service_type="storage-service"),
+        headers={"X-DMS-Principal": "document-service"},
+    )
+    assert response.status_code == 403
+
+
+def test_heartbeat_with_wrong_principal_is_403(client):
+    service_type = f"type-{uuid.uuid4().hex[:8]}"
+    payload = make_payload(service_type=service_type)
+    client.post("/instances", json=payload, headers={"X-DMS-Principal": service_type})
+
+    response = client.post(f"/instances/{payload['instance_id']}/heartbeat")
+
+    assert response.status_code == 403
 
 
 def test_register_response_includes_license_status_for_core_service(client):

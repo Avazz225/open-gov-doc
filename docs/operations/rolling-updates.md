@@ -80,6 +80,13 @@ cases:
   error detection (would need ongoing health/error-rate monitoring —
   monitoring territory, phase 11).
 
+**Since Phase 59 Session 4** ([ADR 0181](../adr/0181-registry-service-instance-mutation-authorization.md)):
+both `/drain` and `/activate` require `Authorization: Bearer <registry_operator_key>` —
+fully locked (`403`) unless the registry-service container has
+`DMS_REGISTRY_OPERATOR_KEY` set. A manual `curl` for the rollback above
+needs the same header, e.g.:
+`curl -X POST -H "Authorization: Bearer $REGISTRY_OPERATOR_KEY" "$REGISTRY_URL/instances/{old_id}/activate"`.
+
 ## Limitations: the persistence layer as a special case (expand/contract)
 
 This procedure works fully uninterrupted for updates

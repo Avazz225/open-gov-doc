@@ -50,8 +50,19 @@ class RegistryRegistration:
             "address": address,
         }
         self._heartbeat_interval = heartbeat_interval_seconds
+        # Fixed system-identity header (Phase 59 Session 4, ADR 0181) - the
+        # SAME literal `service_type` this instance registers itself as,
+        # sent as a default header once here so it automatically covers
+        # register/heartbeat/deregister for every one of this project's
+        # self-registering services, with no per-service change needed.
+        # registry-service checks it equals `payload.service_type`/the
+        # target instance's own `service_type` - unspoofable by a real
+        # gateway-routed caller, same convention as every other fixed-
+        # identity gate in this project.
         self._client = client or httpx.AsyncClient(
-            base_url=registry_base_url.rstrip("/"), timeout=5.0
+            base_url=registry_base_url.rstrip("/"),
+            timeout=5.0,
+            headers={"X-DMS-Principal": service_type},
         )
         self._task: asyncio.Task | None = None
 

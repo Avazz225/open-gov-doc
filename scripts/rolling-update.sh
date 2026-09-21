@@ -51,6 +51,13 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="$REPO_ROOT/infra/docker-compose.yml"
 REGISTRY_URL="${REGISTRY_URL:-http://localhost:${REGISTRY_SERVICE_PORT:-8001}}"
+# Operator-Gate fuer /drain und /activate (Phase 59 Session 4, ADR 0181) -
+# muss mit dem registry-service-Container's DMS_REGISTRY_OPERATOR_KEY
+# uebereinstimmen (gleiches Bearer-Secret-Muster wie federation-hub-
+# service's DMS_HUB_OPERATOR_KEY). Ohne gesetzten Schluessel schlaegt jeder
+# drain-Aufruf unten mit 403 fehl - vom Operator bewusst zu setzen.
+REGISTRY_OPERATOR_KEY="${REGISTRY_OPERATOR_KEY:-}"
+REGISTRY_AUTH_HEADER=(-H "Authorization: Bearer ${REGISTRY_OPERATOR_KEY}")
 
 # Gleiche Liste wie scripts/run-tests.sh's CONSUMER_SERVICES - Services mit
 # eigenem exklusiven NATS-Durable-Consumer (durable=<service-name>). Ein
@@ -166,7 +173,7 @@ echo "    Canary ist bereit: $CANARY_ID"
 echo "==> Draine alte Instanz(en)"
 for id in $OLD_IDS; do
   echo "    POST /instances/$id/drain"
-  curl -sf -X POST "$REGISTRY_URL/instances/$id/drain" >/dev/null
+  curl -sf -X POST "${REGISTRY_AUTH_HEADER[@]}" "$REGISTRY_URL/instances/$id/drain" >/dev/null
 done
 
 echo "==> Gnadenfrist ${DRAIN_GRACE_SECONDS}s, damit laufende Vorgänge auf den alten Instanzen abschließen können"
@@ -188,7 +195,7 @@ fi
 echo "    Reguläre Instanz ist bereit: $FINAL_ID"
 
 echo "==> Draine und entferne den Canary"
-curl -sf -X POST "$REGISTRY_URL/instances/$CANARY_ID/drain" >/dev/null
+curl -sf -X POST "${REGISTRY_AUTH_HEADER[@]}" "$REGISTRY_URL/instances/$CANARY_ID/drain" >/dev/null
 sleep "$DRAIN_GRACE_SECONDS"
 docker stop "$CANARY_NAME" >/dev/null
 docker rm "$CANARY_NAME" >/dev/null

@@ -2,9 +2,61 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P59-S3 (`signature-service`'s `POST /signatures` had no authorization check AND
-trusted a client-supplied `signer_principal_id` with no identity validation — third session of Phase 59,
-"Critical Authorization Bugs"). **New ADR**
+**Last completed:** P59-S4 (`registry-service`'s `POST /instances` plus every other mutating instance
+endpoint were unauthenticated — service hijack/DoS risk — fourth session of Phase 59, "Critical
+Authorization Bugs", closing the phase's five criticals). **New ADR**
+([0181](docs/adr/0181-registry-service-instance-mutation-authorization.md)) — a real authorization-model
+decision, per the plan's own DoD.
+
+**The gap.** Found by this round's live-code security sweep. `registry-service` had zero `Depends()`-based
+auth anywhere. Since `gateway_service.upstream.InstanceResolver` picks instances via unvalidated
+`random.choice()`, any authenticated user could `POST /instances` with an arbitrary `service_type` and an
+attacker-controlled `address` and have a real chance of being selected for real user traffic — a
+traffic-hijack/credential-harvesting vector. The same surface let any user drain or deregister real
+instances — a fleet-wide DoS.
+
+**The fix.** Two gate shapes, chosen by tracing every real caller first. Register/heartbeat/deregister:
+self-service gate — caller's own `X-DMS-Principal` must equal the `service_type` it acts on, built into
+`libs/dms-registry-client`'s shared `RegistryRegistration` client so **all ~31 self-registering services
+pick it up automatically on rebuild**, no per-service source change needed. Drain/activate: an
+operator-key gate (`Authorization: Bearer <registry_operator_key>`, `None`-by-default/fully locked) — the
+real caller is `scripts/rolling-update.sh`, an external ops script, not a service, so this reuses
+`federation-hub-service`'s existing `hub_operator_key` shape exactly rather than inventing a new
+mechanism. `scripts/rolling-update.sh` and `docs/operations/rolling-updates.md` updated to send the new
+header.
+
+New/updated tests: `registry-service` +9 (`test_register_without_principal_header_is_401`,
+`test_register_with_mismatched_principal_is_403`, `test_heartbeat_with_wrong_principal_is_403`,
+`test_deregister_with_wrong_principal_is_403`, `test_drain_without_operator_key_is_403`,
+`test_activate_without_operator_key_is_403`, plus two repository-level tests), 54/54 total — ~15 existing
+call sites across `test_api.py`/`test_repository.py`/`test_events.py` updated with the now-required
+headers. `libs/dms-registry-client`'s own test suite updated (`_deregister_via_api` helper now sends a
+matching header for its own out-of-band simulated deregistration). `ruff` clean (same pre-existing,
+unrelated repo-wide failures confirmed out of scope again).
+
+**All 32 affected services (registry-service + the 31 importing `dms_registry_client`) rebuilt and
+redeployed together in one batch** — deliberately not staggered, since a rolling redeploy would have left
+already-running old-image containers heartbeating against the new gate with no header, getting a silent
+`403` (not the `404` that triggers the client's own self-healing re-registration) and eventually being
+marked unhealthy by the routing table. **Live-verified against the real running stack**: `curl` confirmed
+`401`/`403` for the new gates, a real register→heartbeat→deregister round trip with a matching identity
+succeeded, `403` confirmed for drain with no operator key configured (deliberately left locked by
+default, matching the `hub_operator_key` precedent). Checked all 29 freshly-registered instances
+(everything registered in the last two minutes post-redeploy) were `healthy: true` and found no `403`s in
+`registry-service`'s own logs — confirmed the fleet-wide rebuild avoided any heartbeat-gate interruption.
+
+`docs/services/registry-service.md`: API table (all five mutating rows annotated) + new "Authorization"
+section; `libs/dms-registry-client/README.md` updated with the new default-header behavior.
+
+**Next session:** P59-S5 — `migration-service`'s `POST /transfers`/`POST /paired-installations` combine
+missing caller-permission checks, an SSRF-vulnerable `base_url`, and a forgeable `created_by` field. Fifth
+and last session of Phase 59.
+
+---
+
+Immediately before P59-S4: **P59-S3** (`signature-service`'s `POST /signatures` had no authorization check
+AND trusted a client-supplied `signer_principal_id` with no identity validation — third session of Phase
+59, "Critical Authorization Bugs"). **New ADR**
 ([0180](docs/adr/0180-signature-service-create-signature-permission-and-signer-identity-gate.md)) — a real
 authorization-model decision, per the plan's own DoD.
 

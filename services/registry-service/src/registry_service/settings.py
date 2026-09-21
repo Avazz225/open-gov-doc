@@ -44,3 +44,10 @@ class Settings(BaseServiceSettings):
     # UI's registry overview.
     unreachable_cleanup_after_seconds: float = 604800.0
     cleanup_poll_interval_seconds: float = 3600.0
+
+    # Operator gate for drain/activate (10.5/3.8, Phase 59 Session 4) - same
+    # bearer-secret pattern as `federation-hub-service`'s `hub_operator_key`
+    # (ADR 0039): `None` by default, fully locked (`403`) until an operator
+    # deliberately sets it. `scripts/rolling-update.sh` reads the same value
+    # from `REGISTRY_OPERATOR_KEY` in the operator's own shell environment.
+    registry_operator_key: str | None = None

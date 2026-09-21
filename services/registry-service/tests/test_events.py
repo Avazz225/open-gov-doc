@@ -12,7 +12,9 @@ NATS_URL = os.environ.get("TEST_NATS_URL", "nats://localhost:4222")
 
 @pytest.fixture
 def client():
-    with TestClient(app) as c:
+    """Default `X-DMS-Principal` matching the `service_type` both tests
+    below register as (Phase 59 Session 4) - see `test_api.py::client`."""
+    with TestClient(app, headers={"X-DMS-Principal": "document-service"}) as c:
         yield c
 
 

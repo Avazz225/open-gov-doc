@@ -11,6 +11,15 @@ class InstanceNotFoundError(Exception):
     pass
 
 
+class PermissionDeniedError(Exception):
+    """Raised by `heartbeat`/`deregister` (Phase 59 Session 4) when the
+    caller's own `X-DMS-Principal` does not match the target instance's own
+    `service_type` - existence (`InstanceNotFoundError`) is always checked
+    first, same ordering convention as the rest of this project."""
+
+    pass
+
+
 def _is_healthy(instance: ServiceInstance, timeout_seconds: float, now: datetime) -> bool:
     age = (now - instance.last_heartbeat_at).total_seconds()
     return age <= timeout_seconds
@@ -61,10 +70,12 @@ async def register(session: AsyncSession, payload: RegisterRequest) -> InstanceO
     return _to_out(instance, timeout_seconds=0, now=now)
 
 
-async def heartbeat(session: AsyncSession, instance_id: str) -> InstanceOut:
+async def heartbeat(session: AsyncSession, instance_id: str, x_dms_principal: str) -> InstanceOut:
     instance = await session.get(ServiceInstance, instance_id)
     if instance is None:
         raise InstanceNotFoundError(instance_id)
+    if x_dms_principal != instance.service_type:
+        raise PermissionDeniedError(instance_id)
     now = datetime.now(UTC)
     instance.last_heartbeat_at = now
     await session.flush()
@@ -98,10 +109,12 @@ async def activate(session: AsyncSession, instance_id: str) -> InstanceOut:
     return _to_out(instance, timeout_seconds=0, now=datetime.now(UTC))
 
 
-async def deregister(session: AsyncSession, instance_id: str) -> InstanceOut:
+async def deregister(session: AsyncSession, instance_id: str, x_dms_principal: str) -> InstanceOut:
     instance = await session.get(ServiceInstance, instance_id)
     if instance is None:
         raise InstanceNotFoundError(instance_id)
+    if x_dms_principal != instance.service_type:
+        raise PermissionDeniedError(instance_id)
     result = _to_out(instance, timeout_seconds=0, now=datetime.now(UTC))
     await session.delete(instance)
     await session.flush()

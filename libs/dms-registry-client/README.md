@@ -25,6 +25,14 @@ if registration:
 or `self_address` are not set (default in `BaseServiceSettings`) —
 discovery is thus opt-in, not a hard dependency for the service itself.
 
+**Since Phase 59 Session 4** ([ADR 0181](../../docs/adr/0181-registry-service-instance-mutation-authorization.md)):
+every request sends a fixed `X-DMS-Principal: <service_type>` default
+header — `registry-service` checks this equals the `service_type` being
+registered/heartbeated/deregistered, closing a previously wide-open
+authorization gap on every mutating instance endpoint. No caller-facing
+change needed — this is set automatically from the `service_type` this
+function is already called with.
+
 ## Behavior on errors
 
 If the registry is unreachable (on start, heartbeat, or deregistration),

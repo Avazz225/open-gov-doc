@@ -16,8 +16,16 @@ async def _get_instance(service_type: str, instance_id: str) -> dict | None:
         return next((i for i in response.json() if i["instance_id"] == instance_id), None)
 
 
-async def _deregister_via_api(instance_id: str) -> None:
-    async with httpx.AsyncClient(base_url=REGISTRY_URL) as client:
+async def _deregister_via_api(instance_id: str, service_type: str) -> None:
+    """`X-DMS-Principal` (Phase 59 Session 4, ADR 0181) - must equal the
+    target instance's own `service_type`, same self-service gate
+    `RegistryRegistration`'s own internal client now satisfies
+    automatically; this helper simulates an out-of-band deregistration
+    (e.g. the registry "forgetting" an instance), so it sends the matching
+    header explicitly instead."""
+    async with httpx.AsyncClient(
+        base_url=REGISTRY_URL, headers={"X-DMS-Principal": service_type}
+    ) as client:
         await client.delete(f"/instances/{instance_id}")
 
 
@@ -82,7 +90,7 @@ async def test_heartbeat_reregisters_after_registry_forgot_instance():
     )
     await registration.start()
     try:
-        await _deregister_via_api(registration.instance_id)
+        await _deregister_via_api(registration.instance_id, service_type)
         assert await _get_instance(service_type, registration.instance_id) is None
 
         await asyncio.sleep(0.35)
