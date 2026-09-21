@@ -22,17 +22,29 @@ pure NATS **consumer** with no own stream (`ensure_stream=False`) — see "Four-
 **ADR:** [0035 — Export scope, upsert semantics, gating reuse](../adr/0035-config-service-scope-and-upsert-semantics.md),
 [0040 — Delta comparison: field-level diff, no automatic cross-installation fetch](../adr/0040-config-compare-field-level-diff-no-cross-installation-fetch.md),
 [0058 — Configuration packages: manifest + `realm_roles`, gateway route split](../adr/0058-konfigurationspakete-manifest-realm-roles-and-gateway-import-route-split.md),
-[0060 — eGov package part 2: four-eyes gaps closed](../adr/0060-egov-paket-teil-2-vier-augen-luecken-und-umlaufmappen-prozessvorlagen.md)
+[0060 — eGov package part 2: four-eyes gaps closed](../adr/0060-egov-paket-teil-2-vier-augen-luecken-und-umlaufmappen-prozessvorlagen.md),
+[0188 — Export/compare authorization gating](../adr/0188-config-service-export-gating-search-facet-leak-and-query-limit-clamp.md)
 
 ## API
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/config/export` | Exports a `ConfigDocument` — optionally `?categories=roles&categories=workflows` to restrict scope, otherwise all ten categories |
-| `POST` | `/config/compare` | **Since P14-S1**: delta/comparison function (7.5) — body `{compare, base?, categories?, ignore_regex?}`; if `base` is missing, the service's own current live export is used as the base instance. Purely read-only/diagnostic, ungated like `GET /config/export`. `422` for an unknown category or invalid `ignore_regex` |
+| `GET` | `/config/export` | Exports a `ConfigDocument` — optionally `?categories=roles&categories=workflows` to restrict scope, otherwise all ten categories. **Since P61-S3** requires an `X-DMS-Principal` header with `admin.config_read` permission (`401` with no header, `403` without the permission) — see "Authorization for Export/Compare" below |
+| `POST` | `/config/compare` | **Since P14-S1**: delta/comparison function (7.5) — body `{compare, base?, categories?, ignore_regex?}`; if `base` is missing, the service's own current live export is used as the base instance. Purely read-only/diagnostic. **Since P61-S3** requires the same `admin.config_read` permission as `GET /config/export` (previously ungated — see "Authorization for Export/Compare" below). `422` for an unknown category or invalid `ignore_regex` |
 | `POST` | `/config/import` | Applies a `ConfigDocument` (upsert per category) — requires an `X-DMS-Principal` header with `admin.object_config` permission, otherwise `403`; an unknown `schema_version` with no migration path → `422`. **Since P17-S1 NO LONGER a public gateway route** (see "Gateway Route Split" below). **Since P17-S3** optionally gated via the four-eyes principle (`config.import`, see below) — response `ImportActionResult` (`status: "applied"\|"pending_approval"`, `result`, `approval_request_id`) instead of the previous flat `ImportResult` |
 | `POST` | `/config/fleet-import` | **Since P17-S1** (previously the same route as `/config/import`): identical application logic, but exclusively for `fleet-management-service` — requires `Authorization: Bearer <DMS_FLEET_AGENT_API_KEY>` (3a/P13-S2, [ADR 0037](../adr/0037-fleet-management-service-agent-key-and-gateway-public-routes.md)), no RBAC branch. Remains the public gateway route. **Deliberately still ungated** (see below) |
 | `GET` | `/healthz` | Health check (ungated) |
+
+## Authorization for Export/Compare (since P61-S3, ADR 0188)
+
+`GET /config/export` and `POST /config/compare` previously had no permission check at all, despite
+`export_config` returning the full role/permission catalog, the AD-group→role mapping table, Keycloak
+realm role names, and BPMN process/DMN definitions to any authenticated caller — reconnaissance-grade
+information about the installation's access-control model. Both endpoints now require an
+`X-DMS-Principal` header (`401` if missing) with the `admin.config_read` capability (`403` otherwise),
+granted via the new `domain-admin-config-read` role. Deliberately a dedicated READ capability, not a
+reuse of `admin.object_config` (the existing WRITE-flavored capability gating `POST /config/import`) —
+same read/write split convention as e.g. `admin.notification_read` vs `notification.write`.
 
 ## Four-Eyes Principle for `config.import` (4.3/14.2, since P17-S3)
 
@@ -228,8 +240,9 @@ read-only/diagnostic, changes nothing on either side (7.5). See
   its own, regularly authenticated `GET /config/export` access to the respective installation,
   e.g. via `dms config export`), even if both installations participate in a shared Federation
   Hub. Deliberately scoped smaller than 7.5's optionally mentioned hub automation, in order
-  to neither publicly gate `GET /config/export` nor turn `config-service` into its own
-  federation participant.
+  to not turn `config-service` into its own federation participant. (Since P61-S3/ADR 0188,
+  `GET /config/export` itself is RBAC-gated — see "Authorization for Export/Compare" above; this
+  point is about cross-installation automation, not the endpoint's own access control.)
 - **No deep diff of nested structures** — a change deep within an
   object-type layout is reported as "the entire `layouts` field differs", not line-precisely.
 - **No admin UI visualization of the comparison** in this session — CLI and raw API only,

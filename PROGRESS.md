@@ -2,11 +2,67 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P61-S2 (unbounded file uploads before expensive processing, the same gap independently
-in `virus-scan-service`/`rendering-service`/`storage-service` — second session of Phase 61,
-"Medium-Severity Findings"). **New ADR**
-([0187](docs/adr/0187-shared-max-upload-size-middleware.md)) — a real shared-fix design decision, per the
-plan's own DoD.
+**Last completed:** P61-S3 (three independent, bundled findings — third and final session of Phase 61,
+"Medium-Severity Findings", closing Phase 61). **New ADR**
+([0188](docs/adr/0188-config-service-export-gating-search-facet-leak-and-query-limit-clamp.md)) — three
+real security/correctness fixes, per the plan's own DoD.
+
+**The gaps.** (a) `config-service`'s `GET /config/export`/`POST /config/compare` were completely ungated
+— their own docstrings claimed "does not expose any installation-specific data", but `export_config`
+actually returns the full role/permission catalog, AD-group→role mapping table, Keycloak realm role names,
+and BPMN process/DMN definitions to any authenticated caller — reconnaissance-grade access-control
+information. (b) `search-service`'s `facet_counts` ran a SEPARATE, unfiltered SQL `GROUP BY` query over the
+same filters as `search()` but WITHOUT its permission filtering — a caller with no access to a folder
+could still learn its name and document count via the facet counts, even though the main `results` list
+correctly excluded it. (c) `query-service`'s `GET /query/events?limit=` was unbounded, unlike
+`search-service`'s own established `limit = min(limit, 100)` precedent for the identical parameter shape —
+and the natural-language parser-plugin path fed the same call with its own independently unbounded `limit`.
+
+**The fixes.** (a) New dedicated READ capability `admin.config_read` (role `domain-admin-config-read`),
+distinct from the existing WRITE-flavored `admin.object_config` (gates `POST /config/import`) — same
+read/write split convention as `admin.notification_read` vs `notification.write`. `401` with no
+`X-DMS-Principal`, `403` without the permission. (b) New `repository.facet_counts_from_readable()`, a
+pure-Python aggregation over the SAME, already-permission-filtered `readable` list `main.search` already
+builds via `check_batch` — no separate query, no separate leak surface. Accepted, honestly documented
+tradeoff: since `readable` is bounded by the existing `search_result_hard_limit` overfetch cap, facet
+counts for a query whose true matching set exceeds that cap become an undercount — the same
+"eventually consistent under a cap" ceiling pagination already has. (c) `limit = min(limit, 100)` moved
+into `_run_query`, the single function both `query_events` and the parser-plugin path share — closes both
+callers with one change.
+
+New tests: `config-service` 52/52 (+6: two existing `/config/import` tests' "without principal header"
+premise fixed to explicitly send an empty override, since `_client()`'s new default header would otherwise
+silently defeat it; 4 new export/compare gating tests), `search-service` 76/76 (+1, isolated-folder facet
+leak regression test), `query-service` 54/54 (+1, `limit=999999` still calls `audit_client.list_events`
+with `limit=100`), `permission-service` 182/182 (new role, unaffected otherwise). `ruff` clean across all
+four services (same pre-existing, unrelated repo-wide failure in `apps/libreoffice-addin` confirmed out of
+scope again).
+
+`permission-service` rebuilt/redeployed first (new role seed), then `config-service`/`search-service`/
+`query-service`. **Live-verified against the real running stack**: `config-service` — `401`/`403`/`200`
+confirmed via `curl` for no-header/unauthorized/newly-granted principal respectively; `query-service` —
+`limit=999999` against real audit-service (100k+ events) returned `total_before_filter: 100`, confirming
+the clamp fired before RBAC filtering; `search-service` — redeployed `/search` endpoint smoke-tested,
+correct `facet_counts` shape, isolated-folder leak scenario covered by the passing automated regression
+test (which itself runs against the real permission-service/Postgres, not mocks).
+
+`docs/services/config-service.md` (new "Authorization for Export/Compare" section, API table rows
+updated), `docs/services/search-service.md` (Permission Filtering + Records Quarantine Awareness sections
+extended, Open Points test count updated), `docs/services/query-service.md` (API table row + Tests section
+updated), `docs/services/permission-service.md` (new `domain-admin-config-read` row in the domain-admin
+roles table — also backfilled the missing `domain-admin-migration` row from P59-S5, found while touching
+this table).
+
+**Next session:** Phase 61 is now closed (3/3 sessions done). Continue with P61-S4 per the plan
+(`webdav-connector` edit-token scope + `mail-connector` size limit, bundled), then Phase 62
+("Low-Priority Security Cleanup + Selected Functional Completions").
+
+---
+
+Immediately before P61-S3: **P61-S2** (unbounded file uploads before expensive processing, the same gap
+independently in `virus-scan-service`/`rendering-service`/`storage-service` — second session of Phase 61).
+**New ADR** ([0187](docs/adr/0187-shared-max-upload-size-middleware.md)) — a real shared-fix design
+decision, per the plan's own DoD.
 
 **The gap.** `virus-scan-service`'s `POST /scan`, `rendering-service`'s several render/convert/export
 endpoints, and `storage-service`'s object-upload endpoints all read an entire upload into memory before
@@ -44,10 +100,6 @@ normally.
 
 `docs/services/virus-scan-service.md`/`rendering-service.md`/`storage-service.md`: API table row
 (virus-scan-service) + Open Points bullets closed in all three, cross-referencing the shared fix.
-
-**Next session:** P61-S3 — three independent, bundled findings: `config-service`'s over-broad "ungated"
-export/compare endpoints, `search-service`'s pre-permission-filtering `facet_counts` leak, `query-service`'s
-unclamped `limit`. Third session of Phase 61.
 
 ---
 

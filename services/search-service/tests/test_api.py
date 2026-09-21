@@ -251,6 +251,41 @@ async def test_search_only_returns_documents_the_principal_may_read():
     assert all(r["title"] != title for r in denied_response.json()["results"])
 
 
+async def test_search_facet_counts_exclude_documents_the_principal_may_not_read():
+    """Phase 61 Session 3 (ADR 0188) - `facet_counts` previously ran a
+    SEPARATE, unfiltered query and genuinely leaked document existence/
+    volume/folder-name information across the same permission boundary
+    `test_search_only_returns_documents_the_principal_may_read` above
+    already proves the main `results` respect. Same isolated-folder setup
+    as that test."""
+    title = f"Facet-Sondertitel-{uuid.uuid4().hex[:8]}"
+    isolated_folder = _create_folder(f"Facet-Isoliert-{uuid.uuid4().hex[:8]}")
+    _isolate_resource(isolated_folder)
+    await _index_at_root(title, folder_id=isolated_folder)
+
+    allowed_principal = f"alice-{uuid.uuid4().hex[:8]}"
+    denied_principal = f"bob-{uuid.uuid4().hex[:8]}"
+    _grant_root_read(allowed_principal, resource_id=isolated_folder)
+
+    with TestClient(app) as client:
+        allowed_response = client.get(
+            "/search", params={"q": title}, headers={"X-DMS-Principal": allowed_principal}
+        )
+        denied_response = client.get(
+            "/search", params={"q": title}, headers={"X-DMS-Principal": denied_principal}
+        )
+
+    allowed_folder_ids = {
+        row["folder_id"] for row in allowed_response.json()["facet_counts"]["folder"]
+    }
+    assert isolated_folder in allowed_folder_ids
+
+    denied_folder_ids = {
+        row["folder_id"] for row in denied_response.json()["facet_counts"]["folder"]
+    }
+    assert isolated_folder not in denied_folder_ids
+
+
 async def test_search_registered_false_lists_only_unregistered_documents_over_http():
     # Work-tray browsing (ADR 0113/0118/0146).
     unique = uuid.uuid4().hex[:8]

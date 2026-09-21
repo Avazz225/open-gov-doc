@@ -486,12 +486,18 @@ async def test_search_invalid_query_raises_syntax_error(session):
 
 
 async def test_facet_counts_groups_by_folder(session):
+    """Phase 61 Session 3 (ADR 0188): `facet_counts_from_readable` now
+    computes counts in-process from an already-fetched `rows` list
+    (the caller's permission-filtered `readable`, in production) instead
+    of running its own separate, unfiltered query - this test builds that
+    `rows` list via a real `repository.search()` call, matching what
+    `main.search` actually passes it in practice."""
     await _index(session, folder_id="fa", folder_name="Ordner A")
     await _index(session, folder_id="fa", folder_name="Ordner A")
     await _index(session, folder_id="fb", folder_name="Ordner B")
     await session.commit()
 
-    facets = await repository.facet_counts(
+    rows = await repository.search(
         session,
         query=None,
         folder_id=None,
@@ -500,7 +506,12 @@ async def test_facet_counts_groups_by_folder(session):
         created_after=None,
         created_before=None,
         attr_filters=[],
+        limit=20,
+        offset=0,
+        sort="relevance",
     )
+
+    facets = repository.facet_counts_from_readable(rows)
 
     counts = {row["folder_id"]: row["count"] for row in facets["folder"]}
     assert counts.get("fa") == 2
@@ -612,7 +623,7 @@ async def test_facet_counts_excludes_quarantined_documents(session):
     )
     await session.commit()
 
-    facets = await repository.facet_counts(
+    rows = await repository.search(
         session,
         query=None,
         folder_id=None,
@@ -621,7 +632,11 @@ async def test_facet_counts_excludes_quarantined_documents(session):
         created_after=None,
         created_before=None,
         attr_filters=[],
+        limit=20,
+        offset=0,
+        sort="relevance",
     )
+    facets = repository.facet_counts_from_readable(rows)
 
     assert all(row["folder_id"] != "fq" for row in facets["folder"])
 

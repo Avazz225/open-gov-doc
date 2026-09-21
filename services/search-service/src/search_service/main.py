@@ -273,16 +273,12 @@ async def search(
     readable = [(doc, rank) for doc, rank in rows if allowed.get(doc.document_id, False)]
     page = readable[offset : offset + limit]
 
-    facets = await repository.facet_counts(
-        session,
-        query=q,
-        folder_id=folder_id,
-        object_type_id=object_type_id,
-        created_by=created_by,
-        created_after=created_after,
-        created_before=created_before,
-        attr_filters=attr_filters,
-    )
+    # Computed from `readable` (Phase 61 Session 3, ADR 0188) - previously
+    # a separate, unfiltered query leaking facet information across the
+    # same permission boundary `readable` above already enforces for the
+    # main results. See `repository.facet_counts_from_readable`'s own
+    # docstring for the accepted overfetch-cap tradeoff.
+    facets = repository.facet_counts_from_readable(readable)
 
     return {
         "results": [

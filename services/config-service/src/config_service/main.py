@@ -116,6 +116,23 @@ async def _require_import_permission(x_dms_principal: str) -> None:
         )
 
 
+async def _require_export_permission(x_dms_principal: str) -> None:
+    """RBAC (Phase 61 Session 3, ADR 0188) - `GET /config/export`/`POST
+    /config/compare` previously had no permission check at all, despite
+    returning reconnaissance-grade access-control information (see
+    `settings.export_required_capability`'s own docstring)."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    allowed = await app.state.permission_client.has_permission(
+        x_dms_principal, settings.export_required_capability
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Fehlende Domain-Admin-Rolle 'Konfiguration einsehen'",
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.object_type_client = ObjectTypeServiceClient(settings.object_type_service_base_url)
@@ -191,7 +208,11 @@ def get_metrics() -> Response:
 
 
 @app.get("/config/export", response_model=ConfigDocument)
-async def export_config(categories: list[str] | None = Query(default=None)) -> ConfigDocument:
+async def export_config(
+    categories: list[str] | None = Query(default=None),
+    x_dms_principal: str = Header(default=""),
+) -> ConfigDocument:
+    await _require_export_permission(x_dms_principal)
     resolved = _resolve_categories(categories)
     return await export.build_export(
         categories=resolved,
@@ -204,13 +225,19 @@ async def export_config(categories: list[str] | None = Query(default=None)) -> C
 
 
 @app.post("/config/compare", response_model=CompareResult)
-async def compare_config(payload: CompareRequest) -> CompareResult:
+async def compare_config(
+    payload: CompareRequest, x_dms_principal: str = Header(default="")
+) -> CompareResult:
     """Delta/comparison function (7.5, P14-S1) - purely read-only/diagnostic,
-    ungated like `GET /config/export` (does not change anything, does not expose
-    any installation-specific data such as license state/registry reachability,
-    which is not part of `ConfigDocument` anyway). If `base` is missing,
-    its own current live export is used as the base instance - use case
-    "what would change if I import `compare`"."""
+    does not change anything. **Since Phase 61 Session 3** (ADR 0188): gated by
+    `_require_export_permission`, same as `GET /config/export` - the
+    previous "ungated, does not expose any installation-specific data"
+    claim in this docstring turned out inaccurate (both endpoints return
+    the full role/permission catalog, AD-group->role mapping, Keycloak
+    realm roles, and BPMN definitions). If `base` is missing, its own
+    current live export is used as the base instance - use case "what
+    would change if I import `compare`"."""
+    await _require_export_permission(x_dms_principal)
     resolved = _resolve_categories(payload.categories)
     if payload.ignore_regex:
         for pattern in payload.ignore_regex.values():

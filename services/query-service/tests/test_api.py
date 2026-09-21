@@ -60,6 +60,19 @@ def test_query_events_returns_empty_result_with_role(client):
     }
 
 
+def test_query_events_clamps_limit_to_100(client):
+    """Phase 61 Session 3 (ADR 0188) - `limit` was previously unbounded,
+    unlike `search-service`'s own `limit = min(limit, 100)` precedent."""
+    app.state.audit_client.list_events.return_value = []
+
+    response = client.get(
+        "/query/events", params={"limit": 999999}, headers={"x-dms-principal": "alice"}
+    )
+
+    assert response.status_code == 200
+    assert app.state.audit_client.list_events.call_args.kwargs["limit"] == 100
+
+
 def test_query_events_filters_result_by_permission(client):
     app.state.audit_client.list_events.return_value = [
         {

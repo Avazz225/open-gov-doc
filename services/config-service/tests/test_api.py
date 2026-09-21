@@ -22,7 +22,15 @@ AUTH_SERVICE_URL = os.environ.get("TEST_AUTH_SERVICE_URL", "http://localhost:800
 
 
 def _client() -> httpx.Client:
-    return httpx.Client(base_url=CONFIG_SERVICE_URL, timeout=30.0)
+    """Default `X-DMS-Principal` (Phase 61 Session 3, ADR 0188) -
+    `config-service-tests` is granted `admin.config_read` in `conftest.py`
+    (`_grant_export_read_permission`), needed since `GET /config/export`/
+    `POST /config/compare` are no longer ungated."""
+    return httpx.Client(
+        base_url=CONFIG_SERVICE_URL,
+        timeout=30.0,
+        headers={"X-DMS-Principal": "config-service-tests"},
+    )
 
 
 def test_healthz():
@@ -73,6 +81,42 @@ def test_export_with_unknown_category_returns_422():
     with _client() as client:
         response = client.get("/config/export", params={"categories": "does-not-exist"})
     assert response.status_code == 422
+
+
+def test_export_without_principal_header_returns_401():
+    """Phase 61 Session 3 (ADR 0188) - `GET /config/export` previously had no
+    permission check at all, see `_require_export_permission`'s docstring."""
+    with _client() as client:
+        response = client.get("/config/export", headers={"X-DMS-Principal": ""})
+    assert response.status_code == 401
+
+
+def test_export_with_unauthorized_principal_returns_403():
+    with _client() as client:
+        response = client.get(
+            "/config/export", headers={"X-DMS-Principal": "irgendein-nutzer-ohne-rolle"}
+        )
+    assert response.status_code == 403
+
+
+def test_compare_without_principal_header_returns_401():
+    with _client() as client:
+        response = client.post(
+            "/config/compare",
+            json={"compare": {"schema_version": "1.0", "exported_at": "2026-01-01T00:00:00Z"}},
+            headers={"X-DMS-Principal": ""},
+        )
+    assert response.status_code == 401
+
+
+def test_compare_with_unauthorized_principal_returns_403():
+    with _client() as client:
+        response = client.post(
+            "/config/compare",
+            json={"compare": {"schema_version": "1.0", "exported_at": "2026-01-01T00:00:00Z"}},
+            headers={"X-DMS-Principal": "irgendein-nutzer-ohne-rolle"},
+        )
+    assert response.status_code == 403
 
 
 def test_compare_identical_document_against_itself_reports_no_differences():
@@ -197,10 +241,14 @@ def test_compare_with_unknown_category_returns_422():
 
 
 def test_import_without_principal_header_returns_403():
+    """Explicit empty `X-DMS-Principal` override (Phase 61 Session 3) -
+    `_client()`'s default header would otherwise always send one, defeating
+    this test's own "without header" premise."""
     with _client() as client:
         response = client.post(
             "/config/import",
             json={"schema_version": "1.0", "exported_at": "2026-01-01T00:00:00Z"},
+            headers={"X-DMS-Principal": ""},
         )
     assert response.status_code == 403
 
@@ -219,12 +267,15 @@ def test_import_with_fleet_agent_key_no_longer_bypasses_rbac_on_config_import():
     """P17-S1: `POST /config/import` verlangt seit der Trennung von
     `POST /config/fleet-import` ausschließlich RBAC - ein Fleet-Agent-
     Schlüssel ohne `X-DMS-Principal` wird hier jetzt abgelehnt (vorher, als
-    beide Zugriffswege denselben Pfad teilten, war das ein Bypass)."""
+    beide Zugriffswege denselben Pfad teilten, war das ein Bypass). Explicit
+    empty `X-DMS-Principal` override (Phase 61 Session 3) - `_client()`'s
+    default header would otherwise always send one, defeating this test's
+    own "without header" premise."""
     with _client() as client:
         response = client.post(
             "/config/import",
             json={"schema_version": "1.0", "exported_at": "2026-01-01T00:00:00Z"},
-            headers={"Authorization": "Bearer dev-fleet-agent-key"},
+            headers={"Authorization": "Bearer dev-fleet-agent-key", "X-DMS-Principal": ""},
         )
     assert response.status_code == 403
 

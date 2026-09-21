@@ -382,6 +382,19 @@ DOMAIN_ADMIN_ROLES: list[tuple[str, str, list[str]]] = [
         "Migrations-Installationspaarung verwalten",
         ["admin.migration_management"],
     ),
+    # Phase 61 Session 3: `config-service`'s `GET /config/export`/`POST
+    # /config/compare` previously had no permission check at all, despite
+    # returning reconnaissance-grade access-control information (full
+    # role/permission catalog, AD-group->role mapping, Keycloak realm
+    # roles, BPMN definitions) to any authenticated caller. A dedicated
+    # READ capability, distinct from `admin.object_config` (which already
+    # gates `POST /config/import`, a WRITE action) - same read/write split
+    # convention as `admin.notification_read` vs. `notification.write`.
+    (
+        "domain-admin-config-read",
+        "Konfiguration einsehen (Export/Vergleich)",
+        ["admin.config_read"],
+    ),
 ]
 
 

@@ -5,7 +5,7 @@ from typing import Literal
 from search_service.models import FolderReference, SearchDocument
 from search_service.query_compiler import compile_query
 from search_service.query_language import parse_query
-from sqlalchemy import Date, Numeric, cast, delete, func, null, select, text
+from sqlalchemy import Date, Numeric, cast, delete, null, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -204,59 +204,40 @@ async def search(
     return [(row[0], row[1]) for row in result.all()]
 
 
-async def facet_counts(
-    session: AsyncSession,
-    *,
-    query: str | None,
-    folder_id: str | None,
-    object_type_id: int | None,
-    created_by: str | None,
-    created_after: datetime | None,
-    created_before: datetime | None,
-    attr_filters: list[AttrFilter],
-) -> dict:
-    """Grouped hit counts over the same (pre-permission-filtering) result
-    set as `search()` - deliberately simple: no "facet without self-filter"
-    logic like larger search systems have, that would be overengineering
-    for the scope required here ("full-text index + facet search")."""
-    node = parse_query(query)
-    where = compile_query(node).where if node is not None else None
+def facet_counts_from_readable(rows: "list[tuple[SearchDocument, float | None]]") -> dict:
+    """Grouped hit counts (Phase 61 Session 3, ADR 0188) - previously a
+    separate SQL aggregation (`GROUP BY`) over the SAME filters as
+    `search()` but WITHOUT its permission filtering, genuinely leaking
+    document existence/volume/folder-name information across a permission
+    boundary the caller could not otherwise see through (a caller with no
+    access to a folder could still learn its name and how many matching
+    documents it contains). Now computed in-process from the SAME,
+    already-permission-filtered `readable` list `main.search` already
+    built via `check_batch` - no separate query, no separate leak surface.
 
-    base = select(SearchDocument.folder_id, SearchDocument.folder_name, func.count())
-    if where is not None:
-        base = base.where(where)
-    base = _apply_common_filters(
-        base,
-        folder_id=folder_id,
-        object_type_id=object_type_id,
-        created_by=created_by,
-        created_after=created_after,
-        created_before=created_before,
-        attr_filters=attr_filters,
-    ).group_by(SearchDocument.folder_id, SearchDocument.folder_name)
-    folder_rows = (await session.execute(base)).all()
-
-    base_ot = select(SearchDocument.object_type_id, func.count())
-    if where is not None:
-        base_ot = base_ot.where(where)
-    base_ot = _apply_common_filters(
-        base_ot,
-        folder_id=folder_id,
-        object_type_id=object_type_id,
-        created_by=created_by,
-        created_after=created_after,
-        created_before=created_before,
-        attr_filters=attr_filters,
-    ).group_by(SearchDocument.object_type_id)
-    object_type_rows = (await session.execute(base_ot)).all()
+    **Accepted, honestly documented tradeoff**: `readable` is itself
+    bounded by `search_result_hard_limit` (the existing overfetch cap,
+    unchanged by this session) - for a query whose TRUE matching set
+    exceeds that cap, these facet counts become an undercount of the real
+    total, the same "eventually consistent under a cap" ceiling pagination
+    already has, not a new limitation this session introduces. Correct and
+    exact for the overwhelmingly common case (a query's true match count
+    within the cap), and - unlike before - only ever describes documents
+    the caller can actually read."""
+    folder_counts: dict[tuple[str | None, str | None], int] = {}
+    object_type_counts: dict[int | None, int] = {}
+    for doc, _rank in rows:
+        folder_key = (doc.folder_id, doc.folder_name)
+        folder_counts[folder_key] = folder_counts.get(folder_key, 0) + 1
+        object_type_counts[doc.object_type_id] = object_type_counts.get(doc.object_type_id, 0) + 1
 
     return {
         "folder": [
             {"folder_id": fid, "folder_name": fname, "count": count}
-            for fid, fname, count in folder_rows
+            for (fid, fname), count in folder_counts.items()
         ],
         "object_type": [
-            {"object_type_id": otid, "count": count} for otid, count in object_type_rows
+            {"object_type_id": otid, "count": count} for otid, count in object_type_counts.items()
         ],
     }
 

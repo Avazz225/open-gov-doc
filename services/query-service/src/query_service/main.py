@@ -159,6 +159,14 @@ async def _run_query(
     until: datetime | None,
     limit: int,
 ) -> QueryResult:
+    # Clamped since Phase 61 Session 3 (ADR 0188) - previously unbounded on
+    # both callers below (`query_events`'s direct `limit` query param AND
+    # the natural-language parser plugin's own extracted `parsed.limit`),
+    # unlike `search-service`'s own `limit = min(limit, 100)` precedent
+    # (`main.py`'s `search`/`facet_counts`) for the identical parameter
+    # shape. Clamped once here, the single shared entry point for both
+    # callers, rather than at each call site separately.
+    limit = min(limit, 100)
     events = await app.state.audit_client.list_events(
         principal_id=principal_id,
         actor=actor,
