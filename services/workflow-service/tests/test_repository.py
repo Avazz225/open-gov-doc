@@ -3,7 +3,10 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from dms_db_base import make_session_factory
+from sqlalchemy import update
+from sqlalchemy.orm.exc import StaleDataError
 from workflow_service import repository, spiff_adapter
+from workflow_service.models import ProcessInstance
 
 
 async def test_create_process_definition_auto_detects_process_id(session, manual_task_bpmn):
@@ -418,6 +421,92 @@ async def test_complete_task_already_completed_raises(session, manual_task_bpmn)
     tasks = await repository.get_ready_tasks(session, instance.id)
     await repository.complete_task(session, instance.id, tasks[0].id, completed_by="bob", data={})
     with pytest.raises(repository.TaskNotReadyError):
+        await repository.complete_task(
+            session, instance.id, tasks[0].id, completed_by="bob", data={}
+        )
+
+
+async def test_process_instance_version_conflict_raises_stale_data_error(engine, manual_task_bpmn):
+    """Phase 60 Session 3 (ADR 0185) - direct proof that `ProcessInstance.
+    workflow_version` (`models.ProcessInstance.__mapper_args__`,
+    `version_id_col`) actually protects a read-modify-write race,
+    independent of `complete_task`'s own SpiffWorkflow-specific logic
+    (`spiff_adapter.deserialize`/`find_ready_task`'s exact behavior across
+    two independently-loaded, separately-deserialized `wf` copies is its
+    own, orthogonal concern - see `test_complete_task_finishes_the_
+    instance` etc. above for that). Two SEPARATE `AsyncSession`s (a single
+    session isn't concurrency-safe, same reasoning as `test_create_
+    process_definition_concurrent_uploads_get_distinct_versions` above),
+    sequenced deterministically (not `asyncio.gather` - optimistic
+    concurrency needs a genuine "who committed first" ordering to assert
+    against, not a race with a non-deterministic winner): `session_b`
+    loads the row into its own identity map BEFORE `session_a` commits,
+    so it keeps its stale, pre-commit `workflow_version` even after `a`'s
+    commit lands (`expire_on_commit=False`, `dms_db_base.make_session_
+    factory`) - exactly what a genuinely concurrent second request's
+    already-loaded object would see. Writing through that stale object
+    and flushing raises `StaleDataError` (SQLAlchemy's own optimistic-
+    concurrency exception, which `complete_task`/`retry_instance`
+    translate to `ConcurrentModificationError` - see those functions'
+    own `except StaleDataError` blocks, reviewed but not separately
+    re-exercised here to keep this test deterministic)."""
+    factory = make_session_factory(engine)
+    async with factory() as setup_session:
+        definition = await repository.create_process_definition(
+            setup_session, name="Approval", bpmn_xml=manual_task_bpmn, process_id=None
+        )
+        instance = await repository.start_instance(
+            setup_session, definition.id, created_by="alice", business_key=None, initial_data={}
+        )
+        await setup_session.commit()
+
+    async with factory() as session_a, factory() as session_b:
+        instance_a = await repository.get_instance(session_a, instance.id)
+        instance_b = await repository.get_instance(session_b, instance.id)
+        assert instance_a.workflow_version == instance_b.workflow_version
+
+        instance_a.updated_at = datetime.now(UTC)
+        await session_a.commit()
+
+        instance_b.updated_at = datetime.now(UTC)
+        with pytest.raises(StaleDataError):
+            await session_b.flush()
+
+
+async def test_complete_task_translates_version_conflict_to_concurrent_modification_error(
+    session, engine, manual_task_bpmn
+):
+    """Phase 60 Session 3 (ADR 0185) - proves `complete_task` itself
+    translates a lost optimistic-concurrency race into `Concurrent
+    ModificationError` (`409` at the API layer, see `main.complete_task`'s
+    own `except repository.ConcurrentModificationError` handling), using
+    a deterministic out-of-band version bump (a raw `UPDATE` via a SEPARATE
+    session/connection) rather than a second real session racing
+    SpiffWorkflow's own task-readiness state - see the companion test
+    above for why that turned out non-deterministic. `session` (the
+    fixture) still has its own, now-stale `ProcessInstance` cached with
+    the task genuinely ready in ITS OWN view; the bump only changes what's
+    in the DATABASE, simulating exactly what a real concurrent writer's
+    commit would have done."""
+    definition = await repository.create_process_definition(
+        session, name="Approval", bpmn_xml=manual_task_bpmn, process_id=None
+    )
+    instance = await repository.start_instance(
+        session, definition.id, created_by="alice", business_key=None, initial_data={}
+    )
+    tasks = await repository.get_ready_tasks(session, instance.id)
+    await session.commit()
+
+    factory = make_session_factory(engine)
+    async with factory() as other_session:
+        await other_session.execute(
+            update(ProcessInstance)
+            .where(ProcessInstance.id == instance.id)
+            .values(workflow_version=ProcessInstance.workflow_version + 1)
+        )
+        await other_session.commit()
+
+    with pytest.raises(repository.ConcurrentModificationError):
         await repository.complete_task(
             session, instance.id, tasks[0].id, completed_by="bob", data={}
         )

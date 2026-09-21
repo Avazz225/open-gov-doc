@@ -119,7 +119,19 @@ class ProcessInstance(Base):
     services, is an opaque cross-service reference (e.g. a future
     ``document_id``) without FK enforcement across service boundaries -
     unlike there, as of P6-S1 no caller actually checks it against
-    another service yet."""
+    another service yet.
+
+    ``workflow_version`` (Phase 60 Session 3, ADR 0185) is a SQLAlchemy
+    optimistic-concurrency version column (``__mapper_args__``,
+    ``version_id_col``) protecting every read-modify-write of
+    ``workflow_state``/``status`` - `complete_task`/`retry_instance`/
+    `advance_timers` all deserialize the blob, run SpiffWorkflow engine
+    steps (which can include a SYNCHRONOUS, potentially slow outbound
+    HTTP call via ``taskType=connector_call``, see ``main._handle_
+    connector_task``), then write the result back. Named distinctly from
+    ``ProcessDefinition.version`` above (an unrelated, pre-existing field:
+    BPMN process FAMILY versioning, not per-row optimistic concurrency) to
+    avoid any confusion between the two."""
 
     __tablename__ = "process_instance"
 
@@ -134,6 +146,9 @@ class ProcessInstance(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    workflow_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+
+    __mapper_args__ = {"version_id_col": workflow_version}
 
 
 class TaskClaim(Base):

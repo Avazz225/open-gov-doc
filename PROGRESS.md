@@ -2,7 +2,62 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P60-S2 (`archival-service` XXE hardening across five `etree.fromstring()` call sites
+**Last completed:** P60-S3 (`workflow-service`'s `ProcessInstance.workflow_state` had no locking/
+optimistic-concurrency protection — third and last session of Phase 60, "High-Severity Findings". **Phase
+60 is now fully closed** — all three findings from this round's live-code security sweep are fixed,
+tested, and verified). **New ADR**
+([0185](docs/adr/0185-workflow-service-process-instance-optimistic-concurrency.md)) — a real
+locking-strategy design decision, per the plan's own DoD.
+
+**The gap.** `complete_task`, `retry_instance`, and the SLA poll loop's `advance_timers` all did a plain
+read-modify-write with no protection — a BPMN parallel gateway producing two simultaneously-ready tasks,
+completed back-to-back by two callers, meant whichever committed last silently overwrote the other's
+completion, even though both HTTP calls returned `200`.
+
+**The fix.** New `workflow_version` column on `ProcessInstance`, wired via SQLAlchemy's built-in
+`version_id_col` optimistic-concurrency mechanism (named distinctly from the unrelated, pre-existing
+`ProcessDefinition.version`). **Optimistic concurrency, not a row lock, chosen deliberately**: a
+`taskType=connector_call` service task makes a synchronous, potentially slow outbound HTTP call INSIDE
+the same critical section (`main._handle_connector_task`) — a row lock would hold a real Postgres lock for
+that call's full duration (up to 300s for calls routed through migration-service), risking blocking the
+SLA poll loop and other requests for minutes. `complete_task`/`retry_instance` now catch `StaleDataError`
+and translate it to a new `ConcurrentModificationError` → `409` (with an explicit rollback, not the
+existing generic handler's commit). `advance_timers` deliberately left untranslated — a conflict there
+propagates to the SLA poll loop's existing, already-documented "one broken blob fails the whole tick,
+retried next tick" tolerance, rather than restructuring into per-instance transactions for a narrow edge
+case.
+
+New tests: `workflow-service` +2 — one proving `workflow_version` itself raises `StaleDataError` on a
+genuine two-session race (no SpiffWorkflow involvement, fully deterministic), one proving `complete_task`
+translates it to `409` (via a deterministic out-of-band version bump rather than a second session racing
+SpiffWorkflow's own task-readiness state, which turned out non-deterministic in practice across
+independently-deserialized copies of the identical state — extensively debugged, not a shortcut; see the
+ADR's own Rationale). **Found and fixed three unrelated pre-existing regressions in passing**, surfaced by
+running this service's own full test suite (not just the new tests): (1) `workflow-service`'s
+`SignatureServiceClient` sent no `X-DMS-Principal` — a REAL PRODUCTION BUG, not just a test gap, broken
+since P59-S3's signature-service gate shipped earlier in this same round (every signature-task completion
+check would have 401'd in production); fixed with the established fixed-identity-header convention. (2)
+Two of `workflow-service`'s own test fixtures called `signature-service` directly with no identity headers
+— same P59-S3 gap, test-fixture side. (3) Two federation/xdomea-handoff test fixtures used a literal
+loopback `callback_base_url`, now rejected by P60-S1's SSRF guard — switched to a non-resolving RFC 2606
+test domain matching `federation-hub-service`'s own convention. 218/218 total. `ruff` clean (same
+pre-existing, unrelated repo-wide failures confirmed out of scope again).
+
+Rebuilt/redeployed. **Live-verified**: confirmed `workflow_version` exists on the real running database's
+`process_instance` table; the full test suite (running against the real Postgres instance, not mocked)
+passing end-to-end served as the meaningful verification for a persistence-layer concurrency fix.
+
+`docs/services/workflow-service.md`: API table rows annotated, new "Optimistic Concurrency for
+`ProcessInstance`" section, Open Points bullet closed (explicitly distinguished from the still-deferred,
+unrelated "no distributed lock across replicas" item), test count updated.
+
+**Next session:** none queued — Phase 60 is complete. Per this project's established pattern, check
+`IMPLEMENTATION_PLAN.md` for further queued phases (Phase 61 "Medium-Severity Findings" is next in the
+Phase 59+ gap-analysis round's plan) before self-initiating any new gap-analysis round.
+
+---
+
+Immediately before P60-S3: **P60-S2** (`archival-service` XXE hardening across five `etree.fromstring()` call sites
 in `xdomea.py`/`xjustiz.py` — second session of Phase 60, "High-Severity Findings"). **New ADR**
 ([0184](docs/adr/0184-archival-service-xxe-hardening.md)) — a real security-model decision refined by
 actual testing, per the plan's own DoD.

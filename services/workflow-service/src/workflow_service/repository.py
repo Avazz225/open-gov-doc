@@ -4,6 +4,7 @@ from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.exc import StaleDataError
 
 from workflow_service import spiff_adapter
 from workflow_service.models import (
@@ -85,6 +86,17 @@ class TaskAlreadyClaimedError(Exception):
 class InstanceNotRunningError(Exception):
     """`POST /instances/{id}/retry` (P12-S2) on an already `completed`
     instance - nothing to retry."""
+
+
+class ConcurrentModificationError(Exception):
+    """RBAC/correctness (Phase 60 Session 3, ADR 0185) - raised when
+    `ProcessInstance.workflow_version`'s optimistic-concurrency check
+    (`models.ProcessInstance.__mapper_args__`) rejects a write during
+    `complete_task`/`retry_instance` because another request already
+    modified the same instance since it was read (e.g. two Manual Tasks
+    from the same parallel gateway completed back-to-back). The caller
+    already sees a real `409` - not silently overwritten data - and can
+    retry against the now-current state."""
 
 
 # Postgres advisory lock namespaces (P25-S1, ADR 0096) for
@@ -552,7 +564,18 @@ async def complete_task(
         instance.updated_at = now
         if completed:
             instance.completed_at = now
-        await session.flush()
+        try:
+            await session.flush()
+        except StaleDataError as exc:
+            # Optimistic-concurrency conflict (Phase 60 Session 3, ADR
+            # 0185) - another request already modified this instance
+            # since it was read above (e.g. the sibling of a parallel
+            # gateway completed first). The caller (`main.complete_task`)
+            # must roll back, not commit, before returning `409`.
+            raise ConcurrentModificationError(
+                f"instance_id {instance_id!r} wurde gleichzeitig von einer anderen "
+                "Anfrage geändert - bitte erneut versuchen"
+            ) from exc
     return instance
 
 
@@ -718,7 +741,17 @@ async def retry_instance(session: AsyncSession, instance_id: str) -> ProcessInst
         instance.updated_at = now
         if completed:
             instance.completed_at = now
-        await session.flush()
+        try:
+            await session.flush()
+        except StaleDataError as exc:
+            # Same optimistic-concurrency conflict as `complete_task`
+            # above (Phase 60 Session 3, ADR 0185) - e.g. racing against a
+            # concurrent `complete_task` on the same instance, or against
+            # the SLA poll loop's own `advance_timers` tick.
+            raise ConcurrentModificationError(
+                f"instance_id {instance_id!r} wurde gleichzeitig von einer anderen "
+                "Anfrage geändert - bitte erneut versuchen"
+            ) from exc
     return instance
 
 
@@ -728,7 +761,26 @@ async def advance_timers(session: AsyncSession) -> list[TimerAdvanceResult]:
     re-persists the blob - regardless of whether anything fired, since the
     internal timer state (next due time) can also change otherwise. The
     consequence already documented in ADR 0019 (no efficient cross-instance
-    query possible) applies unchanged here."""
+    query possible) applies unchanged here.
+
+    Since Phase 60 Session 3 (ADR 0185), `ProcessInstance.workflow_version`
+    protects this batched write too - if ANY instance in this tick's batch
+    lost a race against a concurrent `complete_task`/`retry_instance`
+    since `list_instances` read it above, the single `session.flush()`
+    below raises `StaleDataError`, which is deliberately left
+    UNTRANSLATED here (unlike `complete_task`/`retry_instance`'s own
+    `ConcurrentModificationError` wrapping) - it propagates to `main.
+    _sla_poll_loop`'s existing `except Exception` catch, which ALREADY
+    tolerates "a single broken blob" failing the WHOLE tick and retrying
+    on the next one (see that function's own docstring) - the same
+    accepted tolerance model, not a new one. A per-instance-continue
+    restructure (so one conflicted instance doesn't also roll back
+    everyone else's otherwise-successful timer advances in the same tick)
+    was considered and explicitly deferred: SLA ticks repeat every
+    `sla_poll_interval_seconds`, so the cost of losing one whole tick to a
+    rare race is low, and the restructure would need per-instance
+    transactions/savepoints - real added complexity for a narrow edge
+    case, not undertaken in this session."""
     running = await list_instances(session, status="running")
     results: list[TimerAdvanceResult] = []
     now = datetime.now(UTC)

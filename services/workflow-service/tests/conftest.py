@@ -371,6 +371,11 @@ async def real_signature(real_signer):
                 "level": "aes",
                 "signer_principal_id": real_signer,
             },
+            # Phase 59 Session 3 (ADR 0180): signature-service now requires
+            # the caller's own document.write (baseline "everyone" grant
+            # for this ordinary document, ADR 0149) AND X-DMS-Username ==
+            # signer_principal_id.
+            headers={"X-DMS-Principal": "workflow-service-tests", "X-DMS-Username": real_signer},
         )
         response.raise_for_status()
         signature = response.json()
@@ -403,6 +408,7 @@ async def real_ses_signature(real_signer):
                 "level": "ses",
                 "signer_principal_id": real_signer,
             },
+            headers={"X-DMS-Principal": "workflow-service-tests", "X-DMS-Username": real_signer},
         )
         response.raise_for_status()
         signature = response.json()

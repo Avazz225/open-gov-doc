@@ -107,7 +107,12 @@ async def _register_throwaway_installation(**overrides) -> tuple[dict, bytes]:
     payload = {
         "id": f"test-install-{uuid.uuid4().hex[:8]}",
         "display_name": "Test-Zielinstallation",
-        "callback_base_url": "http://localhost:1",  # syntaktisch gültig, garantiert unerreichbar
+        # Phase 60 Session 1 (ADR 0183): federation-hub-service's new SSRF
+        # guard rejects a literal loopback address like "localhost" now -
+        # a non-resolving RFC 2606 test domain is still "syntaktisch
+        # gültig, garantiert unerreichbar" without tripping it, same
+        # convention that service's OWN test suite already uses.
+        "callback_base_url": "http://unreachable.invalid:1",
         "public_key_pem": public_pem.decode("utf-8"),
         "version": "1.0",
         "min_compatible_peer_version": "1.0",

@@ -444,6 +444,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ALTER COLUMN process_instance_id DROP NOT NULL"
             )
         )
+        # Optimistic concurrency for `ProcessInstance.workflow_state`
+        # (Phase 60 Session 3, ADR 0185) - named `workflow_version`, NOT
+        # `version`, to avoid any confusion with `process_definition.
+        # version` above (an unrelated, pre-existing field: BPMN process
+        # FAMILY versioning, not per-row optimistic concurrency). Same
+        # idempotent migration pattern as above.
+        await conn.execute(
+            text(
+                "ALTER TABLE workflow.process_instance "
+                "ADD COLUMN IF NOT EXISTS workflow_version INTEGER NOT NULL DEFAULT 0"
+            )
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
     # Business calendar cache (P14-S5): `business_days()` reads it
@@ -1738,6 +1750,14 @@ async def complete_task(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except repository.TaskNotReadyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except repository.ConcurrentModificationError as exc:
+        # Phase 60 Session 3 (ADR 0185) - unlike the generic `except
+        # Exception` below (which deliberately COMMITS a partial
+        # intermediate state per P12-S2 resumability), a failed
+        # `session.flush()` leaves the transaction unable to commit -
+        # must roll back instead.
+        await session.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception:
         # See `start_instance` - a subsequent automatic step can fail, the
         # already-flushed intermediate state must still be committed
@@ -1800,6 +1820,11 @@ async def retry_instance(
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except repository.InstanceNotRunningError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except repository.ConcurrentModificationError as exc:
+        # Phase 60 Session 3 (ADR 0185) - see `complete_task`'s identical
+        # handling above for why this rolls back instead of committing.
+        await session.rollback()
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception:
         # See `start_instance` - a repeated failing attempt must still be
