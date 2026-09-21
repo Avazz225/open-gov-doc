@@ -47,3 +47,14 @@ class BaseServiceSettings(BaseSettings):
     # access possible, purely RBAC-based as before - a completely optional,
     # separate building block (3a verbatim).
     fleet_agent_api_key: str | None = None
+
+    # Max upload size (Phase 61 Session 2) - a shared default for every
+    # service that reads an entire request/file body into memory before
+    # any expensive processing (`virus-scan-service`'s `/scan`,
+    # `rendering-service`'s render/convert/export endpoints,
+    # `storage-service`'s object upload endpoints - the same gap found
+    # independently in all three, see `dms_common.upload_limits`). 200 MiB
+    # covers real-world scanned-document/PDF sizes with headroom; a
+    # service with a materially different need overrides this field with
+    # its own default, same as every other `BaseServiceSettings` field.
+    max_upload_size_bytes: int = 209715200

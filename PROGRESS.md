@@ -2,9 +2,58 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P61-S1 (`notification-service`'s `POST /notifications/{id}/retry` had no authorization
-check, and `channel="webhook"` sent an outbound POST with zero target validation — first session of Phase
-61, "Medium-Severity Findings"). **New ADR**
+**Last completed:** P61-S2 (unbounded file uploads before expensive processing, the same gap independently
+in `virus-scan-service`/`rendering-service`/`storage-service` — second session of Phase 61,
+"Medium-Severity Findings"). **New ADR**
+([0187](docs/adr/0187-shared-max-upload-size-middleware.md)) — a real shared-fix design decision, per the
+plan's own DoD.
+
+**The gap.** `virus-scan-service`'s `POST /scan`, `rendering-service`'s several render/convert/export
+endpoints, and `storage-service`'s object-upload endpoints all read an entire upload into memory before
+expensive processing (virus scanning, PDF rasterization, a real `soffice --headless` subprocess), with no
+size cap anywhere in-process or at any layer in front of these services (confirmed: no
+`client_max_body_size`/equivalent at the gateway or any nginx config). Unlike every other finding this
+round, genuinely the same gap in three unrelated services — worth a shared fix.
+
+**The fix.** New `dms_common.MaxBodySizeMiddleware`, not a per-endpoint check — investigated first that
+FastAPI/Starlette already fully reads a `File(...)`/`UploadFile` upload into memory BEFORE the endpoint
+function runs, so a per-endpoint check (the plan's own literal wording) would already be too late to
+prevent the read itself. The middleware instead inspects `Content-Length` and rejects with `413` before
+routing/multipart-parsing ever starts, for every route uniformly. New shared
+`BaseServiceSettings.max_upload_size_bytes` (200 MiB default, overridable per service like any other
+field), wired into all three services with one `app.add_middleware(...)` call each. Accepted residual gap,
+stated honestly: a request with no `Content-Length` at all (genuinely chunked, rare for real upload
+clients) isn't caught — true streaming enforcement would need a materially larger change for a narrow
+edge case.
+
+New tests: `dms-common` +5 (one setting test, four middleware tests against a minimal standalone Starlette
+app — no need to spin up any of the three real services to exercise the shared mechanism), 11/11 total.
+**Found and fixed a THIRD occurrence of the same pre-existing regression** already found twice this round
+(P60-S1's ocr-service fix): `rendering-service`'s and `document-service`'s own test helpers called
+`storage-service`'s `DELETE /objects/{key}` directly with no identity header, broken since P59-S2's
+trusted-caller gate — fixed the same way. `document-service` 398/398, `virus-scan-service` 38/38,
+`rendering-service` 103/103, `storage-service` 162/162, all unaffected in count by the middleware itself.
+`ruff` clean across all touched packages (same pre-existing, unrelated repo-wide failures confirmed out of
+scope again).
+
+All three services (plus `dms-common`, picked up automatically on rebuild) rebuilt/redeployed.
+**Live-verified against the real running stack**: `curl` with a `Content-Length: 999999999999` header
+against each of the three services confirmed `413`, fired before any body was even read (a 1-byte actual
+body sent, rejected purely on the declared header); each service's own `/healthz` confirmed still working
+normally.
+
+`docs/services/virus-scan-service.md`/`rendering-service.md`/`storage-service.md`: API table row
+(virus-scan-service) + Open Points bullets closed in all three, cross-referencing the shared fix.
+
+**Next session:** P61-S3 — three independent, bundled findings: `config-service`'s over-broad "ungated"
+export/compare endpoints, `search-service`'s pre-permission-filtering `facet_counts` leak, `query-service`'s
+unclamped `limit`. Third session of Phase 61.
+
+---
+
+Immediately before P61-S2: **P61-S1** (`notification-service`'s `POST /notifications/{id}/retry` had no
+authorization check, and `channel="webhook"` sent an outbound POST with zero target validation — first
+session of Phase 61, "Medium-Severity Findings"). **New ADR**
 ([0186](docs/adr/0186-notification-service-retry-gate-and-webhook-ssrf-guard.md)) — a real
 authorization/security-model decision, per the plan's own DoD.
 

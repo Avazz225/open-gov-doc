@@ -283,8 +283,17 @@ def test_download_content_returns_404_instead_of_crashing_if_object_missing(clie
     document_id = body["id"]
     checksum = client.get(f"/documents/{document_id}/versions/1").json()["checksum_sha256"]
 
+    # X-DMS-Principal: document-service (Phase 59 Session 2, ADR 0179) -
+    # storage-service's object-CRUD endpoints now gate on a fixed trusted-
+    # caller set; this test bypasses document-service's own StorageClient
+    # (which already sends this header) to simulate a Storage Service
+    # inconsistency, so it must assert one of the six trusted identities
+    # itself. Pre-existing gap left unnoticed since P59-S2 - fixed here
+    # (same fix already applied to ocr-service/rendering-service's
+    # identical helpers).
     delete_response = httpx.delete(
-        f"{STORAGE_SERVICE_URL}/objects/documents/{document_id}/{checksum}"
+        f"{STORAGE_SERVICE_URL}/objects/documents/{document_id}/{checksum}",
+        headers={"X-DMS-Principal": "document-service"},
     )
     assert delete_response.status_code == 204
 

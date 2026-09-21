@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
 
-from dms_common import configure_logging
+from dms_common import MaxBodySizeMiddleware, configure_logging
 from dms_db_base import build_engine, make_session_factory
 from dms_metrics_client import SensorConfigClient, bootstrap_http_sensors, metrics_payload
 from dms_permission_client import PermissionServiceClient
@@ -243,6 +243,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title=settings.service_name, lifespan=lifespan)
+
+# Max upload size (Phase 61 Session 2, ADR 0187) - `upload_object`/
+# `upload_archive_copy` previously read the entire request body into
+# memory (`await request.body()`) with no size cap anywhere. Must be
+# added here, at module level right after `app` is constructed - FastAPI
+# forbids adding middleware once the app has started (same constraint the
+# sensor bootstrap below already documents).
+app.add_middleware(MaxBodySizeMiddleware, max_bytes=settings.max_upload_size_bytes)
 
 # Sensor concept (10.1, full rollout): must run at module level, right
 # after `app` is constructed - see bootstrap_http_sensors's docstring

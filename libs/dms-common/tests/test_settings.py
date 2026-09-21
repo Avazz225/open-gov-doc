@@ -40,3 +40,14 @@ def test_fleet_agent_api_key_env_override(monkeypatch):
     monkeypatch.setenv("DMS_FLEET_AGENT_API_KEY", "shared-secret-123")
     settings = ExampleSettings(_env_file=None)
     assert settings.fleet_agent_api_key == "shared-secret-123"
+
+
+def test_max_upload_size_bytes_default_and_env_override(monkeypatch):
+    """Phase 61 Session 2 (ADR 0187): shared default (200 MiB), overridable
+    per service like every other `BaseServiceSettings` field."""
+    settings = ExampleSettings(_env_file=None)
+    assert settings.max_upload_size_bytes == 209715200
+
+    monkeypatch.setenv("DMS_MAX_UPLOAD_SIZE_BYTES", "1024")
+    overridden = ExampleSettings(_env_file=None)
+    assert overridden.max_upload_size_bytes == 1024

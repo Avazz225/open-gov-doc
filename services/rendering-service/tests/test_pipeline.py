@@ -37,7 +37,18 @@ def _delete_storage_object_for_version(document_id: str, version_number: int) ->
     )
     version.raise_for_status()
     checksum = version.json()["checksum_sha256"]
-    response = httpx.delete(f"{STORAGE_SERVICE_URL}/objects/documents/{document_id}/{checksum}")
+    # X-DMS-Principal: rendering-service (Phase 59 Session 2, ADR 0179) -
+    # storage-service's object-CRUD endpoints now gate on a fixed trusted-
+    # caller set; this helper bypasses rendering-service's own
+    # StorageClient (which already sends this header) to simulate the
+    # object going missing, so it must assert one of the six trusted
+    # identities itself. Pre-existing gap in this test file left unnoticed
+    # since P59-S2 - fixed here (same fix already applied to ocr-service's
+    # identical helper in P60-S1).
+    response = httpx.delete(
+        f"{STORAGE_SERVICE_URL}/objects/documents/{document_id}/{checksum}",
+        headers={"X-DMS-Principal": "rendering-service"},
+    )
     response.raise_for_status()
 
 
