@@ -5,13 +5,23 @@ class StorageClient:
     """Duenner HTTP-Client gegen storage-service - `GET /storage/usage`
     direkt statt eines Umwegs ueber reporting-service (Service-Isolation,
     storage-service bleibt Quelle der Wahrheit fuer seinen eigenen
-    Speicherverbrauch, siehe P9-S0-Recherche)."""
+    Speicherverbrauch, siehe P9-S0-Recherche).
+
+    P67-S2: never sent an `X-DMS-Principal` header at all - a real,
+    currently-broken production bug once P66-S1 gated `GET /storage/usage`
+    behind `_require_storage_caller` without adding this equally real
+    caller to the allowlist (only `reporting-service` was checked at the
+    time, same class of bug that session already fixed once for
+    `reporting-service` itself). Found via `dms license status` returning a
+    real `500` during this session's own live verification."""
+
+    _PRINCIPAL_HEADERS = {"X-DMS-Principal": "license-service"}
 
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=10.0)
 
     async def total_bytes(self) -> int:
-        response = await self._client.get("/storage/usage")
+        response = await self._client.get("/storage/usage", headers=self._PRINCIPAL_HEADERS)
         response.raise_for_status()
         return sum(entry["total_size_bytes"] for entry in response.json())
 

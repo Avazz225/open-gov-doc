@@ -227,6 +227,17 @@ def test_new_p66s1_trusted_callers_accepted(client):
     assert response.status_code == 200
 
 
+def test_license_service_accepted_as_trusted_caller(client):
+    """P67-S2: `license-service`'s `StorageClient.total_bytes()` calls
+    `GET /storage/usage` for the `storage_gb` license-usage dimension - a
+    real, actively-used caller since P9-S0 that P66-S1's own new gate on
+    this exact endpoint missed adding, a genuine regression this session
+    found via `dms license status` returning a real `500` in live
+    verification and fixed immediately."""
+    response = client.get("/storage/usage", headers={"X-DMS-Principal": "license-service"})
+    assert response.status_code == 200
+
+
 def _local_usage(client) -> dict:
     body = client.get("/storage/usage").json()
     for entry in body:

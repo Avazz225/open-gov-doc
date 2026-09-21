@@ -12,12 +12,18 @@ from dms_cli.commands import (
     archival,
     auth,
     config,
+    deletion_register,
+    migration,
     object_type,
+    plugin_orchestration,
     query,
     registry,
     role,
     user,
     workflow,
+)
+from dms_cli.commands import (
+    license as license_cmd,
 )
 
 app = typer.Typer(
@@ -48,6 +54,10 @@ role.register(app)
 registry.register(app)
 workflow.register(app)
 archival.register(app)
+migration.register(app)
+license_cmd.register(app)
+plugin_orchestration.register(app)
+deletion_register.register(app)
 
 
 def run() -> None:

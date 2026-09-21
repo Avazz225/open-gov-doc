@@ -342,6 +342,17 @@ _TRUSTED_STORAGE_CALLERS = frozenset(
         # already sends this exact identity, anticipating this gate before
         # it existed ("even if storage-service later gates this endpoint").
         "system:storage-replication-cronjob",
+        # P67-S2: `license-service`'s `StorageClient.total_bytes()` calls
+        # `GET /storage/usage` for the `storage_gb` license-usage dimension
+        # - a real, actively-used caller since P9-S0, but never added here
+        # when P66-S1 gated this specific endpoint (only `reporting-service`
+        # was checked at the time, missing this equally real caller of the
+        # exact same endpoint). A genuine regression this session's own
+        # earlier P66-S1 work introduced, not a pre-existing bug - found via
+        # `dms license status`'s live verification below returning a real
+        # `500` (traced to storage-service's `403`), fixed here immediately
+        # rather than left open.
+        "license-service",
     }
 )
 

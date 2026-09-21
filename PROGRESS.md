@@ -2,14 +2,49 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P67-S1 (first session of Phase 67 — "Blocked on X, X Now Exists"). Wired `admin-ui` to
-the real `fleet-management-service`, which has fully existed since Phase 54 Session 1 with no `admin-ui`
-reference to it at all — the single highest-value finding of the whole Phase 65+ round. **The plan's own
-premise needed correcting first**: `lib/installations.ts`/`InstallationManager.tsx` are NOT a fake
-fleet-management UI — they manage an unrelated concept (which gateway this browser's admin session logs
-into, Concept 8), with a data model (`{id, name, gatewayBaseUrl}`) that doesn't correspond field-for-field
-to `fleet-management-service`'s `ManagedInstallation`. Left unchanged; built a new, separate
-`FleetManagementView` (`/fleet-management/`) instead, reusing `ProcessingFailuresView`'s
+**Last completed:** P67-S2 (second and last session of Phase 67). Wired the CLI tool to
+`migration-service`/`license-service`/`plugin-orchestration-service` (`dms migration ...`,
+`dms license ...`, `dms plugin-orchestration ...`), all of which had existed for many phases with no CLI
+command ever added, plus `dms deletion-register list|reconcile` (`document-service`/`folder-service`).
+**The plan's own premise needed correcting for backup/restore**: `scripts/backup.sh`/`restore.sh` are pure
+host-level shell scripts with no HTTP API, no status endpoint, no log a CLI command (which only ever talks
+to the gateway) could realistically read — a real architecture mismatch, not an unwired gap;
+`docs/tools/cli.md` corrected to say so rather than building something fake. **Incidentally found and
+fixed a real regression from this round's own P66-S1 session**: `dms license status`'s live verification
+returned a `500`, traced to `storage-service` rejecting `license-service`'s `StorageClient` with `403` —
+P66-S1's new `_require_storage_caller` gate on `GET /storage/usage` had added `reporting-service` to the
+trusted-caller allowlist but missed `license-service`'s equally real, pre-existing caller of the same
+endpoint (the `storage_gb` license-usage dimension, live since P9-S0). Fixed the same way P66-S1 fixed the
+identical class of bug for `reporting-service`: `license-service` added to the allowlist, its
+`StorageClient` now sends `X-DMS-Principal: license-service`. New ADR:
+[0198](docs/adr/0198-cli-migration-license-plugin-orchestration-deletion-register-commands.md). Tests:
+`tools/cli` 90/90 (+16), `storage-service` 167/167 (+1), `license-service` 38/38 (new
+`test_storage_client.py`, real HTTP, not mocked — every existing test mocked `StorageClient` and would
+never have caught this bug). `docs/tools/cli.md`/`storage-service.md`/`license-service.md` updated.
+Rebuilt/redeployed `storage-service`/`license-service`. **Live-verified** via a real `dms login` +
+real command invocations against the running stack: `plugin-orchestration status`/`placements list`,
+`migration installations list`/`transfers list`, `deletion-register list` all render real data; `license
+status` failed with the regression above on the first attempt, fixed, rebuilt, re-ran, now correct. **Phase
+67 is now closed (2/2).**
+
+**Next session:** none scheduled yet — Phase 68 ("Infrastructure Hardening") is next. P68-S1 is the
+largest-blast-radius session of the whole Phase 65+ round (per-service Postgres DB users/`GRANT`s across
+all ~28 services, Konzept 3.1) and its own plan entry explicitly defers the rollout-shape decision
+(big-bang vs. phased) to the session itself — worth flagging to the user before starting rather than
+proceeding fully autonomously into it. P68-S2 (migrate five services' bespoke permission clients onto
+`libs/dms-permission-client`) is smaller and mechanical. See `IMPLEMENTATION_PLAN.md`'s Phase 68 table for
+the full description.
+
+---
+
+Immediately before P67-S2: **P67-S1** (first session of Phase 67 — "Blocked on X, X Now Exists"). Wired
+`admin-ui` to the real `fleet-management-service`, which has fully existed since Phase 54 Session 1 with no
+`admin-ui` reference to it at all — the single highest-value finding of the whole Phase 65+ round. **The
+plan's own premise needed correcting first**: `lib/installations.ts`/`InstallationManager.tsx` are NOT a
+fake fleet-management UI — they manage an unrelated concept (which gateway this browser's admin session
+logs into, Concept 8), with a data model (`{id, name, gatewayBaseUrl}`) that doesn't correspond
+field-for-field to `fleet-management-service`'s `ManagedInstallation`. Left unchanged; built a new,
+separate `FleetManagementView` (`/fleet-management/`) instead, reusing `ProcessingFailuresView`'s
 `HandoverFailuresSection` precedent (operator key in component state, never persisted) for auth. Covers
 registration (shows the plaintext `fleet_agent_api_key` exactly once), listing, deletion, live status
 check, and license push — groups/plans/rollouts (the rest of the API) intentionally left for a future
@@ -29,13 +64,6 @@ pre-existing `e2e/` specs (`login`/`user-management`/`object-types`/`email-templ
 current stack due to stale UI-text assertions (e.g. "Nutzer & Rollen" vs. current "Nutzende & Rollen") —
 confirmed unrelated to this session, flagged for a future one. `docs/services/admin-ui.md`/
 `fleet-management-service.md` updated.
-
-**Next session:** P67-S2 — wire `docs/tools/cli.md`'s CLI tool (6.2) to `migration-service`/
-`license-service`/`plugin-orchestration-service`/the backup mechanism, all of which have existed for many
-phases with no CLI command ever added for them. Second and last session of Phase 67. See
-`IMPLEMENTATION_PLAN.md`'s Phase 67 table for the full description.
-
----
 
 Immediately before P67-S1: **P66-S3** (`document-service` correctness bundle — third and last session of
 Phase 66). Two bundled fixes; the plan's own framing bundled a third claim ("four-eyes default `False` is

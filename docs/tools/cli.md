@@ -29,11 +29,12 @@ honestly records what is covered and which future phase each remaining item is w
 | Workflows (7.1) | ✅ `workflow-service` | `dms workflow ...` |
 | User/role management (4.4/4.1/4.6) | ✅ `auth-service`/`permission-service` | `dms user ...`, `dms role ...` |
 | Registry status (3.2) | ✅ `registry-service` | `dms registry status` |
-| Plugin orchestration status (3.8) | ❌ does not exist (phase 10) | — |
-| Migration/transfer operations (7.2) | ❌ generic 7.2 service does not exist (phase 12, P12-S2) | `dms archival ...` covers the **closest real equivalent**: `archival-service`'s transfer-to-archive transfers (5.6) — thematically related (lock→copy/package→verify→release), but not functionally the same as 7.2 |
+| Plugin orchestration status (3.8) | ✅ `plugin-orchestration-service` (retrofitted into the CLI since **P67-S2**) | `dms plugin-orchestration status`, `dms plugin-orchestration placements list [--plugin-type]` |
+| Migration/transfer operations (7.2) | ✅ `migration-service` (retrofitted into the CLI since **P67-S2** — the service itself has existed since P12-S2, `dms archival ...` below remained the only CLI-reachable transfer mechanism until this session) | `dms migration installations list\|pair\|unpair`, `dms migration transfers list\|get\|create` |
 | Configuration import/export (7.3) | ✅ `config-service` (retrofitted into the CLI since P14-S1) | `dms config export [--category]... [--file]` |
-| License status (9.3) | ❌ does not exist (phase 9) | — |
-| Backup/restore (10.4) | ❌ does not exist (phase 11) | — |
+| License status (9.3) | ✅ `license-service` (retrofitted into the CLI since **P67-S2**) | `dms license status`, `dms license upload --token` |
+| Backup/restore (10.4) | ❌ **genuinely has no HTTP surface to wire up** — `scripts/backup.sh`/`restore.sh`/`test-restore.sh` (`docs/operations/backup-restore.md`) are pure host-level shell scripts: no status endpoint, no database table, no log the CLI (which only ever talks to `{gateway_url}/api/{service_type}/{path}`) could realistically read. Confirmed during **P67-S2**'s review rather than assumed — this is a real architecture mismatch, not an unwired gap. Deletion-reconciliation monitoring, 10.4's other half, is NOT in this situation (see below) | — |
+| Deletion-reconciliation monitoring (10.4, other half) | ✅ `document-service`/`folder-service` (retrofitted into the CLI since **P67-S2**) — unlike backup/restore itself, this DOES have a real HTTP surface (`GET /deletion-register`, `POST .../reconcile-restore-deletion`, identical on both services) | `dms deletion-register list [--kind document\|folder] [--id]`, `dms deletion-register reconcile <id> --original-entry-id <id> [--kind document\|folder] [--reason]` |
 | Delta/comparison runs (7.5) | ✅ `config-service` (P14-S1) | `dms config compare <compare.json> [--base] [--category]... [--ignore-regex]` |
 
 Same pattern as P7-S3's handling of the then-also-missing 7.2 template: scope
@@ -95,6 +96,10 @@ not yet connected to the CLI until now — this gap was closed directly in the s
 | Registry (3.2) | `dms registry status [service_type]` |
 | Workflow (7.1) | `dms workflow definitions list\|get <id>`, `dms workflow instances list [--status]\|get <id>\|tasks <id>\|complete-task <instance> <task> --completed-by [-f data.json] [--signature-id]` |
 | Transfer to the archive (5.6, see table above) | `dms archival transfers list [--status]\|get <id>\|retrieve <id>`, `dms archival case-transfers list\|get <id>\|package <id> --out <path>` |
+| Migration/transfer operations (7.2, since **P67-S2**) | `dms migration installations list\|pair --display-name --base-url [--api-key]\|unpair <id>`, `dms migration transfers list [--status]\|get <id>\|create --source-folder-id --target-installation-id [--dry-run] [--retention-days]` |
+| License status (9.3, since **P67-S2**) | `dms license status`, `dms license upload --token <token>` |
+| Plugin orchestration (3.8, since **P67-S2**) | `dms plugin-orchestration status`, `dms plugin-orchestration placements list [--plugin-type]` |
+| Deletion-register (10.4, since **P67-S2**) | `dms deletion-register list [--kind document\|folder] [--id]`, `dms deletion-register reconcile <id> --original-entry-id <id> [--kind document\|folder] [--reason]` |
 
 Every command accepts the global `--output table\|json` (`-o`), which must be given
 **before** the subcommand (`dms -o json query events list`).
@@ -106,9 +111,15 @@ Every command accepts the global `--output table\|json` (`-o`), which must be gi
   CI/CD pipeline would need its own confidential Keycloak clients (client management API) — an
   independent, multi-session feature, not an extension of this session. As a stopgap:
   the `DMS_TOKEN` env var (see above).
-- The 7.2/9.3/10.4 bullets from Concept 6.2 still have no backend — see the table above, each
-  with a reference to the intended phase. No CLI code exists for them. 7.3/7.5 have been
-  covered since P14-S1 (`dms config export`/`dms config compare`).
+- ~~The 7.2/9.3/10.4 bullets from Concept 6.2 still have no backend — see the table above, each
+  with a reference to the intended phase. No CLI code exists for them.~~ — **closed in P67-S2**
+  ([ADR 0198](../adr/0198-cli-migration-license-plugin-orchestration-deletion-register-commands.md)):
+  the premise was stale — all three backends (`migration-service`, `license-service`,
+  `plugin-orchestration-service`) had existed for many phases, simply never wired into the CLI.
+  `dms migration ...`, `dms license ...`, `dms plugin-orchestration ...` now cover them. 10.4's
+  backup/restore half remains genuinely unwireable (see the table above — confirmed, not merely
+  unwired); its deletion-reconciliation half is now covered via `dms deletion-register ...`.
+  7.3/7.5 have been covered since P14-S1 (`dms config export`/`dms config compare`).
 - **`dms config compare` reads both exports from local files**, no automated
   cross-installation fetch — a deliberate boundary, see `docs/services/config-service.md`
   "Delta/comparison function" and [ADR 0040](../adr/0040-config-compare-field-level-diff-no-cross-installation-fetch.md).
@@ -118,8 +129,11 @@ Every command accepts the global `--output table\|json` (`-o`), which must be gi
 
 ## Tests
 
-`tools/cli/tests/` — **77 tests** (previously 70, +7 since P14-S1: `dms config export`/
-`dms config compare`, see below): `GatewayClient` (401 refresh retry, error paths), credential
+`tools/cli/tests/` — **90 tests** (previously 77 since P14-S1, +16 since **P67-S2**: one file
+per new command module, `dms migration`/`dms license`/`dms plugin-orchestration`/
+`dms deletion-register`, each mocking the gateway transport — see
+[ADR 0198](../adr/0198-cli-migration-license-plugin-orchestration-deletion-register-commands.md)):
+`GatewayClient` (401 refresh retry, error paths), credential
 storage (env override, file permissions), output formatting, plus representative
 happy-path/error-path tests per domain module via `typer.testing.CliRunner` + `httpx.MockTransport` (no real
 network). `uv run pytest tools/cli/tests`, `uv run ruff check tools/cli`.
