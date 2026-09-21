@@ -52,12 +52,39 @@ walkthrough — noted transparently as a partial live-verification, proportionat
 scope, unlike (c)'s full end-to-end live verification.
 
 **Phase 58 ("Pseudonymization Completion & Small Polish Bundle") is now closed** (P58-S1 through S2,
-both sessions done). `graphify update .` to run next per the established phase-end convention.
+both sessions done). `graphify update .` run to close out the phase.
 
-**Next session**: none currently defined — `IMPLEMENTATION_PLAN.md` has no further sessions queued
-beyond Phase 58. Per the standing "weiter selbstständig" instruction, the established project pattern is
-that a new gap-analysis round is typically explicitly requested by the user rather than self-initiated —
-the correct next step is to report status rather than inventing a new round unprompted.
+**Sixth gap-analysis round completed** (same four-parallel-research-agent methodology as after Phases
+37/43/50/53), on explicit user request ("weiter mit der nächsten gap analyse"): ADR self-named
+open-scope sweep (all 177 ADRs), `docs/services/*.md` Open Points sweep (~35 files), `Konzept.md`
+coverage + staleness re-check, and a live-code-only security/correctness sweep — this round itself
+further parallelized into six sub-agents covering all ~30 backend services and the frontend connectors,
+the broadest single audit this project has run. The Konzept/staleness agent found nothing new (mature
+system, no under-covered section, no resolved-but-still-listed blocker). The ADR sweep found 22 genuine
+still-open self-named gaps (mostly small-medium functional completions); the docs sweep found a further
+long tail of RBAC/admin-UI/distributed-lock/WORM items. Only the highest-value items from both are
+scheduled (Phase 62); the rest are deliberately deferred, see "Deliberately Not Included in Phase 59+".
+
+**The live-code security sweep is this round's headline result**: **five genuinely critical,
+unauthenticated authorization bypasses** (more than any prior round combined) plus four high, seven
+medium, and roughly nine low-severity findings, written into `IMPLEMENTATION_PLAN.md` as "## Phase 59+:
+Gap Analysis After Phase 58" (Phases 59–62). The five criticals: `notification-service`'s `GET
+/notifications`(`/{id}`) fully unauthenticated (full PII/content disclosure incl. break-glass superuser
+emails); `storage-service`'s entire object-CRUD API fully unauthenticated (any authenticated user can
+read/write/delete any object by key, bypassing document-service's ACL entirely); `signature-service`'s
+`POST /signatures` unauthenticated AND trusting a client-supplied `signer_principal_id` with no identity
+check (signature forgery under another user's name); `registry-service`'s `POST /instances`(+drain/
+activate/deregister) unauthenticated (a fake instance registration can hijack real gateway-routed
+traffic, or deregister/drain real instances fleet-wide); `migration-service`'s `POST /transfers`+`POST
+/paired-installations` unauthenticated (any authenticated user can exfiltrate any folder — bypassing
+per-folder ACLs via the service's own elevated system identity — to an attacker-controlled SSRF target,
+then forge the audit-trail actor). A clear systemic pattern ties several together: the gateway's own auth
+model is "valid Keycloak JWT, nothing more" — every fine-grained check is delegated entirely to the
+downstream service, and this round found five services where a real endpoint simply never got one.
+
+**Next session:** P59-S1 — `notification-service`'s `GET /notifications`/`GET /notifications/{id}`
+fully unauthenticated read fix (smallest, fastest, most severe — do first). First session of Phase 59,
+"Critical Authorization Bugs".
 
 ---
 
