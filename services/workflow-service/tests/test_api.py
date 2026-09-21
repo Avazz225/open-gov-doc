@@ -1724,3 +1724,21 @@ def test_retry_instance_on_completed_instance_returns_409(client, no_tasks_bpmn,
 def test_retry_unknown_instance_returns_404(client):
     response = client.post("/instances/does-not-exist/retry")
     assert response.status_code == 404
+
+
+def test_retry_instance_requires_principal_header(no_tasks_bpmn, admin_headers):
+    """P62-S2: previously ungated - the sibling `start_instance`/`complete_task`
+    endpoints already require `workflow.write` (ADR 0074), `retry` was the
+    one left behind."""
+    with TestClient(app) as anonymous_client:
+        definition_id = _upload_definition(
+            anonymous_client, no_tasks_bpmn, name="NoTasksRetryAuth", headers=admin_headers
+        ).json()["id"]
+        instance_id = anonymous_client.post(
+            f"/process-definitions/{definition_id}/instances",
+            json={"created_by": "alice"},
+            headers={"X-DMS-Principal": "workflow-service-tests"},
+        ).json()["id"]
+
+        response = anonymous_client.post(f"/instances/{instance_id}/retry")
+    assert response.status_code == 401

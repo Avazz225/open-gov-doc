@@ -69,7 +69,12 @@ Three further decisions followed, all resolved via research/precedent without a 
   would be a small, mechanically obvious follow-up (the value is already in hand from `reveal`, the
   existing `PATCH /documents/{id}` attribute-update path could take it from there) - not built here since
   nothing in this session's scope required it, and deliberately not conflated with `reveal` itself (view
-  and restore are different-consequence actions that deserve to stay explicit).
+  and restore are different-consequence actions that deserve to stay explicit). **Built in P62-S2**:
+  `POST /documents/{id}/attributes/{name}/restore` writes the decrypted value directly into
+  `Document.attributes` (not via a literal `PATCH` HTTP round trip - the same repository transaction
+  that already has the document loaded) and deletes the vault row, gated by the same `admin.attribute_
+  reveal` capability as `reveal` itself. See `docs/services/document-service.md` "Attribute-Level
+  Pseudonymization".
 - **Why `reveal` is always published as an event, unconditionally** - unlike `_should_log_document_
   access`'s configurable viewed/downloaded logging (an ordinary business read), re-exposing personal data
   that was specifically pseudonymized for compliance reasons is inherently security-relevant every single

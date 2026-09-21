@@ -1817,6 +1817,7 @@ async def complete_task(
 async def retry_instance(
     instance_id: str,
     x_dms_maintenance_active: str = Header(default="false"),
+    x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> ProcessInstanceOut:
     """Resumability for a failed automatic step (7.1/7.2, P12-S2) - a
@@ -1824,10 +1825,16 @@ async def retry_instance(
     service task whose `serviceUrl` was unreachable on the first attempt
     leaves the instance `running` with the affected task in `ERROR` (see
     `spiff_adapter.retry_errored_tasks`) - this endpoint retries the step
-    without restarting the entire process. No additional role gate beyond
-    the normal license check - `POST .../tasks/.../complete` is already
-    open to every authenticated principal."""
+    without restarting the entire process. Since P62-S2: gated via
+    `_require_workflow_permission` (`workflow.write`), the same check
+    `start_instance`/`complete_task` already have - this endpoint's own
+    docstring previously claimed no additional gate was needed because
+    "`POST .../tasks/.../complete` is already open to every authenticated
+    principal", which was simply out of date: ADR 0074 (Post-Roadmap Phase
+    19 Session 9) added exactly this RBAC check to BOTH of those sibling
+    endpoints, `retry` was the one left behind."""
     await _reject_during_maintenance(x_dms_maintenance_active)
+    await _require_workflow_permission(x_dms_principal, access_type="write")
     try:
         instance = await repository.retry_instance(session, instance_id)
     except repository.NotFoundError as exc:

@@ -224,6 +224,69 @@ def test_list_pseudonymized_attributes_empty_for_a_document_with_none(client, do
     assert response.json() == []
 
 
+# --- Restore / "un-pseudonymize" (P62-S2, ADR 0156's own named follow-up) --
+
+
+def test_restore_requires_reveal_permission_not_pseudonymization_permission(client, document_id):
+    _pseudonymize(client, document_id)
+    response = client.post(
+        f"/documents/{document_id}/attributes/SVNR/restore",
+        json={"restored_by": "dave"},
+        headers=PSEUDONYMIZATION_ADMIN_HEADERS,
+    )
+    assert response.status_code == 403
+
+
+def test_restore_404_for_a_not_pseudonymized_attribute(client, document_id):
+    response = client.post(
+        f"/documents/{document_id}/attributes/SVNR/restore",
+        json={"restored_by": "dave"},
+        headers=REVEAL_ADMIN_HEADERS,
+    )
+    assert response.status_code == 404
+
+
+def test_restore_writes_the_original_value_back_and_deletes_the_vault_entry(client, document_id):
+    _pseudonymize(client, document_id, reason="DSGVO-Löschanfrage")
+
+    response = client.post(
+        f"/documents/{document_id}/attributes/SVNR/restore",
+        json={"restored_by": "dave"},
+        headers=REVEAL_ADMIN_HEADERS,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["document_id"] == document_id
+    assert body["attribute_name"] == "SVNR"
+    assert body["value"] == "123-45-6789"
+    assert body["restored_by"] == "dave"
+
+    # The live document attribute is genuinely restored, unlike `reveal`.
+    document = client.get(f"/documents/{document_id}").json()
+    assert document["attributes"]["SVNR"] == "123-45-6789"
+    assert document["attributes"]["Betreff"] == "Testfall"
+
+    # The attribute is no longer pseudonymized - the vault entry is gone.
+    listing = client.get(f"/documents/{document_id}/attributes/pseudonymized").json()
+    assert listing == []
+
+
+def test_restore_can_be_pseudonymized_again_after_restoring(client, document_id):
+    """Confirms `restore` genuinely deletes the vault entry rather than
+    just clearing the live value - a second pseudonymize/restore cycle
+    must work exactly like the first, not hit `AlreadyPseudonymizedError`."""
+    _pseudonymize(client, document_id)
+    client.post(
+        f"/documents/{document_id}/attributes/SVNR/restore",
+        json={"restored_by": "dave"},
+        headers=REVEAL_ADMIN_HEADERS,
+    )
+
+    second = _pseudonymize(client, document_id)
+    assert second.status_code == 201
+
+
 # --- Automatic retention-expiry trigger (5.2, Phase 58 Session 1) ---------
 
 

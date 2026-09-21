@@ -295,6 +295,29 @@ async def get_pseudonymized_attribute(
     return vault_entry
 
 
+async def restore_pseudonymized_attribute(
+    session: AsyncSession, vault_entry: PseudonymizedAttribute, *, original_value
+) -> None:
+    """Un-pseudonymizes an attribute (P62-S2, ADR 0156's own named,
+    deliberately-deferred follow-up: "a small, mechanically obvious
+    follow-up ... not built here") - writes the already-decrypted
+    `original_value` (caller's responsibility, same crypto-knowledge
+    separation `pseudonymize_attribute` keeps) back into
+    `Document.attributes[attribute_name]` and deletes the vault row - the
+    inverse of `pseudonymize_attribute`'s "no second, orphaned vault entry"
+    invariant: after this call, the attribute is genuinely no longer
+    pseudonymized, `list_pseudonymized_attributes` no longer lists it. The
+    full reveal/restore history stays in the audit trail via
+    `document.attribute.revealed`/`.restored` events, not a retained vault
+    row (same reasoning as the model's own docstring for
+    `last_revealed_by`/`last_revealed_at`)."""
+    document = await get_document(session, vault_entry.document_id)
+    document.attributes = {**document.attributes, vault_entry.attribute_name: original_value}
+    document.updated_at = datetime.now(UTC)
+    await session.delete(vault_entry)
+    await session.flush()
+
+
 async def mark_revealed(session: AsyncSession, vault_entry_id: str, *, revealed_by: str) -> None:
     vault_entry = await session.get(PseudonymizedAttribute, vault_entry_id)
     if vault_entry is None:

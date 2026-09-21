@@ -281,9 +281,9 @@ class PseudonymizedAttributeOut(BaseModel):
 class RevealedAttributeOut(BaseModel):
     """The decrypted original value (5.2, Post-Roadmap Phase 41 Session 2)
     - returned transiently in this response only, never persisted in
-    plaintext anywhere and never written back into `Document.attributes`
-    (restoring the live value is a separate, not-yet-built action, see
-    docs/services/document-service.md "Open Points")."""
+    plaintext anywhere and never written back into `Document.attributes`.
+    To permanently write it back in place, see `RestoreAttributeRequest`/
+    `POST .../restore` instead (P62-S2)."""
 
     document_id: str
     attribute_name: str
@@ -291,6 +291,27 @@ class RevealedAttributeOut(BaseModel):
     reason: str | None
     pseudonymized_by: str
     pseudonymized_at: datetime
+
+
+class RestoreAttributeRequest(BaseModel):
+    """Un-pseudonymize an attribute (P62-S2, ADR 0156's own named follow-up
+    - "a small, mechanically obvious follow-up... not built here") -
+    `restored_by` mirrors `RevealAttributeRequest.revealed_by`."""
+
+    restored_by: str
+
+
+class RestoredAttributeOut(BaseModel):
+    """The decrypted original value, now permanently written back into
+    `Document.attributes` in place (P62-S2) - unlike `RevealedAttributeOut`,
+    this IS persisted; the vault entry is deleted afterward, the attribute
+    is genuinely no longer pseudonymized."""
+
+    document_id: str
+    attribute_name: str
+    value: Any
+    restored_by: str
+    restored_at: datetime
 
 
 class RedactionRegion(BaseModel):

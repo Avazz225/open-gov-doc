@@ -89,6 +89,8 @@ from document_service.schemas import (
     RecordsQuarantineOut,
     RecordsQuarantineReleaseRequest,
     RedactionRequest,
+    RestoreAttributeRequest,
+    RestoredAttributeOut,
     RetentionConfigIn,
     RetentionConfigOut,
     RetentionUpdate,
@@ -2646,6 +2648,61 @@ async def reveal_document_attribute(
         reason=vault_entry.reason,
         pseudonymized_by=vault_entry.pseudonymized_by,
         pseudonymized_at=vault_entry.pseudonymized_at,
+    )
+
+
+@app.post(
+    "/documents/{document_id}/attributes/{attribute_name}/restore",
+    response_model=RestoredAttributeOut,
+)
+async def restore_document_attribute(
+    document_id: str,
+    attribute_name: str,
+    payload: RestoreAttributeRequest,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> RestoredAttributeOut:
+    """Un-pseudonymizes an attribute (P62-S2) - ADR 0156's own named,
+    deliberately-deferred follow-up ("restoring the live value into
+    `Document.attributes` would be a small, mechanically obvious
+    follow-up... not built here"). Unlike `reveal` above (transient,
+    response-only), this permanently writes the decrypted value back into
+    `Document.attributes` in place and deletes the vault entry - the
+    attribute is genuinely no longer pseudonymized afterward. Same
+    capability as `reveal` (`admin.attribute_reveal`), not
+    `admin.attribute_pseudonymization` - permanently re-exposing the value
+    is at least as sensitive as a transient reveal, arguably more so (the
+    value stays exposed going forward, not just in this one response)."""
+    await _require_reveal_permission(x_dms_principal)
+    try:
+        vault_entry = await repository.get_pseudonymized_attribute(
+            session, document_id, attribute_name
+        )
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    key = _get_pseudonymization_key()
+    try:
+        original_value = json.loads(crypto.decrypt(vault_entry.encrypted_value, key))
+    except crypto.DecryptionError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    await repository.restore_pseudonymized_attribute(
+        session, vault_entry, original_value=original_value
+    )
+    await session.commit()
+    await publish_event(
+        "document.attribute.restored",
+        subject=document_id,
+        payload={"attribute_name": attribute_name},
+        actor=payload.restored_by,
+    )
+    return RestoredAttributeOut(
+        document_id=document_id,
+        attribute_name=attribute_name,
+        value=original_value,
+        restored_by=payload.restored_by,
+        restored_at=datetime.now(UTC),
     )
 
 

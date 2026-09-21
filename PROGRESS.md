@@ -2,10 +2,82 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P62-S1 (Low-Severity Security Findings, bundled — first session of Phase 62,
-"Low-Priority Security Cleanup + Selected Functional Completions"). No new ADR — mechanical
-gating/pagination/bounds additions and one narrow TOCTOU re-check, per the plan's own DoD ("no new ADR
-expected... mechanical completions of already-designed patterns, or trivial hardening").
+**Last completed:** P62-S2 (highest-value small items from the ADR self-named-scope sweep — second and
+last session of Phase 62, closing the WHOLE Phase 59+ gap-closure round). No new ADR (mechanical
+completion) — ADR 0156 got a "Built in P62-S2" addendum instead.
+
+**Three of the plan's six bundled items were investigated and found ALREADY CLOSED by earlier, unrelated
+sessions** the plan's own research apparently didn't cross-check against current code:
+- `create_dmn_definition`'s cross-family `DuplicateDecisionIdError` race — the plan described this as
+  still open, but `repository._DMN_DECISION_ID_LOCK_NAMESPACE` (a THIRD advisory lock, keyed on the
+  extracted `decision_id`) already closes it, built in **Post-Roadmap Phase 44 Session 4** with its own
+  regression test (`test_create_dmn_definition_concurrent_different_families_same_decision_id`). Both
+  `repository.py`'s own docstring and `docs/services/workflow-service.md`'s "Open Points" already
+  correctly document this as closed.
+- `federation-hub-service`'s `POST /handovers/{id}/result` missing retry/backoff — already built in
+  **Phase 40 Session 3** (`result_pending_retry`/`result_delivery_failed` status, `result_attempts`/
+  `result_next_retry_at` counters, `_run_result_retry_tick`, mirroring the forward-delivery leg's own
+  ADR 0081 mechanism exactly). Thoroughly documented in `docs/services/federation-hub-service.md`
+  "Retry & Backoff".
+- `mail-connector`'s `root` folder unprotected against rename/move/hard-delete — already closed in
+  **Post-Roadmap Phase 19 Session 11** ([ADR 0076](docs/adr/0076-root-folder-mail-regex-dehydration-409.md)):
+  `folder-service`'s `PROTECTED_FOLDER_IDS` already includes `ROOT_FOLDER_ID` alongside `inbox`/`outbox`
+  — `settings.py`'s own comment says so explicitly ("`root` was deliberately excluded here until...,
+  this gap has since been closed"). ADR 0053's own text (which the plan's finding was based on) is
+  simply out of date.
+
+The WebDAV edit-token admin-UI surface (view/revoke active tokens) was explicitly conditional in the
+plan ("bundle only if P61-S4(a)'s scope fix naturally surfaces the need for an admin view, otherwise
+defer") — P61-S4(a) was a pure backend security fix with no admin-UI touchpoint, so this stays deferred
+per the plan's own instruction.
+
+**The two genuinely open items, both fixed:**
+
+**(1) The "un-pseudonymize" endpoint** (ADR 0156's own named follow-up, "a small, mechanically obvious
+follow-up... not built here"): `reveal` only ever decrypted a pseudonymized attribute transiently, in
+the response — nothing wrote it back into `Document.attributes`. New
+`POST /documents/{id}/attributes/{name}/restore`: decrypts (same as `reveal`) and permanently writes the
+value back into `Document.attributes` in place, then deletes the vault row (the inverse of
+`pseudonymize_attribute`'s "no second, orphaned vault entry" invariant — the attribute is genuinely no
+longer pseudonymized afterward, can be pseudonymized again exactly like a fresh one). Same capability as
+`reveal` (`admin.attribute_reveal`), not the pseudonymization capability — permanently re-exposing a
+value is at least as sensitive as a transient reveal, arguably more so. Published as
+`document.attribute.restored`.
+
+**(2) `workflow-service`'s `POST /instances/{id}/retry` was genuinely ungated**, unlike its siblings:
+`start_instance`/`complete_task` have required `workflow.write` since ADR 0074 (Post-Roadmap Phase 19
+Session 9), but `retry_instance`'s own docstring incorrectly claimed parity with them ("no additional
+role gate beyond the license check - `POST .../tasks/.../complete` is already open to every
+authenticated principal") — that claim was simply stale, `complete_task` has required RBAC for years.
+Fixed by adding the same `_require_workflow_permission(x_dms_principal, access_type="write")` call.
+
+New tests: `document-service` 402/402 (+4: `restore` permission-mismatch/404/success/re-pseudonymize-
+after-restore), `workflow-service` 221/221 (+1: `retry` without a principal header → `401`). `ruff` clean
+(same pre-existing, unrelated repo-wide failures confirmed out of scope again).
+
+Both services rebuilt/redeployed. **Live-verified against the real running stack**: a real object type
+with a `personal_data` attribute, a real document, pseudonymize → document shows the placeholder → new
+`restore` call → document shows the real value again (`"123-45-6789"`) AND the pseudonymized-attributes
+listing is empty (vault row genuinely gone). `retry` on an unknown instance: `401` with no principal
+header, `404` (meaning the gate passed) once one is sent.
+
+`docs/services/document-service.md` (new API row, Open Points bullet closed), `docs/adr/0156-...md`
+(addendum on its own "why reveal doesn't restore" rationale point, pointing at this session),
+`docs/services/workflow-service.md` (API row + top-of-file gating summary updated).
+
+**`graphify update .` run once at the very end of this whole Phase 59-62 round** (not after every
+session/phase), per the plan's own Definition of Done.
+
+**Next session:** Phase 62 is now closed (2/2 sessions), closing the entire Phase 59+ gap-closure round
+this plan covers. Per the established project pattern, check `IMPLEMENTATION_PLAN.md` for further queued
+phases; if none remain, report status to the user rather than self-initiating another gap-analysis round
+unprompted.
+
+---
+
+Immediately before P62-S2: **P62-S1** (Low-Severity Security Findings, bundled — first session of
+Phase 62). No new ADR — mechanical gating/pagination/bounds additions and one narrow TOCTOU re-check,
+per the plan's own DoD.
 
 **The gaps, six unrelated low-severity findings bundled opportunistically:**
 (a) `plugin-orchestration-service`'s `POST /plugins/{type}/resource-usage` was unauthenticated and
@@ -65,12 +137,6 @@ automated regression tests (both simulate the race/window directly rather than v
 `docs/services/teamspace-service.md`, `docs/services/query-service.md`, `docs/services/mail-connector.md`,
 `docs/services/archival-service.md`, `docs/services/workflow-service.md` all updated (API tables, Open
 Points, test counts).
-
-**Next session:** P62-S2 — highest-value small items from the ADR self-named-scope sweep, bundled
-(un-pseudonymize endpoint, `create_dmn_definition`'s cross-family race, workflow-service's ungated
-`POST /instances/{id}/retry`, federation-hub-service's result-path retry/backoff, mail-connector's
-unprotected `root` folder, optionally a WebDAV edit-token admin-UI surface). Second and last session of
-Phase 62, closing the whole Phase 59+ round.
 
 ---
 
