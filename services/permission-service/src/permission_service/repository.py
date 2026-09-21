@@ -301,6 +301,22 @@ DOMAIN_ADMIN_ROLES: list[tuple[str, str, list[str]]] = [
     # notification, this one governs who may change the wording every
     # future notification is sent with).
     ("domain-admin-notification", "Notification-Konfiguration", ["admin.notification_config"]),
+    # Phase 59 Session 1: `GET /notifications`/`GET /notifications/{id}` on
+    # notification-service previously had NO permission check at all -
+    # complete unauthenticated PII/content disclosure (any authenticated
+    # principal could enumerate every notification ever sent, including
+    # break-glass superuser activation emails). Deliberately a THIRD,
+    # separate notification-service capability, not reused with
+    # `notification.write` (governs who may TRIGGER one) or
+    # `admin.notification_config` (governs template wording) - reading the
+    # delivery log is a different concern/risk profile from either, same
+    # split-by-concern precedent this project already uses repeatedly
+    # (legal_hold vs. deletion, pseudonymization vs. reveal).
+    (
+        "domain-admin-notification-read",
+        "Notification-Protokoll einsehen",
+        ["admin.notification_read"],
+    ),
     # Post-Roadmap Phase 41 Session 2 (ADR 0156): concept 5.2's GDPR-tension
     # fix (pseudonymize individual personal-data attributes instead of
     # hard-deleting a whole document under a retention obligation).

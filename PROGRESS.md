@@ -2,9 +2,60 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P58-S2 (Small Polish Bundle — second and last session of Phase 58. **Closes Phase
-58.**). No new ADR — per the plan's own DoD (pure completion/polish of already-established patterns and
-already-existing backend surfaces).
+**Last completed:** P59-S1 (`notification-service`'s `GET /notifications`/`GET /notifications/{id}`
+unauthenticated-read fix — first session of Phase 59, "Critical Authorization Bugs"). **New ADR**
+([0178](docs/adr/0178-notification-service-read-endpoints-rbac-gate.md)) — a real authorization-model
+decision, per the plan's own DoD.
+
+**The gap.** Found by this round's live-code security sweep, not a doc sweep. `GET /notifications`/`GET
+/notifications/{id}` had **no permission check of any kind**, not even a required `X-DMS-Principal`
+header — confirmed via reading the function signatures directly. Any caller reachable through the
+gateway (any authenticated user, since the gateway's own auth model stops at "valid Keycloak JWT") could
+enumerate every notification ever sent — full `subject`/`body`/`recipient`, including break-glass
+superuser activation emails, emergency-maintenance-mode alerts, virus-scan hits (with uploader identity),
+and deletion reminders. `POST /notifications` was already retrofitted with a permission check at
+Post-Roadmap Phase 38 Session 2 — the read/list side was simply never given the same treatment.
+
+**The fix.** New, third notification-service capability `admin.notification_read` (role
+`domain-admin-notification-read`), gating both `GET` endpoints (`401`/`403`). Deliberately NOT the
+per-recipient self-service scoping the plan text originally floated — investigated and declined once the
+real caller was traced: `admin-ui`'s `ProcessingFailuresView` is the ONLY frontend consumer anywhere in
+this codebase, an admin operational-visibility/retry tool, not a personal-inbox view (no frontend lists
+"my own notifications" for an ordinary user). An admin-only gate matches actual usage precisely, and a
+per-recipient scope couldn't even be defined cleanly regardless (`recipient` is a username for most
+channels, an email address for `channel="email"`). Deliberately NOT reused with `notification.write`
+(governs who may TRIGGER one) or `admin.notification_config` (governs template wording) — reading the
+delivery log is a different concern/risk profile from either, same split-by-concern precedent this
+project uses repeatedly.
+
+New/updated tests: `notification-service` +4 (`test_list_notifications_without_principal_header_is_401`/
+`.._without_read_permission_is_403`, `test_get_notification_without_principal_header_is_401`/
+`.._without_read_permission_is_403`), 96/96 total. `permission-service` unchanged, 182/182 (new role
+read dynamically from `DOMAIN_ADMIN_ROLES`, no dedicated test needed). Both `ruff` clean (pre-existing,
+unrelated repo-wide ruff failures in `libreoffice-addin`/`federation-hub-service` confirmed out of scope
+again).
+
+Both services rebuilt/redeployed (`permission-service` first — the new role only exists once its own
+`ensure_domain_admin_roles` self-healing runs on startup; `notification-service`'s own test suite needed
+it already seeded). **Live-verified against the real running stack**: both `GET` endpoints `401` with no
+header, `403` for a real authenticated principal without the new role, `200` once the role was granted to
+a throwaway test principal via a real `POST /role-assignments` call — throwaway assignment cleaned up
+afterward.
+
+`docs/services/notification-service.md`: API table + a new "Authorization" paragraph for the `GET`
+endpoints; also added two new Open Points bullets for the two related findings deliberately NOT fixed in
+this session (`POST /notifications/{id}/retry` still unauthenticated, `channel="webhook"` SSRF), both
+tracked for Phase 61.
+
+**Next session:** P59-S2 — `storage-service`'s entire object-CRUD API (`PUT`/`GET`/`DELETE
+/objects/{key}` etc.) has zero authorization, the largest blast radius of this round's five criticals.
+Second session of Phase 59.
+
+---
+
+Immediately before P59-S1: **P58-S2** (Small Polish Bundle — second and last session of Phase 58.
+**Closed Phase 58.**). No new ADR — per the plan's own DoD (pure completion/polish of already-established
+patterns and already-existing backend surfaces).
 
 **Three independent, cheap items, one genuinely closed as planned, one found already closed, one
 genuinely built:**

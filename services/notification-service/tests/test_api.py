@@ -65,6 +65,35 @@ async def _grant_notification_config_permission():
 
 
 @pytest.fixture(scope="session", autouse=True)
+async def _grant_notification_read_permission():
+    """Phase 59 Session 1: `GET /notifications`/`GET /notifications/{id}`
+    require `admin.notification_read` - a third, separate domain-admin
+    role from `_grant_notification_config_permission` above, granted
+    directly to the default `client` fixture's own test principal, same
+    pattern."""
+    async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL) as pc:
+        roles = (await pc.get("/roles")).json()
+        role_id = next(r["id"] for r in roles if r["name"] == "domain-admin-notification-read")
+        existing = (
+            await pc.get(
+                "/role-assignments", params={"principal_id": NOTIFICATION_TEST_PRINCIPAL_ID}
+            )
+        ).json()
+        if any(a["role_id"] == role_id for a in existing):
+            return
+        response = await pc.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": NOTIFICATION_TEST_PRINCIPAL_ID,
+                "role_id": role_id,
+                "resource_id": "root",
+            },
+        )
+        response.raise_for_status()
+
+
+@pytest.fixture(scope="session", autouse=True)
 async def _grant_notification_write_permission():
     """`notification.write` is deliberately NOT part of the "everyone"
     group (Post-Roadmap Phase 38 Session 2, see `main.py`
@@ -130,6 +159,39 @@ def everyone_role_without():
         ).json()
         role_name = "notification-service-test-write"
         role = next(r for r in roles if r["name"] == role_name)
+        assignment = next(a for a in assignments if a["role_id"] == role["id"])
+
+        pc.delete(
+            f"/role-assignments/{assignment['id']}", headers=role_management_headers
+        ).raise_for_status()
+
+        yield
+
+        pc.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": NOTIFICATION_TEST_PRINCIPAL_ID,
+                "role_id": role["id"],
+                "resource_id": "root",
+            },
+            headers=role_management_headers,
+        ).raise_for_status()
+
+
+@pytest.fixture
+def notification_read_role_removed():
+    """Phase 59 Session 1: temporarily removes the default `client`
+    fixture's `domain-admin-notification-read` grant to exercise the new
+    `GET /notifications`/`GET /notifications/{id}` 403 path, same
+    remove-then-restore pattern as `everyone_role_without` above."""
+    role_management_headers = {"X-DMS-Principal": ROLE_ADMIN_PRINCIPAL_ID}
+    with httpx.Client(base_url=PERMISSION_SERVICE_URL, timeout=10.0) as pc:
+        roles = pc.get("/roles").json()
+        assignments = pc.get(
+            "/role-assignments", params={"principal_id": NOTIFICATION_TEST_PRINCIPAL_ID}
+        ).json()
+        role = next(r for r in roles if r["name"] == "domain-admin-notification-read")
         assignment = next(a for a in assignments if a["role_id"] == role["id"])
 
         pc.delete(
@@ -280,6 +342,34 @@ def test_list_notifications_filters_by_recipient(client, real_recipient):
     assert response.status_code == 200
     assert len(response.json()) == 1
     assert response.json()[0]["subject"] == "S1"
+
+
+def test_list_notifications_without_principal_header_is_401(client):
+    response = client.get("/notifications", headers={"X-DMS-Principal": ""})
+    assert response.status_code == 401
+
+
+def test_list_notifications_without_read_permission_is_403(client, notification_read_role_removed):
+    response = client.get("/notifications")
+    assert response.status_code == 403
+
+
+def test_get_notification_without_principal_header_is_401(client):
+    response = client.get("/notifications/1", headers={"X-DMS-Principal": ""})
+    assert response.status_code == 401
+
+
+def test_get_notification_without_read_permission_is_403(
+    client, real_recipient, notification_read_role_removed
+):
+    username, _email = real_recipient
+    created = client.post(
+        "/notifications",
+        json={"channel": "in_app", "recipient": username, "subject": "S", "body": "B"},
+    )
+    assert created.status_code == 201
+    response = client.get(f"/notifications/{created.json()['id']}")
+    assert response.status_code == 403
 
 
 def test_create_notification_without_principal_header_is_401(client, real_recipient):

@@ -261,13 +261,50 @@ async def create_notification(
     return notification
 
 
+async def _require_notification_read_permission(x_dms_principal: str) -> None:
+    """RBAC (Phase 59 Session 1): `GET /notifications`/`GET /notifications/
+    {id}` previously had NO permission check at all - complete
+    unauthenticated disclosure of every notification's full `subject`/
+    `body`/`recipient`, including break-glass superuser activation emails,
+    emergency-maintenance-mode alerts, virus-scan hits (with uploader
+    identity), and deletion reminders. Deliberately a THIRD capability
+    (`admin.notification_read`), not reused with `notification.write`
+    (governs who may TRIGGER one, e.g. `reporting-service`'s scheduler) or
+    `admin.notification_config` (governs template wording) - reading the
+    delivery log is a different concern with a different risk profile from
+    either. The one real caller of these endpoints today, `admin-ui`'s
+    `ProcessingFailuresView` (an operational visibility/retry tool, not a
+    personal-inbox view - no frontend anywhere lists "my own"
+    notifications), needs full read access, not a per-recipient scope -
+    an admin-only gate matches actual usage more accurately than the
+    per-recipient self-service scoping the plan text originally floated,
+    which would have had no real consumer (`recipient` is a username for
+    most channels but an email address for `channel="email"`, so "the
+    caller's own notifications" isn't even a single well-defined
+    comparison)."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    allowed = await app.state.permission_client.check(
+        principal_id=x_dms_principal,
+        resource_id=PermissionServiceClient.ROOT_RESOURCE_ID,
+        permission="admin.notification_read",
+        access_type="read",
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=403, detail="Fehlende Domain-Admin-Rolle 'Notification-Protokoll einsehen'"
+        )
+
+
 @app.get("/notifications", response_model=list[NotificationOut])
 async def list_notifications(
     recipient: str | None = None,
     channel: str | None = None,
     status: str | None = None,
+    x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> list[NotificationOut]:
+    await _require_notification_read_permission(x_dms_principal)
     return await repository.list_notifications(
         session, recipient=recipient, channel=channel, status=status
     )
@@ -275,8 +312,11 @@ async def list_notifications(
 
 @app.get("/notifications/{notification_id}", response_model=NotificationOut)
 async def get_notification(
-    notification_id: int, session: AsyncSession = Depends(get_session)
+    notification_id: int,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> NotificationOut:
+    await _require_notification_read_permission(x_dms_principal)
     try:
         return await repository.get_notification(session, notification_id)
     except repository.NotFoundError as exc:
