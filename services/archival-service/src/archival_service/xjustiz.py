@@ -224,11 +224,23 @@ def _load_schema() -> etree.XMLSchema:
 
 _SCHEMA = _load_schema()
 
+# XXE hardening (Phase 60 Session 2) - same rationale/flags as
+# `xdomea._UNTRUSTED_XML_PARSER`: every call site below parses
+# ATTACKER-SUPPLIED `xml_bytes` (an uploaded ZIP's `xjustiz_nachricht.xml`,
+# reached via `POST /xjustiz/import`, gated only by the "everyone"-granted
+# `archival.write`), unlike `_load_schema` above, which only ever parses a
+# trusted, vendored schema file at import time.
+_UNTRUSTED_XML_PARSER = etree.XMLParser(resolve_entities=False, no_network=True, huge_tree=False)
+
+
+def _parse_untrusted_xml(xml_bytes: bytes) -> "etree._Element":
+    return etree.fromstring(xml_bytes, parser=_UNTRUSTED_XML_PARSER)
+
 
 def validate_uebermittlung_schriftgutobjekte(xml_bytes: bytes) -> None:
     """Raises `ValidationError` if `xml_bytes` is not valid against the
     real, vendored XJustiz 3.6.2 schema."""
-    document = etree.fromstring(xml_bytes)
+    document = _parse_untrusted_xml(xml_bytes)
     try:
         _SCHEMA.assertValid(document)
     except etree.DocumentInvalid as exc:
@@ -302,7 +314,7 @@ def parse_uebermittlung_schriftgutobjekte(
     `schriftgutobjekte` entry, which this module's own export never
     produces but the schema permits, has all documents flattened into one
     list rather than rejected)."""
-    root = etree.fromstring(xml_bytes)
+    root = _parse_untrusted_xml(xml_bytes)
 
     akte_anzeigename: str | None = None
     akte_id: str | None = None

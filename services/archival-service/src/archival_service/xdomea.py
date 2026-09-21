@@ -334,12 +334,29 @@ def _load_schema(filename: str) -> etree.XMLSchema:
 _SCHEMA = _load_schema("xdomea-Nachrichten-AussonderungDurchfuehren.xsd")
 _ABGABE_SCHEMA = _load_schema("xdomea-Nachrichten-AbgabeDurchfuehren.xsd")
 
+# XXE hardening (Phase 60 Session 2) - a shared parser for every call site
+# below that parses ATTACKER-SUPPLIED `xml_bytes` (from an uploaded ZIP's
+# `abgabe.xml`/etc., reached via `POST /xdomea/import`, gated only by the
+# "everyone"-granted `archival.write`). `_load_schema` above is unaffected -
+# it only ever parses trusted, vendored schema files at import time, never
+# attacker input. `resolve_entities=False` blocks the classic
+# `<!ENTITY xxe SYSTEM "file:///etc/passwd">` file-read/exfiltration
+# pattern (CWE-611); `no_network=True` blocks the network-fetch variant;
+# `huge_tree=False` (lxml's own default, named explicitly here for clarity)
+# keeps the existing entity-expansion/depth limits that guard against a
+# billion-laughs-style DoS.
+_UNTRUSTED_XML_PARSER = etree.XMLParser(resolve_entities=False, no_network=True, huge_tree=False)
+
+
+def _parse_untrusted_xml(xml_bytes: bytes) -> "etree._Element":
+    return etree.fromstring(xml_bytes, parser=_UNTRUSTED_XML_PARSER)
+
 
 def validate_message(xml_bytes: bytes) -> None:
     """Raises `ValidationError` if `xml_bytes` (an `Aussonderung.
     Aussonderung.0503` message) is not valid against the real, vendored
     XDOMEA 4.0.0 schema."""
-    document = etree.fromstring(xml_bytes)
+    document = _parse_untrusted_xml(xml_bytes)
     try:
         _SCHEMA.assertValid(document)
     except etree.DocumentInvalid as exc:
@@ -349,7 +366,7 @@ def validate_message(xml_bytes: bytes) -> None:
 def validate_abgabe_message(xml_bytes: bytes) -> None:
     """Raises `ValidationError` if `xml_bytes` (an `Abgabe.Abgabe.0401`
     message) is not valid against the real, vendored XDOMEA 4.0.0 schema."""
-    document = etree.fromstring(xml_bytes)
+    document = _parse_untrusted_xml(xml_bytes)
     try:
         _ABGABE_SCHEMA.assertValid(document)
     except etree.DocumentInvalid as exc:
@@ -511,7 +528,7 @@ def parse_abgabe_message(xml_bytes: bytes) -> ParsedAbgabeMessage:
     `_parse_dokument_element` helper, importing real scanned content when
     present and counting a missing one separately
     (`ParsedAbgabeMessage.skipped_schriftstueck_count`)."""
-    root = etree.fromstring(xml_bytes)
+    root = _parse_untrusted_xml(xml_bytes)
     ns = {"xdomea": XDOMEA_NS}
 
     akte_els = root.findall(".//xdomea:Schriftgutobjekt/xdomea:Akte", ns)

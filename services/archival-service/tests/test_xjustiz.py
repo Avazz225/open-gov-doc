@@ -129,6 +129,26 @@ def test_validate_raises_on_structurally_invalid_xml():
         xjustiz.validate_uebermittlung_schriftgutobjekte(invalid)
 
 
+def test_untrusted_xml_parser_does_not_expand_entities():
+    """XXE hardening (Phase 60 Session 2, ADR 0184) - same regression test
+    as `xdomea`'s own (see that module's test for the full rationale,
+    including why a `file:// SYSTEM` entity turned out not to be this
+    project's actual exploitable vector, unlike entity expansion)."""
+    payload = (
+        b'<?xml version="1.0"?>\n'
+        b"<!DOCTYPE lolz [\n"
+        b' <!ENTITY lol "lol">\n'
+        b' <!ENTITY lol2 "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">\n'
+        b"]>\n"
+        b"<lolz>&lol2;</lolz>"
+    )
+
+    root = xjustiz._parse_untrusted_xml(payload)
+
+    assert root.text is None
+    assert [child.tag for child in root] == [etree.Entity]
+
+
 def test_package_filename_follows_the_name_underscore_uuid_convention():
     """XJustiz's own convention is the OPPOSITE order of XDOMEA's
     `package_filename` ("Dokumentname_UUID.Dateiformat" vs. XDOMEA's

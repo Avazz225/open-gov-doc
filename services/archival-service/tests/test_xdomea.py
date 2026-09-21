@@ -74,6 +74,35 @@ def test_validate_message_raises_on_structurally_invalid_xml():
         xdomea.validate_message(invalid)
 
 
+def test_untrusted_xml_parser_does_not_expand_entities():
+    """XXE hardening (Phase 60 Session 2, ADR 0184) - a real regression
+    test, not just a parser-flag change treated as self-evidently
+    sufficient. Uses a billion-laughs-style internal entity chain (the
+    genuinely demonstrable exploit in this project's pinned lxml/libxml2
+    version - a classic `file:// SYSTEM` entity turned out to already be
+    unreachable by default here, since `load_dtd` defaults to `False` and
+    was never explicitly enabled anywhere in this codebase; documented in
+    ADR 0184's own Rationale so this fix isn't mistaken for closing a gap
+    that was already closed by an upstream default). Without
+    `resolve_entities=False`, `&lol2;` below would expand to 100 repeated
+    characters (still shallow by design - a real payload nests many more
+    levels for genuine memory exhaustion); with it, the entity stays a
+    literal, unexpanded `etree.Entity` placeholder node."""
+    payload = (
+        b'<?xml version="1.0"?>\n'
+        b"<!DOCTYPE lolz [\n"
+        b' <!ENTITY lol "lol">\n'
+        b' <!ENTITY lol2 "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">\n'
+        b"]>\n"
+        b"<lolz>&lol2;</lolz>"
+    )
+
+    root = xdomea._parse_untrusted_xml(payload)
+
+    assert root.text is None
+    assert [child.tag for child in root] == [etree.Entity]
+
+
 def test_package_filename_matches_required_uuid_prefixed_pattern():
     """`stringDateinameType` (Baukasten.xsd) erzwingt per Regex, dass der
     Dateiname mit einer UUID beginnt."""

@@ -2,7 +2,49 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P60-S1 (`federation-hub-service`'s `callback_base_url` SSRF + `ocr-service`'s
+**Last completed:** P60-S2 (`archival-service` XXE hardening across five `etree.fromstring()` call sites
+in `xdomea.py`/`xjustiz.py` — second session of Phase 60, "High-Severity Findings"). **New ADR**
+([0184](docs/adr/0184-archival-service-xxe-hardening.md)) — a real security-model decision refined by
+actual testing, per the plan's own DoD.
+
+**The gap.** `xdomea.py`/`xjustiz.py`'s import parsers called bare `etree.fromstring(xml_bytes)` on
+attacker-supplied XML (reached via `POST /xdomea/import`/`POST /xjustiz/import`, gated only by
+`archival.write` — granted to "everyone" by default) at five sites (the plan counted four), with no
+hardening — unlike `_load_schema()` in the same files, which only ever parses trusted, vendored schema
+files.
+
+**The fix, refined by testing rather than assumed.** Before implementing, verified the actual
+exploitability against this project's pinned lxml/libxml2 (6.1.1/2.14.6) in a live repl: the finding's own
+"classic `file://` SYSTEM entity exfiltrates `/etc/passwd`" framing turned out **already unreachable by
+default** in this version (`load_dtd` defaults `False`, never set `True` anywhere in this codebase — even
+the ORIGINAL, unfixed code never resolved such an entity). What IS real and reachable by default: internal-
+entity expansion (billion-laughs-style DoS, CWE-776) — confirmed a shallow 4-level chain alone produced
+3000 characters from a few dozen input bytes. `_parse_untrusted_xml` (new shared helper per module) uses
+`etree.XMLParser(resolve_entities=False, no_network=True, huge_tree=False)` — closes the entity-expansion
+vector that's actually reachable, and keeps the file-read vector closed as genuine defense-in-depth
+regardless of it already being closed upstream. Documented this full testing trail in the ADR rather than
+letting the fix imply a vulnerability that, as literally described, didn't actually exist in this codebase.
+
+New tests: `archival-service` +2 (`test_untrusted_xml_parser_does_not_expand_entities` in both
+`test_xdomea.py`/`test_xjustiz.py`) — a real regression test against the genuinely demonstrable exploit
+(billion-laughs, entity stays an unexpanded `etree.Entity` node) rather than treating the parser-flag
+change as self-evidently sufficient, per the plan's own explicit ask. 147/147 total. `ruff` clean (same
+pre-existing, unrelated repo-wide failures confirmed out of scope again).
+
+Rebuilt/redeployed. **Live-verified against the real running stack**: uploaded a real ZIP containing a
+billion-laughs-style `abgabe.xml` through `POST /xdomea/import` against the live container — rejected
+cleanly as a structurally-invalid XDOMEA message (`422`), no crash, no entity content anywhere in the
+response or the service's own logs. Throwaway test folder cleaned up afterward.
+
+`docs/services/archival-service.md`: Open Points bullet closed, test count updated.
+
+**Next session:** P60-S3 — `workflow-service`'s `ProcessInstance.workflow_state` race condition. Needs a
+real locking-strategy design decision (row lock vs. optimistic version column). Third and last session of
+Phase 60.
+
+---
+
+Immediately before P60-S2: **P60-S1** (`federation-hub-service`'s `callback_base_url` SSRF + `ocr-service`'s
 per-document IDOR, bundled — first session of Phase 60, "High-Severity Findings"). **New ADR**
 ([0183](docs/adr/0183-federation-hub-callback-ssrf-and-ocr-service-document-idor.md)) — a real
 authorization-model decision, per the plan's own DoD.

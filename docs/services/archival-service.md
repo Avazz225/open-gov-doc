@@ -357,7 +357,7 @@ None yet — follows in Phase 11.
 
 ## Tests
 
-- `uv run pytest services/archival-service/tests` (**142 tests**, of which 4 new since **Post-Roadmap
+- `uv run pytest services/archival-service/tests` (**147 tests**, +2 since **Phase 60 Session 2** ([ADR 0184](../adr/0184-archival-service-xxe-hardening.md)): `test_untrusted_xml_parser_does_not_expand_entities` in both `test_xdomea.py`/`test_xjustiz.py`, a real XXE regression test (billion-laughs-style entity chain confirmed to stay unexpanded) rather than treating the new parser-flag hardening as self-evidently sufficient. Before that, 142 tests, of which 4 new since **Post-Roadmap
   Phase 42 Session 1**: `test_xdomea.py` — a top-level `Akte` with no Betreff of its own falls back to a
   nested `Teilvorgang`'s Betreff for case naming, that fallback does NOT override an already-usable
   primary Betreff, a `DokumentMitSchriftstueck`'s real `Schriftstueck` content is actually imported (not
@@ -392,6 +392,7 @@ definition, confirmed in case-service with the correct name (see `PROGRESS.md`).
 ## Open Points
 
 - ~~No role/permission check except for retrieval~~ — **fixed in Post-Roadmap Phase 19 Session 7** ([ADR 0072](../adr/0072-archival-reporting-rbac.md)): all eight endpoints now check `archival.read`/`archival.write` against `permission-service` (`_require_archival_permission`, `resource_id="root"`). The existing `archive_retrieval_role` gate (X-DMS-Roles) for retrieval/`/released-items`/package download remains additionally in place, unchanged.
+- ~~`xdomea.py`/`xjustiz.py`'s `etree.fromstring(xml_bytes)` on attacker-supplied import XML had no XXE hardening~~ — **closed in Phase 60 Session 2** ([ADR 0184](../adr/0184-archival-service-xxe-hardening.md)): all five attacker-facing parse sites now use a hardened `etree.XMLParser(resolve_entities=False, no_network=True, huge_tree=False)` via a shared `_parse_untrusted_xml` helper per module. Testing found the finding's own "classic `file://` exfiltration" framing was already unreachable by default in this project's pinned lxml/libxml2 version (`load_dtd` defaults `False`) — the fix's real, demonstrated effect is closing internal-entity-expansion (billion-laughs-style DoS), which WAS reachable, plus genuine defense-in-depth against the file-read vector regardless. See ADR 0184's Rationale for the full testing trail.
 - ~~**No retry for `failed` transfers**~~ — **fixed in Post-Roadmap Phase 20 Session 2** ([ADR 0078](../adr/0078-archival-service-retry-backoff-failed-permanent.md)): automatic retry with full-jitter backoff up to `max_archival_attempts`, then `failed_permanent` + manual restart via `POST .../retry`. Still open: an Admin UI visibility/control for this (P20-S7).
 - **Encryption with only a single, static key** (`EnvKeyStore`) — no key rotation/multi-tenant support, see "KeyStore Plugin" above.
 - **Only the 0503 message, no full XDOMEA negotiation flow** (see above) — 0501/0502/0504–0507 are not implemented, since there is no responding second system.
