@@ -261,10 +261,61 @@ def get_metrics() -> Response:
     return Response(content=body, media_type=content_type)
 
 
+async def _require_document_write_permission(x_dms_principal: str, document_id: str) -> None:
+    """RBAC (Phase 59 Session 3) - checks the CALLER's own `document.write`
+    against the target document's resource tree, directly via
+    `permission-service` - `document_client.py`'s own calls into
+    `document-service` always assert the fixed, elevated `X-DMS-Principal:
+    signature-service` identity (covered by "everyone"'s baseline grants),
+    so without this check document-service never learns who the real
+    caller actually was, and a caller with no access to the target
+    document at all could still sign (and check in a new version of) it.
+    Mirrors `document_service.main._require_document_permission`'s own
+    shape/resource_id convention (ADR 0154: a document's own `id` is its
+    `resource_id`), via the generic `check()` on the shared
+    `dms_permission_client` (this service doesn't have a document-specific
+    convenience wrapper the way `document-service` does its own,
+    duplicated client). Callers resolve `404` (unknown document) themselves
+    first, same existence-before-permission ordering convention as
+    `document_service.main._require_document_permission`'s own callers."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    allowed = await app.state.permission_client.check(
+        principal_id=x_dms_principal,
+        resource_id=document_id,
+        permission="document.write",
+        access_type="write",
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=403, detail=f"Fehlende Berechtigung 'document.write' auf {document_id!r}"
+        )
+
+
+async def _require_document_read_permission(x_dms_principal: str, document_id: str) -> None:
+    """Read counterpart of `_require_document_write_permission` above, for
+    the three `GET` endpoints below (Phase 59 Session 3) - same
+    previously-missing-entirely gap, same fix shape."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    allowed = await app.state.permission_client.check(
+        principal_id=x_dms_principal,
+        resource_id=document_id,
+        permission="document.read",
+        access_type="read",
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=403, detail=f"Fehlende Berechtigung 'document.read' auf {document_id!r}"
+        )
+
+
 @app.post("/signatures", response_model=SignatureOut, status_code=status.HTTP_201_CREATED)
 async def create_signature(
     payload: SignatureCreate,
     session: AsyncSession = Depends(get_session),
+    x_dms_principal: str = Header(default=""),
+    x_dms_username: str = Header(default=""),
     x_dms_maintenance_active: str = Header(default="false"),
 ) -> SignatureOut:
     await _reject_during_maintenance(x_dms_maintenance_active)
@@ -272,6 +323,16 @@ async def create_signature(
         document = await app.state.document_client.get_document(payload.document_id)
     except DocumentNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await _require_document_write_permission(x_dms_principal, payload.document_id)
+    if payload.signer_principal_id != x_dms_username:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "signer_principal_id muss mit der eigenen, verifizierten Identität "
+                "(X-DMS-Username) übereinstimmen - Signieren im Namen einer anderen "
+                "Person ist nicht möglich"
+            ),
+        )
 
     source_version_number = payload.version_number or document["current_version_number"]
     try:
@@ -428,29 +489,47 @@ async def put_signature_config(
 
 @app.get("/signatures", response_model=list[SignatureOut])
 async def list_signatures(
-    document_id: str | None = None, session: AsyncSession = Depends(get_session)
+    document_id: str | None = None,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> list[SignatureOut]:
+    """`document_id` is required (Phase 59 Session 3) - previously
+    optional, and an omitted filter returned every signature in the
+    system regardless of caller. The one real frontend caller
+    (`user-ui`'s `SignaturesPanel`) always already passes it."""
+    if not document_id:
+        raise HTTPException(
+            status_code=400, detail="document_id ist erforderlich (kein systemweites Listing)"
+        )
+    await _require_document_read_permission(x_dms_principal, document_id)
     return await repository.list_signatures(session, document_id=document_id)
 
 
 @app.get("/signatures/{signature_id}", response_model=SignatureOut)
 async def get_signature(
-    signature_id: int, session: AsyncSession = Depends(get_session)
+    signature_id: int,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> SignatureOut:
     try:
-        return await repository.get_signature(session, signature_id)
+        signature = await repository.get_signature(session, signature_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await _require_document_read_permission(x_dms_principal, signature.document_id)
+    return signature
 
 
 @app.get("/signatures/{signature_id}/verify", response_model=VerificationOut)
 async def verify_signature(
-    signature_id: int, session: AsyncSession = Depends(get_session)
+    signature_id: int,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> VerificationOut:
     try:
         signature = await repository.get_signature(session, signature_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await _require_document_read_permission(x_dms_principal, signature.document_id)
 
     try:
         _content_type, pdf_bytes = await app.state.document_client.get_version_content(

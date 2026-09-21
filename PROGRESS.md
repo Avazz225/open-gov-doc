@@ -2,8 +2,67 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P59-S2 (`storage-service`'s entire object-CRUD API had zero authorization — second
-session of Phase 59, "Critical Authorization Bugs"). **New ADR**
+**Last completed:** P59-S3 (`signature-service`'s `POST /signatures` had no authorization check AND
+trusted a client-supplied `signer_principal_id` with no identity validation — third session of Phase 59,
+"Critical Authorization Bugs"). **New ADR**
+([0180](docs/adr/0180-signature-service-create-signature-permission-and-signer-identity-gate.md)) — a real
+authorization-model decision, per the plan's own DoD.
+
+**The gap.** Found by this round's live-code security sweep. Any authenticated caller could sign (and
+thereby check in a new version of) any document in the installation, with no check of their own
+`document.write` access to it — a full document-ACL bypass on the write side. Worse,
+`signer_principal_id` was taken directly from the request body with no verification against the caller's
+own identity, so any caller could attribute a signature to an arbitrary username. The three read
+endpoints had the matching read-side gap, and `GET /signatures` additionally allowed an unfiltered
+system-wide listing of every signature in the installation with no `document_id` filter.
+
+**The fix.** New `_require_document_write_permission`/`_require_document_read_permission` helpers, both
+checking the caller's own `document.write`/`.read` directly against `permission-service` (the document's
+own `id` as `resource_id`, ADR 0154's convention) — applied to `create_signature` (write) and the three
+`GET` endpoints (read). `create_signature` additionally requires `payload.signer_principal_id ==
+X-DMS-Username` (`403` otherwise) — checked against `X-DMS-Username` (Keycloak `preferred_username`), not
+`X-DMS-Principal` (Keycloak `sub`), since `signer_principal_id` is itself a username elsewhere in this
+service. Confirmed against the one real caller (`apps/user-ui/src/components/SignaturesPanel.tsx`, which
+already always sends the caller's own username) that this changes no real usage, only closes the spoofing
+path. `GET /signatures` now requires a non-empty `document_id` (`400` otherwise) — its one real caller
+already always passes it. **Ordering correction made during implementation**: the first draft checked
+permission before existence to avoid an existence oracle for unauthorized callers, but that was reverted
+in favor of matching `document-service`'s own established existence-before-permission convention exactly
+(verified via a dedicated research pass), rather than introducing a second, inconsistent security posture
+unique to this one service — see ADR 0180 for the full reasoning.
+
+New/updated tests: `signature-service` +6 (`test_create_signature_without_principal_header_is_401`,
+`test_create_signature_with_mismatched_signer_is_403`, `test_list_signatures_without_document_id_is_400`,
+`test_list_signatures_without_principal_header_is_401`, `test_get_signature_without_principal_header_is_401`,
+`test_verify_signature_without_principal_header_is_401`), 32/32 total. The shared `client` test fixture
+now sends a default `X-DMS-Principal: signature-service-tests` (the same principal already used to create
+test documents against the real `document-service`) — no new `permission-service` grant needed, since
+`document.write`/`.read` are baseline "everyone" grants for ordinary documents (ADR 0149). It does not set
+a default `X-DMS-Username`, since `real_signer` generates a fresh username per test; each `POST
+/signatures` call site now passes it explicitly. `ruff` clean (pre-existing, unrelated repo-wide ruff
+failures in a `loadtest/` notebook and `federation-hub-service` confirmed out of scope again). **Scope
+note**: no regression test exists for the real "caller genuinely lacks `document.write`/`.read`" `403`
+case — since that permission is a baseline everyone-grant, constructing a real negative case needs a
+teamspace-scoped document, out of this session's scope (documented in ADR 0180 and a new Open Points
+bullet).
+
+Rebuilt/redeployed. **Live-verified against the real running stack**: `curl` against `signature-service`
+with a real document (created via `document-service`) confirmed `401` with no `X-DMS-Principal`, `403`
+with a mismatched `X-DMS-Username`/`signer_principal_id`; a full real signing flow (real `auth-service`
+account, matching identity) succeeded end-to-end through `GET .../verify` and `GET
+/signatures?document_id=...`. Throwaway test document and user cleaned up afterward.
+
+`docs/services/signature-service.md`: API table (all four rows annotated) + a new "Signature data-plane
+authorization" paragraph, test count updated, new Open Points bullet for the deferred negative-permission
+test.
+
+**Next session:** P59-S4 — `registry-service`'s `POST /instances` plus drain/activate/deregister are
+unauthenticated (service hijack/DoS risk). Fourth session of Phase 59.
+
+---
+
+Immediately before P59-S3: **P59-S2** (`storage-service`'s entire object-CRUD API had zero authorization —
+second session of Phase 59, "Critical Authorization Bugs"). **New ADR**
 ([0179](docs/adr/0179-storage-service-object-crud-trusted-caller-gate.md)) — a real authorization-model
 decision, per the plan's own DoD.
 
