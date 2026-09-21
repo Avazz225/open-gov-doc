@@ -94,10 +94,12 @@ already-captured behavioral data about a specific person.
   addressed**: retention IS enforced (own poll loop, configurable, default 7 days, independent of the
   regular audit log) — but no GeoIP/location data, no client-side fingerprinting, no correlated session
   duration, and no four-eyes on the toggle action are built (the concept names the last as explicitly
-  optional). No admin-UI page either — API/curl-only, the same "backend before frontend" precedent
-  already established for AD-group-mapping administration in this same service (Post-Roadmap Phase 39
-  Session 3, ADR 0153) and for several other admin-only mechanisms across this project. All explicitly
-  documented as deferred, not silently missing, in `docs/services/auth-service.md` "Open Points".
+  optional; still genuinely open as of Phase 65+'s gap-analysis round — `put_user_tracking_config` has no
+  `requires_approval` wiring, unlike the AD-group-mapping endpoints, which do — small fix if ever pursued,
+  same pattern as ADR 0171). ~~No admin-UI page either — API/curl-only~~ — **closed in Post-Roadmap Phase
+  52 Session 1**: `apps/admin-ui/src/app/user-tracking/page.tsx` + `components/UserTracking.tsx`, gated
+  by `RequireCapability`. All explicitly documented as deferred, not silently missing, in
+  `docs/services/auth-service.md` "Open Points".
 - **This closes Phase 41** ("Compliance Gaps from the Concept Document") — `graphify update .` runs at
   session end per the standing phase-end rule.
 - **Tests**: `services/auth-service/tests/test_user_tracking.py` (new, 11 tests) covers RBAC (403s for

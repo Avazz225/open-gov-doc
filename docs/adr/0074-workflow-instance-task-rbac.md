@@ -71,8 +71,10 @@ of a hardcoded open path:
   `case-service`'s own test suite already covers the real end-to-end path (`create_case` →
   `WorkflowClient.start_instance` with the passed-through principal) — no mocking between the
   services.
-- **`POST /instances/{id}/retry` remains deliberately ungated** — the roadmap mandate explicitly named
-  only instance start and task completion, not the retry path; out of scope for this session.
+- ~~**`POST /instances/{id}/retry` remains deliberately ungated** — the roadmap mandate explicitly named
+  only instance start and task completion, not the retry path; out of scope for this session.~~ —
+  **closed in P62-S2**: `retry_instance` now gated via `_require_workflow_permission` (`workflow.write`),
+  the same check `start_instance`/`complete_task` already have.
 - **`created_by`/`completed_by` remain plain, unverified body strings** (unchanged since P6-S1) — this
   session's gating decision only concerns *whether* an action may be performed, not whether the given
   name is accurate.

@@ -57,9 +57,11 @@ a single well-defined comparison across channels).
   JWT-verified `X-DMS-Principal` on every proxied call) — but an installation operator now needs to
   explicitly grant `domain-admin-notification-read` to whichever admin account should see this page,
   the same "backend-gated first, client-side UI consistency can follow later" pattern this project has
-  used repeatedly (e.g. ADR 0148's own admin-ui alignment sweep); `ProcessingFailuresView` itself remains
+  used repeatedly (e.g. ADR 0148's own admin-ui alignment sweep). ~~`ProcessingFailuresView` itself remains
   one of the admin-ui pages with no client-side capability gate, tracked separately (see
-  IMPLEMENTATION_PLAN.md's Phase 62/"Deliberately Not Included in Phase 59+").
+  IMPLEMENTATION_PLAN.md's Phase 62/"Deliberately Not Included in Phase 59+").~~ — **closed in P63-S3**:
+  `NotificationFailuresSection` self-gates on `admin.notification_read` (per-section, not a whole-page
+  `RequireCapability`, since the page aggregates three other, independently-gated sections).
 - New tests: `test_list_notifications_without_principal_header_is_401`,
   `test_list_notifications_without_read_permission_is_403`,
   `test_get_notification_without_principal_header_is_401`,

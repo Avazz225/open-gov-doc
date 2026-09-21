@@ -26,7 +26,12 @@
 
 ## Consequences
 
-- **6 of the 7 domains from 4.6 are seeded but not enforced**: `domain-admin-config`/`-storage`/`-license`/`-query-console`/`-deletion`/`-deletion-vs` exist as `Role` rows, without an associated account and without any endpoint checking them — an open point for respective future retrofit sessions (e.g. object-type/workflow configuration, storage guard).
+- ~~**6 of the 7 domains from 4.6 are seeded but not enforced**: `domain-admin-config`/`-storage`/`-license`/`-query-console`/`-deletion`/`-deletion-vs` exist as `Role` rows, without an associated account and without any endpoint checking them — an open point for respective future retrofit sessions (e.g. object-type/workflow configuration, storage guard).~~ —
+  **all 6 now enforced**: `-config` since ADR 0035/P12-S3, `-license` since P9-S1, `-query-console` since
+  P8-S1, `-storage` since Post-Roadmap Phase 38 Session 3, `-deletion-vs` since ADR 0133 (Phase 32 Session
+  4), `-deletion` since ADR 0150 (Phase 39 Session 1). None needed a dedicated technical account — each
+  is enforced via a direct `has_permission`/role-assignment lookup against whatever principal holds the
+  role.
 - **No "real" rolling inactivity deactivation**: a superuser who stays active but does nothing for a long time is still only deactivated after the absolute `superuser_activation_minutes` deadline, not after 10 minutes of inactivity as described in the concept text.
 - **No increased audit priority for individual actions during activation**: `audit-service` consumes `auth.>` (lifecycle events: requested/activated/deactivated) with normal priority like any other subject — its hash-chain model has no priority concept; a foreign action executed *during* an active superuser session in another service is not specially marked.
 - **`permission-service`'s `/roles`/`/role-assignments` remain ungated**: `auth-service`'s seeding logic (bootstrap creates the very first role assignment) would otherwise itself have needed the very permission it is creating - a chicken-and-egg problem avoided by deliberately leaving these two endpoints ungated (in line with the explicitly named, narrower retrofit mandate).

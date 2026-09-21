@@ -68,13 +68,18 @@ If the Virus Scan Service is unreachable, the upload is likewise rejected
   already stale or a lock conflict exists (the scan runs before the actual
   conflict detection) - unnecessary but not incorrect work; no correctness
   gap.
-- No dedicated release/deletion workflow for quarantined objects (restore,
-  permanent deletion) - out of scope for this session.
-- "Notifying the uploader" on a hit (10.3 does not mention this explicitly,
+- ~~No dedicated release/deletion workflow for quarantined objects (restore,
+  permanent deletion) - out of scope for this session.~~ — **closed by ADR 0052**
+  (P15-S2): `document-service`'s `POST /documents/from-quarantine-release` and
+  `virus-scan-service`'s role-gated `GET /scans?status=infected` plus a real
+  permanent-deletion path.
+- ~~"Notifying the uploader" on a hit (10.3 does not mention this explicitly,
   but it is a natural expectation) is not yet implemented, since the
   Notification Service does not exist until P6-S2 - `virus_scan.completed`
   is already published and can be consumed there without any change to the
-  Virus Scan Service.
+  Virus Scan Service.~~ — **closed in Post-Roadmap Phase 44 Session 4**:
+  `notification-service`'s `_handle_virus_scan_completed` consumes
+  `virus_scan.completed` and notifies the uploader (`created_by`).
 - OCR (P5-S3) and Rendering/Preview (P5-S2) hook into
   `document.version.created`, which is only published *after* a clean scan
   - neither session needs to concern itself with the scan gating itself.

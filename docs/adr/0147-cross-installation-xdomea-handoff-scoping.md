@@ -126,3 +126,8 @@ scheduled) would implement option (1) above, informed by this scoping.
   work — a genuinely reassuring scoping outcome: the two-and-a-half-year-old (in-project-time) trust design
   was built generically enough to carry a payload shape (large binary documents) never anticipated at the
   time it was designed.
+
+**Closed (Phase 43 Session 1, [ADR 0159](0159-dms-to-dms-xdomea-handoff-implementation.md))**: the
+DMS-to-DMS build this ADR scoped was implemented exactly along the bounded starting point named above —
+base64-in-envelope transport, `taskType=federated`/reserved `process_type` dispatch, no trust-model
+changes. ADR 0159's own Consequences state this closes ADR 0126's originally-deferred DMS-to-DMS gap.

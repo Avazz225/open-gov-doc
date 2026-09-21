@@ -32,14 +32,16 @@ download), calling `POST /xjustiz/export/documents/{id}` (ADR 0129) instead of t
 - **No new component, no new panel** — the export is a document-scoped action already living exactly where
   the equivalent XDOMEA action lives; the plan's own wording ("at least a document-export button, mirroring
   `PreviewPane.tsx`'s existing button") is satisfied without inventing new UI structure.
-- **A case-level export button was NOT added this session** — same reasoning ADR 0127/ADR 0129 already
+- ~~**A case-level export button was NOT added this session** — same reasoning ADR 0127/ADR 0129 already
   gave for XDOMEA's/XJustiz's own case-export having no `user-ui` entry point: `case-service`'s "Case"
   concept has no dedicated browsing UI anywhere in `user-ui` today, so there is no natural existing screen
   to attach a "export this case" button to. That gap (a minimal case-browsing UI) is explicitly P34-S3's
-  own, separate concern, not incidentally solved here.
-- **No import-side UI** — `POST /xjustiz/import` (P34-S1/ADR 0139) remains API-only, same scoping the
+  own, separate concern, not incidentally solved here.~~ — **closed by ADR 0141** (P34-S3, the very next
+  session): `CasesPane.tsx`'s case-detail view ships all four buttons (XDOMEA export, XJustiz export,
+  XDOMEA import, XJustiz import).
+- ~~**No import-side UI** — `POST /xjustiz/import` (P34-S1/ADR 0139) remains API-only, same scoping the
   XDOMEA import (ADR 0128) already accepted; a frontend upload flow for either format is not part of this
-  session.
+  session.~~ — **closed by ADR 0141**, same `CasesPane.tsx` buttons as above.
 
 ## Consequences
 

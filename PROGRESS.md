@@ -2,8 +2,25 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P64-S1 (cross-service reference validation — first and only session of Phase 64,
-**closes the entire Phase 63-64 round**, the seventh gap-analysis round). **New ADR**
+**Last completed:** P65-S1 (ADR documentation corrections bundle — first session of Phase 65, no code).
+Pure documentation: ~20 one-line "Closed in..." addenda across ADRs 0010/0023/0074/0081/0093/0113/0126/
+0140/0141/0142/0144/0147/0149/0153/0157/0159/0164/0165/0168/0178, each correcting the recurring
+"ADR names a gap, an unrelated later session silently closes it, nobody annotates the ADR" failure mode —
+full list and exact closure evidence in `IMPLEMENTATION_PLAN.md`'s Phase 65 table, not duplicated here.
+Two items initially suspected closed were investigated and found still genuinely open while writing the
+addenda (ADR 0141's reviewer-ui case-browsing UI; ADR 0157's four-eyes-on-the-toggle gap) — both left
+unstruck and added to the Phase 65+ plan's "Deliberately Not Included" list instead of being incorrectly
+closed. No tests, no rebuild, no new ADR (pure documentation).
+
+**Next session:** P65-S2 — `docs/services/*.md` documentation corrections bundle (second session of
+Phase 65, no code). See `IMPLEMENTATION_PLAN.md`'s Phase 65 table for the full list (webdav-connector,
+user-ui, object-type-service, document-service, folder-service, case-service, process-designer,
+permission-service, auth-service, admin-ui, fleet-management-service).
+
+---
+
+Immediately before P65-S1: **P64-S1** (cross-service reference validation — first and only session of
+Phase 64, **closes the entire Phase 63-64 round**, the seventh gap-analysis round). **New ADR**
 ([0193](docs/adr/0193-cross-service-reference-validation.md)) covering all three sub-parts — each turned
 out to be a genuine design decision, not the mechanical/obvious fix the plan's own DoD text anticipated.
 
@@ -82,10 +99,22 @@ temporary test data/permission grants created during live verification cleaned u
 `process-designer.md` all updated (Open Points closed, new sections, test counts, two other stale test-count
 histories found drifted and corrected transparently as an aside, same pattern as prior sessions this round).
 
-**Round closed.** Phase 64 was the last phase queued in `IMPLEMENTATION_PLAN.md` — no Phase 65 exists.
-`graphify update .` run to close out the whole Phase 63-64 round per its own Definition of Done. Per this
-project's established pattern, the next gap-analysis round is NOT self-initiated — status is reported to
-the user, a new round only starts on explicit request.
+**Round closed.** Phase 64 was the last phase queued in `IMPLEMENTATION_PLAN.md` — no Phase 65 existed
+yet. `graphify update .` run to close out the whole Phase 63-64 round per its own Definition of Done. Per
+this project's established pattern, the next gap-analysis round was NOT self-initiated — status was
+reported to the user.
+
+**Immediately after, the user explicitly requested the next round** ("und die nächste runde"), plus a new
+instruction (saved to memory, not project state) to additionally consult an external reference source in
+future gap-analysis rounds, cited only as generic domain input, never by name. The eighth gap-analysis
+round ran — five parallel research dimensions this time (the usual four, plus the new domain-comparison
+pass), several of which split into further parallel sub-batches once dispatched, making this by far the
+deepest round yet (roughly 15 research agents total). Full findings and the resulting **Phase 65-72
+plan** (documentation corrections → security/correctness quick wins → "blocked on X, X now exists"
+completions → infrastructure hardening → two genuine never-attempted concept gaps, each scoping-then-
+build → a remaining-completions bundle → four scoping-only sessions for the largest/least-certain
+candidates) are written into `IMPLEMENTATION_PLAN.md`'s new "Phase 65+: Gap Analysis After Phase 64"
+section — see that section for the full research summary rather than duplicating it here.
 
 ---
 

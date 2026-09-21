@@ -84,6 +84,8 @@ handling needs no change).
   itself — a reviewer must independently open the document in `user-ui` to actually judge the OCR
   result before completing the task. `reviewer-ui`'s task table does show the business key (the OCR
   result ID, which embeds the document ID), so the document is at least identifiable.
-- **`object-type-service`/status-transition (Konzept 4.5) remains open**, now split out into its own,
+- ~~**`object-type-service`/status-transition (Konzept 4.5) remains open**, now split out into its own,
   not-yet-numbered future session — first needs a decision on what "status" concretely means as a data
-  model before the constraint engine can validate transitions of it.
+  model before the constraint engine can validate transitions of it.~~ — **closed by ADR 0166** (Phase 45
+  Session 4, forked from this session): new `status_transitions` schema on the object type +
+  `Case.status` "open"→"closed" gating, the first (and, for now, only) real status-transition trigger.

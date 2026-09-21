@@ -1459,6 +1459,249 @@ non-trivial decisions (see per-phase notes above for which sessions need one), `
 (`scripts/run-tests.sh --build`) + frontend regression (`tsc`/`eslint`/`vitest`/`next build`) before
 completion, real browser verification for the P63-S3(b) `admin-ui` change.
 
+## Phase 65+: Gap Analysis After Phase 64
+
+After Phase 64 completed (closing the entire Phase 63-64 round), an eighth gap-analysis round ran on
+user request ("und die nächste runde") — the same methodology as every prior round, but run deeper than
+usual: five parallel research dimensions instead of four (ADR self-named open scope across all 193
+ADRs, `docs/services/*.md` Open Points across all ~50 files, `Konzept.md` coverage + phantom-reference
+check, reassessment of every "Deliberately Not Included" item across all seven prior rounds, and — new
+this round — a domain-knowledge comparison pass against common capabilities in this problem space),
+several of which further split into their own parallel sub-batches once dispatched, so this round's
+findings are unusually deep. This is by far the largest single gap-analysis round to date; the plan
+below is sized accordingly.
+
+**The recurring "ADR/doc names a gap, an unrelated later session silently closes it, nobody annotates
+it" failure mode was found again, at much greater scale than any prior round** — over 30 confirmed
+instances across ADRs and service docs (full list in P65-S1/S2 below). Notably, this round independently
+re-confirmed several ADR-0157/permission-service/ADR-0149 findings that TWO separate research agents
+found the same way, and one finding (the `fleet-management-service`↔`admin-ui` wiring gap, see P67-S1)
+was independently found and confirmed by three separate agents — a useful cross-check on the round's own
+reliability, not just redundant work.
+
+**The Konzept.md coverage check, run in three parallel slices this round instead of one pass, found real
+material the prior seven rounds' single-pass checks had missed**: 3.1's explicit requirement for
+DB-level technical enforcement (a per-service database user with `GRANT` restricted to only that
+service's own schema) was never built — every one of the ~28 services still connects with one shared
+Postgres superuser-adjacent credential, schema separation is enforced by convention only; 3.5's
+requirement for a lean backend-for-frontend/aggregation layer per web UI was conflated with the (fully
+built) API gateway from ADR 0005 onward and never separately implemented — every frontend still
+addresses many microservices individually through a purely generic reverse-proxy gateway; 6.2's CLI
+tool was never revisited after migration-service/license-service/plugin-orchestration-service/backup
+all shipped, so it still can't trigger a migration, show license status, show plugin-orchestration
+status, or show backup/restore progress, despite `docs/tools/cli.md` listing these as "not yet" for
+services that have existed for many phases now; and 7.3/Section 8's "UI customizations
+(branding/theming)" and "role-dependent dashboards" were never built at all — a real, permanent, never-
+previously-flagged gap against the literal concept text. 4.5's soft ("sollte") requirement for a
+validation-rule plugin/extension mechanism was also found unbuilt, but is lower-severity (the fixed rule
+set already covers every example the concept itself gives) and is carried forward as a documented,
+correctly-deferred item rather than a session.
+
+**The domain-knowledge comparison pass** (new this round, cross-referenced against `Konzept.md` and
+`docs/services/*.md` before treating anything as a real finding, deliberately filtered to only what
+survived that check) surfaced three additive, architecture-compatible candidates that fit DMS's existing
+plugin/connector extension points: batch-scan intake splitting (barcode/separator-sheet document-
+boundary detection for bulk mail-room scanning, a natural OCR-pipeline-adjacent plugin), structured
+e-invoice format support (the German eGov config package's own worked example is literally an invoice
+object type, but nothing parses the standard machine-readable invoice payload formats), and a
+standardized secure e-government transport protocol as an alternative Federation Hub channel (for
+exchanging documents with external authorities/courts that don't speak DMS's own bespoke hub protocol).
+All three are large, genuinely new features — scoped as scoping-only sessions in Phase 72, not build
+sessions.
+
+**The deferred-item reassessment** re-confirmed almost everything from all seven prior rounds' lists
+still correctly deferred, with one process note: the very first deferred item ever recorded (Phase 32+'s
+"third-party long-term archive integration, Java 11 runtime/SBOM/multi-solution coexistence, UI-parity
+convenience fixes") had fallen out of the recurring per-round re-confirmation loop every other item gets
+— not found stale, just found to have silently stopped being re-checked. Re-confirmed still correctly
+deferred this round (no new trigger), and named explicitly here to close that process gap.
+
+**Numbering**: last phase in `IMPLEMENTATION_PLAN.md` is Phase 64, highest ADR number is 0193 — this
+plan starts at **Phase 65** / **ADR 0194**.
+
+**Ordering principle**: documentation-only corrections first (zero risk, clears the backlog before more
+of it accumulates), then cheap security/correctness fixes, then the "blocked on X, X now exists"
+completions (the round's single highest-value functional finding), then infrastructure hardening
+(largest blast radius, so scheduled once the smaller sessions have re-validated the current baseline),
+then the two genuine, never-attempted concept gaps (each gets a scoping session before a build session,
+given how large and previously-unscoped they are), then a bundle of the remaining moderate-value
+completions, then scoping-only sessions for the domain-comparison round's three large candidates plus
+the two Konzept findings whose realistic build path is genuinely unclear (6.1's blocked parser, 3.5's
+BFF layer).
+
+### Phase 65 — Documentation Corrections (no code)
+
+| Session | Deliverable |
+|---|---|
+| P65-S1 | ✅ ~~ADR documentation corrections bundle — one-line "Closed in..." addenda (same treatment already used for ADR 0053/0076/0116/0123/0154 in earlier rounds), no code changes: **ADR 0010** (quarantine release workflow — closed by ADR 0052; uploader virus-hit notification — closed Post-Roadmap Phase 44 Session 4), **ADR 0023** (all 6 previously-unenforced domain-admin roles now enforced: `-license` P9-S1, `-query-console` P8-S1, `-storage` Phase 38 S3, `-deletion-vs` ADR 0133, `-deletion` ADR 0150, `-config` ADR 0035/P12-S3), **ADR 0074** (`POST /instances/{id}/retry` gated — closed P62-S2), **ADR 0081** (result-path retry/backoff — closed Phase 40 S3), **ADR 0093** (4 of 5 named gaps closed by ADR 0153 — composite rules, default role, four-eyes, JSON export; the 5th, AD sync interval, remains genuinely open, see P71 below), **ADR 0113** (document-service `registered` filter — closed by ADR 0118; case-service half remains open, see P71), **ADR 0126** (XDOMEA federation-hub delivery — closed by ADR 0159), **ADR 0140** (XJustiz case-level export UI — closed by ADR 0141), **ADR 0141** (process-definition-picker — closed P42-S1; case-service per-case RBAC — closed by ADR 0144), **ADR 0142** (Teilvorgang/Teilakte naming + nested Schriftstück — partially closed P42-S1; the broader redesign remains open and already correctly tracked separately), **ADR 0144** (`GET /cases` row-level filtering + case-scoped org-hierarchy grants — both closed by ADR 0154), **ADR 0147** (DMS-to-DMS handoff scoping — fully implemented by ADR 0159), **ADR 0149** (folder-service deletion bypass — closed by ADR 0163; `list_documents_by_kennzeichen` row-level RBAC — closed by ADR 0176), **ADR 0153** (AD-group-mapping admin-UI CRUD — closed Phase 50 S5), **ADR 0157** (admin-UI page for user-tracking — closed P52-S1, confirmed independently by two research agents this round), **ADR 0159** (open-case export document-inclusion — closed by ADR 0170), **ADR 0164** (its own existing addendum is itself now stale — the case-service/migration-service/signature-service Category A gaps it names as still-open were subsequently closed too, per ADR 0152's own later "Update, Phase 56 Session 1" note), **ADR 0165** (status-transition constraint engine — closed by ADR 0166), **ADR 0168** (shared design tokens — now consumed by all six frontend apps since Phase 49), **ADR 0178** (notification-service retry gate — closed by ADR 0186; `ProcessingFailuresView` client-side gate — closed P63-S3).~~ **Done.** All 20 addenda written exactly as scoped, plus two small corrections found while writing them: ADR 0141's own reviewer-ui-case-browsing-UI item was re-confirmed still genuinely open (not closed, kept unstruck, noted for a future round) rather than assumed closed; ADR 0157's "no four-eyes on the toggle" item was likewise re-confirmed still open rather than assumed closed alongside the admin-UI-page item in the same bullet. No code, no tests, no rebuild needed. |
+| P65-S2 | `docs/services/*.md` documentation corrections bundle — strike-through + "closed in..." notes, no code changes: **webdav-connector.md** (no-own-`/metrics` bullet — service has a full generic sensor rollout with a real `/metrics` endpoint), **user-ui.md** (FolderTree favorites-marker bullet — closed P23-S5; FolderTree context-menu bullet — closed P23-S8; "no browser E2E possible" bullet — stale since Playwright adoption; installation-wide-trash-overview bullet — duplicate of the already-closed P15-S1 `TrashPane.tsx`), **object-type-service.md** (two "follows only with P5b-S4" bullets — P5b-S4 has long since shipped, `LayoutFormFields`/`SearchPane`/`UploadForm` are layout-driven today), **document-service.md** (kennzeichen-display-in-frontend bullet — closed P5e-S3; "no admin UI toggle for `document.delete`/etc." bullet — closed by `ApprovalSettings.tsx`, Post-Roadmap Phase 22 S3/ADR 0089), **folder-service.md** (scope-locks-deferred bullet — scope locks have applied to folder resource subtrees since P3-S4; deletion-register-backup-independence bullet — `audit-service`'s deletion ledger already covers `folder.force_deleted`, not just documents), **case-service.md** (records-disposal-retry bullet — `archival-service` already has `POST /case-archival-transfers/{id}/retry` since ADR 0078), **process-designer.md** (config-export/import-connection bullet — flatly false, `config-service` has exported/imported workflow/DMN definitions for a long time; "no permanently set-up browser E2E" bullet — flatly false, a full Playwright suite is checked in; "no rollback endpoint" bullet — half-false, the backend endpoint has existed since P25-S2, only frontend wiring is missing, reword rather than strike), **permission-service.md** ("Category A remains open" bullet — closed across document-service/folder-service/migration-service per ADR 0152's Phase 56 S1 update; AD-group-sync bullet's "planned as Phase 24 Session 2" framing — that phase shipped and was extended twice more, reword to describe the narrower remaining gap, see P71), **auth-service.md** (user-tracking admin-UI-page bullet — same closure as ADR 0157 above, this doc's own body text already says so at a different line), **admin-ui.md** (ocr-settings "no permission check" clause — inaccurate, `ocr-service` does check `ocr.read`/`.write`, just open-by-default via the "everyone" group, reword; "no group management" bullet — group entities have existed since Post-Roadmap Phase 22 S2, reword to scope specifically to role-assignment's `principalType` remaining `user`-only; installation-list/fleet-management-service blocker clause — the service now exists, reword per P67-S1 below rather than strike, since the underlying gap is still real), **fleet-management-service.md** (eGov-package-not-assigned-until-P17-S2/S3 blocker clause — the package now exists at `packages/egov/`, reword to keep only the still-accurate "no built-in template library, pure pass-through" note). |
+
+**Definition of Done**: no tests needed (pure documentation), no new ADR, docs and `PROGRESS.md` updated
+per session.
+
+### Phase 66 — Security/Correctness Quick Wins
+
+| Session | Deliverable |
+|---|---|
+| P66-S1 | Small, independent security fixes bundled by size not theme: (a) `webdav-connector`'s edit-token document-scope check (ADR 0189) covers `get_resource_inst` but not `handle_move`'s destination resolution — a token-scoped session can MOVE its one authorized document into any folder the underlying real user has write access to, a real scope-bypass, not just a theoretical gap. (b) `storage-service`'s `GET /storage/usage`, `POST /replication/process-pending`, `POST /object-verify/process-pending` remain completely unauthenticated (ADR 0179 gated the eleven object-CRUD endpoints but not these three aggregate/maintenance ones) — add the same `_require_storage_caller` gate. (c) `document-service`'s `AuditTraceRoleOverride` (`PUT /audit-trace-role-overrides/{role}`) upserts a free-text role name with no existence check against permission-service — add one. |
+| P66-S2 | `workflow-service` bundle, both closing a stale-premise gap: (a) `business_key` is validated nowhere despite the plan's own prior-round framing that "no real process type sets it to an actual document/case ID yet" — that premise is false and has been since Phase 14: `office-addin`/`libreoffice-addin` both ship a generic "start workflow from this document" feature that always sets `business_key=documentId`, live and load-bearing (ADR 0131's `scope_folder_resource_ids` delegation dimension already depends on this reference being real). Validate at `POST /instances` (and/or task-completion time) by reusing the already-existing `_resolve_business_key_scope` helper, and correct the stale comments in `document_client.py`/`main.py`/ADR 0131 that assert otherwise. (b) `reassign_task` (ADR 0145) has no supervisor-only authorization, with its own docstring claiming "no such authorization primitive exists anywhere in this project yet" — false, `POST .../org-hierarchy-grant` in the same file already resolves `SupervisorAssignment`/org-hierarchy via `permission-service` (ADR 0121, predates ADR 0145). Reuse that same resolution in `reassign_task`, deciding hard-require vs. an optional stricter mode. |
+| P66-S3 | `document-service` correctness bundle: (a) force-unlock's four-eyes gate (`ApprovalActionConfig.requires_approval`) defaults to `False` when unconfigured, and separately there is no feedback channel when a queued force-unlock execution fails (`consumer.py` just logs and returns, no event published back to permission-service) — decide and fix both, they're the same underlying "force-unlock has weaker guarantees than the four-eyes model implies" gap. (b) `checkin_version` runs the virus scan unconditionally before checking for a lock conflict, wasting a full scan on requests that were always going to be rejected — reorder the check. |
+
+**Definition of Done**: regression test per fix (a token-scoped WebDAV session rejected from moving its
+document outside its own authorized subtree; the three storage-service endpoints reject an ungated
+caller; a role-override PUT with an unknown role name rejected; a federated `business_key` referencing a
+real document is now enforced/validated end to end; a non-supervisor's `reassign_task` call rejected once
+the gate is added); new ADR for P66-S1 (a real scope-check decision) and P66-S2 (both are real
+authorization-model decisions); no new ADR expected for P66-S3 (mechanical reorder + reuse of an
+already-established four-eyes pattern); docs and `PROGRESS.md` updated per session.
+
+### Phase 67 — "Blocked on X, X Now Exists" Completions
+
+| Session | Deliverable |
+|---|---|
+| P67-S1 | `admin-ui`'s installation list is still 100% `localStorage` (`lib/installations.ts`), with the Open Points bullet blaming "the optional, not-yet-built Fleet/License Management Service." `fleet-management-service` has fully existed since Phase 54 Session 1 — full CRUD (`POST`/`GET /installations`, `/installations/{id}/license`, group/rollout management) — and `apps/admin-ui/src` has zero references to it (confirmed independently by three separate research agents this round, including `fleet-management-service.md`'s own P54-S1 note already saying so). Wire `InstallationManager.tsx`/`installations.ts` to the real service's `/installations` endpoints instead of (or alongside) `localStorage`, working out an operator-key auth story for the cross-device provisioning use case this was always meant to serve. The single highest-value finding of this round. |
+| P67-S2 | `docs/tools/cli.md`'s CLI tool (6.2) still lists migration/transfer triggering (7.2), license status (9.3), plugin-orchestration status (3.8), and backup/restore + deletion-reconciliation monitoring (10.4) as "not yet" — but `migration-service` (P12-S2), `license-service` (P9-S2), `plugin-orchestration-service` (Phase 10), and the backup mechanism (Phase 11) have all existed for many phases now; no session ever went back to wire them into `tools/cli/`. Wire all four, matching the CLI's existing command patterns for the services it already covers (query console, object types, registry, workflows, config export/compare). |
+
+**Definition of Done**: real browser verification for P67-S1 (a live cross-device installation-
+provisioning round trip against the actual running stack); a real CLI smoke test per new command for
+P67-S2; new ADR only if P67-S1's operator-key auth story turns out to be a genuine new decision rather
+than reuse of an existing pattern; docs and `PROGRESS.md` updated per session.
+
+### Phase 68 — Infrastructure Hardening
+
+| Session | Deliverable |
+|---|---|
+| P68-S1 | Konzept 3.1's explicit requirement — "technical enforcement: a DB user per service, `GRANT` restricted exclusively to its own schema" — was never built. Schema separation itself is real (`infra/postgres-init/001-schemas.sql`, one schema per service), but every one of the ~28 services still connects with the identical shared `DMS_POSTGRES_DSN` credential (`infra/docker-compose.yml`), so the separation is convention-only, not technically enforced. Largest blast radius of any session in this round — touches every service's DB connection string, the Postgres init scripts (per-service `CREATE USER`/`GRANT` statements), the Helm chart's secret structure, and needs every one of ~28 services' own test suites to still pass against a narrower-permissioned connection. Session decides the concrete rollout mechanism (likely: extend `infra/postgres-init/` with per-service role creation + `GRANT`, one new secret per service in Compose/Helm) and whether to land it in one big-bang session or split into a scoping session + a phased rollout once the shape is proven on 2-3 services first. |
+| P68-S2 | `document-service`'s `PermissionServiceClient` is a bespoke `httpx`-based client duplicating `libs/dms-permission-client`, not even listed in its own `pyproject.toml` (ADR 0154's own named tech debt, still growing — `is_maintenance_active()` was added later, Post-Roadmap Phase 44 S3/ADR 0164, as ANOTHER explicitly-duplicated method rather than migrating). The same pattern repeats in `auth-service`, `search-service`, `workflow-service`, `mail-connector` — each keeps its own local `permission_client.py`. Migrate all five onto the shared package: mechanical but touches five services, verify method parity (especially `create_resource_node`, `is_maintenance_active`) and update each service's own tests. |
+
+**Definition of Done**: full backend regression (`scripts/run-tests.sh --build`) across every affected
+service for P68-S1, since a DB-connection-shape change is exactly the kind of thing that fails silently
+per-service rather than loudly; new ADR for P68-S1 (a real infrastructure/security-model decision); no
+new ADR expected for P68-S2 (mechanical consolidation of an already-proven shared client); docs and
+`PROGRESS.md` updated per session.
+
+### Phase 69 — UI Customization, Branding & Role-Dependent Views (Konzept 7.3/8)
+
+**Ties together two findings from the same slice of Konzept.md that are really one gap**: 7.3's
+configuration-export "UI customizations" category was never built (confirmed absent from the entire
+codebase, ADR 0035's own text), and Section 8's "customizability... branding/theming, role-dependent
+dashboards where applicable" has an unstruck, permanent Open Point in `user-ui.md` that has never
+surfaced in any of the seven prior gap-analysis rounds until now. A genuine, never-attempted concept
+requirement, not a stale-doc correction.
+
+| Session | Deliverable |
+|---|---|
+| P69-S1 (scoping only) | What would "branding/theming" and "role-dependent dashboards" concretely mean for this codebase's existing design-token system (`libs/dms-ui`, ADR 0168, consumed by all six frontend apps since Phase 49)? Likely shape: an installation-level branding config (logo, accent color, product name override — the "OG Doc" rename precedent already shows product-name-as-config is a known pattern) layered on top of the existing token system, exported/imported as a new `7.3` config category; "role-dependent dashboards" likely means conditionally showing/hiding dashboard widgets by capability, not a second UI. Session's output is a concrete, buildable recommendation for P69-S2, not code. |
+| P69-S2 | Build per P69-S1's recommendation. |
+
+**Definition of Done**: P69-S1 needs no tests, a short ADR recording the scoping decision, and
+`PROGRESS.md` updated, explicitly marked "scoping, no feature"; P69-S2's DoD depends on what was scoped —
+at minimum a new ADR, tests, real browser verification (both themes) for any visual change, and
+`docs/services/config-service.md`/`user-ui.md`/`admin-ui.md` updated as applicable.
+
+### Phase 70 — Document Declassification Mechanism (ADR 0114/0115)
+
+`document-service`'s `set_classification_level` explicitly rejects any lower rank with `409` — set-or-
+raise only. No endpoint, workflow, or process exists anywhere to clear/lower a document's
+`classification_level` (VS-NfD/VS-VERTRAULICH/GEHEIM/STRENG GEHEIM) once set; ADR 0115 itself already
+names this as a real gap ("No 'un-redact'/declassify-adjacent mechanism exists"). Compliance-sensitive
+(German VS classification handling), which is exactly why ADR 0114/0115 both deliberately left it out
+rather than under-designing it — matching that same caution here rather than rushing a "just PATCH the
+field" fix.
+
+| Session | Deliverable |
+|---|---|
+| P70-S1 (scoping only) | What would a real declassification process need? Likely: a dedicated capability distinct from `admin.deletion_classified`, a mandatory dual-control/four-eyes gate (reusing the existing generic mechanism, ADR 0022), a full audit trail entry distinct from a normal metadata update, and a decision on whether declassification is a single-step lowering or must pass through each intermediate level. Session's output is a concrete, buildable recommendation, not code. |
+| P70-S2 | Build per P70-S1's recommendation. |
+
+**Definition of Done**: same shape as Phase 69 — P70-S1 scoping-only (short ADR, `PROGRESS.md` marked
+"scoping, no feature"); P70-S2 needs a new ADR, tests proving the four-eyes gate actually gates, and
+`docs/services/document-service.md` updated.
+
+### Phase 71 — Remaining Moderate-Value Completions
+
+| Session | Deliverable |
+|---|---|
+| P71-S1 | `notification-service`'s "logs only" alerting retrofit: storage-service, force-unlock, report dispatch, and monitoring escalation remain genuinely unwired (only break-glass/deletion-reminder/lock-reminder/virus-hit are actually connected) — each just needs a `subjects` entry plus a producer-side `publish_event` call, same pattern as the existing four. Bundle with `permission-service`'s missing approver-notification/execution-feedback channel on the approval-consumer path (`approval_consumer.py` has no notification-service call anywhere) — same "an async action fails/succeeds with no one told" theme. |
+| P71-S2 | `reporting-service`'s forensic trace covers only user/document/folder events, not role changes (`permission-service` publishes no `permission.role.*` events at all) or folder reads (`folder-service` publishes no `folder.viewed`) — add both event types and their consumers, closing two related, previously-identified-but-never-fixed audit-coverage gaps. Bundle with `permission-service`'s missing elevated audit priority for emergency-shutdown events (no priority/severity concept exists in `audit-service`'s schema at all — same underlying schema change serves both). |
+| P71-S3 | `process-designer` completions bundle: DMN `decisionRef` gained a delete-time existence check in P64-S1 (`extract_decision_refs`) but still has no DESIGN-time validation or cross-reference UI (no warning if a typed `decisionRef` doesn't match any loaded DMN family, no "which BPMN files reference this DMN" list in the overview); `workflow-service`'s process-definition rollback endpoint has existed since P25-S2 but was never wired into the designer's own UI (no restore button). Bundle with `admin-ui`'s missing `reference_target` picker for `type:"reference"` object-type attributes (ADR 0193, P64-S1's own follow-up — currently API-only). |
+| P71-S4 | `signature-service`'s PAdES-B-LTA re-timestamping poll loop (ADR 0155) has no admin-UI visibility or manual trigger — add a view under signature-config listing signatures due/last-timestamped, plus an optional manual-trigger endpoint. Bundle with two small `archival-service` fixes: the XDOMEA `Format/Name` element is hardcoded to code "100" regardless of actual content type (a small MIME-type → XDOMEA-codelist lookup table would close this cheaply); and `test_api.py`'s `client` fixture race (the real `document_client`/poll task both start during `TestClient(app)`'s lifespan before the test's `AsyncMock` replacement takes effect) — reorder or gate the poll task's first tick. |
+
+**Definition of Done**: regression test per fix; no new ADR expected (mechanical extensions of already-
+established patterns — event publishing, admin-UI views, a lookup table, a test-fixture reorder) except
+P71-S1 if the force-unlock/approval feedback-channel design turns out to need a real decision rather
+than reusing the existing event/notification shape; docs and `PROGRESS.md` updated per session.
+
+### Phase 72 — Scoping-Only Sessions for Larger Candidates
+
+None of these are build sessions — each produces a concrete, buildable (or explicitly "not now")
+recommendation for a future round, matching the established pattern from every prior round's scoping-
+only sessions (P37-S1, P43-S2/S3).
+
+| Session | Deliverable |
+|---|---|
+| P72-S1 | Batch-scan intake splitting — automatic document-boundary detection (barcode/separator-sheet/blank-page) for a bulk mail-room scan, so the Poststelle role doesn't have to scan one physical document at a time. Would slot in as a new pipeline step between virus-scan and OCR, or as an OCR-service plugin. Scope: detection approach, where exactly it lives in the existing fixed pipeline, and what a minimal viable version looks like. |
+| P72-S2 | Structured e-invoice format support (the machine-readable, XML-embedded invoice formats mandated for German public-sector B2G invoicing and increasingly common in B2B intake generally) — an intake/OCR-pipeline plugin that recognizes and extracts the structured payload, auto-populating the invoice object type's attributes through the existing constraint engine instead of relying on OCR text extraction. Scope: parser library choice, plugin placement, attribute-mapping design. |
+| P72-S3 | A standardized secure e-government transport protocol as an alternative Federation Hub channel, for exchanging documents with external authorities/courts that only speak that standard rather than DMS's own bespoke hub protocol. Likely shape: a new connector service analogous to the CMIS/WebDAV connectors (3.3), not a Federation Hub rewrite. Scope: protocol library availability, trust-model fit against the hub's existing e2e-encryption stance, and whether this is realistically a DMS-core feature or an installation-specific connector some operators would build themselves. |
+| P72-S4 | Two Konzept findings whose realistic build path is genuinely unclear, scoped together since both are "is this actually worth pursuing" questions rather than "how do we build it" questions: **6.1**'s free-form psql-syntax query language was never shipped after `pglast` turned out GPL-licensed (ADR 0031) — only the structured-filter path works without an external, unshipped plugin; is a real (non-GPL) SQL-parser dependency available now, or should the concept's own text be revised instead? **3.5**'s per-UI backend-for-frontend/aggregation layer was conflated with the (already fully built) API gateway from ADR 0005 onward and never separately implemented — given the gateway has worked fine as a generic proxy for over 60 phases with no reported aggregation-performance problem, is a real BFF layer still warranted, or should Konzept.md's own wording be reconciled with what was actually and successfully built instead? |
+
+**Definition of Done**: each session ends with a new ADR recording a clear recommendation (build in a
+future round / revise the concept text / decline with reasoning); no code diff expected except possibly
+in P72-S4 if the session concludes the concept text itself should be corrected; `PROGRESS.md` marks each
+explicitly as "scoping, no feature."
+
+## Deliberately Not Included in Phase 65+
+
+Carried over from Phase 63+ (re-confirmed this round, no new trigger for any of them): `storage-
+service`'s local/Azure WORM gap, `signature-service`'s QES/PKCS#11/HSM/OCSP, PDF/UA formal-conformance
+validation (veraPDF), XDOMEA nested-hierarchy import redesign (ADR 0142's broader scope, distinct from
+the narrow fix closed in P42-S1), teamspace AD-group invitation (ADR 0160), `mail-connector`'s
+Microsoft Graph/O365 backend (ADR 0161), CheckMK/SAML 2.0/XAdES/CAdES, `object-type-service`'s
+`allowedParentTypes` cycle detection (re-confirmed a deliberate design decision at Phase 38 S1, still
+correct — a type-graph cycle fails safely at first placement attempt, unlike an instance-level cycle).
+
+New this round:
+- **The very first deferred item ever recorded** (Phase 32+'s "third-party long-term archive
+  integration, Java 11 runtime/SBOM/multi-solution coexistence, UI-parity convenience fixes") — found to
+  have silently fallen out of the recurring per-round re-confirmation loop every other item gets, not
+  found stale. Re-confirmed correctly deferred, re-entered into the loop going forward.
+- **`auth-service`'s AD synchronization interval / no periodic reconciliation** (Konzept 4.4, ADR 0093's
+  5th, still-open item) — group membership is resolved live from the Keycloak JWT `groups` claim on
+  every request; a periodic reconciliation job would only matter if group claims can go stale between
+  token refreshes, which hasn't been identified as a real operational problem. Medium effort if ever
+  needed, no current trigger.
+- **`case-service`'s missing `registered` filter on `GET /cases`** (ADR 0113's other half, ADR 0118 only
+  closed the document-service side) — ADR 0118's own reasoning already explains why: a case always
+  starts a real BPMN instance, it can't be an "informal, no-process pre-record object" the way a
+  work-tray document can, so the work-tray use case this filter serves doesn't apply to cases.
+- **A real `case-service` browsing UI in `reviewer-ui`** (ADR 0141's own named gap, re-confirmed still
+  open while writing P65-S1's ADR addenda) — `user-ui`'s `CasesPane.tsx` has no `reviewer-ui` counterpart.
+  Medium effort (a read-only list+detail pane, same shape as `CasesPane.tsx` minus the write-gated action
+  buttons), no concrete operator request yet.
+- **`auth-service`'s user-tracking config toggle has no four-eyes gate** (ADR 0157's own named gap,
+  re-confirmed still open while writing P65-S1's ADR addenda) — `put_user_tracking_config` has no
+  `requires_approval` wiring, unlike the AD-group-mapping endpoints. Small fix (same pattern as ADR 0171)
+  if ever prioritized; not itemized into its own session this round.
+- **`gateway-service`'s `permission-service` `/check`, `principal_id` as query param not header** — one
+  of several endpoints in this shape by deliberate, long-standing design, low value to special-case.
+- **`storage-service`'s per-object-type/per-folder write-strategy configuration** (still service-wide
+  only) — large feature, no concrete trigger identified.
+- Several small, individually low-value polish items surfaced across the docs/services sweep this round
+  (`permission-service`'s non-subtree-scoped cache invalidation, `registry-service`'s unpolled
+  `health_endpoint`, `mail-connector`'s no-bulk-rescan-on-format-change, `migration-console`'s no-
+  proactive-license-banner/no-own-approval-UI, `fleet-management-service`'s plain-string-compare four-
+  eyes/no-Prometheus-export/no-remote-controlled-gates, `reviewer-ui`'s lane-based task pre-selection
+  blocked on `workflow-service` never enforcing BPMN lanes anywhere) — real but low-individual-value,
+  not itemized into their own sessions this round.
+
+## Definition of Done for Phase 65+ (unchanged, `CONTRIBUTING.md`)
+
+Same standing rule as every phase above: tests green, `docs/services/*.md` current, new ADR for
+non-trivial decisions (see per-phase notes above for which sessions need one), `PROGRESS.md` update,
+`graphify update .` once at the end of the whole Phase 65-72 round (not after every session), backend
+regression (`scripts/run-tests.sh --build`) + frontend regression (`tsc`/`eslint`/`vitest`/`next build`)
+before closing a session, real browser verification for every UI-visible change.
+
 ## PROGRESS.md — Resume Mechanism
 
 `dms/PROGRESS.md` is created as the first order of business in P0-S1 and is the entry point for every new session:

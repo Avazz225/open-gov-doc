@@ -71,5 +71,9 @@ an already-registered object returns `409`.
 - No UI surfaces this for `case-service`: there is no dedicated case-creation frontend anywhere in the
   project today (cases are created via direct API calls with a `process_definition_id`) — this session's
   frontend work (draft toggle, "Draft" badge, "Register" action) is `document-service`/`user-ui` only.
-- A future session could add `registered: bool` query filters to `GET /documents`/`GET /cases` if a real
-  consumer needs to list drafts separately — not built here, no concrete need identified yet.
+- ~~A future session could add `registered: bool` query filters to `GET /documents`/`GET /cases` if a real
+  consumer needs to list drafts separately — not built here, no concrete need identified yet.~~ — the
+  `document-service` half **closed by ADR 0118** (Phase 31 Session 7): `GET /documents?registered=true|
+  false`. The `case-service` half remains open — per ADR 0118's own reasoning, a case always starts a
+  real BPMN instance, so it can't be an "informal, no-process pre-record object" the way a work-tray
+  document can, and the work-tray use case this filter serves doesn't apply to cases the same way.

@@ -86,13 +86,17 @@ the basis for a startup backfill loop that registers every case created *before*
   fix live: `GET /cases/does-not-exist` correctly returns `404`. Confirmed the startup backfill against the
   real dev stack's 157 pre-existing cases (spanning back to early Phase 7 sessions) — all found already
   registered.
-- **`GET /cases`/`GET /cases/by-vorgangsnummer` still cannot filter per-case** — they remain root-scoped,
+- ~~**`GET /cases`/`GET /cases/by-vorgangsnummer` still cannot filter per-case** — they remain root-scoped,
   all-or-nothing collection reads; per-row filtering by each case's own resource would need a bulk-authz
   check against every returned row, a genuinely separate, larger feature not part of this session's
-  "retrofit the resource type" scope.
+  "retrofit the resource type" scope.~~ — **closed by ADR 0154** (P39-S4): `_filter_cases_by_permission()`
+  row-level filtering via `check_batch`.
 - **No admin-ui changes** — the existing generic role-assignment UI already covers the new capability (see
-  Rationale); a dedicated case-ACL management page, if ever wanted, remains explicitly future work.
-- **`workflow-service`'s org-hierarchy grants (ADR 0121) are NOT migrated to case-scoped `Delegation`s** —
+  Rationale); a dedicated case-ACL management page, if ever wanted, remains explicitly future work. **Still
+  genuinely open as of Phase 65+'s gap-analysis round** (low priority — cosmetic/UX completion, not a
+  functional gap).
+- ~~**`workflow-service`'s org-hierarchy grants (ADR 0121) are NOT migrated to case-scoped `Delegation`s** —
   they remain scoped by `process_definition_id`, unchanged; whether/how to narrow them to the specific case
   instance using this session's new resource type is a separate, explicitly deferred follow-up (ADR 0121's
-  own "Consequences" already named this as out of its scope).
+  own "Consequences" already named this as out of its scope).~~ — **closed by ADR 0154**: new
+  `scope_case_resource_ids` delegation dimension.

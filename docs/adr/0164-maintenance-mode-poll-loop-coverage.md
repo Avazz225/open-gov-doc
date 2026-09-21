@@ -110,8 +110,12 @@ mirroring `workflow-service`'s own identical treatment of new process-instance s
   already stable and already well-tested from ADR 0024's original session; this ADR only adds new
   callers of an existing endpoint.
 - ~~**Category A (request-triggered cascading writes) remains explicitly unaddressed** — ADR 0152's own
-  documented, lower-priority second half, unchanged by this session.~~ — **partially closed in Phase 51
-  Session 4** (see ADR 0152's own "Update" note): `document-service`/`folder-service`'s cascading
-  endpoints now reject during maintenance mode via the gateway-forwarded header, the same shape
-  `workflow-service` already had. `case-service`/`migration-service`/`signature-service`'s own Category
-  A call sites remain open.
+  documented, lower-priority second half, unchanged by this session.~~ — **closed in two rounds**: Phase
+  51 Session 4 (see ADR 0152's own "Update" note) closed `document-service`/`folder-service`'s cascading
+  endpoints (reject during maintenance mode via the gateway-forwarded header, the same shape
+  `workflow-service` already had); this addendum's own "remain open" claim about
+  `case-service`/`migration-service`/`signature-service` was itself superseded by ADR 0152's later
+  "Update, Phase 56 Session 1" note, which confirms all three closed (`case-service.create_case`,
+  `migration-service.create_transfer`, `signature-service.create_signature`, each via
+  `_reject_during_maintenance`) — found during Phase 65+'s gap-analysis round, this addendum had simply
+  never been updated after that second closure round.

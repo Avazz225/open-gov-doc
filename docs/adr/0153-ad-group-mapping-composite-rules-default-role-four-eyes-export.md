@@ -134,8 +134,11 @@ already knows how to render, per `UserManagement.tsx`'s existing pattern for rol
   installation with `auth.ad_group_role_mapping.create` gated will see that gate silently bypassed by a
   config-service-driven import, the same characteristic `realm_roles` already has today (not a new
   inconsistency this session introduces).
-- **No admin-ui CRUD surface for mapping/composite-rule/default-role management** - remains an
-  API/curl-only feature for now, a natural candidate for a future session, not committed to here.
+- ~~**No admin-ui CRUD surface for mapping/composite-rule/default-role management** - remains an
+  API/curl-only feature for now, a natural candidate for a future session, not committed to here.~~ —
+  **closed in Post-Roadmap Phase 50 Session 5**: `apps/admin-ui/src/components/AdGroupMappings.tsx` +
+  `app/ad-group-mappings/page.tsx`, covering 1:1 mappings, composite AND-rules, and the default-role
+  setting, all with four-eyes/pending-approval handling.
 - ~~**A mapping/rule created via the four-eyes/consumer path records the approver's raw Keycloak `sub`
   as `created_by`/actor**, not their `preferred_username` like the direct (ungated) path does - the
   approval-request payload carries no display-name field. A cosmetic inconsistency (verified live: the

@@ -95,10 +95,12 @@ exactly along the lines that ADR 0147 recommended:
 - **The DMS-to-DMS half of the originally-named "cross-tenant workflow participation" gap (concept
   7.4/14.2) is now fully closed**, not just scoped. The foreign-system half remains closed-as-in-not-
   buildable per ADR 0147's own finding (unchanged).
-- **A real, pre-existing `archival-service` limitation is now documented** (open-case export silently
+- ~~**A real, pre-existing `archival-service` limitation is now documented** (open-case export silently
   drops document references) — a genuine, separate future-session candidate, not blocking this feature
   for its most natural use case (handing off a case at the point a local process closes/finalizes it,
-  which is exactly the live-verification scenario that surfaced this).
+  which is exactly the live-verification scenario that surfaced this).~~ — **closed by ADR 0170**
+  (`case-export-open-case-document-inclusion.md`, Phase 52 Session 4): `general_export.
+  _resolve_export_version()` falls back to `current_version_number` for open cases.
 - **Hub memory-pressure risk is bounded, not eliminated** — see "Rationale" above. Both installations'
   outbound HTTP timeouts are raised from the original small-payload-era 15s default to 60s.
 - **No archival-service code changed** — a genuine zero-footprint reuse of Phase 31/34's existing general

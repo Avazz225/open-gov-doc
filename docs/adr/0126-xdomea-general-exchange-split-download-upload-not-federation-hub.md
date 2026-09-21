@@ -72,10 +72,11 @@ message). Both findings were put to the user directly via `AskUserQuestion`:
 - Each of the three sub-sessions gets its own Definition of Done and, where warranted, its own ADR for
   non-trivial decisions made during implementation (e.g. exact XJustiz message type chosen for P31-S13c,
   researched at that session's own start rather than pre-decided here).
-- **Automatic cross-installation delivery via `federation-hub-service` remains explicitly out of scope**
+- ~~**Automatic cross-installation delivery via `federation-hub-service` remains explicitly out of scope**
   for all three P31-S13 sub-sessions — a plausible, separate future phase if that gap is ever prioritized,
   building on both this work (the package format) and `federation-hub-service`'s existing trust model
-  (the transport), but not attempted here.
+  (the transport), but not attempted here.~~ — **fully implemented by ADR 0159** (`dms-to-dms-xdomea-
+  handoff-implementation.md`, P43-S1), scoped first by ADR 0147.
 - `archival-service`'s existing disposal-only export path (P7-S3b) is **not modified in place** by
   P31-S13a — the plan is to generalize `xdomea.py`'s message-building logic so it can be invoked for an
   arbitrary document/case, not to change the disposal pipeline's own existing call site or message shape.

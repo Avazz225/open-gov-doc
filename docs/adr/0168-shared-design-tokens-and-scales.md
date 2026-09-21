@@ -115,15 +115,19 @@ the end whether the direction landed.
 
 ## Consequences
 
-- **`libs/dms-ui/tokens.css`** exists and is documented (`libs/dms-ui/README.md`, `libs/README.md`
-  updated to note this one non-Python exception), but is consumed by **no app yet**.
-- **Phase 49** (visual modernization rollout) will, per app: add the `@import` line, remove that
+- ~~**`libs/dms-ui/tokens.css`** exists and is documented (`libs/dms-ui/README.md`, `libs/README.md`
+  updated to note this one non-Python exception), but is consumed by **no app yet**.~~ — **closed by
+  Phase 49's rollout** (Sessions 1-3): all six frontend apps (`admin-ui`, `user-ui`, `reviewer-ui`,
+  `process-designer`, `migration-console`, `office-addin`) now `@import "../../../../libs/dms-ui/
+  tokens.css"` at the top of their own `globals.css`.
+- ~~**Phase 49** (visual modernization rollout) will, per app: add the `@import` line, remove that
   app's own now-duplicate `--dms-*` declarations from its `globals.css`, and replace hardcoded
   radius/spacing/shadow/font-size values with the new scale tokens where they match (rounding
   off-grid outliers to the nearest step) — real browser verification (before/after screenshots, both
-  themes) per the project's own established convention for every UI-visible change.
-- **The live high-contrast bug is fixed for `user-ui`/`admin-ui`/`process-designer`** the moment each
-  adopts `tokens.css` in Phase 49 — not before, since no app has been touched yet.
+  themes) per the project's own established convention for every UI-visible change.~~ — **done**, see
+  above.
+- ~~**The live high-contrast bug is fixed for `user-ui`/`admin-ui`/`process-designer`** the moment each
+  adopts `tokens.css` in Phase 49 — not before, since no app has been touched yet.~~ — **done**, see above.
 - **`office-addin`'s reduced theming is now an explicitly recorded exception** (this ADR), not
   something a future session might "notice" is inconsistent and try to unify away.
 - **No new JS tooling, dependency, or workspace configuration was added** to the repository — the

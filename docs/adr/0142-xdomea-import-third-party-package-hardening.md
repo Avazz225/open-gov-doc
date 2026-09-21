@@ -31,6 +31,13 @@ nested physical-page/Schriftstück scans) remain explicitly out of scope — the
 elements are still picked up by the unconditional `//Dokument` descendant search (no document is
 silently dropped), but they contribute no case-naming metadata of their own.
 
+~~The above two gaps~~ — **partially closed in Phase 42 Session 1**: `parse_abgabe_message()` gained a
+Teilvorgang/Teilakte Betreff fallback and a new Schriftstueck-import loop (`skipped_schriftstueck_count`).
+The BROADER redesign this ADR itself flags below (full recursive nesting, genuine multi-level hierarchy
+support) remains genuinely open — Phase 42 Session 1 closed the narrow, evidence-based tolerance gap
+named here, not the larger scope named in "Rationale" below, which is still correctly tracked as a
+separate, deliberately-deferred item (see `IMPLEMENTATION_PLAN.md`'s "Deliberately Not Included" lists).
+
 ## Rationale
 
 - **Bounded, evidence-based scope, not a rewrite into a general-purpose XDOMEA reader** — each of the

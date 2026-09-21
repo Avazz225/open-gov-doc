@@ -62,10 +62,12 @@ separate, symmetric `POST /handovers/{id}/result` return path (out of scope for 
   intermediate status `"pending_retry"` is the actual new vocabulary addition; `"delivery_failed"`
   already existed as a status value and is now just reached later in time (only after exhaustion
   instead of immediately).
-- **Why `POST /handovers/{id}/result` (the "result" return path) is NOT part of this session**:
+- ~~**Why `POST /handovers/{id}/result` (the "result" return path) is NOT part of this session**:
   structurally symmetric, but architecturally independent (opposite direction, a different installation
   calls back) — the plan explicitly scopes this session to the initial delivery; equal treatment of the
-  result return path would be a sensible follow-up session, not part of this one.
+  result return path would be a sensible follow-up session, not part of this one.~~ — **closed in Phase 40
+  Session 3**: new `result_attempts`/`result_next_retry_at` columns, status `result_pending_retry`,
+  the same retry/backoff shape applied to `POST /handovers/{id}/result`.
 
 ## Consequences
 

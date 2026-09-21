@@ -67,22 +67,27 @@
 
 ## Consequences
 
-- **Composite rules (group AND attribute, multiple groups → one role) remain unimplemented** — Concept
-  4.4 explicitly not fully covered, documented open point.
-- **No "configurable default behavior for unmapped AD groups"** (Concept 4.4 explicitly names "no role
+- ~~**Composite rules (group AND attribute, multiple groups → one role) remain unimplemented** — Concept
+  4.4 explicitly not fully covered, documented open point.~~ — **closed by ADR 0153** (P39-S3): composite
+  AND-rules.
+- ~~**No "configurable default behavior for unmapped AD groups"** (Concept 4.4 explicitly names "no role
   granted vs. defined default role" as a configuration option) — this session implements only the first
-  behavior (no role), hardcoded, no setting for it.
-- **No "no live editing with immediate blast effect without a control" approval step** (Concept 4.4:
+  behavior (no role), hardcoded, no setting for it.~~ — **closed by ADR 0153**: configurable default role.
+- ~~**No "no live editing with immediate blast effect without a control" approval step** (Concept 4.4:
   "changes to the mapping only take effect after explicit approval/save") — this session makes every
   change effective immediately (save = approval), no additional four-eyes step as with
   `permission.role_assignment.create` (ADR 0060). Documented open point, not a deliberate security gap
-  (the change itself is already gated by `admin.user_management` and audited).
+  (the change itself is already gated by `admin.user_management` and audited).~~ — **closed by ADR 0153**:
+  four-eyes on mapping changes.
 - **No AD synchronization interval/no user/group synchronization** (Concept 4.4, final paragraph) — this
   session reads group memberships exclusively from the JWT `groups` claim at token-fetch time, no periodic
-  reconciliation, no dedicated user/group table.
-- **JSON configuration export (Concept 4.4: "part of the JSON configuration export (7.3)")** not part of
+  reconciliation, no dedicated user/group table. **Still genuinely open as of Phase 65+'s gap-analysis
+  round** — group membership is resolved live on every request, so this would only matter if group claims
+  could go stale between token refreshes, which hasn't been identified as a real operational problem.
+- ~~**JSON configuration export (Concept 4.4: "part of the JSON configuration export (7.3)")** not part of
   this session — `ad_group_role_mapping` rows are currently not part of `config-service`'s configuration
-  packages, so a mapping cannot be transferred between installations as envisioned in the concept.
+  packages, so a mapping cannot be transferred between installations as envisioned in the concept.~~ —
+  **closed by ADR 0153**: `ad_group_mappings` is now a real `config-service` export/import category.
 - **`skip_exists=True` limit remains** (already documented for the audience mapper): changes to the new
   `groups` mapper itself (e.g. later `full.path=true`) would not automatically be picked up on an
   already-existing client — uncritical for dev/test, `_ensure_groups_mapper` only checks for the

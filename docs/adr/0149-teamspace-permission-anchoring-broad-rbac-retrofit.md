@@ -195,14 +195,15 @@ tradeoff, not something this session's scope calls for optimizing.
 
 ## Consequences
 
-- **Residual, accepted gap**: `teamspace-member`'s broad `folder.write` grant on a teamspace's root folder
+- ~~**Residual, accepted gap**: `teamspace-member`'s broad `folder.write` grant on a teamspace's root folder
   means a regular (non-manager) member can now bypass `teamspace-service`'s own manager-only deletion guard
   by calling `folder-service`'s `DELETE /folders/{root_folder_id}` directly instead of going through
   `teamspace-service`. This is a **net improvement** over the prior fully-open state (previously *anyone*,
   member or not, could do this via the totally-ungated `folder-service` endpoint) — not a new regression —
   but it is not closed by this session. Closing it would need folder-service to distinguish "member with
   ordinary write access" from "member with delete/admin rights on this specific folder," which ADR 0043's
-  single-role model does not currently support.
+  single-role model does not currently support.~~ — **closed by ADR 0163** (Phase 44 Session 2): new
+  `folder.delete` permission + `teamspace-manager` role.
 - **Residual, accepted gap**: a soft-deleted (trashed) document whose parent folder is later hard-deleted
   becomes permanently unreadable by anyone, including via `GET /documents/{id}/deleted`-family admin/trash
   views — hard-deleting a folder removes its `ResourceNode` in `permission-service` (a pre-existing
@@ -229,8 +230,9 @@ tradeoff, not something this session's scope calls for optimizing.
   `cascade-trash`/`cascade-restore` (called only by `folder-service` during folder cascade operations),
   `count_active_by_folder_ids`/`count_active_total` (pure counts, no content), `archive-request`/
   `archive-status`/`has-active-hold`/`has-active-quarantine` (pre-existing deliberate ungating), and
-  `list_documents_by_kennzeichen` (cross-folder global search used by `mail-connector`; row-level filtering
-  here would be a separate, larger effort, out of scope).
+  ~~`list_documents_by_kennzeichen` (cross-folder global search used by `mail-connector`; row-level filtering
+  here would be a separate, larger effort, out of scope)~~ — **closed by ADR 0176** (Phase 56 Session 2):
+  `check_read_batch`-based row-level filtering on `GET /documents/by-kennzeichen`.
 - **Test fixtures across ~15 services** needed a default `X-DMS-Principal` header added (either at the
   `TestClient`/`httpx.Client` construction level, or per-call), following the same established pattern
   already used by `ocr-service`/`object-type-service`'s test clients before this session.
