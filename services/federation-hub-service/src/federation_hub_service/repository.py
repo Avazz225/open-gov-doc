@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
 from dms_retry import compute_backoff_seconds
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from federation_hub_service import crypto_utils
@@ -431,3 +431,31 @@ async def list_handovers(
         query.order_by(Handover.created_at.desc()).limit(limit).offset(offset)
     )
     return list(result.scalars().all())
+
+
+# Terminal statuses only (P63-S2) - a handover still `pending`/`delivered`/
+# `pending_retry`/`result_pending_retry` is mid-flight and must never be
+# swept up by the cleanup loop below, however old it looks; only these three
+# genuinely will never transition again.
+_TERMINAL_HANDOVER_STATUSES = ("completed", "delivery_failed", "result_delivery_failed")
+
+
+async def purge_stale_handovers(session: AsyncSession, *, cleanup_after_seconds: float) -> int:
+    """Periodic cleanup (P63-S2) - unlike `registry-service`'s equivalent
+    (Phase 58 Session 2, `list_permanently_unreachable` + per-row
+    `deregister`), there is no existing per-handover deletion event for
+    this to preserve by reusing a single-row function - a plain bulk
+    `DELETE` is used instead, no event published (nothing in this project
+    consumes a per-handover lifecycle event beyond the ones already
+    published at creation/delivery time). Only rows in a TERMINAL status
+    are eligible, regardless of age - a stuck `pending`/`pending_retry` row
+    (which should never happen in practice, but this must not silently
+    delete evidence of it if it does) is left alone. Returns the number of
+    rows deleted, for the caller's own log line."""
+    cutoff = datetime.now(UTC) - timedelta(seconds=cleanup_after_seconds)
+    result = await session.execute(
+        delete(Handover).where(
+            Handover.status.in_(_TERMINAL_HANDOVER_STATUSES), Handover.created_at < cutoff
+        )
+    )
+    return result.rowcount or 0

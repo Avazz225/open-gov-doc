@@ -443,3 +443,50 @@ async def test_authenticate_signed_request_rejects_an_invalid_certificate(sessio
             signature=sign_body(private_pem, body),
             hub_ca_certificate_pem=identity.ca_certificate_pem,
         )
+
+
+# --- Periodic cleanup of terminal-status `handover` rows (P63-S2) ----------
+
+
+async def _create_handover_with_age(
+    session, *, status: str, age_seconds: float, process_type: str = "test-process"
+) -> None:
+    handover = await repository.create_handover(
+        session,
+        handover_id=str(uuid.uuid4()),
+        from_installation_id="from-installation",
+        to_installation_id="to-installation",
+        process_type=process_type,
+    )
+    handover.status = status
+    handover.created_at = datetime.now(UTC) - timedelta(seconds=age_seconds)
+    await session.flush()
+
+
+async def test_purge_stale_handovers_removes_old_terminal_rows(session):
+    await _create_handover_with_age(session, status="completed", age_seconds=1_000_000)
+
+    deleted = await repository.purge_stale_handovers(session, cleanup_after_seconds=604800.0)
+
+    assert deleted == 1
+
+
+async def test_purge_stale_handovers_leaves_recent_terminal_rows_alone(session):
+    await _create_handover_with_age(session, status="completed", age_seconds=60.0)
+
+    deleted = await repository.purge_stale_handovers(session, cleanup_after_seconds=604800.0)
+
+    assert deleted == 0
+
+
+async def test_purge_stale_handovers_never_removes_a_non_terminal_row_regardless_of_age(session):
+    """A stuck `pending`/`pending_retry`/`delivered`/`result_pending_retry`
+    row should never happen in practice, but the cleanup must not silently
+    delete evidence of it if it somehow does - only genuinely terminal
+    statuses are eligible."""
+    for status in ("pending", "delivered", "pending_retry", "result_pending_retry"):
+        await _create_handover_with_age(session, status=status, age_seconds=1_000_000)
+
+    deleted = await repository.purge_stale_handovers(session, cleanup_after_seconds=604800.0)
+
+    assert deleted == 0

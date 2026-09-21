@@ -349,6 +349,62 @@ def test_create_handover_rejects_incompatible_versions(client):
     assert response.status_code == 409
 
 
+def test_create_handover_rejects_undeclared_process_type(client):
+    """P63-S2: `supported_process_types` was previously stored at
+    registration but never checked - a handover of an undeclared type
+    succeeded at the hub and only failed downstream once the target
+    installation itself rejected it."""
+    sender, sender_key = register_installation(client)
+    target, _ = register_installation(client, supported_process_types=["allowed-process"])
+
+    payload = {
+        "handover_id": str(uuid.uuid4()),
+        "to_installation_id": target["id"],
+        "process_type": "not-the-declared-process",
+        "encrypted_payload": "opaque",
+    }
+    response = _signed_post(client, "/handovers", payload, sender_key, installation_id=sender["id"])
+    assert response.status_code == 422
+
+
+def test_create_handover_allows_declared_process_type(client):
+    stub, _ = _make_stub_receiver()
+    app.state.http_client = httpx.AsyncClient(transport=httpx.ASGITransport(app=stub))
+    sender, sender_key = register_installation(client)
+    target, _ = register_installation(client, supported_process_types=["allowed-process"])
+
+    payload = {
+        "handover_id": str(uuid.uuid4()),
+        "to_installation_id": target["id"],
+        "process_type": "allowed-process",
+        "encrypted_payload": "opaque",
+    }
+    response = _signed_post(client, "/handovers", payload, sender_key, installation_id=sender["id"])
+    assert response.status_code == 201
+    assert response.json()["status"] == "delivered"
+
+
+def test_create_handover_allows_any_process_type_when_none_declared(client):
+    """An empty `supported_process_types` list (the default - nothing sets
+    this field at registration in practice today) means "no restriction
+    declared", not "accepts nothing" - otherwise this check would reject
+    every handover that exists in the real system today."""
+    stub, _ = _make_stub_receiver()
+    app.state.http_client = httpx.AsyncClient(transport=httpx.ASGITransport(app=stub))
+    sender, sender_key = register_installation(client)
+    target, _ = register_installation(client)
+
+    payload = {
+        "handover_id": str(uuid.uuid4()),
+        "to_installation_id": target["id"],
+        "process_type": "anything-at-all",
+        "encrypted_payload": "opaque",
+    }
+    response = _signed_post(client, "/handovers", payload, sender_key, installation_id=sender["id"])
+    assert response.status_code == 201
+    assert response.json()["status"] == "delivered"
+
+
 def test_create_handover_requires_valid_signature(client):
     target, _ = register_installation(client)
     wrong_private_pem, _ = _generate_keypair()

@@ -2,8 +2,53 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P63-S1 (superuser/break-glass session hardening — first session of the newly-created
-Phase 63, the seventh gap-analysis round). **New ADR**
+**Last completed:** P63-S2 (`federation-hub-service` bundle — second session of Phase 63). **New ADR**
+([0191](docs/adr/0191-federation-hub-process-type-enforcement-and-handover-cleanup.md)) — a real
+validation-strictness decision for (a), reusing an already-proven pattern for (b).
+
+**The gaps.** (a) `Installation.supported_process_types`/`.supported_document_types` were stored at
+registration but never checked — a `POST /handovers` of an undeclared type succeeded at the hub and only
+failed downstream once the target installation itself rejected it. (b) No cleanup mechanism existed for
+the `handover` metadata table at all — unbounded growth over an installation's lifetime, the exact same
+shape `registry-service` already fixed for its own instance table in Phase 58 Session 2.
+
+**The fixes.** (a) `create_handover` now rejects (`422`) a `process_type` not in `to_installation`'s
+declared `supported_process_types`, UNLESS that list is empty (the default, and still every real
+installation's actual state today) — empty means "no restriction declared", not "accepts nothing".
+**Investigated and corrected the plan's own framing during implementation**: `supported_document_types`
+is deliberately NOT also enforced — `HandoverCreate` has no document-type field at all, and
+`encrypted_payload` is end-to-end encrypted (ADR 0028's own "the hub never sees content" design), so
+there is genuinely nothing for the hub to compare a document-type declaration against without reversing
+that architecture. A real, discovered-during-implementation constraint, not an oversight — the plan's
+original finding had grouped both fields together as simply "not enforced". (b) New
+`_handover_cleanup_poll_loop` (1h interval) deletes `handover` rows in a TERMINAL status (`completed`,
+`delivery_failed`, `result_delivery_failed`) older than 7 days — same naming/default-value convention as
+`registry-service`'s equivalent, but a plain bulk `DELETE` rather than a per-row deletion with an event
+publish (no existing per-handover lifecycle event to preserve).
+
+New tests: `federation-hub-service` 83/83 (+6: 3 API-level for the process-type check, 3 repository-
+level for the cleanup function — mirroring `registry-service`'s own direct-repository-call testing
+convention for its analogous cleanup rather than waiting on the real poll loop). `ruff` clean (same
+pre-existing, unrelated repo-wide failures confirmed out of scope again).
+
+Rebuilt/redeployed. **Live-verified against the real running stack**: a real RSA-PSS-signed handover
+with an undeclared `process_type` confirmed `422` with a clear message naming the declared list; the
+same with the declared type confirmed `201`/`pending_retry` (delivery itself failing only because the
+test target's `callback_base_url` doesn't resolve in this environment — expected, unrelated to this
+fix). The cleanup poll loop's own logic is exercised end to end by its repository-level tests; the
+service's clean startup with the new lifespan-managed task confirmed via container logs.
+
+`docs/services/federation-hub-service.md` (Open Points bullet closed, new "Periodic cleanup of old
+`handover` rows" paragraph, API table row, model field description, test count).
+
+**Next session:** P63-S3 — small fixes + ADR documentation corrections bundle (`document-service`'s
+`Kennzeichen` format validation; `admin-ui`'s `/processing-failures/` `RequireCapability` wiring; three
+ADR closure addenda for ADR 0116/0123/0154). Third and last session of Phase 63.
+
+---
+
+Immediately before P63-S2: **P63-S1** (superuser/break-glass session hardening — first session of the
+newly-created Phase 63, the seventh gap-analysis round). **New ADR**
 ([0190](docs/adr/0190-permission-service-general-superuser-bypass.md)) — a real authorization-model
 decision.
 

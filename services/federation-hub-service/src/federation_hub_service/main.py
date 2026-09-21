@@ -209,6 +209,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             app.state.permission_client,
         )
     )
+    cleanup_poll_task = asyncio.create_task(_handover_cleanup_poll_loop(app.state.session_factory))
 
     # Sensor concept (10.1, Phase 40 Session 4) - this service's first
     # sensors at all (`sensor_config_proxy`/`sensor_registry`/
@@ -247,6 +248,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     retry_poll_task.cancel()
     with suppress(asyncio.CancelledError):
         await retry_poll_task
+    cleanup_poll_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await cleanup_poll_task
     if app.state.permission_client is not None:
         await app.state.permission_client.close()
     await app.state.http_client.aclose()
@@ -665,6 +669,31 @@ async def _handover_retry_poll_loop(
         await asyncio.sleep(settings.handover_retry_poll_interval_seconds)
 
 
+async def _handover_cleanup_poll_loop(session_factory) -> None:
+    """Periodic cleanup of terminal-status `handover` rows (P63-S2) - same
+    poll-loop idiom as `registry-service`'s equivalent
+    (`_cleanup_poll_loop`, Phase 58 Session 2). Unlike that one, this uses
+    a plain bulk `DELETE` (`repository.purge_stale_handovers`) rather than
+    reusing a single-row deletion function - there is no existing
+    per-handover lifecycle event this needs to preserve by going row by
+    row. An error in one tick doesn't abort the loop."""
+    while True:
+        try:
+            async with session_factory() as session:
+                deleted = await repository.purge_stale_handovers(
+                    session, cleanup_after_seconds=settings.handover_cleanup_after_seconds
+                )
+                await session.commit()
+                if deleted:
+                    logger.info("handover_cleanup_purged_rows count=%d", deleted)
+        except Exception:
+            logger.exception(
+                "Handover-Cleanup-Poll-Tick fehlgeschlagen - "
+                "wird beim naechsten Tick erneut versucht."
+            )
+        await asyncio.sleep(settings.handover_cleanup_poll_interval_seconds)
+
+
 async def _authenticate(
     session: AsyncSession, *, installation_id: str, body: bytes, signature: str
 ) -> Installation:
@@ -719,6 +748,31 @@ async def create_handover(
                 f"{from_installation.min_compatible_peer_version}) <-> "
                 f"{to_installation.id!r} ({to_installation.version}, "
                 f"min. Peer {to_installation.min_compatible_peer_version})"
+            ),
+        )
+    # P63-S2: `supported_process_types` was previously stored at
+    # registration but never checked - a handover of an undeclared type
+    # succeeded at the hub and only failed downstream once the target
+    # installation itself rejected it. An empty list (the default, and
+    # still every real installation's actual state today - nothing sets
+    # this field yet) means "no restriction declared", not "accepts
+    # nothing" - otherwise this check would reject every handover that
+    # exists in practice. `supported_document_types` is deliberately NOT
+    # checked here alongside it: `encrypted_payload` is end-to-end
+    # encrypted (ADR 0028, "the hub never sees content") and
+    # `HandoverCreate` has no document-type field at all - there is
+    # nothing for the hub to compare it against without breaking that
+    # design, not an oversight.
+    if (
+        to_installation.supported_process_types
+        and payload.process_type not in to_installation.supported_process_types
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"process_type {payload.process_type!r} wird von "
+                f"to_installation_id {payload.to_installation_id!r} nicht unterstützt "
+                f"(deklariert: {to_installation.supported_process_types})"
             ),
         )
 

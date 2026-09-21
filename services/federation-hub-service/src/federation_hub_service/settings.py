@@ -100,3 +100,14 @@ class Settings(BaseServiceSettings):
     # scrape, same limitation any non-registered target would have.
     monitoring_service_base_url: str = "http://localhost:8026"
     sensor_sample_interval_seconds: float = 15.0
+
+    # Periodic cleanup of terminal-status `handover` rows (P63-S2) - same
+    # naming/default-value convention as `registry-service`'s equivalent
+    # (Phase 58 Session 2, `unreachable_cleanup_after_seconds`/
+    # `cleanup_poll_interval_seconds`): unbounded growth of this metadata
+    # table over an installation's lifetime, with no cleanup mechanism at
+    # all before this session. 7 days/1 hour, same values as
+    # `registry-service` - no reason for this table to need a materially
+    # different retention window.
+    handover_cleanup_after_seconds: float = 604800.0
+    handover_cleanup_poll_interval_seconds: float = 3600.0
