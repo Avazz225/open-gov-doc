@@ -73,6 +73,26 @@ class Settings(BaseServiceSettings):
         # subject of this service on the "virus_scan" stream, so no
         # `_SHARED_STREAM_DURABLE_OVERRIDES` entry is needed.
         "virus_scan.completed",
+        # Force-unlock feedback (4.2/4.3, P71-S1) - both already published
+        # unconditionally by `document-service`'s consumer since P6-S4/P66-S3
+        # (execution feedback channel), just never consumed here before.
+        # Third/fourth subjects on the "document" stream, own durable names
+        # (see `_SHARED_STREAM_DURABLE_OVERRIDES`), same reasoning as
+        # `document.lock.reminder` above.
+        "document.lock.force_released",
+        "document.force_unlock.failed",
+        # Four-eyes approval lifecycle feedback (4.3, P71-S1) - the
+        # initiator of an approval request previously had no way to learn
+        # its outcome except by polling `GET /approval-requests/{id}`.
+        # Second/third subjects on the "permission" stream, own durable
+        # names.
+        "permission.approval.approved",
+        "permission.approval.rejected",
+        # Storage-service alerting (3.6, P71-S1) - this service's first
+        # ever event bus connection (a new "storage" stream), see
+        # consumer.py.
+        "storage.replication.failed_permanent",
+        "storage.object_verify.mismatch",
     ]
 
     # Recipient of the optional security notification on break-glass
@@ -83,6 +103,13 @@ class Settings(BaseServiceSettings):
     # coded, same rationale as `security_officer_email` (no recipient
     # resolution mechanism needed).
     license_admin_email: str = "license-admin@dms.local"
+
+    # Recipient of storage-service alerting (3.6, P71-S1) - permanently-
+    # failed replication/fixity mismatches carry no principal identity in
+    # their payload at all (an object key/backend id, not a person), same
+    # fixed-address rationale as `security_officer_email`/
+    # `license_admin_email` above.
+    storage_admin_email: str = "storage-admin@dms.local"
 
     # Retrofit P6-S6 (call authorization): recipient existence check for
     # `POST /notifications` against real auth-service accounts, via the

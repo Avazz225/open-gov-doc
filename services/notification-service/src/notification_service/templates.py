@@ -100,6 +100,36 @@ EMAIL_TEMPLATE_USE_CASES: list[dict[str, object]] = [
         "description": "Beanspruchter Task seit längerem offen (14.2/8, neu seit Phase 35)",
         "placeholders": ["task_name", "instance_id", "business_key", "principal_id", "link"],
     },
+    {
+        "use_case": "document.lock.force_released",
+        "description": "Zwangsweise Sperrenfreigabe durchgeführt (4.2/4.3, neu seit P71-S1)",
+        "placeholders": ["document_id", "original_locked_by", "released_by", "reason", "link"],
+    },
+    {
+        "use_case": "document.force_unlock.failed",
+        "description": "Genehmigte Sperrenfreigabe fehlgeschlagen (4.2/4.3, seit P71-S1)",
+        "placeholders": ["document_id", "released_by", "reason", "link"],
+    },
+    {
+        "use_case": "permission.approval.approved",
+        "description": "Vier-Augen-Genehmigungsanfrage bewilligt (4.3, neu seit P71-S1)",
+        "placeholders": ["action_type", "approved_by", "request_id"],
+    },
+    {
+        "use_case": "permission.approval.rejected",
+        "description": "Vier-Augen-Genehmigungsanfrage abgelehnt (4.3, neu seit P71-S1)",
+        "placeholders": ["action_type", "rejected_by", "reason", "request_id"],
+    },
+    {
+        "use_case": "storage.replication.failed_permanent",
+        "description": "Replikation dauerhaft fehlgeschlagen (3.6, neu seit P71-S1)",
+        "placeholders": ["object_key", "backend_id", "attempts", "error"],
+    },
+    {
+        "use_case": "storage.object_verify.mismatch",
+        "description": "Prüfsummen-Abweichung bei Fixity-Prüfung (3.6, neu seit P71-S1)",
+        "placeholders": ["object_key", "backend_ids"],
+    },
 ]
 
 

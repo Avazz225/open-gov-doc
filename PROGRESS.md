@@ -2,7 +2,59 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P70-S2 (second and final session of Phase 70 — "Document Declassification
+**Last completed:** P71-S1 (first session of Phase 71 — "Remaining Moderate-Value Completions").
+Notification wiring bundle: verified the plan's premise for all five sub-items before building, found
+three held up, one needed a different fix, one had no real target. **Force-unlock**
+(`document.lock.force_released`/`document.force_unlock.failed`) and the **four-eyes approval lifecycle**
+(`permission.approval.approved`/`.rejected`) matched exactly — both event pairs already published
+unconditionally, only `notification-service`'s consumer side was missing; no `permission-service` code
+change needed at all (the plan's own text implied one would be). **Storage-service alerts** needed more
+than "a subjects entry" — the service had **zero event bus connections** before this session (confirmed
+by grep); added its first-ever `NatsEventBusClient` producer (new `"storage"` stream) plus
+`publish_event` threaded as an optional parameter into `replication.process_pending`/`verify_pending`,
+firing `storage.replication.failed_permanent`/`storage.object_verify.mismatch` to a new fixed
+`storage_admin_email` recipient (neither payload carries a principal identity). **Report dispatch**
+didn't match the plan's "same NATS pattern" framing at all — `reporting-service` already notifies on
+SUCCESS via direct HTTP to `notification-service`; the real gap was a missing FAILURE-path notification
+in its own poll tick, fixed there instead (best-effort, nested `try`/`except`; the email-delivery-failure
+branch deliberately did not get a second, redundant send attempt — retrying the exact channel that just
+failed is circular). **Monitoring escalation deliberately NOT built** — verified no threshold/escalation
+concept exists anywhere in `monitoring-service` (its only published event is an admin sensor on/off
+toggle) — this needs its own design session, not a mechanical wiring task; documented as a genuine open
+point rather than force-fit to match the plan's shape.
+
+**Incidental deployment bug caught by live verification, fixed in the same session**: `storage-service`'s
+`pyproject.toml` was missing the new `dms-eventbus-client` dependency — local `uv run pytest`/`ruff`
+never caught this because this repo's uv workspace shares one lockfile/venv across all services (the
+module was already importable there regardless of any individual service's own declared dependencies);
+only the isolated per-service Docker build surfaced it, crashing the container on startup with
+`ModuleNotFoundError`. Fixed by adding the dependency — a reminder that a clean local test run does not
+guarantee a clean container build in this workspace layout.
+
+**Verification**: `notification-service` 106/106 (+6), `reporting-service` 81/81 (+2), `storage-service`
+169/169 (+2), `permission-service` 185/185 (unchanged, no code touched there). A full unfiltered backend
+regression run afterward found zero new failures anywhere — every failure present (`auth-service`'s
+ADR-0190 circular dependency, `gateway-service`'s same 3 pre-existing failures, `webdav-connector`'s
+ADR-0189 timeout pattern) matches what prior sessions' own full runs already documented as pre-existing.
+All four touched services rebuilt, redeployed, and **live-verified end-to-end against the real running
+stack**: a real object uploaded to `storage-service`, its on-disk content corrupted directly (bypassing
+the API), a full fixity sweep run against all 13,556 real objects in the dev stack's own accumulated
+data (found exactly the 1 real mismatch — the one just created), and the resulting
+`storage.object_verify.mismatch` event confirmed to have produced a real email notification row in
+`notification-service`'s own database, addressed to `storage_admin_email`, with the correct object key
+and backend name in the body. The test object's content was restored afterward.
+
+New ADR: [0205](docs/adr/0205-p71s1-notification-wiring-bundle.md). `docs/services/notification-service.md`
+(Open Point closed, new consumer section, Events list extended), `docs/services/storage-service.md`
+(Events section — previously "neither publish nor consume events," now describes the new stream), and
+`docs/services/reporting-service.md` (Poll Loop section extended) all updated.
+
+**Next session:** P71-S2 — `reporting-service`'s forensic trace event-type coverage bundle. See
+`IMPLEMENTATION_PLAN.md`'s Phase 71 table for the full session breakdown.
+
+---
+
+**Immediately before P71-S1: P70-S2** (second and final session of Phase 70 — "Document Declassification
 Mechanism"). Built per P70-S1's scoped design (ADR 0203): new `admin.declassification` capability
 (role `domain-admin-declassification`, `permission-service`); `document-service` gained `POST
 /documents/{id}/classification-level/declassify` (`repository.next_lower_classification_level`
@@ -57,9 +109,6 @@ New ADR: [0204](docs/adr/0204-p70s2-declassification-build.md). `docs/services/d
 `required_permission`/domain-role table entries, correction note) updated.
 
 **Phase 70 is now closed (2/2).**
-
-**Next session:** Phase 71 — Remaining Moderate-Value Completions. See `IMPLEMENTATION_PLAN.md` for the
-full session breakdown.
 
 ---
 

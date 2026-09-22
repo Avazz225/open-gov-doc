@@ -1173,3 +1173,201 @@ async def test_deletion_reminder_falls_back_when_template_has_unknown_placeholde
         notifications = await repository.list_notifications(session)
     email = next(n for n in notifications if n.channel == "email")
     assert email.subject == "Löschfrist erreicht bald: Vertrag.pdf"
+
+
+# --- Force-unlock execution feedback (4.2/4.3, P71-S1) ----------------------
+
+
+async def test_lock_force_released_notifies_the_original_lock_holder(engine, settings):
+    """Closes ADR 0022's own named gap ("no execution feedback channel") -
+    `document-service` has published `document.lock.force_released`
+    unconditionally since P6-S4, just never consumed here before."""
+    published = []
+
+    async def fake_publish(event_type, subject, payload, actor=None):
+        published.append((event_type, subject, payload))
+
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    event = Event(
+        event_type="document.lock.force_released",
+        service_name="document-service",
+        subject="doc-30",
+        payload={
+            "original_locked_by": "alice",
+            "released_by": "bob",
+            "reason": "Urlaub",
+        },
+    )
+
+    await handler(event.to_bytes())
+
+    session_factory = _session_factory(engine)
+    async with session_factory() as session:
+        notifications = await repository.list_notifications(session)
+    assert len(notifications) == 1
+    assert notifications[0].channel == "in_app"
+    assert notifications[0].recipient == "alice"
+    assert "bob" in notifications[0].body
+    assert len(published) == 1
+
+
+async def test_force_unlock_failed_notifies_the_approver(engine, settings):
+    """Counterpart - the approver whose already-approved request could not
+    actually be executed is the one who needs to know, not the original
+    lock holder (who was never affected)."""
+    published = []
+
+    async def fake_publish(event_type, subject, payload, actor=None):
+        published.append((event_type, subject, payload))
+
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    event = Event(
+        event_type="document.force_unlock.failed",
+        service_name="document-service",
+        subject="doc-31",
+        payload={
+            "approval_request_id": "req-1",
+            "released_by": "bob",
+            "reason": "Sperre bereits anderweitig aufgehoben",
+        },
+    )
+
+    await handler(event.to_bytes())
+
+    session_factory = _session_factory(engine)
+    async with session_factory() as session:
+        notifications = await repository.list_notifications(session)
+    assert len(notifications) == 1
+    assert notifications[0].channel == "in_app"
+    assert notifications[0].recipient == "bob"
+    assert "anderweitig aufgehoben" in notifications[0].body
+
+
+# --- Four-eyes approval lifecycle feedback (4.3, P71-S1) --------------------
+
+
+async def test_approval_approved_notifies_the_initiator(engine, settings):
+    """The initiator of an approval request previously had no way to learn
+    its outcome except by polling `GET /approval-requests/{id}` directly -
+    `request_id` comes from the payload, not `event.subject`
+    (`permission-service`'s own `publish_event` never sets a subject)."""
+    published = []
+
+    async def fake_publish(event_type, subject, payload, actor=None):
+        published.append((event_type, subject, payload))
+
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    event = Event(
+        event_type="permission.approval.approved",
+        service_name="permission-service",
+        payload={
+            "request_id": "req-2",
+            "action_type": "document.classification.declassify",
+            "initiated_by": "alice",
+            "approved_by": "carol",
+            "payload": {},
+        },
+    )
+
+    await handler(event.to_bytes())
+
+    session_factory = _session_factory(engine)
+    async with session_factory() as session:
+        notifications = await repository.list_notifications(session)
+    assert len(notifications) == 1
+    assert notifications[0].channel == "in_app"
+    assert notifications[0].recipient == "alice"
+    assert "carol" in notifications[0].body
+
+
+async def test_approval_rejected_notifies_the_initiator_with_reason(engine, settings):
+    published = []
+
+    async def fake_publish(event_type, subject, payload, actor=None):
+        published.append((event_type, subject, payload))
+
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    event = Event(
+        event_type="permission.approval.rejected",
+        service_name="permission-service",
+        payload={
+            "request_id": "req-3",
+            "action_type": "document.classification.declassify",
+            "initiated_by": "alice",
+            "rejected_by": "carol",
+            "reason": "Unzureichend begründet",
+        },
+    )
+
+    await handler(event.to_bytes())
+
+    session_factory = _session_factory(engine)
+    async with session_factory() as session:
+        notifications = await repository.list_notifications(session)
+    assert len(notifications) == 1
+    assert notifications[0].channel == "in_app"
+    assert notifications[0].recipient == "alice"
+    assert "Unzureichend begründet" in notifications[0].body
+
+
+# --- Storage-service alerting (3.6, P71-S1) ----------------------------------
+
+
+async def test_storage_replication_failed_permanent_notifies_the_storage_admin(engine, settings):
+    """`storage-service`'s first ever event bus connection - permanently-
+    failed replication was "logged instead of alerted" before this."""
+    published = []
+
+    async def fake_publish(event_type, subject, payload, actor=None):
+        published.append((event_type, subject, payload))
+
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    event = Event(
+        event_type="storage.replication.failed_permanent",
+        service_name="storage-service",
+        subject="documents/doc-1/abc",
+        payload={
+            "object_key": "documents/doc-1/abc",
+            "backend_id": "s3-secondary",
+            "attempts": 5,
+            "error": "connection refused",
+        },
+    )
+
+    await handler(event.to_bytes())
+
+    session_factory = _session_factory(engine)
+    async with session_factory() as session:
+        notifications = await repository.list_notifications(session)
+    assert len(notifications) == 1
+    assert notifications[0].channel == "email"
+    assert notifications[0].recipient == settings.storage_admin_email
+    assert "s3-secondary" in notifications[0].body
+
+
+async def test_storage_verify_mismatch_notifies_the_storage_admin(engine, settings):
+    published = []
+
+    async def fake_publish(event_type, subject, payload, actor=None):
+        published.append((event_type, subject, payload))
+
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    event = Event(
+        event_type="storage.object_verify.mismatch",
+        service_name="storage-service",
+        subject="documents/doc-2/def",
+        payload={
+            "object_key": "documents/doc-2/def",
+            "backend_ids": ["local", "s3-secondary"],
+        },
+    )
+
+    await handler(event.to_bytes())
+
+    session_factory = _session_factory(engine)
+    async with session_factory() as session:
+        notifications = await repository.list_notifications(session)
+    assert len(notifications) == 1
+    assert notifications[0].channel == "email"
+    assert notifications[0].recipient == settings.storage_admin_email
+    assert "local" in notifications[0].body

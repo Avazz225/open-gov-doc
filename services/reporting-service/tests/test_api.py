@@ -702,6 +702,70 @@ async def test_poll_tick_executes_due_schedule_and_sends_notification(poll_env):
         assert updated.next_run_at > datetime(2020, 1, 1, tzinfo=UTC)
 
 
+async def test_poll_tick_notifies_recipient_when_report_generation_fails(poll_env):
+    """P71-S1: before this, a report-generation failure was only ever
+    logged/marked on the schedule row - the recipient had no way to learn
+    their report never arrived except by proactively checking `GET
+    /report-schedules/{id}`, nobody does that. Own try/except around the
+    notification call - a notification-service outage must not also
+    prevent `mark_schedule_run` from having already committed."""
+    session_factory = poll_env
+    app.state.storage_client.get_usage.side_effect = RuntimeError("Speicherdienst nicht erreichbar")
+    async with session_factory() as session:
+        schedule = await repository.create_schedule(
+            session,
+            report_type="storage_usage",
+            format="csv",
+            frequency="daily",
+            recipient_email="admin@example.invalid",
+            filters={},
+        )
+        schedule.next_run_at = datetime(2020, 1, 1, tzinfo=UTC)
+        await session.commit()
+        schedule_id = schedule.id
+
+    await _run_due_schedules(session_factory)
+
+    app.state.notification_client.send_email.assert_called_once()
+    call_kwargs = app.state.notification_client.send_email.call_args.kwargs
+    assert call_kwargs["recipient"] == "admin@example.invalid"
+    assert "fehlgeschlagen" in call_kwargs["subject"]
+    app.state.storage_client.upload.assert_not_called()
+
+    async with session_factory() as session:
+        updated = await repository.get_schedule(session, schedule_id)
+        assert updated.last_status == "failed"
+        assert "Speicherdienst nicht erreichbar" in updated.last_error
+
+
+async def test_poll_tick_generation_failure_survives_notification_send_also_failing(poll_env):
+    """The notification call added in P71-S1 is itself best-effort - if
+    notification-service is ALSO unreachable, the tick must still advance
+    the schedule (already committed beforehand) rather than raise."""
+    session_factory = poll_env
+    app.state.storage_client.get_usage.side_effect = RuntimeError("Speicherdienst nicht erreichbar")
+    app.state.notification_client.send_email.side_effect = RuntimeError("SMTP down")
+    async with session_factory() as session:
+        schedule = await repository.create_schedule(
+            session,
+            report_type="storage_usage",
+            format="csv",
+            frequency="daily",
+            recipient_email="admin@example.invalid",
+            filters={},
+        )
+        schedule.next_run_at = datetime(2020, 1, 1, tzinfo=UTC)
+        await session.commit()
+        schedule_id = schedule.id
+
+    await _run_due_schedules(session_factory)  # darf nicht raisen
+
+    async with session_factory() as session:
+        updated = await repository.get_schedule(session, schedule_id)
+        assert updated.last_status == "failed"
+        assert "Speicherdienst nicht erreichbar" in updated.last_error
+
+
 async def test_poll_tick_skips_schedules_that_are_not_due_yet(poll_env):
     session_factory = poll_env
     async with session_factory() as session:

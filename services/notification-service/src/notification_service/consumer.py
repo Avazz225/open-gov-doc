@@ -28,6 +28,15 @@ _SHARED_STREAM_DURABLE_OVERRIDES: dict[str, str] = {
     # and `workflow.federation.inbound_received`), Post-Roadmap Phase 35
     # Session 3 (ADR 0145) - same reasoning as those two above.
     "workflow.task_claim.abandoned": "notification-service-task-claim-abandoned",
+    # P71-S1: third/fourth subjects on the "document" stream.
+    "document.lock.force_released": "notification-service-lock-force-released",
+    "document.force_unlock.failed": "notification-service-force-unlock-failed",
+    # P71-S1: second/third subjects on the "permission" stream.
+    "permission.approval.approved": "notification-service-approval-approved",
+    "permission.approval.rejected": "notification-service-approval-rejected",
+    # P71-S1: second subject on the new "storage" stream (first subject,
+    # `storage.replication.failed_permanent`, needs no override).
+    "storage.object_verify.mismatch": "notification-service-storage-verify-mismatch",
 }
 
 
@@ -80,6 +89,26 @@ def make_handler(
             return
         if event.event_type == "license.invalid":
             await _handle_license_invalid(session_factory, settings, publish_event, event)
+            return
+        if event.event_type == "document.lock.force_released":
+            await _handle_lock_force_released(session_factory, settings, publish_event, event)
+            return
+        if event.event_type == "document.force_unlock.failed":
+            await _handle_force_unlock_failed(session_factory, settings, publish_event, event)
+            return
+        if event.event_type == "permission.approval.approved":
+            await _handle_approval_approved(session_factory, settings, publish_event, event)
+            return
+        if event.event_type == "permission.approval.rejected":
+            await _handle_approval_rejected(session_factory, settings, publish_event, event)
+            return
+        if event.event_type == "storage.replication.failed_permanent":
+            await _handle_storage_replication_failed(
+                session_factory, settings, publish_event, event
+            )
+            return
+        if event.event_type == "storage.object_verify.mismatch":
+            await _handle_storage_verify_mismatch(session_factory, settings, publish_event, event)
             return
         await _handle_task_escalated(session_factory, settings, publish_event, event)
 
@@ -687,6 +716,284 @@ async def _handle_license_invalid(
             settings,
             channel="email",
             recipient=settings.license_admin_email,
+            subject=subject,
+            body=body,
+        )
+        await session.commit()
+        await publish_notification_result(publish_event, notification)
+
+
+async def _handle_lock_force_released(
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    publish_event: Callable[[str, str, dict], Awaitable[None]],
+    event: Event,
+) -> None:
+    """Force-unlock execution feedback, success case (4.2/4.3, P71-S1) -
+    `document-service` has published this unconditionally since P6-S4, just
+    never consumed here before (ADR 0022's own "Consequences" named this
+    gap). Recipient is the ORIGINAL lock holder (`original_locked_by`), the
+    person most plausibly affected by having their lock pulled - not
+    `released_by` (the approver who requested the force-unlock), same
+    "notify the affected party" reasoning as `_handle_lock_reminder`
+    above."""
+    data = event.payload
+    original_locked_by = data.get("original_locked_by", "?")
+    released_by = data.get("released_by", "?")
+    reason = data.get("reason")
+    fallback_subject = "Dokumentsperre zwangsweise aufgehoben"
+    fallback_body = (
+        f"Ihre Sperre für Dokument (id={event.subject}) wurde von {released_by!r} zwangsweise "
+        f"aufgehoben."
+    )
+    if reason:
+        fallback_body += f" Grund: {reason}"
+    link = build_resource_link(settings.user_ui_public_base_url, "document", event.subject)
+    if link:
+        fallback_body += f"\n\nDokument öffnen: {link}"
+
+    async with session_factory() as session:
+        subject, body = await _render_or_fallback(
+            session,
+            use_case="document.lock.force_released",
+            recipient=original_locked_by,
+            fallback_subject=fallback_subject,
+            fallback_body=fallback_body,
+            document_id=event.subject,
+            original_locked_by=original_locked_by,
+            released_by=released_by,
+            reason=reason or "",
+            link=link or "",
+        )
+        notification = await repository.create_and_send(
+            session,
+            settings,
+            channel="in_app",
+            recipient=original_locked_by,
+            subject=subject,
+            body=body,
+        )
+        await session.commit()
+        await publish_notification_result(publish_event, notification)
+
+
+async def _handle_force_unlock_failed(
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    publish_event: Callable[[str, str, dict], Awaitable[None]],
+    event: Event,
+) -> None:
+    """Force-unlock execution feedback, failure case (4.2/4.3, P71-S1) -
+    the counterpart to `_handle_lock_force_released` above, closing the
+    exact gap ADR 0022's "Consequences" section named ("no execution
+    feedback channel... a failed force-unlock is only logged locally").
+    Recipient is `released_by` (the approver whose already-approved request
+    could not actually be executed, e.g. because the lock had meanwhile
+    been released some other way) - they are the one who needs to know
+    their action did not take effect, not the original lock holder (who
+    was never affected, since nothing actually changed)."""
+    data = event.payload
+    released_by = data.get("released_by", "?")
+    reason = data.get("reason", "?")
+    fallback_subject = "Zwangsweise Sperrenfreigabe fehlgeschlagen"
+    fallback_body = (
+        f"Die genehmigte zwangsweise Freigabe der Sperre für Dokument (id={event.subject}) "
+        f"konnte nicht ausgeführt werden: {reason}"
+    )
+    link = build_resource_link(settings.user_ui_public_base_url, "document", event.subject)
+    if link:
+        fallback_body += f"\n\nDokument öffnen: {link}"
+
+    async with session_factory() as session:
+        subject, body = await _render_or_fallback(
+            session,
+            use_case="document.force_unlock.failed",
+            recipient=released_by,
+            fallback_subject=fallback_subject,
+            fallback_body=fallback_body,
+            document_id=event.subject,
+            released_by=released_by,
+            reason=reason,
+            link=link or "",
+        )
+        notification = await repository.create_and_send(
+            session, settings, channel="in_app", recipient=released_by, subject=subject, body=body
+        )
+        await session.commit()
+        await publish_notification_result(publish_event, notification)
+
+
+async def _handle_approval_approved(
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    publish_event: Callable[[str, str, dict], Awaitable[None]],
+    event: Event,
+) -> None:
+    """Four-eyes approval lifecycle feedback, approved case (4.3, P71-S1) -
+    the initiator of an approval request previously had no way to learn
+    its outcome except by polling `GET /approval-requests/{id}` at
+    permission-service directly. Recipient is `initiated_by` - the person
+    who requested the action, now told it was approved (execution itself
+    follows separately, asynchronously, via whichever service's own
+    consumer owns that action type)."""
+    data = event.payload
+    initiated_by = data.get("initiated_by", "?")
+    action_type = data.get("action_type", "?")
+    approved_by = data.get("approved_by", "?")
+    # `permission-service`'s own `publish_event` has no `subject` parameter
+    # at all (unlike document-service's) - `request_id` lives in the
+    # payload, not `event.subject`.
+    request_id = data.get("request_id", "?")
+    fallback_subject = "Genehmigungsanfrage bewilligt"
+    fallback_body = f"Ihre Genehmigungsanfrage ({action_type}) wurde von {approved_by!r} bewilligt."
+
+    async with session_factory() as session:
+        subject, body = await _render_or_fallback(
+            session,
+            use_case="permission.approval.approved",
+            recipient=initiated_by,
+            fallback_subject=fallback_subject,
+            fallback_body=fallback_body,
+            action_type=action_type,
+            approved_by=approved_by,
+            request_id=request_id,
+        )
+        notification = await repository.create_and_send(
+            session,
+            settings,
+            channel="in_app",
+            recipient=initiated_by,
+            subject=subject,
+            body=body,
+        )
+        await session.commit()
+        await publish_notification_result(publish_event, notification)
+
+
+async def _handle_approval_rejected(
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    publish_event: Callable[[str, str, dict], Awaitable[None]],
+    event: Event,
+) -> None:
+    """Four-eyes approval lifecycle feedback, rejected case (4.3, P71-S1) -
+    counterpart to `_handle_approval_approved` above."""
+    data = event.payload
+    initiated_by = data.get("initiated_by", "?")
+    action_type = data.get("action_type", "?")
+    rejected_by = data.get("rejected_by", "?")
+    reason = data.get("reason")
+    request_id = data.get("request_id", "?")
+    fallback_subject = "Genehmigungsanfrage abgelehnt"
+    fallback_body = f"Ihre Genehmigungsanfrage ({action_type}) wurde von {rejected_by!r} abgelehnt."
+    if reason:
+        fallback_body += f" Grund: {reason}"
+
+    async with session_factory() as session:
+        subject, body = await _render_or_fallback(
+            session,
+            use_case="permission.approval.rejected",
+            recipient=initiated_by,
+            fallback_subject=fallback_subject,
+            fallback_body=fallback_body,
+            action_type=action_type,
+            rejected_by=rejected_by,
+            reason=reason or "",
+            request_id=request_id,
+        )
+        notification = await repository.create_and_send(
+            session,
+            settings,
+            channel="in_app",
+            recipient=initiated_by,
+            subject=subject,
+            body=body,
+        )
+        await session.commit()
+        await publish_notification_result(publish_event, notification)
+
+
+async def _handle_storage_replication_failed(
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    publish_event: Callable[[str, str, dict], Awaitable[None]],
+    event: Event,
+) -> None:
+    """Permanently-failed replication (3.6, P71-S1) - `storage-service`
+    now publishes this instead of only logging it (an already-real
+    operational pain point: 30,410 orphaned rows once needed manual SQL
+    cleanup, see docs/services/storage-service.md). No principal identity
+    in the payload at all (an object key/backend id, not a person) - fixed
+    admin address, same pattern as `security_officer_email`/
+    `license_admin_email`."""
+    data = event.payload
+    object_key = data.get("object_key", event.subject)
+    backend_id = data.get("backend_id", "?")
+    attempts = data.get("attempts", "?")
+    error = data.get("error", "?")
+    fallback_subject = "Replikation dauerhaft fehlgeschlagen"
+    fallback_body = (
+        f"Die Replikation von Objekt {object_key!r} auf Backend {backend_id!r} ist nach "
+        f"{attempts} Versuchen dauerhaft fehlgeschlagen: {error}"
+    )
+
+    async with session_factory() as session:
+        subject, body = await _render_or_fallback(
+            session,
+            use_case="storage.replication.failed_permanent",
+            recipient=settings.storage_admin_email,
+            fallback_subject=fallback_subject,
+            fallback_body=fallback_body,
+            object_key=object_key,
+            backend_id=backend_id,
+            attempts=attempts,
+            error=error,
+        )
+        notification = await repository.create_and_send(
+            session,
+            settings,
+            channel="email",
+            recipient=settings.storage_admin_email,
+            subject=subject,
+            body=body,
+        )
+        await session.commit()
+        await publish_notification_result(publish_event, notification)
+
+
+async def _handle_storage_verify_mismatch(
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    publish_event: Callable[[str, str, dict], Awaitable[None]],
+    event: Event,
+) -> None:
+    """Fixity mismatch (3.6 "regular fixity check", P71-S1) - a data-
+    integrity event, previously only visible via the storage-guard UI.
+    Counterpart to `_handle_storage_replication_failed` above."""
+    data = event.payload
+    object_key = data.get("object_key", event.subject)
+    backend_ids = data.get("backend_ids", [])
+    fallback_subject = "Prüfsummen-Abweichung festgestellt"
+    fallback_body = (
+        f"Bei der regelmäßigen Fixity-Prüfung von Objekt {object_key!r} wurde auf "
+        f"Backend(s) {', '.join(backend_ids) or '?'} eine Prüfsummen-Abweichung festgestellt."
+    )
+
+    async with session_factory() as session:
+        subject, body = await _render_or_fallback(
+            session,
+            use_case="storage.object_verify.mismatch",
+            recipient=settings.storage_admin_email,
+            fallback_subject=fallback_subject,
+            fallback_body=fallback_body,
+            object_key=object_key,
+            backend_ids=", ".join(backend_ids),
+        )
+        notification = await repository.create_and_send(
+            session,
+            settings,
+            channel="email",
+            recipient=settings.storage_admin_email,
             subject=subject,
             body=body,
         )

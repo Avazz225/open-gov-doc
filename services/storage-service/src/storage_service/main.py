@@ -7,6 +7,7 @@ from datetime import datetime
 
 from dms_common import MaxBodySizeMiddleware, configure_logging
 from dms_db_base import build_engine, make_session_factory
+from dms_eventbus_client import Event, NatsEventBusClient
 from dms_metrics_client import SensorConfigClient, bootstrap_http_sensors, metrics_payload
 from dms_permission_client import PermissionServiceClient
 from dms_registry_client import maybe_start_registration
@@ -197,6 +198,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
 
+    # First event bus connection this service has ever needed (P71-S1) -
+    # permanently-failed replication/fixity mismatches were "logged
+    # instead of alerted" before this (see `replication.py`'s own
+    # docstrings), an already-real operational pain point (30,410 orphaned
+    # rows once needed manual SQL cleanup, see docs/services/
+    # storage-service.md's decommissioning section for the incident this
+    # service's alerting gap is adjacent to).
+    event_bus = NatsEventBusClient(settings.nats_url, stream="storage")
+    await event_bus.connect()
+    app.state.event_bus = event_bus
+
     # Records disposal (5.6, since P7-S3) - archive targets are NOT part
     # of `app.state.targets` (regular upload replication), but reachable
     # only via the new `.../archive-copy` endpoints. Since Post-Roadmap
@@ -237,9 +249,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     sensor_config_proxy.unbind()
     await app.state.sensor_config_client.stop()
     await app.state.permission_client.close()
+    await app.state.event_bus.close()
     if registration:
         await registration.stop()
     await engine.dispose()
+
+
+async def publish_event(
+    event_type: str, subject: str, payload: dict, actor: str | None = None
+) -> None:
+    event = Event(
+        event_type=event_type,
+        service_name=settings.service_name,
+        subject=subject,
+        payload=payload,
+        actor=actor,
+    )
+    await app.state.event_bus.publish(event_type, event.to_bytes())
 
 
 app = FastAPI(title=settings.service_name, lifespan=lifespan)
@@ -750,6 +776,7 @@ async def replication_process_pending(
         max_attempts=operational_config.max_replication_attempts,
         limit=limit,
         lock_target_ids=app.state.lock_target_ids,
+        publish_event=publish_event,
     )
     await session.commit()
     return result
@@ -781,6 +808,7 @@ async def verify_pending_objects(
         backends=app.state.backends,
         limit=limit,
         interval_seconds=settings.fixity_verify_interval_seconds,
+        publish_event=publish_event,
     )
     await session.commit()
     return result

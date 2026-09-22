@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import hashlib
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 
 from dms_retry import compute_backoff_seconds
@@ -240,6 +241,7 @@ async def verify_pending(
     backends: dict[str, StorageBackend],
     limit: int = 100,
     interval_seconds: int,
+    publish_event: Callable[[str, str, dict], Awaitable[None]] | None = None,
 ) -> dict:
     """Bulk fixity sweep (3.6 "regular fixity check", Phase 40 Session 1 -
     the shape ADR 0101's Consequences section already recommended once a
@@ -249,7 +251,11 @@ async def verify_pending(
     Unlike `process_pending`, there is no retry/backoff semantics here
     (ADR-0082 sense) - a mismatch is already recorded on `object_copy` by
     `verify_all_copies` itself and simply re-checked at the next scheduled
-    sweep, not retried sooner."""
+    sweep, not retried sooner. Since P71-S1, a mismatch also publishes
+    `storage.object_verify.mismatch` (`publish_event` optional, same
+    reasoning as `process_pending` above) - a checksum mismatch is a data-
+    integrity event, not something that should wait to be noticed at the
+    next admin visit to the storage-guard UI."""
     now = datetime.now(UTC)
     checked = ok = mismatches = 0
     for metadata in await repository.list_unverified_objects(session, limit=limit):
@@ -260,8 +266,15 @@ async def verify_pending(
             key=metadata.object_key,
             expected_checksum=metadata.checksum_sha256,
         )
-        if any(result["ok"] is False for result in results):
+        failed_backends = [r["backend_id"] for r in results if r["ok"] is False]
+        if failed_backends:
             mismatches += 1
+            if publish_event is not None:
+                await publish_event(
+                    "storage.object_verify.mismatch",
+                    metadata.object_key,
+                    {"object_key": metadata.object_key, "backend_ids": failed_backends},
+                )
         else:
             ok += 1
         await repository.set_next_verify_at(
@@ -287,12 +300,19 @@ async def process_pending(
     max_attempts: int,
     limit: int = 100,
     lock_target_ids: set[str] | None = None,
+    publish_event: Callable[[str, str, dict], Awaitable[None]] | None = None,
 ) -> dict:
     """Retry queue for asynchronously caught-up copies (3.6). Reads the
     bytes from an already-confirmed copy of the same object and writes
     them to the pending target. After ``max_attempts`` unsuccessful
-    attempts, a copy is considered permanently failed (logged instead of
-    alerted, see Settings.max_replication_attempts).
+    attempts, a copy is considered permanently failed - since P71-S1 this
+    also publishes `storage.replication.failed_permanent` (`publish_event`
+    optional, defaults to `None` so existing tests that don't care about
+    alerting don't all need updating) - previously "logged instead of
+    alerted" (see Settings.max_replication_attempts), an already-real
+    operational pain point (30,410 orphaned rows once needed manual SQL
+    cleanup before this service's decommissioning mechanism existed, see
+    docs/services/storage-service.md).
 
     ``lock_target_ids`` (Phase 50 Session 1, mirrors ``write_with_redundancy``'s
     same-named parameter): a target that only gets populated via catch-up
@@ -340,6 +360,17 @@ async def process_pending(
                     new_attempts,
                     exc,
                 )
+                if publish_event is not None:
+                    await publish_event(
+                        "storage.replication.failed_permanent",
+                        copy.object_key,
+                        {
+                            "object_key": copy.object_key,
+                            "backend_id": copy.backend_id,
+                            "attempts": new_attempts,
+                            "error": str(exc),
+                        },
+                    )
             else:
                 failed += 1
                 status = "failed"

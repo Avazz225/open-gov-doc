@@ -418,6 +418,50 @@ async def test_process_pending_marks_permanently_failed_after_max_attempts(sessi
     assert result["processed"] == 0
 
 
+async def test_process_pending_publishes_event_on_permanent_failure(session, backend_a):
+    """P71-S1: permanently-failed replication was "logged instead of
+    alerted" before this - `publish_event` is optional (defaults to
+    `None`), so this test explicitly passes a tracking stub to prove the
+    event actually fires with the right payload."""
+    key = _key()
+    data = b"hello"
+    checksum = hashlib.sha256(data).hexdigest()
+    await _make_metadata(session, key, checksum)
+    backends = {"a": backend_a, "b": _AlwaysFailingBackend()}
+    await replication.write_with_redundancy(
+        session,
+        backends=backends,
+        targets=["a", "b"],
+        strategy="primary_async",
+        quorum_count=1,
+        key=key,
+        data=data,
+        checksum=checksum,
+    )
+
+    published = []
+
+    async def fake_publish(event_type, subject, payload):
+        published.append((event_type, subject, payload))
+
+    for _ in range(2):
+        await replication.process_pending(
+            session, backends=backends, max_attempts=2, limit=100, publish_event=fake_publish
+        )
+        copy_b = await repository.get_copy(session, key, "b")
+        if copy_b.next_retry_at is not None:
+            copy_b.next_retry_at = datetime.now(UTC) - timedelta(seconds=1)
+            await session.flush()
+
+    assert len(published) == 1
+    event_type, subject, payload = published[0]
+    assert event_type == "storage.replication.failed_permanent"
+    assert subject == key
+    assert payload["object_key"] == key
+    assert payload["backend_id"] == "b"
+    assert payload["attempts"] == 2
+
+
 async def test_process_pending_sets_next_retry_at_and_skips_not_yet_due_copy(session):
     """Post-Roadmap Phase 20 Session 6 (ADR 0082): ein Fehlschlag setzt jetzt
     ein per Full-Jitter-Backoff in die Zukunft gesetztes `next_retry_at` -
@@ -528,6 +572,36 @@ async def test_verify_pending_counts_a_mismatch_and_still_reschedules(session, b
     assert result["mismatches"] == 1
     metadata = await repository.get_metadata(session, key)
     assert metadata.next_verify_at is not None
+
+
+async def test_verify_pending_publishes_event_on_mismatch(session, backend_a):
+    """P71-S1: a fixity mismatch is a data-integrity event, previously
+    only visible by proactively checking the storage-guard UI."""
+    key = _key()
+    checksum = hashlib.sha256(b"hello").hexdigest()
+    await _make_metadata(session, key, checksum)
+    await backend_a.write(key, b"corrupted")
+    await repository.record_copy(session, key, "a", status="ok", checksum=checksum)
+
+    published = []
+
+    async def fake_publish(event_type, subject, payload):
+        published.append((event_type, subject, payload))
+
+    await replication.verify_pending(
+        session,
+        backends={"a": backend_a},
+        limit=100,
+        interval_seconds=3600,
+        publish_event=fake_publish,
+    )
+
+    assert len(published) == 1
+    event_type, subject, payload = published[0]
+    assert event_type == "storage.object_verify.mismatch"
+    assert subject == key
+    assert payload["object_key"] == key
+    assert payload["backend_ids"] == ["a"]
 
 
 async def test_verify_pending_never_checked_object_is_picked_up_before_a_recently_verified_one(

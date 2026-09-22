@@ -100,6 +100,28 @@ async def _run_due_schedules(session_factory) -> None:
                     error=f"Berichtsgenerierung fehlgeschlagen: {exc}",
                 )
                 await session.commit()
+                # P71-S1: before this, a failed run was only visible via
+                # `GET /report-schedules/{id}` - nobody proactively checks
+                # that, so a broken schedule could silently stay broken
+                # indefinitely. Own try/except, same isolation reasoning as
+                # the "Own try/except (Phase 53 Session 3)" comment below -
+                # a notification-service outage must not also break the
+                # tick for every OTHER due schedule.
+                try:
+                    await app.state.notification_client.send_email(
+                        recipient=schedule.recipient_email,
+                        subject=f"DMS-Bericht fehlgeschlagen: {schedule.report_type}",
+                        body=(
+                            f"Die Erstellung des geplanten Berichts {schedule.report_type!r} ist "
+                            f"fehlgeschlagen. Der nächste Versuch erfolgt zum nächsten fälligen "
+                            f"Zeitpunkt."
+                        ),
+                    )
+                except Exception:
+                    logger.exception(
+                        "Fehlerbenachrichtigung fuer Planung %r konnte nicht versendet werden.",
+                        schedule.id,
+                    )
                 continue
 
             run_id = str(uuid.uuid4())

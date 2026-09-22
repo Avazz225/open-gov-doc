@@ -455,6 +455,9 @@ services:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://svc_storage:${POSTGRES_PASSWORD_STORAGE:-storage_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      # First event bus connection this service has ever needed (P71-S1,
+      # replication/fixity-mismatch alerting).
+      DMS_NATS_URL: nats://nats:4222
       # Target set (3.6, since P5b-S6 a real list instead of fixed backend/
       # secondary_backend slots - see ADR 0004/0017): default a single
       # local target (stands in for NFS/PVC mount). Any number of targets,
@@ -504,6 +507,8 @@ services:
       - "${STORAGE_SERVICE_PORT:-8005}:8000"
     depends_on:
       postgres:
+        condition: service_healthy
+      nats:
         condition: service_healthy
       minio:
         condition: service_healthy
