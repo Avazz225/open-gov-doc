@@ -2,8 +2,73 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P71-S4 (fourth and last session of Phase 71 — "Remaining Moderate-Value
-Completions"). Signature-service/archival-service bundle, all 3 sub-items, with one deliberate
+**Last completed:** P72-S4 (fourth and last session of Phase 72 — "Scoping-Only Sessions for Larger
+Candidates", and the **last session in the entire `IMPLEMENTATION_PLAN.md` queue** — no Phase 73 exists).
+Two independent Konzept findings, scoped together: **6.1**'s free-form psql-syntax query language and
+**3.5**'s per-UI backend-for-frontend/aggregation layer. Both examined and **declined to build**:
+6.1 — a real non-GPL alternative to ADR 0031's GPL-blocked `pglast` exists now (`sqlglot`, MIT), but the
+parser was never the real blocker; `query-service`'s own Open Points already name "new bulk endpoints in
+several owner services" as the actual remaining gap, with no operator demand for it ever documented
+across ~72 phases. 3.5 — `gateway-service` confirmed a pure reverse proxy with zero aggregation anywhere
+in its source, and zero documented multi-call frontend performance pain across the project's history;
+`docs/services/gateway-service.md`'s extensive Open Points never once named this as a gap. **Deliberately
+left `Konzept.md` itself unedited** despite this session's own Definition of Done allowing a text
+correction here if warranted — reasoned explicitly in [ADR 0210](docs/adr/0210-p72s4-query-language-and-bff-concept-reconciliation.md):
+editing the concept document would be the first departure from this project's unbroken 72-phase
+convention of treating it as a fixed baseline that ADRs reconcile against, not a document that gets
+rewritten to match reality. No code diff, no test run needed (pure research/documentation session).
+
+**Phase 72 in full** (all four sessions completed in this same continuous session, each a scoping-only
+recommendation with no code diff):
+- **P72-S1** (batch-scan intake splitting): [ADR 0209](docs/adr/0209-p72s1-batch-scan-intake-splitting-scoping.md).
+  Recommends narrowing the first build slice to blank-page-as-separator detection only (zero new
+  dependencies, reuses `ocr-service`'s existing page rendering), gated by an explicit opt-in upload flag
+  (never automatic — a false-positive split on an ordinary document with a legitimately blank page would
+  be a real, avoidable failure mode), living inside `ocr-service` (not `mail-connector`, despite the
+  plan's own framing associating it with the Poststelle role — that role has zero concept of physical
+  bulk scanning today). Barcode-based separator sheets explicitly deferred (needs a new `pyzbar`/`zbar`
+  dependency plus a real mail-room operational change). Corrected the plan's own literal premise:
+  splitting can't sit strictly "between virus-scan and OCR" since `document-service` commits to one
+  document row at creation time — it must run as a stage that runs after creation and produces
+  additional documents instead.
+- **P72-S2** (structured e-invoice support): [ADR 0207](docs/adr/0207-p72s2-structured-e-invoice-support-scoping.md).
+  Recommends narrowing to ZUGFeRD/Factur-X (hybrid PDF + embedded CII XML) only, not bare XRechnung/UBL
+  files — this project's whole document model assumes a viewable rendering, which bare XML lacks. New
+  pre-engine-selection stage in `ocr-service`, reusing `archival-service`'s `xdomea.py` offline-schema-
+  validation pattern for safety against untrusted vendor XML, mapping a small set of well-known optional
+  attribute names via the existing `PATCH /documents/{id}` — no new config surface, purely additive.
+- **P72-S3** (e-government transport protocol): [ADR 0208](docs/adr/0208-p72s3-egov-transport-protocol-scoping.md)
+  — **recommendation: do not build**, this phase's one genuinely negative finding (its sibling sessions
+  all hand a future session a bounded build plan; this one doesn't). Two independent reasons:
+  `federation-hub-service`'s existing trust model already plays the exact role a second relay-based
+  protocol (OSCI-Transport's "Intermediär") would play, making a second one parallel infrastructure, not
+  an additive shim like the existing CMIS/WebDAV connectors; and OSCI-Transport tooling is essentially
+  Java-only, no maintained Python implementation found — building it here would mean hand-rolling a
+  SOAP/XML-DSig/XML-Enc stack from spec or standing up a JVM sidecar, disproportionate to a reference
+  implementation. Two concrete conditions named that would warrant revisiting it later.
+- **P72-S4**: this entry, above.
+
+New ADRs: [0207](docs/adr/0207-p72s2-structured-e-invoice-support-scoping.md),
+[0208](docs/adr/0208-p72s3-egov-transport-protocol-scoping.md),
+[0209](docs/adr/0209-p72s1-batch-scan-intake-splitting-scoping.md),
+[0210](docs/adr/0210-p72s4-query-language-and-bff-concept-reconciliation.md). `docs/services/query-service.md`
+and `docs/services/gateway-service.md` (P72-S4 findings cross-referenced into their own Open Points),
+`docs/services/ocr-service.md` (P72-S1/S2 cross-referenced), `docs/services/mail-connector.md` (P72-S1's
+"not here, see ocr-service instead" redirect), `docs/services/federation-hub-service.md` (P72-S3
+cross-referenced) all updated. `graphify update .` run twice this session (once after Phase 71 closed,
+once after Phase 72 closed, per the standing "phase-end only" rule) — final state: 17,472 nodes,
+31,920 edges, 1,860 communities.
+
+**Next session: none queued.** This is the end of `IMPLEMENTATION_PLAN.md`'s entire session list — no
+Phase 73 exists. Per the standing instruction governing this whole multi-session run: do not
+self-initiate a new gap-analysis round; report this milestone to the user and let them decide what comes
+next (another gap-analysis round, a specific new ask, or nothing further for now).
+
+---
+
+Immediately before P72-S1 (and this whole Phase 72 scoping round): **P71-S4** (fourth and last session
+of Phase 71 — "Remaining Moderate-Value Completions"). Signature-service/archival-service bundle, all 3
+sub-items, with one deliberate
 correction against the plan's own framing. **`signature-service` admin-UI visibility**: new
 `GET /signatures/due-for-retimestamp` (gated behind `admin.signature_config`, the same capability
 already gating `PUT /signature-config` — a system-wide overview, not a per-document read like the

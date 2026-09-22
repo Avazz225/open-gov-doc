@@ -240,6 +240,12 @@ Registers itself with the registry on startup via `dms-registry-client`, same pa
 
 ## Open Points
 
+- **Batch-scan intake splitting (barcode/separator-sheet/blank-page document-boundary detection) does
+  NOT belong here** — **scoped in P72-S1** ([ADR 0209](../adr/0209-p72s1-batch-scan-intake-splitting-scoping.md)):
+  the Poststelle role this service owns handles e-mail intake only, with no concept of physical bulk
+  scanning at all; the future build recommendation is a new stage inside `ocr-service` instead, not an
+  extension of this service, despite the plan's own initial framing associating the feature with the
+  Poststelle role. Noted here so a future reader doesn't look for it in the wrong service.
 - **`max_message_size_bytes` (P61-S4, [ADR 0189](../adr/0189-webdav-edit-token-scope-and-mail-connector-size-limit.md)) does not reduce the IMAP/POP3 fetch cost itself** — `MailboxBackend.fetch_new_messages()` already retrieves a message's full raw bytes over the wire before `_ingest_message` gets a chance to check its length; the fix prevents the subsequent, materially larger MIME-parsing/base64-decode/virus-scan/storage-upload cost, not the initial protocol-level fetch. Avoiding that too would need per-message size-aware fetching (e.g. `IMAP FETCH BODY.PEEK[]<0.N>` partial fetches) - a materially larger change for a narrower residual, not attempted here (same "accepted, honestly documented tradeoff" shape as `dms_common.MaxBodySizeMiddleware`'s own no-`Content-Length` gap, [ADR 0187](../adr/0187-shared-max-upload-size-middleware.md)).
 - ~~**Candidate regex is generic, not derived from the actually configured `kennzeichen_format`/`case_number_config.format` values**~~ — **fixed in Post-Roadmap Phase 19 Session 11** ([ADR 0076](../adr/0076-root-folder-mail-regex-dehydration-409.md)).
 - **No bulk rescan of already received, unconfirmed messages on a subsequent format change** — the new format-derived pattern is only applied on the INITIAL ingestion of a message; older messages already sitting as `unassigned` are not retroactively re-checked on a later format change.

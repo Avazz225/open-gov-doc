@@ -250,6 +250,14 @@ None yet — to follow in Phase 11.
 
 ## Open Points
 
+- **No BFF/aggregation layer, only a generic reverse proxy** (Konzept 3.5 named both in one breath,
+  ADR 0005 built only the proxy half) — **examined and declined in P72-S4**
+  ([ADR 0210](../adr/0210-p72s4-query-language-and-bff-concept-reconciliation.md)): confirmed this
+  service does zero multi-service aggregation anywhere in its source, and confirmed no frontend has ever
+  needed more than a trivial 2-call client-side `Promise.all` for a screen that needs two related pieces
+  of data — no documented N+1-style performance pain anywhere in ~72 phases of usage. Not a missing
+  feature, an aspirational phrase that never became a distinct requirement; stays an accepted gap, not a
+  scheduled one, unless a real multi-call performance problem surfaces in a specific screen.
 - Identity headers (`X-DMS-Principal`/`X-DMS-Username`/`X-DMS-Roles`) are
   still not consumed by EVERY backend service — many endpoints that need a
   principal still accept it explicitly as a parameter/body field (e.g.

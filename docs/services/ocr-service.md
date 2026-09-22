@@ -145,6 +145,14 @@ None yet — follows in Phase 11.
 ## Open Points
 
 - **PaddleOCR not implemented**: only the plugin interface allows for it, see ADR 0011.
+- **No batch-scan intake splitting (document-boundary detection for a bulk mail-room scan) and no
+  structured e-invoice (ZUGFeRD/Factur-X) extraction** — both **scoped, not built, in Phase 72**:
+  batch-scan splitting in [ADR 0209](../adr/0209-p72s1-batch-scan-intake-splitting-scoping.md)
+  (recommends a new, explicitly opt-in pipeline stage here, blank-page detection first, barcode
+  detection deferred), e-invoice extraction in
+  [ADR 0207](../adr/0207-p72s2-structured-e-invoice-support-scoping.md) (recommends a new
+  pre-engine-selection stage here for ZUGFeRD/Factur-X specifically). Both stay scoped, awaiting a
+  future phase.
 - **Text-layer availability is decided based on page 1 only**: `select_engine()` does not check page by page whether a usable text layer exists — a PDF with, e.g., a native page 1 and a scanned page 2 would incorrectly get `NativeTextLayerEngine` for the entire document (page 2 would then have no recognized words). A deliberate simplification, no known use case for it so far.
 - ~~**`needs_review` without real workflow integration**~~ — **closed in Phase 45 Session 3**: a real `ocr_review.bpmn` Manual Task workflow instance now starts automatically, see "`needs_review` Workflow Integration" above.
 - **No reviewer-facing OCR-text/document preview linked from the review task itself** (Phase 45 Session 3) — a reviewer must independently open the document in `user-ui` to judge the OCR result before completing the task; the task's `business_key` (the OCR result ID, embedding the document ID) is the only identifying information shown in `reviewer-ui`'s generic task table.
