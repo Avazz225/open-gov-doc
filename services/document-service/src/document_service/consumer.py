@@ -34,6 +34,9 @@ def make_handler(
         if action_type == "document.delete":
             await _handle_delete_approved(session_factory, publish_event, event)
             return
+        if action_type == "document.classification.declassify":
+            await _handle_declassify_approved(session_factory, publish_event, event)
+            return
         if action_type != "document.force_unlock":
             return
         action_payload = event.payload.get("payload") or {}
@@ -177,6 +180,51 @@ async def _handle_delete_approved(
         await session.commit()
         await publish_event(
             "document.deleted", document_id, {"deleted_by": deleted_by}, actor=deleted_by
+        )
+
+
+async def _handle_declassify_approved(
+    session_factory: async_sessionmaker[AsyncSession],
+    publish_event: Callable[[str, str, dict], Awaitable[None]],
+    event: Event,
+) -> None:
+    """Executes an already-approved declassification (14.2, P70-S2, ADR
+    0204) - the ONLY place in this service that ever calls
+    `repository.declassify_document`, exactly like `auth-service`'s
+    `superuser.activate` has no execution path outside its own consumer.
+    Identical structural pattern to `_handle_delete_approved` above."""
+    action_payload = event.payload.get("payload") or {}
+    document_id = action_payload.get("document_id")
+    if not document_id:
+        logger.warning(
+            "permission.approval.approved für document.classification.declassify ohne "
+            "document_id im payload erhalten - ignoriert: %r",
+            action_payload,
+        )
+        return
+
+    async with session_factory() as session:
+        try:
+            await repository.declassify_document(
+                session, document_id, target_level=action_payload.get("target_classification_level")
+            )
+        except repository.NotFoundError:
+            logger.warning(
+                "Genehmigte Deklassifizierung für document_id=%r konnte nicht ausgeführt werden "
+                "(Dokument inzwischen bereits anderweitig entfernt)",
+                document_id,
+            )
+            return
+        await session.commit()
+        await publish_event(
+            "document.classification.changed",
+            document_id,
+            {
+                "classification_level": action_payload.get("target_classification_level"),
+                "direction": "lowered",
+                "reason": action_payload.get("reason"),
+            },
+            actor=action_payload.get("changed_by"),
         )
 
 

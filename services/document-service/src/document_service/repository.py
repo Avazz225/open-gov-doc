@@ -505,6 +505,41 @@ async def set_classification_level(
     return document
 
 
+_CLASSIFICATION_RANK_TO_LEVEL = {rank: level for level, rank in CLASSIFICATION_RANK.items()}
+
+
+def next_lower_classification_level(current_level: str | None) -> str | None:
+    """Single-step-only declassification target (14.2, P70-S2, ADR 0204) -
+    the level exactly one rank below `current_level`, or `None` if that
+    would be rank 0 (unclassified). Raises if `current_level` is already
+    `None`/unclassified - there is nothing left to declassify."""
+    current_rank = CLASSIFICATION_RANK.get(current_level or "", 0)
+    if current_rank == 0:
+        raise ClassificationDowngradeError(
+            "Dokument ist bereits nicht eingestuft - keine weitere Deklassifizierung möglich"
+        )
+    return _CLASSIFICATION_RANK_TO_LEVEL.get(current_rank - 1)
+
+
+async def declassify_document(
+    session: AsyncSession, document_id: str, *, target_level: str | None
+) -> Document:
+    """Executes an already-approved declassification (14.2, P70-S2, ADR
+    0204) - called exclusively from `consumer.py`'s
+    `permission.approval.approved` handler, never directly from an
+    endpoint (no synchronous path exists at all, unlike
+    `set_classification_level`'s raise-only rank check above). Deliberately
+    does NOT retroactively rewrite `DocumentVersion` snapshots - same
+    boundary ADR 0114 already drew for raises, a version snapshot reflects
+    the classification in force when IT was created, not a live mirror of
+    the document's current value."""
+    document = await get_document(session, document_id)
+    document.classification_level = target_level
+    document.updated_at = datetime.now(UTC)
+    await session.flush()
+    return document
+
+
 async def delete_document(session: AsyncSession, document_id: str, *, deleted_by: str) -> Document:
     """Soft delete (visibility off, metadata remains) - triggered manually via
     the API. Since P7-S1, a soft-deleted document moves into the

@@ -33,6 +33,9 @@ LEGAL_HOLD_ADMIN_PRINCIPAL_ID = "document-service-test-legal-hold-admin"
 LEGAL_HOLD_ADMIN_HEADERS = {"X-DMS-Principal": LEGAL_HOLD_ADMIN_PRINCIPAL_ID}
 CLASSIFICATION_ADMIN_PRINCIPAL_ID = "document-service-test-classification-admin"
 CLASSIFICATION_ADMIN_HEADERS = {"X-DMS-Principal": CLASSIFICATION_ADMIN_PRINCIPAL_ID}
+DECLASSIFICATION_ADMIN_PRINCIPAL_ID = "document-service-test-declassification-admin"
+DECLASSIFICATION_ADMIN_HEADERS = {"X-DMS-Principal": DECLASSIFICATION_ADMIN_PRINCIPAL_ID}
+DECLASSIFICATION_ADMIN_2_PRINCIPAL_ID = "document-service-test-declassification-admin-2"
 RECORDS_QUARANTINE_ADMIN_PRINCIPAL_ID = "document-service-test-records-quarantine-admin"
 RECORDS_QUARANTINE_ADMIN_HEADERS = {"X-DMS-Principal": RECORDS_QUARANTINE_ADMIN_PRINCIPAL_ID}
 CLASSIFIED_DELETION_ADMIN_PRINCIPAL_ID = "document-service-test-classified-deletion-admin"
@@ -2086,6 +2089,109 @@ def test_set_classification_level_unknown_document_returns_404(client):
         headers=CLASSIFICATION_ADMIN_HEADERS,
     )
     assert response.status_code == 404
+
+
+# --- Declassification (14.2, P70-S2, ADR 0204) -------------------------------
+
+
+def test_declassify_without_principal_returns_401(client):
+    document_id = upload(client).json()["id"]
+    response = client.post(
+        f"/documents/{document_id}/classification-level/declassify",
+        json={"changed_by": "alice", "reason": "Testfall"},
+        headers={"X-DMS-Principal": ""},
+    )
+    assert response.status_code == 401
+
+
+def test_declassify_without_capability_returns_403(client):
+    document_id = upload(client).json()["id"]
+    response = client.post(
+        f"/documents/{document_id}/classification-level/declassify",
+        json={"changed_by": "alice", "reason": "Testfall"},
+        headers={"X-DMS-Principal": "alice"},
+    )
+    assert response.status_code == 403
+
+
+def test_declassify_unknown_document_returns_404(client):
+    response = client.post(
+        "/documents/does-not-exist/classification-level/declassify",
+        json={"changed_by": "alice", "reason": "Testfall"},
+        headers=DECLASSIFICATION_ADMIN_HEADERS,
+    )
+    assert response.status_code == 404
+
+
+def test_declassify_already_unclassified_returns_409(client):
+    document_id = upload(client).json()["id"]
+    response = client.post(
+        f"/documents/{document_id}/classification-level/declassify",
+        json={"changed_by": "alice", "reason": "Testfall"},
+        headers=DECLASSIFICATION_ADMIN_HEADERS,
+    )
+    assert response.status_code == 409
+
+
+def test_declassify_always_defers_and_never_executes_synchronously(client):
+    """P70-S2/ADR 0204: unlike `trash_document`'s OPTIONAL four-eyes toggle,
+    declassification has NO synchronous execution path at all - this is
+    unconditionally true regardless of any `approval-config` setting
+    (mirrors `auth.superuser.activate`'s mandatory shape). Actual execution
+    follows asynchronously via `consumer.py` (see `test_consumer.py`)."""
+    document_id = upload(client).json()["id"]
+    client.put(
+        f"/documents/{document_id}/classification-level",
+        json={"classification_level": "GEHEIM", "changed_by": "alice"},
+        headers=CLASSIFICATION_ADMIN_HEADERS,
+    )
+
+    response = client.post(
+        f"/documents/{document_id}/classification-level/declassify",
+        json={"changed_by": "alice", "reason": "Fehleingabe korrigiert"},
+        headers=DECLASSIFICATION_ADMIN_HEADERS,
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["status"] == "pending_approval"
+    assert result["approval_request_id"] is not None
+
+    # Klassifizierung ist unverändert - die tatsächliche Herabstufung folgt
+    # ausschließlich über consumer.py, nie über diesen Endpunkt selbst.
+    assert client.get(f"/documents/{document_id}").json()["classification_level"] == "GEHEIM"
+
+
+def test_declassify_approval_gate_accepts_a_second_distinct_holder_of_the_same_capability(client):
+    """Real integration against the running `permission-service` (no
+    mocking) - proves the capability-reuse fix actually works: `admin.
+    declassification` is the SAME capability required from both the
+    initiator and the approver (`ApprovalActionConfig.required_permission`,
+    ADR 0204), not two distinct capabilities as an earlier draft of this
+    session's own design mistakenly assumed (caught by this exact test
+    initially failing with a 403 on the approval call). Does not wait for/
+    poll the asynchronous consumer execution - that path is covered by
+    `test_consumer.py`, same established split this codebase already uses
+    for `document.delete`/`document.force_unlock`."""
+    document_id = upload(client).json()["id"]
+    client.put(
+        f"/documents/{document_id}/classification-level",
+        json={"classification_level": "GEHEIM", "changed_by": "alice"},
+        headers=CLASSIFICATION_ADMIN_HEADERS,
+    )
+    request_id = client.post(
+        f"/documents/{document_id}/classification-level/declassify",
+        json={"changed_by": DECLASSIFICATION_ADMIN_PRINCIPAL_ID, "reason": "Testfall"},
+        headers=DECLASSIFICATION_ADMIN_HEADERS,
+    ).json()["approval_request_id"]
+
+    approve_response = httpx.post(
+        f"{PERMISSION_SERVICE_URL}/approval-requests/{request_id}/approve",
+        json={"approved_by": DECLASSIFICATION_ADMIN_2_PRINCIPAL_ID},
+    )
+
+    assert approve_response.status_code == 200
+    assert approve_response.json()["status"] == "approved"
 
 
 def test_checkin_snapshots_classification_level_on_new_version(client):

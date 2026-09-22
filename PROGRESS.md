@@ -2,7 +2,68 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P70-S1 (first session of Phase 70 — "Document Declassification Mechanism",
+**Last completed:** P70-S2 (second and final session of Phase 70 — "Document Declassification
+Mechanism"). Built per P70-S1's scoped design (ADR 0203): new `admin.declassification` capability
+(role `domain-admin-declassification`, `permission-service`); `document-service` gained `POST
+/documents/{id}/classification-level/declassify` (`repository.next_lower_classification_level`
+computes the single-step target server-side, `repository.declassify_document` executes it) — gated
+by `admin.declassification`, and mandatorily deferred under the four-eyes principle with **no
+synchronous execution path in code at all**, mirroring `auth.superuser.activate`'s shape (ADR 0023)
+rather than the ordinary configurable `requires_approval` toggle every other action type uses.
+Execution happens exclusively in `consumer.py`'s new `_handle_declassify_approved`, once a second,
+distinct person approves.
+
+**Real design correction found by this session's own tests, not anticipated by the scoping session**:
+P70-S1's own text assumed the four-eyes approver would need a capability distinct from the initiator's
+`admin.declassification`. Building against the real `permission-service` code immediately falsified
+this — `ApprovalActionConfig.required_permission` is a single shared capability, checked identically on
+both `initiated_by` (at request creation) and `approved_by` (at approval); already accurately documented
+in `docs/services/permission-service.md`'s own pre-existing text, which the scoping session read past. A
+first implementation attempt (a separate `declassification-approver` role) failed its very first test
+run with a `403` — the *initiator* itself failing its own config's `required_permission` check. Fixed by
+dropping the second role and reusing `admin.declassification` for both sides, matching break-glass's
+`breakglass.approve` shape exactly; the "two distinct people" guarantee comes entirely from
+`permission-service`'s own unconditional `approved_by == initiated_by` rejection, not from two
+capabilities. **A second bug the same test caught**: the endpoint's first draft passed the opaque
+`changed_by` attribution field as `initiated_by` instead of the actual authenticated `x_dms_principal` —
+fixed alongside the first correction.
+
+Reuses the existing `document.classification.changed` event (new `direction: "raised"|"lowered"`
+payload marker) — no new `audit-service` plumbing needed, it already subscribes to the whole
+`document.>` wildcard. `DocumentVersion` snapshots stay non-retroactive for both raises and lowerings,
+same boundary ADR 0114 already drew.
+
+**Verification**: `permission-service` 185/185 (unchanged, the new `DOMAIN_ADMIN_ROLES` entry is covered
+by that file's own list-driven assertions); `document-service` 424/424 including 10 new tests — six at
+the API level (401/403/404/409, the "always defers, never executes synchronously" proof, and a real
+integration test against the running `permission-service` proving a second, distinct holder of the same
+capability can approve — this exact test is what caught both bugs above) and four at the consumer level
+(successful lowering with the correct event payload, lowering to `None`/unclassified from the bottom
+rung, and two "logged, not raised" resilience tests). A full unfiltered backend regression run afterward
+found zero new failures anywhere — every failure present (`auth-service`'s ADR-0190 circular dependency,
+`folder-service`'s known flake, `gateway-service`'s same 3 pre-existing failures, `rendering-service`'s
+already-documented flaky `test_run_retry_tick_processes_a_due_rendition`, `webdav-connector`'s ADR-0189
+timeout pattern, `workflow-service`'s known federation/xdomea flake) matches exactly what P68-S1/P69-S2's
+own full runs already documented as pre-existing/flaky; the two services this session actually touched
+(`document-service`, `permission-service`) are both 100% green. Both rebuilt, redeployed, and
+**live-verified end-to-end against the real running stack**: a real document raised to `GEHEIM`,
+declassified (`pending_approval`, classification confirmed unchanged), approved by a second, distinct
+real principal holding the same role, and confirmed automatically lowered to `VS-VERTRAULICH` once the
+NATS consumer processed the approval — the complete mandatory four-eyes path exercised for real, not
+just its individual pieces.
+
+New ADR: [0204](docs/adr/0204-p70s2-declassification-build.md). `docs/services/document-service.md`
+(new "Declassification" section, API table row) and `docs/services/permission-service.md` (new
+`required_permission`/domain-role table entries, correction note) updated.
+
+**Phase 70 is now closed (2/2).**
+
+**Next session:** Phase 71 — Remaining Moderate-Value Completions. See `IMPLEMENTATION_PLAN.md` for the
+full session breakdown.
+
+---
+
+**Immediately before P70-S2: P70-S1** (first session of Phase 70 — "Document Declassification Mechanism",
 scoping only, no code). Scoped what a real declassification process needs for `document-service`'s
 set-or-raise-only `classification_level` field (`PUT /documents/{id}/classification-level` currently
 rejects any lower rank with `409`, no path anywhere to clear/lower it — ADR 0114/0115's own already-
@@ -31,9 +92,6 @@ reuses `document.classification.changed` with an added `direction` payload marke
 snapshots stay untouched — not retroactive, same boundary ADR 0114 already drew for raises. New ADR
 [0203](docs/adr/0203-p70s1-declassification-scoping.md). No tests, no doc corrections beyond the ADR
 (deliberately — `document-service.md`'s classification-level docs stay as-is until P70-S2 builds this).
-
-**Next session:** P70-S2 — build per P70-S1's recommendation above. See `IMPLEMENTATION_PLAN.md`'s Phase
-70 table and ADR 0203 for the full scoped design.
 
 ---
 

@@ -61,6 +61,8 @@ from document_service.schemas import (
     ClassificationLevelUpdate,
     CountActiveRequest,
     CountActiveResult,
+    DeclassifyRequest,
+    DeclassifyResult,
     DeletionRegisterEntryOut,
     DocumentOut,
     DocumentPromoteRequest,
@@ -2547,10 +2549,89 @@ async def set_document_classification_level(
     await publish_event(
         "document.classification.changed",
         subject=document_id,
-        payload={"classification_level": payload.classification_level},
+        payload={"classification_level": payload.classification_level, "direction": "raised"},
         actor=payload.changed_by,
     )
     return updated
+
+
+async def _require_declassification_permission(x_dms_principal: str) -> None:
+    """RBAC (14.2, P70-S2, ADR 0204) - deliberately a NEW domain-admin
+    capability (`admin.declassification`, role
+    "domain-admin-declassification"), separate from `admin.classification`
+    (which only ever RAISES a classification) and from
+    `admin.deletion_classified` (which governs PURGING an already-
+    classified document, a materially different sensitive action) - same
+    "two distinct sensitive actions, two distinct domains" rationale ADR
+    0114 itself already used. Checked here as a defense-in-depth,
+    initiator-side gate before even attempting to create the approval
+    request - `permission-service`'s own `_require_permission_if_configured`
+    independently re-checks the SAME `admin.declassification` capability
+    on the initiator at request-creation time AND again on whoever
+    approves it (there is no separate "approver-only" capability
+    mechanism in this codebase, same shape as break-glass's single
+    `breakglass.approve`) - the "two distinct people" guarantee comes from
+    `permission-service`'s unconditional `approved_by == initiated_by`
+    rejection, not from two different capabilities."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    if not await app.state.permission_client.has_permission(
+        x_dms_principal, "admin.declassification"
+    ):
+        raise HTTPException(
+            status_code=403, detail="Fehlende Domain-Admin-Rolle 'Deklassifizierungsverwaltung'"
+        )
+
+
+@app.post(
+    "/documents/{document_id}/classification-level/declassify", response_model=DeclassifyResult
+)
+async def declassify_document_classification_level(
+    document_id: str,
+    payload: DeclassifyRequest,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> DeclassifyResult:
+    """Lower a document's classification by exactly one rank (14.2, P70-S2,
+    ADR 0204) - deliberately, UNCONDITIONALLY deferred under the four-eyes
+    principle, with NO synchronous execution path in this endpoint at all
+    (unlike `trash_document`'s OPTIONAL `approval_client.requires_approval`
+    check above): mirrors `auth.superuser.activate`'s mandatory shape (ADR
+    0023), not the ordinary per-installation-configurable four-eyes toggle
+    every other action type in this service uses. The actual field change
+    happens exclusively in `consumer.py`'s `permission.approval.approved`
+    handler once a second, distinct person (never the initiator, enforced
+    by `permission-service` itself) approves the request."""
+    await _require_declassification_permission(x_dms_principal)
+    try:
+        document = await repository.get_document(session, document_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    try:
+        target_level = repository.next_lower_classification_level(document.classification_level)
+    except repository.ClassificationDowngradeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    request = await app.state.approval_client.create_request(
+        action_type="document.classification.declassify",
+        # `x_dms_principal`, NOT `payload.changed_by` - `changed_by` is an
+        # opaque attribution/audit-only field (same pattern as
+        # `ClassificationLevelUpdate.changed_by` above), but
+        # `permission-service`'s `required_permission` check is applied to
+        # whoever is passed as `initiated_by`, which must be the ACTUAL
+        # authenticated principal already verified above to hold
+        # `admin.declassification` - passing `changed_by` here (an earlier
+        # version of this endpoint's own bug, caught by this session's own
+        # tests) would let that check silently apply to the wrong,
+        # caller-supplied string instead.
+        initiated_by=x_dms_principal,
+        payload={
+            "document_id": document_id,
+            "target_classification_level": target_level,
+            "changed_by": payload.changed_by,
+            "reason": payload.reason,
+        },
+    )
+    return DeclassifyResult(status="pending_approval", approval_request_id=request["id"])
 
 
 @app.get("/documents/{document_id}/derived", response_model=list[DocumentOut])

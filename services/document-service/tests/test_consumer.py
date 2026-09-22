@@ -373,3 +373,176 @@ async def test_approved_delete_without_document_id_is_logged_not_raised(engine):
     await handler(event.to_bytes())  # darf nicht raisen
 
     assert published == []
+
+
+async def test_approved_declassify_lowers_classification_and_publishes(engine):
+    """14.2, P70-S2, ADR 0204 - this is the ONLY code path that ever
+    executes a declassification; the endpoint itself (test_api.py) only
+    ever creates a pending approval request."""
+    session_factory = _session_factory(engine)
+    document_id = str(uuid.uuid4())
+    async with session_factory() as session:
+        await repository.create_document(
+            session,
+            document_id=document_id,
+            title="Vertrag",
+            filename="vertrag.pdf",
+            content_type="application/pdf",
+            size_bytes=3,
+            checksum_sha256="abc",
+            storage_object_key=f"documents/{document_id}/abc",
+            folder_id=None,
+            object_type_id=None,
+            attributes={},
+            created_by="alice",
+        )
+        await repository.set_classification_level(
+            session, document_id, classification_level="GEHEIM"
+        )
+        await session.commit()
+
+    published = []
+
+    async def fake_publish(event_type, subject, payload, actor=None):
+        published.append((event_type, subject, payload))
+
+    handler = consumer.make_handler(session_factory, None, "dms-admin", fake_publish)
+    event = Event(
+        event_type="permission.approval.approved",
+        service_name="permission-service",
+        payload={
+            "request_id": "req-10",
+            "action_type": "document.classification.declassify",
+            "initiated_by": "alice",
+            "approved_by": "bob",
+            "payload": {
+                "document_id": document_id,
+                "target_classification_level": "VS-VERTRAULICH",
+                "changed_by": "alice",
+                "reason": "Fehleingabe korrigiert",
+            },
+        },
+    )
+
+    await handler(event.to_bytes())
+
+    async with session_factory() as session:
+        document = await repository.get_document(session, document_id)
+        assert document.classification_level == "VS-VERTRAULICH"
+    assert published == [
+        (
+            "document.classification.changed",
+            document_id,
+            {
+                "classification_level": "VS-VERTRAULICH",
+                "direction": "lowered",
+                "reason": "Fehleingabe korrigiert",
+            },
+        )
+    ]
+
+
+async def test_approved_declassify_to_unclassified_sets_none(engine):
+    """Single-step-only means the bottom rung (VS-NfD) declassifies to
+    `None` (unclassified), not a fifth named level."""
+    session_factory = _session_factory(engine)
+    document_id = str(uuid.uuid4())
+    async with session_factory() as session:
+        await repository.create_document(
+            session,
+            document_id=document_id,
+            title="Vertrag",
+            filename="vertrag.pdf",
+            content_type="application/pdf",
+            size_bytes=3,
+            checksum_sha256="abc",
+            storage_object_key=f"documents/{document_id}/abc",
+            folder_id=None,
+            object_type_id=None,
+            attributes={},
+            created_by="alice",
+        )
+        await repository.set_classification_level(
+            session, document_id, classification_level="VS-NfD"
+        )
+        await session.commit()
+
+    async def fake_publish(event_type, subject, payload, actor=None):
+        pass
+
+    handler = consumer.make_handler(session_factory, None, "dms-admin", fake_publish)
+    event = Event(
+        event_type="permission.approval.approved",
+        service_name="permission-service",
+        payload={
+            "request_id": "req-11",
+            "action_type": "document.classification.declassify",
+            "initiated_by": "alice",
+            "approved_by": "bob",
+            "payload": {
+                "document_id": document_id,
+                "target_classification_level": None,
+                "changed_by": "alice",
+                "reason": "Herabstufung auf unklassifiziert",
+            },
+        },
+    )
+
+    await handler(event.to_bytes())
+
+    async with session_factory() as session:
+        document = await repository.get_document(session, document_id)
+        assert document.classification_level is None
+
+
+async def test_approved_declassify_for_already_removed_document_is_logged_not_raised(engine):
+    published = []
+
+    async def fake_publish(event_type, subject, payload, actor=None):
+        published.append((event_type, subject, payload))
+
+    handler = consumer.make_handler(_session_factory(engine), None, "dms-admin", fake_publish)
+    event = Event(
+        event_type="permission.approval.approved",
+        service_name="permission-service",
+        payload={
+            "request_id": "req-12",
+            "action_type": "document.classification.declassify",
+            "initiated_by": "alice",
+            "approved_by": "bob",
+            "payload": {
+                "document_id": "does-not-exist",
+                "target_classification_level": "VS-NfD",
+                "changed_by": "alice",
+                "reason": "Testfall",
+            },
+        },
+    )
+
+    await handler(event.to_bytes())  # darf nicht raisen
+
+    assert published == []
+
+
+async def test_approved_declassify_without_document_id_is_logged_not_raised(engine):
+    published = []
+
+    async def fake_publish(event_type, subject, payload, actor=None):
+        published.append((event_type, subject, payload))
+
+    handler = consumer.make_handler(_session_factory(engine), None, "dms-admin", fake_publish)
+    event = Event(
+        event_type="permission.approval.approved",
+        service_name="permission-service",
+        payload={
+            "request_id": "req-13",
+            "action_type": "document.classification.declassify",
+            "initiated_by": "alice",
+            "approved_by": "bob",
+            "payload": {"x": 1},
+        },
+    )
+
+    await handler(event.to_bytes())  # darf nicht raisen
+
+    assert published == []

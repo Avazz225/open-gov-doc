@@ -13,6 +13,7 @@
 | `POST` | `/documents/{id}/register` | Draft → registered transition (Post-Roadmap Phase 31 Session 2, ADR 0113) — assigns the reference number deferred by `draft=true` above. `409` if already registered, `422` on a missing placeholder attribute (same as at creation time), see below |
 | `POST` | `/documents/{id}/promote` | Work tray promotion (Post-Roadmap Phase 31 Session 7, ADR 0118) — register (as above) plus an optional move to `target_folder_id`, as one atomic action/event. `409`/`422` same as register; `400` for an unknown target folder (document left untouched, still a draft); see "Work Tray Promotion" below |
 | `PUT` | `/documents/{id}/classification-level` | Set/raise a document's classification level (14.2, Post-Roadmap Phase 31 Session 3, ADR 0114) — requires `admin.classification`. `409` on an attempted downgrade, see "Classification Level" below |
+| `POST` | `/documents/{id}/classification-level/declassify` | **Since P70-S2** (14.2, ADR 0204): lowers a classification by exactly one rank — requires `admin.declassification`, mandatorily deferred under the four-eyes principle with no synchronous execution path at all, see "Declassification" below |
 | `POST` | `/documents/{id}/redact` | Burns the given regions into a new, independent redacted copy (14.2, Post-Roadmap Phase 31 Session 4, ADR 0115) — requires `document.redaction.read` on the original (dedicated permission since ADR 0149, was plain `document.read`), `422` for a non-PDF source, see "Document Redaction" below |
 | `GET` | `/documents/{id}/derived` | Documents derived from this one (currently only redacted copies) — the first actual reader of the P6-S3 `derived_from_document_id` field, see below |
 | `GET` | `/documents/{id}/redaction-preview/page-count` | Proxies to rendering-service's `/render/pdf-page-count` — requires `document.redaction.read` (dedicated permission since ADR 0149) |
@@ -243,14 +244,49 @@ check-in time) make it a genuine per-document/per-version attribute:
   `domain-admin-classification`, see `docs/services/permission-service.md`), deliberately separate from
   `admin.object_config` (which still governs the object type's own default). Rank order: `None` (never
   offered as a target by this endpoint) < VS-NfD < VS-VERTRAULICH < GEHEIM < STRENG GEHEIM. A strictly
-  lower target is rejected with `409`; the same level again is an idempotent no-op. **There is no way to
-  clear/lower a document's classification via this endpoint at all** — declassification is a separate,
-  heavier process this session does not build.
+  lower target is rejected with `409`; the same level again is an idempotent no-op. This endpoint never
+  lowers/clears a classification — see "Declassification" below for that path.
 - **`DocumentVersion.classification_level`** is set from the document's *current* value at check-in time,
-  not retroactively rewritten by a later raise — a version checked in while the document was VS-NfD keeps
-  showing VS-NfD even after the document is later raised to GEHEIM.
-- Publishes `document.classification.changed` on a successful raise (picked up by `audit-service`'s
-  existing `document.>` wildcard subscription, no extension needed there).
+  not retroactively rewritten by a later raise (or a later declassification, see below) — a version
+  checked in while the document was VS-NfD keeps showing VS-NfD even after the document is later raised
+  to GEHEIM.
+- Publishes `document.classification.changed` (payload additionally carries `direction: "raised"` since
+  P70-S2) on a successful raise (picked up by `audit-service`'s existing `document.>` wildcard
+  subscription, no extension needed there).
+
+## Declassification (14.2, P70-S2, [ADR 0204](../adr/0204-p70s2-declassification-build.md))
+
+**`POST /documents/{id}/classification-level/declassify`** (`changed_by`, `reason`) lowers a document's
+classification by exactly one rank — single-step-only (`VS-NfD` declassifies to unclassified/`None`,
+never a direct multi-level drop; `repository.next_lower_classification_level` computes the target
+server-side, the caller never specifies it). Gated by a **new** `admin.declassification` capability
+(role `domain-admin-declassification`) — deliberately separate from `admin.classification` (which only
+ever raises) and from `admin.deletion_classified` (which governs *purging* an already-classified
+document, a materially different sensitive action).
+
+**Mandatory, not configurable four-eyes** — deliberately mirrors `auth.superuser.activate`'s shape (ADR
+0023), not the ordinary per-installation-configurable `requires_approval` toggle every other
+`document-service` action type uses: this endpoint has **no synchronous execution path in code at all**.
+It always creates a pending `ApprovalRequest` at `permission-service` (`action_type=
+"document.classification.declassify"`, pre-seeded `requires_approval=True`) and returns
+`{"status": "pending_approval", "approval_request_id": ...}` — never a "declassified" outcome. The actual
+field change happens exclusively in `consumer.py`'s `permission.approval.approved` handler once a
+second, distinct person approves.
+
+**The four-eyes `required_permission` is the SAME capability (`admin.declassification`) checked on both
+the initiator and the approver** — `permission-service`'s `_require_permission_if_configured` applies
+identically to `create_approval_request`/`approve_request`, there is no separate "approver-only"
+capability mechanism in this codebase (same single-capability shape as break-glass's
+`breakglass.approve`). The "two distinct people" guarantee comes entirely from `permission-service`'s own
+unconditional `approved_by == initiated_by` rejection, not from two different capabilities — an earlier
+draft of this session's own design assumed two distinct capabilities were needed and possible; caught
+and corrected by this session's own tests (a 403 on request creation, since the initiator itself failed
+its own `required_permission` check against a capability it was never granted).
+
+On execution, republishes `document.classification.changed` with `direction: "lowered"` (same event
+type raises use, distinguished by the payload marker — no new audit-service plumbing needed, it already
+subscribes to the whole `document.>` wildcard). `DocumentVersion` snapshots are **not** retroactively
+rewritten — same boundary already drawn for raises above.
 
 ## Document Redaction (14.2, Post-Roadmap Phase 31 Session 4, [ADR 0115](../adr/0115-document-redaction-genuine-content-removal.md))
 

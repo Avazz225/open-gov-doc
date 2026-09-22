@@ -165,6 +165,27 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 requires_approval=False,
                 required_permission="system.not_shutdown.trigger",
             )
+        # Document declassification (14.2, P70-S2, ADR 0204): like
+        # break-glass above, mandatorily pre-seeded with `requires_approval=
+        # True` - unlike break-glass, `document-service` itself additionally
+        # has NO synchronous execution path in code at all for a downgrade
+        # (see that service's `main.py`), so this flag is really just
+        # documentation/consistency at this point, not the actual
+        # enforcement boundary - but kept mandatory here too, so a future
+        # session that ever added a bypass endpoint without checking this
+        # row first would still be blocked. `required_permission` is the
+        # SAME capability (`admin.declassification`) checked on both the
+        # initiator and the approver (`_require_permission_if_configured`
+        # applies to both `create_approval_request`/`approve_request`) -
+        # not two distinct capabilities, same shape as
+        # `"auth.superuser.activate"`'s `breakglass.approve` above.
+        if await session.get(ApprovalActionConfig, "document.classification.declassify") is None:
+            await repository.set_approval_config(
+                session,
+                "document.classification.declassify",
+                requires_approval=True,
+                required_permission="admin.declassification",
+            )
         await repository.get_or_seed_maintenance_mode(session)
         await session.commit()
 

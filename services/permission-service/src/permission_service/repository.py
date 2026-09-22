@@ -395,6 +395,30 @@ DOMAIN_ADMIN_ROLES: list[tuple[str, str, list[str]]] = [
         "Konfiguration einsehen (Export/Vergleich)",
         ["admin.config_read"],
     ),
+    # P70-S2 (ADR 0204): document declassification (14.2) -
+    # deliberately a NEW domain, separate from `admin.classification`
+    # (which only ever RAISES a document's classification) and from
+    # `admin.deletion_classified` (which governs PURGING an already-
+    # classified document, a materially different sensitive action, same
+    # "two distinct sensitive actions, two distinct domains" reasoning
+    # ADR 0114 itself already used). Same single-capability shape as
+    # "breakglass-approver"/`breakglass.approve` (4.6) - `_require_
+    # permission_if_configured` (see `create_approval_request`/
+    # `approve_request` above) checks THIS SAME capability on both the
+    # initiator and the approver, there is no separate "approver-only"
+    # capability mechanism in this codebase. The actual "two distinct
+    # people" guarantee comes from `approve_request`'s unconditional
+    # `approved_by == request.initiated_by` rejection, not from two
+    # different capabilities - an earlier draft of this entry mistakenly
+    # assumed a separate approver capability existed; corrected before
+    # this session's own tests caught the resulting 403 in
+    # `create_approval_request` (the initiator itself failing its own
+    # `required_permission` check).
+    (
+        "domain-admin-declassification",
+        "Deklassifizierungsverwaltung (Verschlusssachen)",
+        ["admin.declassification"],
+    ),
 ]
 
 

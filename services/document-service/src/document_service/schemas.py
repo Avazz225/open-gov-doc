@@ -250,6 +250,30 @@ class ClassificationLevelUpdate(BaseModel):
     changed_by: str
 
 
+class DeclassifyRequest(BaseModel):
+    """Lower a document's classification level by exactly one rank (14.2,
+    P70-S2, ADR 0204) - no target level in the payload (unlike
+    `ClassificationLevelUpdate`): single-step-only by design, so the target
+    is always deterministic (current rank minus one) and computed
+    server-side, not caller-specified. `reason` is mandatory (unlike e.g.
+    `LockForceReleaseRequest.reason`) - a heavier, human-justified
+    administrative action, not a routine one."""
+
+    changed_by: str
+    reason: str
+
+
+class DeclassifyResult(BaseModel):
+    """Always `"pending_approval"` - deliberately not a two-outcome wrapper
+    like `TrashResult`/`ForceReleaseResult`: there is NO synchronous
+    execution path for a declassification at all (ADR 0204, mirroring
+    `auth.superuser.activate`'s shape, ADR 0023), so this literal only ever
+    has the one value."""
+
+    status: Literal["pending_approval"]
+    approval_request_id: str
+
+
 class PseudonymizeAttributeRequest(BaseModel):
     """Trigger pseudonymization of one personal-data attribute (5.2, Post-
     Roadmap Phase 41 Session 2, ADR 0156) - `pseudonymized_by` mirrors

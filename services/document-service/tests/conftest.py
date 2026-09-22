@@ -111,6 +111,51 @@ async def _grant_classification_permission():
         response.raise_for_status()
 
 
+DECLASSIFICATION_ADMIN_PRINCIPAL_ID = "document-service-test-declassification-admin"
+# A second, distinct principal holding the SAME role (P70-S2, ADR 0204) -
+# `admin.declassification` is the one capability `permission-service`
+# checks on both the initiator and the approver
+# (`_require_permission_if_configured` applies to both
+# `create_approval_request`/`approve_request`, no separate "approver-only"
+# capability mechanism exists in this codebase, same shape as break-glass's
+# single `breakglass.approve`). The actual "two distinct people" guarantee
+# comes from `permission-service`'s own unconditional `approved_by ==
+# initiated_by` rejection, not from two different capabilities - so a
+# round-trip approval test needs a second person with this same role, not a
+# different one.
+DECLASSIFICATION_ADMIN_2_PRINCIPAL_ID = "document-service-test-declassification-admin-2"
+
+
+@pytest.fixture(scope="session", autouse=True)
+async def _grant_declassification_permission():
+    """P70-S2 (ADR 0204): `POST .../classification-level/declassify`
+    requires `admin.declassification`, and `permission-service` requires
+    the same capability again from whoever approves the resulting request -
+    grants it to both test principals above."""
+    async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL) as pc:
+        roles = (await pc.get("/roles")).json()
+        role_id = next(r["id"] for r in roles if r["name"] == "domain-admin-declassification")
+        for principal_id in (
+            DECLASSIFICATION_ADMIN_PRINCIPAL_ID,
+            DECLASSIFICATION_ADMIN_2_PRINCIPAL_ID,
+        ):
+            existing = (
+                await pc.get("/role-assignments", params={"principal_id": principal_id})
+            ).json()
+            if any(a["role_id"] == role_id for a in existing):
+                continue
+            response = await pc.post(
+                "/role-assignments",
+                json={
+                    "principal_type": "user",
+                    "principal_id": principal_id,
+                    "role_id": role_id,
+                    "resource_id": "root",
+                },
+            )
+            response.raise_for_status()
+
+
 CLASSIFIED_DELETION_ADMIN_PRINCIPAL_ID = "document-service-test-classified-deletion-admin"
 
 
