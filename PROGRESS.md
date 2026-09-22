@@ -2,7 +2,58 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P67-S2 (second and last session of Phase 67). Wired the CLI tool to
+**Last completed:** P68-S1 (first session of Phase 68 — "Infrastructure Hardening", the largest-blast-
+radius session of the whole Phase 65+ round; user explicitly chose the big-bang rollout over a phased
+one when asked). Implemented Konzept 3.1's "a DB user per service, `GRANT` restricted exclusively to its
+own schema" for real: 28 new Postgres roles (`svc_<schema>`), each owning exactly its own pre-created
+schema, across `infra/postgres-init/` (new `002-service-roles.sh`), `infra/docker-compose.yml` (all 28
+services' `DMS_POSTGRES_DSN`), and the full Helm chart (`values.yaml`/`_helpers.tpl`/`secrets.yaml`/
+`postgresql.yaml` — validated via `helm lint`/`helm template`, a local helm binary installed since none
+was available; bundled Postgres only, external Postgres keeps the single shared credential). A real,
+live-discovered design gap: `CREATE SCHEMA IF NOT EXISTS` checks `CREATE`-on-database privilege *before*
+checking whether the schema exists, so every role also needed `GRANT CREATE ON DATABASE` (a documented,
+deliberate trade-off — lets a role create an *additional* empty schema, never read/write another
+service's existing one). Applied live to this session's own long-running dev database (not a fresh
+volume) — every existing schema/table/sequence's ownership transferred from the superuser to the new
+roles; `scripts/run-tests.sh` updated to run every service's tests under its own narrowed role, not the
+superuser. New ADR: [0199](docs/adr/0199-per-service-postgres-roles.md).
+
+**This session's own required full regression run surfaced a real, previously-undetected P66-S2
+regression, corrected in the same session** ([ADR 0200](docs/adr/0200-p66s2-business-key-validation-regression-correction.md)):
+P66-S2's `business_key` creation-time validation broke `case-service`'s real case-creation flow
+unconditionally — `case-service` sets `business_key=case_id` in its call to `workflow-service` *before*
+its own `Case` row exists (needed so the row's initial status can reflect a synchronously-completed
+instance), so the validation always rejected it with `422`. No session between P66-S2 and this one had
+ever run the full, unfiltered `scripts/run-tests.sh` — every one only re-tested the services it had
+directly touched. Fixed by reverting the validation entirely (its own value was a data-quality nicety,
+not a security requirement, and a full fix would have needed a disproportionate test-infrastructure
+rework — case-service's own tests run in-process, so a live workflow-service container can never resolve
+against them anyway) while keeping two independently-valuable pieces: `case-service` now creates and
+commits its `Case` row before calling `workflow-service` (more correct regardless), and
+`workflow-service`'s `case_client`/`document_client` now catch transport-level connection failures
+gracefully instead of crashing with `500`. Tests: `case-service` 87/87 (was 25 failed), `mail-connector`
+80/80 (was 3 errors, same root cause), `workflow-service` 227/228 (one already-documented, pre-existing,
+unrelated federation-dispatch flake). Two more pre-existing, unrelated failures found and root-caused
+during this same regression sweep, confirmed unrelated to either fix, flagged not fixed: `auth-service`
+(a circular dependency from ADR 0190/P63-S1 — `permission-service`'s superuser check always calls back to
+`auth-service`, whose own container is stopped during its own test run) and `webdav-connector` (matches
+ADR 0189's already-documented root-`PROPFIND`-timeout pattern exactly). `gateway-service`'s 3 failures
+were found but not fully root-caused.
+
+`docs/services/workflow-service.md`/`case-service.md`, `docs/adr/0100`, `infra/k8s/README.md` updated.
+`workflow-service` rebuilt/redeployed. **Live-verified** against the real running stack: every service's
+own API calls (`document-service`/`auth-service`/`workflow-service`/`registry-service`) confirmed working
+under the new narrowed Postgres credentials; the case-creation fix confirmed via a real `POST /cases`
+round trip.
+
+**Next session:** P68-S2 — migrate five services' bespoke permission clients
+(`document-service`/`auth-service`/`search-service`/`workflow-service`/`mail-connector`) onto the shared
+`libs/dms-permission-client`, closing ADR 0154's own named tech debt. Smaller and mechanical, no new ADR
+expected. See `IMPLEMENTATION_PLAN.md`'s Phase 68 table for the full description.
+
+---
+
+Immediately before P68-S1: **P67-S2** (second and last session of Phase 67). Wired the CLI tool to
 `migration-service`/`license-service`/`plugin-orchestration-service` (`dms migration ...`,
 `dms license ...`, `dms plugin-orchestration ...`), all of which had existed for many phases with no CLI
 command ever added, plus `dms deletion-register list|reconcile` (`document-service`/`folder-service`).
@@ -26,16 +77,6 @@ real command invocations against the running stack: `plugin-orchestration status
 `migration installations list`/`transfers list`, `deletion-register list` all render real data; `license
 status` failed with the regression above on the first attempt, fixed, rebuilt, re-ran, now correct. **Phase
 67 is now closed (2/2).**
-
-**Next session:** none scheduled yet — Phase 68 ("Infrastructure Hardening") is next. P68-S1 is the
-largest-blast-radius session of the whole Phase 65+ round (per-service Postgres DB users/`GRANT`s across
-all ~28 services, Konzept 3.1) and its own plan entry explicitly defers the rollout-shape decision
-(big-bang vs. phased) to the session itself — worth flagging to the user before starting rather than
-proceeding fully autonomously into it. P68-S2 (migrate five services' bespoke permission clients onto
-`libs/dms-permission-client`) is smaller and mechanical. See `IMPLEMENTATION_PLAN.md`'s Phase 68 table for
-the full description.
-
----
 
 Immediately before P67-S2: **P67-S1** (first session of Phase 67 — "Blocked on X, X Now Exists"). Wired
 `admin-ui` to the real `fleet-management-service`, which has fully existed since Phase 54 Session 1 with no

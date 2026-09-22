@@ -365,16 +365,6 @@ async def create_case(
             raise HTTPException(status_code=400, detail={"errors": errors})
 
     case_id = str(uuid.uuid4())
-    try:
-        instance = await app.state.workflow_client.start_instance(
-            payload.process_definition_id,
-            created_by=payload.created_by,
-            business_key=case_id,
-            initial_data=payload.initial_data,
-            x_dms_principal=x_dms_principal,
-        )
-    except ProcessDefinitionUnknownError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # Case number (2.3/2.5, P15-S3): starting with this session, every new
     # circulation folder gets a server-generated, installation-wide unique
@@ -384,6 +374,27 @@ async def create_case(
     # the case instead stays unregistered until `POST .../register`.
     vorgangsnummer = None if payload.draft else await repository.next_vorgangsnummer(session)
 
+    # P68-S1 (incidental fix, found via this session's own full regression
+    # run - a real, previously-undetected P66-S2 regression, not part of
+    # that session's own scope): the case row must exist and be COMMITTED
+    # before workflow-service is asked to start an instance with
+    # `business_key=case_id` - since P66-S2, `POST /instances` validates a
+    # non-`None` `business_key` by resolving it against case-service's own
+    # `GET /cases/{id}`, and a business_key that resolves to nothing is now
+    # rejected with `422`. The previous order (start the instance first,
+    # create the case row after) meant that lookup always failed, since the
+    # case genuinely didn't exist yet on case-service's own side at that
+    # moment - breaking case creation for every process definition
+    # entirely, caught only by this session's first full,
+    # unfiltered `scripts/run-tests.sh` run since P66-S2 shipped (prior
+    # sessions only re-ran workflow-service's own test suite, which never
+    # exercises this real cross-service integration path).
+    # `process_instance_id` is already nullable for exactly this reason -
+    # filled in below once the instance actually exists. On a genuinely
+    # unknown `process_definition_id`, the just-created row is removed
+    # again via `delete_unstarted_case` before returning `400` - it was
+    # never returned to any caller, so this preserves the original "nothing
+    # persisted on a 400" contract.
     case = await repository.create_case(
         session,
         case_id=case_id,
@@ -391,11 +402,27 @@ async def create_case(
         object_type_id=payload.object_type_id,
         attributes=payload.attributes,
         process_definition_id=payload.process_definition_id,
-        process_instance_id=instance["id"],
+        process_instance_id=None,
         created_by=payload.created_by,
         vorgangsnummer=vorgangsnummer,
         draft=payload.draft,
     )
+    await session.commit()
+
+    try:
+        instance = await app.state.workflow_client.start_instance(
+            payload.process_definition_id,
+            created_by=payload.created_by,
+            business_key=case_id,
+            initial_data=payload.initial_data,
+            x_dms_principal=x_dms_principal,
+        )
+    except ProcessDefinitionUnknownError as exc:
+        await repository.delete_unstarted_case(session, case_id)
+        await session.commit()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    case.process_instance_id = instance["id"]
     await session.commit()
     await publish_event(
         "case.created",

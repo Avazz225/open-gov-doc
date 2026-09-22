@@ -1333,6 +1333,77 @@ postgresql:
     # secret with key "postgres-password" (see dms.postgresSecretName in
     # templates/_helpers.tpl). No plaintext password field here (ADR 0100).
     existingSecret: ""
+  # Per-service DB roles (Konzept 3.1, P68-S1) - each service connects with
+  # its own role, GRANT restricted to its own schema, instead of the shared
+  # superuser above. Dev-only default passwords (parity with
+  # infra/docker-compose.yml's POSTGRES_PASSWORD_<SCHEMA> defaults) - only
+  # effective as long as the matching serviceExistingSecrets.<schema> entry
+  # below is empty. Keyed by schema name (svc_<schema> is the role name), not
+  # by service directory name - see templates/_helpers.tpl's
+  # dms.postgresServiceSchema for the service-name -> schema-name mapping.
+  servicePasswords:
+    archival: archival_dev_only
+    audit: audit_dev_only
+    auth: auth_dev_only
+    case: case_dev_only
+    document: document_dev_only
+    favorite: favorite_dev_only
+    federation: federation_dev_only
+    fleet: fleet_dev_only
+    folder: folder_dev_only
+    license: license_dev_only
+    mail_connector: mail_connector_dev_only
+    migration: migration_dev_only
+    monitoring: monitoring_dev_only
+    notification: notification_dev_only
+    object_type: object_type_dev_only
+    ocr: ocr_dev_only
+    orchestration: orchestration_dev_only
+    permission: permission_dev_only
+    query: query_dev_only
+    registry: registry_dev_only
+    rendering: rendering_dev_only
+    reporting: reporting_dev_only
+    search: search_dev_only
+    signature: signature_dev_only
+    storage: storage_dev_only
+    teamspace: teamspace_dev_only
+    virus_scan: virus_scan_dev_only
+    workflow: workflow_dev_only
+  # Empty = generate from servicePasswords above (dev/test default). Set a
+  # schema's entry to reference an already-existing secret instead (expects
+  # key "postgres-password", same as dms.postgresSecretKey) - production
+  # convention, same existingSecret-if-set-else-generate pattern as
+  # postgresql.existingSecret above (ADR 0100).
+  serviceExistingSecrets:
+    archival: ""
+    audit: ""
+    auth: ""
+    case: ""
+    document: ""
+    favorite: ""
+    federation: ""
+    fleet: ""
+    folder: ""
+    license: ""
+    mail_connector: ""
+    migration: ""
+    monitoring: ""
+    notification: ""
+    object_type: ""
+    ocr: ""
+    orchestration: ""
+    permission: ""
+    query: ""
+    registry: ""
+    rendering: ""
+    reporting: ""
+    search: ""
+    signature: ""
+    storage: ""
+    teamspace: ""
+    virus_scan: ""
+    workflow: ""
 
 keycloak:
   enabled: true

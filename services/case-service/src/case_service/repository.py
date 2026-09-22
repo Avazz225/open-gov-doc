@@ -89,6 +89,20 @@ async def create_case(
     return case
 
 
+async def delete_unstarted_case(session: AsyncSession, case_id: str) -> None:
+    """P68-S1 (incidental fix, see main.py's `create_case`): rollback-only
+    helper for the narrow window between committing a new `Case` row and
+    successfully starting its workflow instance - NOT a general "delete a
+    case" capability (this codebase deliberately has none; cases are
+    otherwise never deleted). The row it removes was never returned to any
+    caller and never externally observable as a real case, since the
+    request that created it is about to fail with `400` before it returns
+    anything."""
+    case = await get_case(session, case_id)
+    await session.delete(case)
+    await session.flush()
+
+
 async def register_case(session: AsyncSession, case_id: str, *, vorgangsnummer: str) -> Case:
     """Draft -> registered transition (post-roadmap phase 31 session 2, ADR
     0113) - the counterpart to the at-creation-time assignment in

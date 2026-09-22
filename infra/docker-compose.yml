@@ -86,6 +86,37 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-dms}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dms_dev_only}
       POSTGRES_DB: ${POSTGRES_DB:-dms}
+      # Per-service role passwords (Konzept 3.1, P68-S1) - read by
+      # postgres-init/002-service-roles.sh at first-boot init time, and by
+      # each service's own DMS_POSTGRES_DSN below (must match).
+      POSTGRES_PASSWORD_ARCHIVAL: ${POSTGRES_PASSWORD_ARCHIVAL:-archival_dev_only}
+      POSTGRES_PASSWORD_AUDIT: ${POSTGRES_PASSWORD_AUDIT:-audit_dev_only}
+      POSTGRES_PASSWORD_AUTH: ${POSTGRES_PASSWORD_AUTH:-auth_dev_only}
+      POSTGRES_PASSWORD_CASE: ${POSTGRES_PASSWORD_CASE:-case_dev_only}
+      POSTGRES_PASSWORD_DOCUMENT: ${POSTGRES_PASSWORD_DOCUMENT:-document_dev_only}
+      POSTGRES_PASSWORD_FAVORITE: ${POSTGRES_PASSWORD_FAVORITE:-favorite_dev_only}
+      POSTGRES_PASSWORD_FEDERATION: ${POSTGRES_PASSWORD_FEDERATION:-federation_dev_only}
+      POSTGRES_PASSWORD_FLEET: ${POSTGRES_PASSWORD_FLEET:-fleet_dev_only}
+      POSTGRES_PASSWORD_FOLDER: ${POSTGRES_PASSWORD_FOLDER:-folder_dev_only}
+      POSTGRES_PASSWORD_LICENSE: ${POSTGRES_PASSWORD_LICENSE:-license_dev_only}
+      POSTGRES_PASSWORD_MAIL_CONNECTOR: ${POSTGRES_PASSWORD_MAIL_CONNECTOR:-mail_connector_dev_only}
+      POSTGRES_PASSWORD_MIGRATION: ${POSTGRES_PASSWORD_MIGRATION:-migration_dev_only}
+      POSTGRES_PASSWORD_MONITORING: ${POSTGRES_PASSWORD_MONITORING:-monitoring_dev_only}
+      POSTGRES_PASSWORD_NOTIFICATION: ${POSTGRES_PASSWORD_NOTIFICATION:-notification_dev_only}
+      POSTGRES_PASSWORD_OBJECT_TYPE: ${POSTGRES_PASSWORD_OBJECT_TYPE:-object_type_dev_only}
+      POSTGRES_PASSWORD_OCR: ${POSTGRES_PASSWORD_OCR:-ocr_dev_only}
+      POSTGRES_PASSWORD_PERMISSION: ${POSTGRES_PASSWORD_PERMISSION:-permission_dev_only}
+      POSTGRES_PASSWORD_ORCHESTRATION: ${POSTGRES_PASSWORD_ORCHESTRATION:-orchestration_dev_only}
+      POSTGRES_PASSWORD_QUERY: ${POSTGRES_PASSWORD_QUERY:-query_dev_only}
+      POSTGRES_PASSWORD_REGISTRY: ${POSTGRES_PASSWORD_REGISTRY:-registry_dev_only}
+      POSTGRES_PASSWORD_RENDERING: ${POSTGRES_PASSWORD_RENDERING:-rendering_dev_only}
+      POSTGRES_PASSWORD_REPORTING: ${POSTGRES_PASSWORD_REPORTING:-reporting_dev_only}
+      POSTGRES_PASSWORD_SEARCH: ${POSTGRES_PASSWORD_SEARCH:-search_dev_only}
+      POSTGRES_PASSWORD_SIGNATURE: ${POSTGRES_PASSWORD_SIGNATURE:-signature_dev_only}
+      POSTGRES_PASSWORD_STORAGE: ${POSTGRES_PASSWORD_STORAGE:-storage_dev_only}
+      POSTGRES_PASSWORD_TEAMSPACE: ${POSTGRES_PASSWORD_TEAMSPACE:-teamspace_dev_only}
+      POSTGRES_PASSWORD_VIRUS_SCAN: ${POSTGRES_PASSWORD_VIRUS_SCAN:-virus_scan_dev_only}
+      POSTGRES_PASSWORD_WORKFLOW: ${POSTGRES_PASSWORD_WORKFLOW:-workflow_dev_only}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
@@ -256,7 +287,7 @@ services:
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
-      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_POSTGRES_DSN: postgresql+asyncpg://svc_registry:${POSTGRES_PASSWORD_REGISTRY:-registry_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       # Registers itself since P4-S3 with itself, so the gateway can also
       # resolve "registry-service" as a service_type (e.g. admin UI).
@@ -300,7 +331,7 @@ services:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
-      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_POSTGRES_DSN: postgresql+asyncpg://svc_audit:${POSTGRES_PASSWORD_AUDIT:-audit_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       # Self-registration with the registry (3.2a, since P4-S1) - basis for
       # gateway routing (3.5). Address is the internal Compose DNS name
@@ -361,7 +392,7 @@ services:
       # Directory/contacts (2.5/4.4, P15-S4) - first own Postgres schema
       # of this service (federation identity for the optional federated
       # contact search, see below).
-      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_POSTGRES_DSN: postgresql+asyncpg://svc_auth:${POSTGRES_PASSWORD_AUTH:-auth_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       # Federated contact search (7.4) - own registration, independent of
       # workflow-service's federation hub participation (ADR 0054). No
       # `depends_on: federation-hub-service` (registration is best-effort,
@@ -393,7 +424,7 @@ services:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
-      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_POSTGRES_DSN: postgresql+asyncpg://svc_permission:${POSTGRES_PASSWORD_PERMISSION:-permission_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://permission-service:8000
@@ -420,7 +451,7 @@ services:
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
-      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_POSTGRES_DSN: postgresql+asyncpg://svc_storage:${POSTGRES_PASSWORD_STORAGE:-storage_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       # Target set (3.6, since P5b-S6 a real list instead of fixed backend/
       # secondary_backend slots - see ADR 0004/0017): default a single
       # local target (stands in for NFS/PVC mount). Any number of targets,
@@ -486,7 +517,7 @@ services:
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
-      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_POSTGRES_DSN: postgresql+asyncpg://svc_document:${POSTGRES_PASSWORD_DOCUMENT:-document_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_STORAGE_SERVICE_BASE_URL: http://storage-service:8000
       DMS_FOLDER_SERVICE_BASE_URL: http://folder-service:8000
@@ -551,7 +582,7 @@ services:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
-      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_POSTGRES_DSN: postgresql+asyncpg://svc_virus_scan:${POSTGRES_PASSWORD_VIRUS_SCAN:-virus_scan_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_STORAGE_SERVICE_BASE_URL: http://storage-service:8000
       DMS_SCAN_ENGINE: ${VIRUS_SCAN_ENGINE:-eicar}
@@ -589,7 +620,7 @@ services:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
-      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_POSTGRES_DSN: postgresql+asyncpg://svc_rendering:${POSTGRES_PASSWORD_RENDERING:-rendering_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_STORAGE_SERVICE_BASE_URL: http://storage-service:8000
       DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
@@ -631,7 +662,7 @@ services:
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
-      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_POSTGRES_DSN: postgresql+asyncpg://svc_ocr:${POSTGRES_PASSWORD_OCR:-ocr_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_STORAGE_SERVICE_BASE_URL: http://storage-service:8000
       DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
@@ -671,7 +702,7 @@ services:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
-      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_POSTGRES_DSN: postgresql+asyncpg://svc_search:${POSTGRES_PASSWORD_SEARCH:-search_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
       DMS_FOLDER_SERVICE_BASE_URL: http://folder-service:8000
@@ -710,7 +741,7 @@ services:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
-      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_POSTGRES_DSN: postgresql+asyncpg://svc_workflow:${POSTGRES_PASSWORD_WORKFLOW:-workflow_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://workflow-service:8000
@@ -767,7 +798,7 @@ services:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
-      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_POSTGRES_DSN: postgresql+asyncpg://svc_notification:${POSTGRES_PASSWORD_NOTIFICATION:-notification_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://notification-service:8000
@@ -811,7 +842,7 @@ services:
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
-      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_POSTGRES_DSN: postgresql+asyncpg://svc_case:${POSTGRES_PASSWORD_CASE:-case_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_WORKFLOW_SERVICE_BASE_URL: http://workflow-service:8000
       DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
@@ -854,7 +885,7 @@ services:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
-      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_POSTGRES_DSN: postgresql+asyncpg://svc_signature:${POSTGRES_PASSWORD_SIGNATURE:-signature_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
       DMS_OBJECT_TYPE_SERVICE_BASE_URL: http://object-type-service:8000
@@ -897,7 +928,7 @@ services:
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
-      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_POSTGRES_DSN: postgresql+asyncpg://svc_federation:${POSTGRES_PASSWORD_FEDERATION:-federation_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       # Post-Roadmap Phase 44 Session 3 (ADR 0164) - optional, and set here
       # specifically because this dev stack IS the single-installation
       # shape that setting is meant for (self-loopback, same convention
@@ -922,7 +953,7 @@ services:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
-      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_POSTGRES_DSN: postgresql+asyncpg://svc_favorite:${POSTGRES_PASSWORD_FAVORITE:-favorite_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://favorite-service:8000
@@ -945,7 +976,7 @@ services:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
-      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_POSTGRES_DSN: postgresql+asyncpg://svc_reporting:${POSTGRES_PASSWORD_REPORTING:-reporting_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://reporting-service:8000
@@ -998,7 +1029,7 @@ services:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
-      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_POSTGRES_DSN: postgresql+asyncpg://svc_archival:${POSTGRES_PASSWORD_ARCHIVAL:-archival_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://archival-service:8000
       DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
@@ -1044,7 +1075,7 @@ services:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
-      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_POSTGRES_DSN: postgresql+asyncpg://svc_query:${POSTGRES_PASSWORD_QUERY:-query_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://query-service:8000
@@ -1091,7 +1122,7 @@ services:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
-      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_POSTGRES_DSN: postgresql+asyncpg://svc_license:${POSTGRES_PASSWORD_LICENSE:-license_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://license-service:8000
@@ -1141,7 +1172,7 @@ services:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
-      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_POSTGRES_DSN: postgresql+asyncpg://svc_orchestration:${POSTGRES_PASSWORD_ORCHESTRATION:-orchestration_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://plugin-orchestration-service:8000
@@ -1171,7 +1202,7 @@ services:
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
-      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_POSTGRES_DSN: postgresql+asyncpg://svc_monitoring:${POSTGRES_PASSWORD_MONITORING:-monitoring_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       # Scrape proxy (10.1, P11-S1): asks registry-service for all
       # currently active instances and itself calls their own /metrics
@@ -1270,7 +1301,7 @@ services:
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
-      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_POSTGRES_DSN: postgresql+asyncpg://svc_mail_connector:${POSTGRES_PASSWORD_MAIL_CONNECTOR:-mail_connector_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_STORAGE_SERVICE_BASE_URL: http://storage-service:8000
       DMS_VIRUS_SCAN_SERVICE_BASE_URL: http://virus-scan-service:8000
@@ -1341,7 +1372,7 @@ services:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
-      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_POSTGRES_DSN: postgresql+asyncpg://svc_migration:${POSTGRES_PASSWORD_MIGRATION:-migration_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://migration-service:8000
@@ -1433,7 +1464,7 @@ services:
       # only for local development/testing (analogous to
       # federation-hub-service, ADR 0028) - an operator would run it
       # separately.
-      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_POSTGRES_DSN: postgresql+asyncpg://svc_fleet:${POSTGRES_PASSWORD_FLEET:-fleet_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
     ports:
       - "${FLEET_MANAGEMENT_SERVICE_PORT:-8031}:8000"
     depends_on:
@@ -1451,7 +1482,7 @@ services:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
-      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_POSTGRES_DSN: postgresql+asyncpg://svc_teamspace:${POSTGRES_PASSWORD_TEAMSPACE:-teamspace_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://teamspace-service:8000
@@ -1546,7 +1577,7 @@ services:
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
-      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_POSTGRES_DSN: postgresql+asyncpg://svc_object_type:${POSTGRES_PASSWORD_OBJECT_TYPE:-object_type_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://object-type-service:8000
       # Sensor concept (10.1, full rollout) - same fail-open pattern as
@@ -1574,7 +1605,7 @@ services:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
-      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_POSTGRES_DSN: postgresql+asyncpg://svc_folder:${POSTGRES_PASSWORD_FOLDER:-folder_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_OBJECT_TYPE_SERVICE_BASE_URL: http://object-type-service:8000
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000

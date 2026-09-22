@@ -116,3 +116,10 @@ see ADR 0099) each get a `<component>.existingSecret` field in
   `access_key`/`secret_key` fields of the same target deliberately remain
   plaintext dev values — a secret integration for this storage-service-
   specific target list is an open point for a later session.
+- **Extended in P68-S1** ([ADR 0199](0199-per-service-postgres-roles.md)):
+  this same `existingSecret`-if-set-else-generate pattern now also covers
+  28 additional, per-service Postgres role secrets (Konzept 3.1) —
+  `postgresql.serviceExistingSecrets.<schema>` per schema instead of one
+  field per component, looped in `templates/secrets.yaml` rather than
+  hand-written once each, but otherwise the identical mechanism this ADR
+  established.

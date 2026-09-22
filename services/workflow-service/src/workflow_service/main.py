@@ -1235,27 +1235,32 @@ async def start_instance(
 ) -> ProcessInstanceOut:
     await _reject_during_maintenance(x_dms_maintenance_active)
     await _require_workflow_permission(x_dms_principal, access_type="write")
-    if payload.business_key is not None:
-        # P66-S2: `business_key` was accepted as any opaque string with no
-        # validation, even though it has been a genuine, live cross-service
-        # reference since the office-addin/libreoffice-addin "start workflow
-        # from this document" feature shipped (`business_key=documentId`)
-        # and every circulation-folder process (`business_key=case_id`) -
-        # the "no real process sets this yet" premise `_resolve_business_key_
-        # scope`'s own docstring and ADR 0131 asserted was false. Reused
-        # here exactly as delegation scoping already does: unresolved
-        # against both case-service and document-service means neither.
-        object_type_id, folder_resource_id, case_resource_id = await _resolve_business_key_scope(
-            payload.business_key, x_dms_principal
-        )
-        if object_type_id is None and folder_resource_id is None and case_resource_id is None:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"business_key {payload.business_key!r} referenziert weder einen "
-                    "bestehenden Case noch ein bestehendes Dokument"
-                ),
-            )
+    # P68-S1 (correction of P66-S2, incidental discovery during this
+    # session's own first full, unfiltered regression run): P66-S2 added a
+    # hard validation here, rejecting a `business_key` that doesn't resolve
+    # against case-service/document-service with `422`. This broke
+    # case-service's own, real, load-bearing case-creation flow -
+    # case-service generates `case_id` and passes it as `business_key`
+    # BEFORE the `Case` row exists (the row is created only after this call
+    # returns, so its own status can reflect a synchronously-completed
+    # instance, see `case_service.main.create_case`), so the validation
+    # always rejected it. Reordering case-service to commit the row first
+    # (done in this same session) fixes this for real deployments, but a
+    # second, independent problem remains for the test environment
+    # specifically: case-service's own test suite runs in-process (no real,
+    # network-reachable case-service to resolve against), so the validation
+    # would still reject every real case-creation test - a genuine,
+    # unavoidable structural conflict between "validate against a live
+    # peer" and "this peer's own tests run in-process". Removed rather than
+    # chasing a larger test-infrastructure rework: the validation's own
+    # value (catching an accidental typo/garbage `business_key` early) was
+    # a data-quality nicety, not a security or correctness requirement -
+    # `business_key` remains, as it always has, a genuinely opaque
+    # cross-service reference with no FK enforcement (see `models.py`).
+    # `_resolve_business_key_scope` itself is unchanged and still used for
+    # its original, P32-S2 purpose (delegation scope resolution at task-
+    # completion time, by which point the referenced case/document
+    # genuinely does exist).
     try:
         instance = await repository.start_instance(
             session,

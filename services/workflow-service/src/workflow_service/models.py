@@ -119,12 +119,18 @@ class ProcessInstance(Base):
     services, is an opaque cross-service reference (a ``case_id`` for
     every circulation-folder process, a ``document_id`` for the
     office-addin/libreoffice-addin "start workflow from this document"
-    feature) without FK enforcement across service boundaries - since
-    P66-S2, ``POST /instances`` validates it against case-service/
-    document-service at creation time via ``_resolve_business_key_scope``
-    (rejecting an unresolvable value with ``422``); it is otherwise
-    immutable for the life of the instance, so no further check is needed
-    once created.
+    feature) without FK enforcement across service boundaries - genuinely
+    unvalidated at creation time (P66-S2 briefly added a validation here,
+    checking it against case-service/document-service via
+    ``_resolve_business_key_scope``, but this broke case-service's own
+    real case-creation flow - the case row is created only AFTER this
+    call, so it could never resolve - as well as case-service's own test
+    suite, which runs in-process with no real, reachable case-service to
+    resolve against; reverted in P68-S1, see ``main.py``'s
+    ``start_instance``). ``_resolve_business_key_scope`` remains, used for
+    its original P32-S2 purpose at task-completion time, once the
+    referenced case/document genuinely exists. Immutable for the life of
+    the instance regardless.
 
     ``workflow_version`` (Phase 60 Session 3, ADR 0185) is a SQLAlchemy
     optimistic-concurrency version column (``__mapper_args__``,

@@ -137,6 +137,74 @@ UND ein per existingSecret referenziertes Secret müssen diesen Key liefern. */}
 {{- define "dms.postgresSecretKey" -}}postgres-password{{- end -}}
 
 {{/*
+Service-Name -> Schema-Name (Konzept 3.1, P68-S1) - Pendant zur Python-
+Mapping-Tabelle, die infra/postgres-init/002-service-roles.sh erzeugt hat;
+MUSS mit der dort/in infra/docker-compose.yml verwendeten Zuordnung
+übereinstimmen. Erwartet den Service-Namen als String (z. B. "document-
+service"), liefert den reinen Schema-Namen (z. B. "document") oder "" für
+jeden Dienst ohne eigenes Schema (z. B. "cmis-connector",
+"config-service", "gateway-service", "webdav-connector" - die einzigen vier
+Dienste in services/ ohne Postgres-Nutzung).
+*/}}
+{{- define "dms.postgresServiceSchema" -}}
+{{- $map := dict
+  "archival-service" "archival"
+  "audit-service" "audit"
+  "auth-service" "auth"
+  "case-service" "case"
+  "document-service" "document"
+  "favorite-service" "favorite"
+  "federation-hub-service" "federation"
+  "fleet-management-service" "fleet"
+  "folder-service" "folder"
+  "license-service" "license"
+  "mail-connector" "mail_connector"
+  "migration-service" "migration"
+  "monitoring-service" "monitoring"
+  "notification-service" "notification"
+  "object-type-service" "object_type"
+  "ocr-service" "ocr"
+  "permission-service" "permission"
+  "plugin-orchestration-service" "orchestration"
+  "query-service" "query"
+  "registry-service" "registry"
+  "rendering-service" "rendering"
+  "reporting-service" "reporting"
+  "search-service" "search"
+  "signature-service" "signature"
+  "storage-service" "storage"
+  "teamspace-service" "teamspace"
+  "virus-scan-service" "virus_scan"
+  "workflow-service" "workflow"
+-}}
+{{- get $map . | default "" -}}
+{{- end -}}
+
+{{/* svc_<schema> - der Rollen-Name, den infra/postgres-init/002-service-
+roles.sh für dieses Schema angelegt hat. */}}
+{{- define "dms.postgresServiceRole" -}}
+svc_{{ include "dms.postgresServiceSchema" . }}
+{{- end -}}
+
+{{/*
+Name/Key des Kubernetes-Secret mit dem Passwort EINES per-Service-Postgres-
+Rolle (Konzept 3.1, P68-S1) - Pendant zu dms.postgresSecretName/Key oben,
+aber je Schema statt einmal global. Nur für gebündeltes Postgres relevant
+(bundled): externes Postgres kennt diese 28 Rollen nicht (siehe
+values.yaml's postgresql.external - ein externer DBA müsste sie exakt
+gleichnamig selbst anlegen, was dieses Chart nicht voraussetzt) - für
+externes Postgres bleibt die einzelne, globale dms.postgresSecretName/
+dms.postgresUsername-Kombination von oben die einzige Option, unverändert.
+Erwartet dict "root" $ "schema" $schemaName (der reine Schema-Name, nicht
+der Service-Name - siehe dms.postgresServiceSchema für die Umwandlung).
+*/}}
+{{- define "dms.postgresServiceSecretName" -}}
+{{- $existing := index .root.Values.postgresql.serviceExistingSecrets .schema -}}
+{{- $existing | default (printf "%s-postgresql-%s-secret" (include "dms.fullname" .root) (.schema | replace "_" "-")) -}}
+{{- end -}}
+{{- define "dms.postgresServiceSecretKey" -}}postgres-password{{- end -}}
+
+{{/*
 DMS_POSTGRES_DSN — das Passwort selbst kommt NICHT mehr als Klartext in
 diesen String (anders als vor P26-S3), sondern über die Kubernetes-eigene
 "$(VAR_NAME)"-Referenzsubstitution auf eine zuvor im selben Container-env
@@ -150,9 +218,21 @@ müssen). Ersetzt den vorherigen "${DMS_POSTGRES_PASSWORD}"-Platzhalter aus
 P26-S1 (mit geschweiften Klammern von Helm nie aufgelöst UND von Kubernetes
 nicht als Referenz erkannt — reine Doku-Attrappe) durch einen tatsächlich
 funktionierenden Mechanismus.
+
+Seit P68-S1: erwartet dict "root" $ "name" $serviceName (statt nur "."), da
+der Benutzername jetzt vom konkreten Service abhängt (dessen eigene Rolle,
+Konzept 3.1) statt global identisch zu sein - für gebündeltes Postgres mit
+bekanntem Schema (dms.postgresServiceSchema liefert nicht ""); für externes
+Postgres oder einen der vier Dienste ohne eigenes Schema bleibt die alte,
+globale dms.postgresUsername-Logik unverändert bestehen.
 */}}
 {{- define "dms.postgresDsn" -}}
-postgresql+asyncpg://{{ include "dms.postgresUsername" . }}:$(DMS_POSTGRES_PASSWORD)@{{ include "dms.postgresHost" . }}:{{ include "dms.postgresPort" . }}/{{ include "dms.postgresDatabase" . }}
+{{- $schema := include "dms.postgresServiceSchema" .name -}}
+{{- if and .root.Values.postgresql.enabled $schema -}}
+postgresql+asyncpg://{{ include "dms.postgresServiceRole" .name }}:$(DMS_POSTGRES_PASSWORD)@{{ include "dms.postgresHost" .root }}:{{ include "dms.postgresPort" .root }}/{{ include "dms.postgresDatabase" .root }}
+{{- else -}}
+postgresql+asyncpg://{{ include "dms.postgresUsername" .root }}:$(DMS_POSTGRES_PASSWORD)@{{ include "dms.postgresHost" .root }}:{{ include "dms.postgresPort" .root }}/{{ include "dms.postgresDatabase" .root }}
+{{- end -}}
 {{- end -}}
 
 {{/* DMS_NATS_URL — bundled-only, kein external-Escape-Hatch (siehe values.yaml). */}}
@@ -220,14 +300,26 @@ Zeilen). Erwartet dict "root" $ "name" $serviceName.
   value: {{ .root.Values.global.installationDisplayName | quote }}
 {{/* Seit P26-S3: das Passwort selbst kommt über secretKeyRef, DMS_POSTGRES_DSN
 baut es per k8s-"$(VAR)"-Substitution ein statt es literal einzubetten (siehe
-dms.postgresDsn/dms.postgresSecretName-Kommentar oben). */}}
+dms.postgresDsn/dms.postgresSecretName-Kommentar oben). Seit P68-S1: für
+einen Dienst mit eigenem Schema (dms.postgresServiceSchema liefert nicht "")
+kommt das Passwort aus DESSEN EIGENEM per-Service-Secret statt dem
+einzelnen, globalen Postgres-Secret (Konzept 3.1) - die vier Dienste ohne
+eigenes Schema (cmis-connector/config-service/gateway-service/
+webdav-connector) und jeder Dienst unter externem Postgres bleiben
+unverändert beim globalen Secret. */}}
+{{- $schema := include "dms.postgresServiceSchema" .name }}
 - name: DMS_POSTGRES_PASSWORD
   valueFrom:
     secretKeyRef:
+{{- if and .root.Values.postgresql.enabled $schema }}
+      name: {{ include "dms.postgresServiceSecretName" (dict "root" .root "schema" $schema) }}
+      key: {{ include "dms.postgresServiceSecretKey" .root }}
+{{- else }}
       name: {{ include "dms.postgresSecretName" .root }}
       key: {{ include "dms.postgresSecretKey" .root }}
+{{- end }}
 - name: DMS_POSTGRES_DSN
-  value: {{ include "dms.postgresDsn" .root | quote }}
+  value: {{ include "dms.postgresDsn" (dict "root" .root "name" .name) | quote }}
 - name: DMS_NATS_URL
   value: {{ include "dms.natsUrl" .root | quote }}
 - name: DMS_REGISTRY_SERVICE_BASE_URL

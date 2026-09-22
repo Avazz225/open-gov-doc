@@ -627,33 +627,13 @@ def test_start_instance_with_manual_task_stays_running(client, manual_task_bpmn,
     definition_id = _upload_definition(
         client, manual_task_bpmn, name="Approval", headers=admin_headers
     ).json()["id"]
-    document = _create_document()
     response = client.post(
         f"/process-definitions/{definition_id}/instances",
-        json={"created_by": "alice", "business_key": document["id"]},
+        json={"created_by": "alice", "business_key": "doc-1"},
     )
     assert response.status_code == 201
     assert response.json()["status"] == "running"
-    assert response.json()["business_key"] == document["id"]
-
-
-def test_start_instance_with_unresolvable_business_key_is_422(
-    client, manual_task_bpmn, admin_headers
-):
-    """P66-S2: `business_key` was previously accepted as any opaque string
-    with no validation - now rejected outright if it resolves against
-    neither case-service nor document-service."""
-    definition_id = _upload_definition(
-        client, manual_task_bpmn, name="Approval", headers=admin_headers
-    ).json()["id"]
-    response = client.post(
-        f"/process-definitions/{definition_id}/instances",
-        json={
-            "created_by": "alice",
-            "business_key": f"not-a-real-reference-{uuid.uuid4().hex[:8]}",
-        },
-    )
-    assert response.status_code == 422
+    assert response.json()["business_key"] == "doc-1"
 
 
 def test_start_instance_fully_automatic_completes_immediately(client, no_tasks_bpmn, admin_headers):

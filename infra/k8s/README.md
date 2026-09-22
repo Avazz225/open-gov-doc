@@ -15,14 +15,15 @@ infra/k8s/dms/
 ├── .helmignore
 ├── files/
 │   └── postgres-init/
-│       └── 001-schemas.sql  # copy of infra/postgres-init/ (see comment there)
+│       ├── 001-schemas.sql       # copy of infra/postgres-init/ (see comment there)
+│       └── 002-service-roles.sh  # ditto (P68-S1, ADR 0199 — per-service DB roles)
 └── templates/
     ├── _helpers.tpl      # naming/label helpers + generic env/resource building blocks
     ├── deployment.yaml    # ONE template for ALL services: entries (range)
     ├── service.yaml       # ditto
     ├── hpa.yaml            # HorizontalPodAutoscaler, only where autoscaling.enabled
     ├── pdb.yaml             # PodDisruptionBudget, only where podDisruptionBudget.enabled
-    ├── secrets.yaml         # Postgres/Keycloak/MinIO admin secrets (P26-S3, ADR 0100)
+    ├── secrets.yaml         # Postgres/Keycloak/MinIO admin secrets + 28 per-service Postgres role secrets (P26-S3/P68-S1, ADR 0100/0199)
     ├── postgresql.yaml      # bundled Postgres: ConfigMap+PVC+Deployment+Service (P26-S3)
     ├── keycloak.yaml        # bundled Keycloak: Deployment+Service (P26-S3)
     ├── minio.yaml           # bundled MinIO: PVC+Deployment+Service (P26-S3)
@@ -101,6 +102,14 @@ tar xzf helm.tar.gz
   builds the password into the connection string via native Kubernetes
   `$(VAR_NAME)` substitution (see the `dms.postgresDsn` comment in
   `templates/_helpers.tpl`).
+- **`postgresql.servicePasswords`/`serviceExistingSecrets`** (P68-S1, ADR
+  0199): per-service Postgres roles (Konzept 3.1 — one DB role per service,
+  `GRANT` restricted to its own schema, instead of every service sharing the
+  single superuser above). Same `existingSecret`-if-set-else-generate
+  pattern as `<component>.existingSecret`, just one entry per schema
+  (28 total) instead of one field per component. Bundled Postgres only —
+  external Postgres keeps the single shared credential (see ADR 0199's own
+  rationale for why).
 - **`storageService.targets`**: native YAML list (counterpart to
   `BackendTargetConfig` in `services/storage-service`), serialized at
   runtime via `toJson` into the `DMS_TARGETS` env var read by the service

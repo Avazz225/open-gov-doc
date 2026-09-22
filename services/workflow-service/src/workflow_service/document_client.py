@@ -1,4 +1,8 @@
+import logging
+
 import httpx
+
+logger = logging.getLogger(__name__)
 
 
 class DocumentServiceClient:
@@ -28,7 +32,13 @@ class DocumentServiceClient:
         )
 
     async def get_document(self, document_id: str) -> dict | None:
-        response = await self._client.get(f"/documents/{document_id}")
+        """P68-S1 (incidental fix): same transport-level-failure handling as
+        `CaseServiceClient.get_case` - see its docstring."""
+        try:
+            response = await self._client.get(f"/documents/{document_id}")
+        except httpx.TransportError:
+            logger.warning("document_service_unreachable_during_business_key_resolution")
+            return None
         if response.status_code == 404:
             return None
         response.raise_for_status()
