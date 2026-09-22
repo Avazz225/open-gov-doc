@@ -8,7 +8,9 @@ import {
   deleteDmnDefinition,
   listDmnDefinitionVersions,
   listDmnDefinitions,
+  listDmnReferences,
   type DmnDefinitionSummary,
+  type ProcessDefinitionSummary,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
@@ -27,6 +29,13 @@ export function DmnDefinitionList() {
   const [error, setError] = useState<string | null>(null);
   const [expandedName, setExpandedName] = useState<string | null>(null);
   const [history, setHistory] = useState<DmnDefinitionSummary[]>([]);
+  // P71-S3 (7.1): "which process definitions reference this DMN" cross-
+  // reference view - a separate expand state from the version history
+  // above (keyed by the latest version's `id`, since references are
+  // checked against one specific DMN row's `decision_id`, not a family
+  // name), so both can be open independently.
+  const [expandedReferencesId, setExpandedReferencesId] = useState<number | null>(null);
+  const [references, setReferences] = useState<ProcessDefinitionSummary[]>([]);
 
   const reload = () => {
     if (!accessToken) return;
@@ -71,6 +80,20 @@ export function DmnDefinitionList() {
     } catch {
       // History stays at its previous state, not a blocker for the
       // actual delete confirmation above.
+    }
+  }
+
+  async function toggleReferences(id: number) {
+    if (expandedReferencesId === id) {
+      setExpandedReferencesId(null);
+      return;
+    }
+    if (!accessToken) return;
+    setExpandedReferencesId(id);
+    try {
+      setReferences(await listDmnReferences(accessToken, id));
+    } catch {
+      setError(t("dmnList.referencesLoadError"));
     }
   }
 
@@ -120,6 +143,11 @@ export function DmnDefinitionList() {
                         ? t("processList.historyToggleHide")
                         : t("processList.historyToggleShow")}
                     </button>
+                    <button type="button" onClick={() => toggleReferences(definition.id)}>
+                      {expandedReferencesId === definition.id
+                        ? t("dmnList.referencesToggleHide")
+                        : t("dmnList.referencesToggleShow")}
+                    </button>
                     {canManage && (
                       <button type="button" onClick={() => handleDelete(definition.id)}>
                         {t("common.delete")}
@@ -127,6 +155,31 @@ export function DmnDefinitionList() {
                     )}
                   </td>
                 </tr>
+                {expandedReferencesId === definition.id && (
+                  <tr key={`${definition.id}-references`}>
+                    <td colSpan={5}>
+                      <strong>{t("dmnList.referencesHeading")}</strong>
+                      {references.length === 0 ? (
+                        <p className="empty-state">{t("dmnList.referencesEmpty")}</p>
+                      ) : (
+                        <ul className="entry-list">
+                          {references.map((processDefinition) => (
+                            <li className="entry-row" key={processDefinition.id}>
+                              <span>
+                                {processDefinition.name} (v{processDefinition.version})
+                              </span>
+                              <span className="actions">
+                                <Link href={`/designer/?id=${processDefinition.id}`}>
+                                  <button type="button">{t("common.open")}</button>
+                                </Link>
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </td>
+                  </tr>
+                )}
                 {expandedName === definition.name && (
                   <tr key={`${definition.id}-history`}>
                     <td colSpan={5}>

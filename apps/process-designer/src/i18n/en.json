@@ -53,7 +53,10 @@
     "historyToggleShow": "Show versions",
     "historyToggleHide": "Hide versions",
     "deleteConfirm": "Really delete this version?",
-    "noCapabilityHint": "Saving/deleting requires the domain admin role \"Workflow configuration\"."
+    "noCapabilityHint": "Saving/deleting requires the domain admin role \"Workflow configuration\".",
+    "restoreButton": "Restore",
+    "restoreConfirm": "Restore this version as the new, current version?",
+    "restoreError": "Restore failed"
   },
   "designer": {
     "newHeading": "New process definition",
@@ -74,7 +77,12 @@
     "heading": "DMN decision tables",
     "decisionIdColumn": "Decision ID",
     "empty": "No decision tables yet.",
-    "deleteConfirm": "Really delete this version?"
+    "deleteConfirm": "Really delete this version?",
+    "referencesToggleShow": "Show usage",
+    "referencesToggleHide": "Hide usage",
+    "referencesHeading": "Used in",
+    "referencesEmpty": "Not referenced by any saved process definition.",
+    "referencesLoadError": "Could not load usage"
   },
   "dmnDesigner": {
     "nameHint": "An unchanged name saves a new version of this family, a different name creates a new family.",

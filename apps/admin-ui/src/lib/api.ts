@@ -790,6 +790,12 @@ export interface ObjectTypeAttribute {
   // attribute as eligible for document-service's pseudonymize/reveal
   // endpoints.
   personal_data?: boolean;
+  // Cross-service reference validation (ADR 0193, P71-S3 admin-ui follow-
+  // up) - only for `type: "reference"`. Which instance-holding service a
+  // reference value is checked against, NOT another object type (there is
+  // no per-object-type reference target, only these two fixed services -
+  // see `object_type_service.repository._REFERENCE_TARGETS`).
+  reference_target?: "document" | "folder";
 }
 
 // Sentinel for "can be placed directly under the root" (2.2a, ADR 0013) -

@@ -175,6 +175,80 @@ describe("ObjectTypeEditor", () => {
     expect((checkboxes[1] as HTMLInputElement).checked).toBe(true);
   });
 
+  it("creates an object type with a reference attribute's target (ADR 0193, P71-S3)", async () => {
+    createObjectTypeMock.mockResolvedValue({ ...RECHNUNG, id: 99 });
+    renderObjectTypeEditor();
+    await waitFor(() => expect(listObjectTypesMock).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Vertrag" } });
+    fireEvent.click(screen.getByText("Attribut hinzufügen"));
+    fireEvent.change(screen.getByLabelText("Technischer Name"), {
+      target: { value: "Hauptvertrag" },
+    });
+    fireEvent.change(screen.getByLabelText("Typ"), { target: { value: "reference" } });
+    fireEvent.change(screen.getByLabelText("Referenzziel"), { target: { value: "document" } });
+
+    fireEvent.submit(screen.getByRole("form", { name: "Objekttyp anlegen" }));
+
+    await waitFor(() =>
+      expect(createObjectTypeMock).toHaveBeenCalledWith(
+        "token-123",
+        expect.objectContaining({
+          attributes: [
+            {
+              name: "Hauptvertrag",
+              type: "reference",
+              required: false,
+              reference_target: "document",
+            },
+          ],
+        })
+      )
+    );
+  });
+
+  it("omits reference_target when left unset - a reference attribute may stay format-only", async () => {
+    createObjectTypeMock.mockResolvedValue({ ...RECHNUNG, id: 99 });
+    renderObjectTypeEditor();
+    await waitFor(() => expect(listObjectTypesMock).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Vertrag" } });
+    fireEvent.click(screen.getByText("Attribut hinzufügen"));
+    fireEvent.change(screen.getByLabelText("Technischer Name"), {
+      target: { value: "Hauptvertrag" },
+    });
+    fireEvent.change(screen.getByLabelText("Typ"), { target: { value: "reference" } });
+
+    fireEvent.submit(screen.getByRole("form", { name: "Objekttyp anlegen" }));
+
+    await waitFor(() =>
+      expect(createObjectTypeMock).toHaveBeenCalledWith(
+        "token-123",
+        expect.objectContaining({
+          attributes: [{ name: "Hauptvertrag", type: "reference", required: false }],
+        })
+      )
+    );
+  });
+
+  it("loads an existing reference_target into the form for editing", async () => {
+    const withReference = {
+      ...RECHNUNG,
+      attributes: [
+        { name: "Betrag", type: "decimal", required: true },
+        { name: "Hauptvertrag", type: "reference", required: false, reference_target: "folder" },
+      ],
+    };
+    listObjectTypesMock.mockResolvedValue([withReference, PROJEKTORDNER]);
+    updateObjectTypeMock.mockResolvedValue(withReference);
+    renderObjectTypeEditor();
+    await waitFor(() => expect(listObjectTypesMock).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getAllByText("Bearbeiten")[0]);
+
+    expect((screen.getByLabelText("Referenzziel") as HTMLSelectElement).value).toBe("folder");
+  });
+
   it("persists an initial smart layout for all three purposes when a display label differs", async () => {
     createObjectTypeMock.mockResolvedValue({ id: 42 });
     putObjectTypeLayoutMock.mockResolvedValue({});

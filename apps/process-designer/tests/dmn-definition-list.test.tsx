@@ -6,11 +6,13 @@ import { I18nProvider } from "@/i18n";
 const listDmnDefinitionsMock = vi.fn();
 const listDmnDefinitionVersionsMock = vi.fn();
 const deleteDmnDefinitionMock = vi.fn();
+const listDmnReferencesMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   listDmnDefinitions: (...args: unknown[]) => listDmnDefinitionsMock(...args),
   listDmnDefinitionVersions: (...args: unknown[]) => listDmnDefinitionVersionsMock(...args),
   deleteDmnDefinition: (...args: unknown[]) => deleteDmnDefinitionMock(...args),
+  listDmnReferences: (...args: unknown[]) => listDmnReferencesMock(...args),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {
@@ -64,6 +66,7 @@ describe("DmnDefinitionList", () => {
     listDmnDefinitionsMock.mockReset();
     listDmnDefinitionVersionsMock.mockReset();
     deleteDmnDefinitionMock.mockReset();
+    listDmnReferencesMock.mockReset();
     listDmnDefinitionsMock.mockResolvedValue([FREIGABESTUFE_V2]);
   });
 
@@ -110,6 +113,34 @@ describe("DmnDefinitionList", () => {
 
     fireEvent.click(screen.getByText("Versionen ausblenden"));
     expect(screen.queryByText(/v1 —/)).not.toBeInTheDocument();
+  });
+
+  it("shows which process definitions reference a DMN family (P71-S3)", async () => {
+    listDmnReferencesMock.mockResolvedValue([
+      { id: 9, name: "Freigabe-Workflow", version: 1, bpmn_process_id: "Process_1" },
+    ]);
+    renderList();
+    await screen.findByText("Freigabestufe");
+
+    fireEvent.click(screen.getByText("Verwendung anzeigen"));
+
+    await waitFor(() => expect(listDmnReferencesMock).toHaveBeenCalledWith("token-123", 2));
+    expect(await screen.findByText(/Freigabe-Workflow/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Verwendung ausblenden"));
+    expect(screen.queryByText(/Freigabe-Workflow/)).not.toBeInTheDocument();
+  });
+
+  it("shows the empty-state hint when a DMN family has no references", async () => {
+    listDmnReferencesMock.mockResolvedValue([]);
+    renderList();
+    await screen.findByText("Freigabestufe");
+
+    fireEvent.click(screen.getByText("Verwendung anzeigen"));
+
+    expect(
+      await screen.findByText("Wird von keiner gespeicherten Prozessdefinition referenziert.")
+    ).toBeInTheDocument();
   });
 
   it("shows the backend error message when delete fails", async () => {

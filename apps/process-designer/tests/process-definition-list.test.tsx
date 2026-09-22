@@ -6,11 +6,13 @@ import { I18nProvider } from "@/i18n";
 const listProcessDefinitionsMock = vi.fn();
 const listProcessDefinitionVersionsMock = vi.fn();
 const deleteProcessDefinitionMock = vi.fn();
+const restoreProcessDefinitionMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   listProcessDefinitions: (...args: unknown[]) => listProcessDefinitionsMock(...args),
   listProcessDefinitionVersions: (...args: unknown[]) => listProcessDefinitionVersionsMock(...args),
   deleteProcessDefinition: (...args: unknown[]) => deleteProcessDefinitionMock(...args),
+  restoreProcessDefinition: (...args: unknown[]) => restoreProcessDefinitionMock(...args),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {
@@ -64,6 +66,7 @@ describe("ProcessDefinitionList", () => {
     listProcessDefinitionsMock.mockReset();
     listProcessDefinitionVersionsMock.mockReset();
     deleteProcessDefinitionMock.mockReset();
+    restoreProcessDefinitionMock.mockReset();
     listProcessDefinitionsMock.mockResolvedValue([RECHNUNGSFREIGABE_V2]);
   });
 
@@ -112,6 +115,31 @@ describe("ProcessDefinitionList", () => {
 
     fireEvent.click(screen.getByText("Versionen ausblenden"));
     expect(screen.queryByText(/v1 —/)).not.toBeInTheDocument();
+  });
+
+  it("offers Wiederherstellen only for non-latest versions and restores on click (P71-S3)", async () => {
+    mockPermissions = ["admin.object_config"];
+    listProcessDefinitionVersionsMock.mockResolvedValue([
+      RECHNUNGSFREIGABE_V2,
+      RECHNUNGSFREIGABE_V1,
+    ]);
+    restoreProcessDefinitionMock.mockResolvedValue({ ...RECHNUNGSFREIGABE_V2, id: 3, version: 3 });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    renderList();
+    await screen.findByText("Rechnungsfreigabe");
+
+    fireEvent.click(screen.getByText("Versionen anzeigen"));
+    await screen.findByText(/v1 —/);
+
+    // Only v1 (the non-latest row) gets a restore button - v2 is already
+    // the current version shown in the table itself.
+    expect(screen.getAllByText("Wiederherstellen")).toHaveLength(1);
+
+    fireEvent.click(screen.getByText("Wiederherstellen"));
+
+    await waitFor(() =>
+      expect(restoreProcessDefinitionMock).toHaveBeenCalledWith("token-123", 1)
+    );
   });
 
   it("shows the backend error message when delete fails (e.g. definition still in use)", async () => {

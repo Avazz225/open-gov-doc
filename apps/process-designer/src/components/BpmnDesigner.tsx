@@ -11,6 +11,7 @@ import { useEffect, useRef } from "react";
 import type { FederationInstallation } from "./FederatedStepPropertiesProvider";
 import { FederatedStepPropertiesProviderModule } from "./FederatedStepPropertiesProvider";
 import { SignatureTaskPropertiesProviderModule } from "./SignatureTaskPropertiesProvider";
+import { DmnValidationPropertiesProviderModule } from "./DmnValidationPropertiesProvider";
 
 import "bpmn-js/dist/assets/diagram-js.css";
 import "bpmn-js/dist/assets/bpmn-js.css";
@@ -29,6 +30,12 @@ interface BpmnDesignerProps {
   // is configured - `FederatedStepPropertiesProvider` then hides the
   // entire group.
   federationInstallations: FederationInstallation[];
+  // Injected statically the same way (7.1, P71-S3) - every currently
+  // loaded DMN family's `decision_id` (see
+  // `lib/api.ts#listDmnDefinitions`), used by
+  // `DmnValidationPropertiesProvider` to warn when a `businessRuleTask`'s
+  // `camunda:decisionRef` doesn't match any of them.
+  knownDecisionIds: string[];
   onImportError?: (message: string) => void;
   // Callback prop instead of `forwardRef`/`useImperativeHandle` - avoids any
   // uncertainty about ref forwarding through `next/dynamic` (which this
@@ -49,6 +56,7 @@ interface BpmnDesignerProps {
 export function BpmnDesigner({
   initialXml,
   federationInstallations,
+  knownDecisionIds,
   onImportError,
   onReady,
 }: BpmnDesignerProps) {
@@ -67,9 +75,11 @@ export function BpmnDesigner({
         CamundaPlatformPropertiesProviderModule,
         SignatureTaskPropertiesProviderModule,
         FederatedStepPropertiesProviderModule,
+        DmnValidationPropertiesProviderModule,
         // Not a dedicated bpmn-js module, but a didi inline binding for the
         // static installation list (see FederatedStepPropertiesProvider.tsx).
         { federationInstallations: ["value", federationInstallations] },
+        { knownDecisionIds: ["value", knownDecisionIds] },
       ],
       moddleExtensions: { camunda: camundaModdleDescriptor },
     });

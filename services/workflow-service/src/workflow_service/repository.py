@@ -359,6 +359,29 @@ async def delete_dmn_definition(session: AsyncSession, dmn_definition_id: int) -
     await session.flush()
 
 
+async def list_dmn_references(
+    session: AsyncSession, dmn_definition_id: int
+) -> list[ProcessDefinition]:
+    """P71-S3 (7.1): read-time counterpart to `delete_dmn_definition`'s own
+    "in use" check above - which (latest-per-family) process definitions
+    currently reference this DMN version's `decision_id` via
+    `camunda:decisionRef`, reusing the exact same lookup so the two never
+    drift apart. Deliberately not restricted to "latest version of its
+    DMN family" like the delete check is - a historical DMN version can
+    still be inspected here even if it's no longer the one SpiffWorkflow
+    would actually resolve against (`list_latest_dmn_xml`), since the
+    question asked here ("is anything using THIS row") is honest either
+    way, unlike the delete check's narrower "would deleting THIS row
+    break anything runnable" question."""
+    definition = await get_dmn_definition(session, dmn_definition_id)
+    process_definitions = await list_process_definitions(session)
+    return [
+        pd
+        for pd in process_definitions
+        if definition.decision_id in spiff_adapter.extract_decision_refs(pd.bpmn_xml)
+    ]
+
+
 async def list_latest_dmn_xml(session: AsyncSession) -> list[str]:
     """DMN XML contents of the respective newest version of each family -
     loaded before every BPMN parse (`create_process_definition`/

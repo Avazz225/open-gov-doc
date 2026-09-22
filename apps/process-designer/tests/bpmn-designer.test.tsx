@@ -51,15 +51,18 @@ describe("BpmnDesigner", () => {
   });
 
   it("instantiates the modeler with the properties panel modules and imports the initial XML", async () => {
-    render(<BpmnDesigner initialXml={STARTER_XML} federationInstallations={[]} />);
+    render(
+      <BpmnDesigner initialXml={STARTER_XML} federationInstallations={[]} knownDecisionIds={[]} />
+    );
 
     expect(modelerConstructorMock).toHaveBeenCalledTimes(1);
     const options = modelerConstructorMock.mock.calls[0][0] as {
       additionalModules: unknown[];
     };
-    // 4 previous modules + FederatedStepPropertiesProviderModule + the
-    // didi inline binding for the static installation list (P6-S9).
-    expect(options.additionalModules).toHaveLength(6);
+    // 4 previous modules + FederatedStepPropertiesProviderModule + its didi
+    // inline binding (P6-S9) + DmnValidationPropertiesProviderModule + its
+    // own didi inline binding (P71-S3).
+    expect(options.additionalModules).toHaveLength(8);
 
     await waitFor(() => expect(importXMLMock).toHaveBeenCalledWith(STARTER_XML));
   });
@@ -72,6 +75,7 @@ describe("BpmnDesigner", () => {
       <BpmnDesigner
         initialXml={STARTER_XML}
         federationInstallations={[]}
+        knownDecisionIds={[]}
         onImportError={onImportError}
       />
     );
@@ -85,6 +89,7 @@ describe("BpmnDesigner", () => {
       <BpmnDesigner
         initialXml={STARTER_XML}
         federationInstallations={[]}
+        knownDecisionIds={[]}
         onReady={(h) => {
           handle = h;
         }}
@@ -107,7 +112,7 @@ describe("BpmnDesigner", () => {
 
   it("destroys the modeler on unmount", async () => {
     const { unmount } = render(
-      <BpmnDesigner initialXml={STARTER_XML} federationInstallations={[]} />
+      <BpmnDesigner initialXml={STARTER_XML} federationInstallations={[]} knownDecisionIds={[]} />
     );
     await waitFor(() => expect(modelerConstructorMock).toHaveBeenCalledTimes(1));
 

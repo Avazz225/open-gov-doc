@@ -483,6 +483,42 @@ def test_delete_dmn_definition_referenced_by_a_process_definition_returns_409(
     assert client.get(f"/dmn-definitions/{dmn_definition_id}").status_code == 200
 
 
+def test_list_dmn_references_returns_the_referencing_process_definition(
+    client, business_rule_task_bpmn, approval_level_dmn, admin_headers
+):
+    """P71-S3 (7.1): read-time counterpart to the delete-time in-use check
+    above - the process-designer's cross-reference view."""
+    dmn_definition_id = _upload_dmn(
+        client, approval_level_dmn, name="Freigabestufe", headers=admin_headers
+    ).json()["id"]
+    process_definition_id = _upload_definition(
+        client, business_rule_task_bpmn, name="Freigabe-Workflow", headers=admin_headers
+    ).json()["id"]
+
+    response = client.get(f"/dmn-definitions/{dmn_definition_id}/references")
+
+    assert response.status_code == 200
+    [reference] = response.json()
+    assert reference["id"] == process_definition_id
+    assert reference["name"] == "Freigabe-Workflow"
+
+
+def test_list_dmn_references_empty_when_unreferenced(client, approval_level_dmn, admin_headers):
+    dmn_definition_id = _upload_dmn(
+        client, approval_level_dmn, name="Freigabestufe", headers=admin_headers
+    ).json()["id"]
+
+    response = client.get(f"/dmn-definitions/{dmn_definition_id}/references")
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_list_dmn_references_unknown_dmn_definition_returns_404(client):
+    response = client.get("/dmn-definitions/999999/references")
+    assert response.status_code == 404
+
+
 def test_business_rule_task_process_definition_evaluates_dmn_end_to_end(
     client, business_rule_task_bpmn, approval_level_dmn, admin_headers
 ):

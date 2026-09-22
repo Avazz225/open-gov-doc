@@ -8,6 +8,7 @@ import {
   deleteProcessDefinition,
   listProcessDefinitionVersions,
   listProcessDefinitions,
+  restoreProcessDefinition,
   type ProcessDefinitionSummary,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -72,6 +73,26 @@ export function ProcessDefinitionList() {
     } catch {
       // History stays at its previous state, not a blocker for the
       // actual delete confirmation above.
+    }
+  }
+
+  // P25-S2/P71-S3 (7.1): reads an arbitrary historical version
+  // (`process_definition_id` can be any version of the family) and
+  // creates from it a brand-new, now-current version with identical
+  // content - append-only like every other version, not an in-place
+  // overwrite. No special "already the newest version" case: restoring
+  // the current version simply creates another, content-identical one.
+  async function handleRestore(id: number, name: string) {
+    if (!accessToken) return;
+    if (!window.confirm(t("processList.restoreConfirm"))) return;
+    setError(null);
+    try {
+      await restoreProcessDefinition(accessToken, id);
+      reload();
+      await toggleHistoryRefresh(name);
+      setExpandedName(name);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t("processList.restoreError"));
     }
   }
 
@@ -142,6 +163,14 @@ export function ProcessDefinitionList() {
                               <Link href={`/designer/?id=${version.id}`}>
                                 <button type="button">{t("common.open")}</button>
                               </Link>
+                              {canManage && version.id !== definition.id && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleRestore(version.id, version.name)}
+                                >
+                                  {t("processList.restoreButton")}
+                                </button>
+                              )}
                               {canManage && (
                                 <button type="button" onClick={() => handleDelete(version.id)}>
                                   {t("common.delete")}

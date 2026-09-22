@@ -59,6 +59,11 @@ interface AttributeDraft {
   // Attribute-level pseudonymization eligibility (5.2, Post-Roadmap Phase
   // 41 Session 2, ADR 0156).
   personalData: boolean;
+  // Cross-service reference validation (ADR 0193, P71-S3) - only for
+  // `type: "reference"`. "" = not yet chosen (rejected at save time, same
+  // as an empty `name`), otherwise one of the two fixed instance-holding
+  // services this backend actually validates against.
+  referenceTarget: "" | "document" | "folder";
 }
 
 function emptyAttribute(): AttributeDraft {
@@ -71,6 +76,7 @@ function emptyAttribute(): AttributeDraft {
     min: "",
     max: "",
     personalData: false,
+    referenceTarget: "",
   };
 }
 
@@ -91,6 +97,9 @@ function toBackendAttribute(draft: AttributeDraft): ObjectTypeAttribute {
   }
   if ((draft.type === "decimal" || draft.type === "integer") && draft.max.trim() !== "") {
     attribute.max = Number(draft.max);
+  }
+  if (draft.type === "reference" && draft.referenceTarget) {
+    attribute.reference_target = draft.referenceTarget;
   }
   return attribute;
 }
@@ -212,6 +221,7 @@ export function ObjectTypeEditor() {
         min: a.min !== undefined ? String(a.min) : "",
         max: a.max !== undefined ? String(a.max) : "",
         personalData: Boolean(a.personal_data),
+        referenceTarget: a.reference_target ?? "",
       }))
     );
     setIcon(ot.icon ?? "");
@@ -623,6 +633,27 @@ export function ObjectTypeEditor() {
                       />
                     </label>
                   </>
+                )}
+                {attribute.type === "reference" && (
+                  <label>
+                    {t("objectTypes.attributeReferenceTarget")}
+                    <select
+                      value={attribute.referenceTarget}
+                      onChange={(e) =>
+                        updateAttribute(index, {
+                          referenceTarget: e.target.value as AttributeDraft["referenceTarget"],
+                        })
+                      }
+                    >
+                      <option value="">{t("objectTypes.attributeReferenceTargetUnset")}</option>
+                      <option value="document">
+                        {t("objectTypes.attributeReferenceTargetDocument")}
+                      </option>
+                      <option value="folder">
+                        {t("objectTypes.attributeReferenceTargetFolder")}
+                      </option>
+                    </select>
+                  </label>
                 )}
               </div>
               <button type="button" onClick={() => removeAttribute(index)}>

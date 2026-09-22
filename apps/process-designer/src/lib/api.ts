@@ -260,6 +260,24 @@ export async function deleteProcessDefinition(token: string, id: number): Promis
   );
 }
 
+// `POST /process-definitions/{id}/restore` (P25-S2, ADR-documented as
+// "rollback") - reads an arbitrary historical version and creates from it
+// a brand-new, now-current version with that version's content
+// (append-only, no in-place overwrite). `id` can be any version of the
+// family, not just its latest.
+export async function restoreProcessDefinition(
+  token: string,
+  id: number
+): Promise<ProcessDefinitionSummary> {
+  const response = await request(
+    "workflow-service",
+    `process-definitions/${id}/restore`,
+    { method: "POST" },
+    token
+  );
+  return response.json();
+}
+
 // DMN 1.3 decision tables (7.1, P14-S4) - same versioning pattern
 // as process definitions (`name` is the family key), see
 // `models.DmnDefinition`.
@@ -322,6 +340,23 @@ export async function createDmnDefinition(
 
 export async function deleteDmnDefinition(token: string, id: number): Promise<void> {
   await request("workflow-service", `dmn-definitions/${id}`, { method: "DELETE" }, token);
+}
+
+// `GET /dmn-definitions/{id}/references` (P71-S3, 7.1) - the read-time
+// counterpart to the delete-time "in use" check `deleteDmnDefinition`
+// above can already hit (`409`): which process definitions currently
+// reference this DMN version via `camunda:decisionRef`.
+export async function listDmnReferences(
+  token: string,
+  id: number
+): Promise<ProcessDefinitionSummary[]> {
+  const response = await request(
+    "workflow-service",
+    `dmn-definitions/${id}/references`,
+    {},
+    token
+  );
+  return response.json();
 }
 
 // Federation Hub (7.4, P6-S9) - proxy from workflow-service to the

@@ -10,6 +10,7 @@ import {
   createProcessDefinition,
   getProcessDefinition,
   isPendingApproval,
+  listDmnDefinitions,
   listFederationInstallations,
 } from "@/lib/api";
 import type { FederationInstallationSummary } from "@/lib/api";
@@ -63,6 +64,10 @@ function DesignerPageInner() {
   const [federationInstallations, setFederationInstallations] = useState<
     FederationInstallationSummary[] | null
   >(null);
+  // `null` = not yet loaded, same gating reasoning as `federationInstallations`
+  // above (P71-S3, 7.1) - every currently loaded DMN family's `decision_id`,
+  // for `DmnValidationPropertiesProvider`'s design-time `decisionRef` check.
+  const [knownDecisionIds, setKnownDecisionIds] = useState<string[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
@@ -100,6 +105,16 @@ function DesignerPageInner() {
       // Fail-open instead of blocking the whole designer - without a reachable
       // hub, the federation group simply stays hidden.
       .catch(() => setFederationInstallations([]));
+  }, [accessToken]);
+
+  useEffect(() => {
+    if (!accessToken) return;
+    listDmnDefinitions(accessToken)
+      .then((definitions) => setKnownDecisionIds(definitions.map((d) => d.decision_id)))
+      // Fail-open, same reasoning as federation installations above - a
+      // temporarily unreachable list must not block the whole designer,
+      // it only means the validation warning can't fire this session.
+      .catch(() => setKnownDecisionIds([]));
   }, [accessToken]);
 
   const handleReady = useCallback((handle: BpmnDesignerHandle) => {
@@ -204,10 +219,11 @@ function DesignerPageInner() {
           </span>
         )}
       </div>
-      {initialXml !== null && federationInstallations !== null && (
+      {initialXml !== null && federationInstallations !== null && knownDecisionIds !== null && (
         <BpmnDesigner
           initialXml={initialXml}
           federationInstallations={federationInstallations}
+          knownDecisionIds={knownDecisionIds}
           onReady={handleReady}
           onImportError={(message) => setLoadError(message)}
         />

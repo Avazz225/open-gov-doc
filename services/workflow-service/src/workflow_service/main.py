@@ -1096,6 +1096,25 @@ async def get_dmn_definition(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@app.get(
+    "/dmn-definitions/{dmn_definition_id}/references",
+    response_model=list[ProcessDefinitionOut],
+    dependencies=[Depends(_license_gate("read"))],
+)
+async def list_dmn_references(
+    dmn_definition_id: int, session: AsyncSession = Depends(get_session)
+) -> list[ProcessDefinitionOut]:
+    """P71-S3 (7.1): which (latest-per-family) process definitions
+    currently reference this DMN version's `decision_id` - the
+    process-designer's cross-reference view (`DmnDefinitionList.tsx`),
+    the read-time counterpart to the delete-time "in use" check
+    `DELETE /dmn-definitions/{id}` already had since P64-S1."""
+    try:
+        return await repository.list_dmn_references(session, dmn_definition_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @app.delete(
     "/dmn-definitions/{dmn_definition_id}",
     status_code=status.HTTP_204_NO_CONTENT,

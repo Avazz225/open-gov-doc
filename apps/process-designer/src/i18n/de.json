@@ -53,7 +53,10 @@
     "historyToggleShow": "Versionen anzeigen",
     "historyToggleHide": "Versionen ausblenden",
     "deleteConfirm": "Diese Version wirklich löschen?",
-    "noCapabilityHint": "Speichern/Löschen erfordert die Domain-Admin-Rolle \"Workflow-Konfiguration\"."
+    "noCapabilityHint": "Speichern/Löschen erfordert die Domain-Admin-Rolle \"Workflow-Konfiguration\".",
+    "restoreButton": "Wiederherstellen",
+    "restoreConfirm": "Diese Version als neue, aktuelle Version wiederherstellen?",
+    "restoreError": "Wiederherstellung fehlgeschlagen"
   },
   "designer": {
     "newHeading": "Neue Prozessdefinition",
@@ -74,7 +77,12 @@
     "heading": "DMN-Entscheidungstabellen",
     "decisionIdColumn": "Decision-ID",
     "empty": "Noch keine Entscheidungstabellen vorhanden.",
-    "deleteConfirm": "Diese Version wirklich löschen?"
+    "deleteConfirm": "Diese Version wirklich löschen?",
+    "referencesToggleShow": "Verwendung anzeigen",
+    "referencesToggleHide": "Verwendung ausblenden",
+    "referencesHeading": "Verwendet in",
+    "referencesEmpty": "Wird von keiner gespeicherten Prozessdefinition referenziert.",
+    "referencesLoadError": "Verwendung konnte nicht geladen werden"
   },
   "dmnDesigner": {
     "nameHint": "Unveränderter Name speichert eine neue Version dieser Familie, ein anderer Name legt eine neue Familie an.",

@@ -1,8 +1,141 @@
 # Progress
 
-> ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
+> ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed, no backup existed to restore from (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for anything beyond a single already-known-safe, already-isolated test file** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P71-S2 (second session of Phase 71 — "Remaining Moderate-Value Completions").
+**Last completed:** P71-S3 (third session of Phase 71 — "Remaining Moderate-Value Completions").
+`process-designer` completions bundle, all 3 of 3, all live-verified in a real browser.
+**DMN decisionRef design-time validation**: a new "DMN-Validierung" properties-panel group on
+`bpmn:BusinessRuleTask` elements, shown only when the element's `camunda:decisionRef` doesn't match any
+currently loaded DMN family's `decision_id` — a passive, read-only warning alongside the existing,
+unchanged, already-working `decisionRef` field itself, not a second editable control.
+**DMN cross-reference view**: new `GET /dmn-definitions/{id}/references` endpoint (`workflow-service`,
+reuses the exact same `extract_decision_refs` lookup the delete-time "in use" check already had since
+P64-S1, so the two can never drift apart), surfaced via a new "Verwendung anzeigen" toggle in
+`DmnDefinitionList.tsx`. **Restore button**: `ProcessDefinitionList.tsx`'s version history gained a
+"Wiederherstellen" button per non-latest version (the current/latest row deliberately excluded — a
+restore-onto-itself button would be a confusing no-op), wired to the existing `POST .../restore`
+endpoint (live since P25-S2, never previously wired into this app's UI). **`admin-ui`'s
+`reference_target` picker**: a `<select>` (unset/document/folder) shown only for `type:"reference"`
+object-type attributes — a **corrected scope** from the plan's own framing: `reference_target` was never
+an "other object type" picker, it's a fixed 2-value selector for which of the two instance-holding
+services (`document-service`/`folder-service`) the value is checked against (ADR 0193's own "Rationale"
+already said this; the plan text re-described it imprecisely).
+
+**Real, reusable bug found and fixed via this session's own live browser verification, not by
+review**: the properties panel this app registers providers into (`bpmn-js-properties-panel`/
+`@bpmn-io/properties-panel`) renders via **Preact**, not this app's own React. The two pre-existing
+providers (`FederatedStepPropertiesProvider.tsx`/`SignatureTaskPropertiesProvider.tsx`) already avoided
+this trap by construction — every field returns the library's own exported entry-factory function calls
+(`CheckboxEntry(...)`/`SelectEntry(...)`/`TextFieldEntry(...)`), never hand-authored JSX. This session's
+first attempt at the DMN warning DID write plain JSX, which compiles through the app's own React
+`jsx-runtime` — the resulting React element silently failed to render anywhere inside Preact's tree (no
+console error, no thrown exception at all — the group header appeared, correctly labeled, but its body
+stayed permanently empty; confirmed only by inspecting `element.innerHTML` directly in a real Playwright
+run, since nothing in the browser console pointed at the cause). Fixed by calling the library's own
+exported `DescriptionEntry` function instead of authoring JSX — the same "call the library's factory
+function, never hand-author JSX" rule the two pre-existing providers already followed, now made
+explicit for the next provider written in this app.
+
+**A real incident caused by this session's own process, not by any code change — full honesty required
+by this project's own established culture (see the file-top warning, now updated with this entry)**:
+while iterating on the DMN-references backend endpoint, this session repeatedly ran
+`uv run pytest services/workflow-service/tests` directly (bypassing `scripts/run-tests.sh`, for faster
+debugging turnaround) without ever setting `TEST_POSTGRES_DSN`. Per the exact, already-documented risk
+this file's own top warning names, that means every one of those invocations' `DSN` fell back to the
+LIVE stack's real database, and `conftest.py`'s autouse `_clean_tables` fixture's
+`TRUNCATE workflow.process_instance, workflow.process_definition, workflow.dmn_definition,
+workflow.business_calendar CASCADE` ran against it before every single test function — repeatedly,
+across many manual invocations. **Every real process definition, DMN definition, process instance, and
+business calendar that existed in this dev stack before this session is gone.** `backups/` was checked
+and is empty (no `manifest.json`, nothing to restore from) — this is not recoverable. The first symptom
+surfaced downstream, not in `workflow-service` itself: `migration-service`'s live container had cached
+a now-deleted process-definition id at its own last startup (`ensure_process_definition`, resolved
+once at lifespan start, not per request) and started 500ing on every transfer with a `404` from
+`workflow-service` underneath. The SAME mistake was made against `teamspace-service`'s and
+`virus-scan-service`'s live schemas too (a later combined debugging invocation, same missing env var) —
+those two services' own test suites don't depend on pre-existing seeded data the way
+`migration-service`'s cached id did, so they kept passing, but whatever historical demonstration/test
+data existed in their tables before this session is equally gone. **Fix**: `docker compose restart
+migration-service` (its own `ensure_process_definition` self-heals by design — create-if-missing —
+confirmed clean afterward, 18/18); `teamspace-service`/`virus-scan-service` needed no service-level fix
+(nothing downstream had cached their now-missing rows). No code change resulted from this — the fix is
+entirely "stop doing the thing that caused it" plus the file-top warning update. Every subsequent test
+invocation in this session used `scripts/run-tests.sh` exclusively, which unconditionally exports
+`TEST_POSTGRES_DSN` and never touches the live schema.
+
+Two further, smaller, genuinely pre-existing environment/test-staleness issues found and (partially)
+fixed along the way, unrelated to the above and not caused by this session's own code: (1) this dev
+stack's documented one-time e2e permission grant (`users-admin`, Keycloak `sub` claim `"2"`, →
+`domain-admin-config`/`admin.object_config`, documented in `apps/process-designer/e2e/README.md`) had
+been lost at some point across this project's long history — silently redirecting both `admin-ui`'s
+`object-types.spec.ts` and this app's own `designer.spec.ts` save flow home instead of reaching their
+target pages. Restored via the exact grant the README already documents (a live Postgres row, nothing
+to commit). (2) `admin-ui`'s `e2e/` specs had drifted behind real i18n/UI changes made in earlier
+sessions: `login.spec.ts` used a stale "Nutzer & Rollen" link name (now "Nutzende & Rollen") and,
+independently, an unscoped `getByRole("link", ...)` locator that now matches both the sidebar and
+P69-S2's dashboard widget cards, violating Playwright's strict mode — both fixed, scoped to the sidebar
+`nav`. `user-management.spec.ts`/`fleet-management.spec.ts`/`email-templates.spec.ts` were found
+similarly stale but left unfixed, out of scope for a session about `object-types` — flagged for a
+dedicated future session to reconcile `admin-ui`'s whole `e2e/` suite in one pass. Also newly observed
+(not investigated further, not fixed): `workflow-service`'s real-round-trip
+`test_rotate_federation_key_updates_hub_registration` failed with a `502` — plausibly a further symptom
+of the same truncation incident above (repeated fresh `FederationIdentity` self-registration against a
+hub that never forgets a prior registration), but not confirmed; flagged alongside the already-documented
+ADR 0195 dispatch flake for a future session rather than chased down further here.
+
+**A significant, cross-cutting environmental finding surfaced by this session's own full regression
+run, not caused by any code change in this session**: the full unfiltered regression suite came back
+with unexpected failures in FOUR services entirely unrelated to this session's own diff —
+`migration-service` (2), `teamspace-service` (1), `virus-scan-service` (1), and three of
+`workflow-service`'s own tests (`test_complete_signature_task_*`/`test_complete_task_on_behalf_of_*folder_resource_scope`,
+none of which this session touched). Root-caused to a single shared cause: this long-lived dev stack's
+installed license (`license-service`, `GET /license/status`) had genuinely crossed its own
+`document_limit` (1000 configured, 1015 real documents accumulated) — every one of the failing tests
+independently creates a real document against the live `document-service` as test setup, and all began
+returning `403 Dokumentenlimit der Lizenz überschritten`/derived `500`s once the count crossed the
+threshold, most likely tipped over by this session's own repeated manual `uv run pytest` invocations
+against `workflow-service` (each real run creates its own real signature-task test document). Fixed by
+minting a fresh, validly-signed dev license via the project's own existing, documented test-only
+mechanism (`services/license-service/tests/fixtures/license_factory.py`, signed with the checked-in
+throwaway `dev_private_key.pem` whose public counterpart is already `license-service`'s configured
+default verification key — the same dev-only signing key this project's own license-service tests
+already use, not a new capability) with a much higher `document_limit`, then `POST /license`d it against
+the live service (a live-state-only fix, nothing to commit). Re-confirmed clean afterward: `migration-service`
+18/18, `teamspace-service`/`virus-scan-service` back to their prior clean baselines, `workflow-service`
+228/231 with only the two already-known-flaky tests remaining (`test_dispatch_records_delivery_failed_for_unreachable_target`/
+`test_dispatch_builds_xdomea_package_instead_of_raw_task_data`, ADR 0195) plus the newly-observed
+`test_rotate_federation_key_updates_hub_registration` flake noted above.
+
+**Verification**: `workflow-service` 231/231 (+3: `test_list_dmn_references_returns_the_referencing_process_definition`,
+`test_list_dmn_references_empty_when_unreferenced`, `test_list_dmn_references_unknown_dmn_definition_returns_404`).
+`process-designer` 55/55 Vitest (+5 net: new `dmn-validation-properties-provider.test.ts`, +1 restore
+test, +2 reference-view tests) plus a new `e2e/p71s3.spec.ts` (3 real-browser tests, all passing: the
+restore flow end to end, the cross-reference view end to end incl. a real DMN/BPMN upload via the API,
+the design-time warning end to end incl. a real BPMN file import through the UI's own import button).
+`admin-ui` 299/299 (+3: reference-target set/omitted/loaded-for-editing). All three services/apps
+rebuilt, redeployed, and live-verified end to end in a real Playwright browser against the running
+stack — not merely unit-tested. `docker run --network host` Playwright per `apps/*/e2e/README.md`'s own
+documented convention was not needed this session since a real, already-installed Chromium was available
+via `nvm`/local `npx playwright test` directly against the rebuilt containers.
+
+New ADR: none (Phase 71's own Definition of Done named this session as a mechanical extension of
+already-established patterns; the one architecturally-flavored finding, the React/Preact JSX trap, is
+documented in code comments plus `docs/services/process-designer.md` instead, following the same
+precedent P64-S1's `TargetProcessTypeField` debounce bug used). `docs/services/workflow-service.md` (new
+`GET /dmn-definitions/{id}/references` row, closed the process-designer-UI-wiring half of the old
+rollback Open Point), `docs/services/process-designer.md` (new "DMN decisionRef design-time validation
+and cross-reference view" section, closed two Open Points, new Backend Integration rows, e2e spec list
+updated), and `docs/services/admin-ui.md` (closed the `reference_target`-picker Open Point, new Open
+Points bullet documenting the e2e/environment staleness findings) all updated.
+
+**Next session:** P71-S4 — `signature-service`'s PAdES-B-LTA re-timestamping poll loop admin-UI
+visibility/manual trigger, bundled with two small `archival-service` fixes (XDOMEA `Format/Name` MIME
+lookup table, `test_api.py`'s `client` fixture race). See `IMPLEMENTATION_PLAN.md`'s Phase 71 table for
+the full breakdown — this closes out Phase 71 (4/4 sessions).
+
+---
+
+Immediately before P71-S3: **P71-S2** (second session of Phase 71 — "Remaining Moderate-Value Completions").
 Forensic-trace audit-coverage bundle: two of the plan's three bundled sub-items closed real gaps, the
 third was verified as already declined twice before and not reopened. **`permission.role.*` events**:
 the four-eyes-**approved** execution path already published `permission.role.created`/`.updated`/
