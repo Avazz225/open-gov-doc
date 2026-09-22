@@ -294,3 +294,84 @@ def test_heartbeat_response_includes_license_status(client):
     response = client.post(f"/instances/{payload['instance_id']}/heartbeat")
 
     assert response.json()["license_status"] == "licensed"
+
+
+# --- Branding config (7.3/8, P69-S2, ADR 0201) -------------------------------
+
+
+def test_get_branding_config_is_ungated_and_returns_a_value(client):
+    """Ungated wie `GET /installation` - muss vor jedem Login lesbar sein."""
+    response = client.get("/installation/branding")
+    assert response.status_code == 200
+    body = response.json()
+    assert "product_name" in body
+    assert "accent_color" in body
+    assert "logo_url" in body
+    assert body["updated_at"]
+
+
+def test_update_branding_config_requires_admin(client):
+    response = client.put("/installation/branding", json={"product_name": "Test"})
+    assert response.status_code == 403
+
+
+def test_update_branding_config_round_trip(client, config_admin_headers):
+    """Stellt den vorherigen Stand am Ende wieder her (Singleton-Zeile,
+    geteilt mit jedem anderen Test dieses Moduls), gleiches Muster wie
+    `workflow-service`'s `test_update_federation_config_round_trip`."""
+    previous = client.get("/installation/branding").json()
+    try:
+        response = client.put(
+            "/installation/branding",
+            json={
+                "product_name": "P69-S2 Test Product",
+                "accent_color": "#123456",
+                "logo_url": "https://example.invalid/logo.png",
+            },
+            headers=config_admin_headers,
+        )
+        assert response.status_code == 200
+        assert response.json()["product_name"] == "P69-S2 Test Product"
+        assert response.json()["accent_color"] == "#123456"
+        assert response.json()["logo_url"] == "https://example.invalid/logo.png"
+
+        get_response = client.get("/installation/branding")
+        assert get_response.status_code == 200
+        assert get_response.json()["product_name"] == "P69-S2 Test Product"
+    finally:
+        client.put(
+            "/installation/branding",
+            json={
+                "product_name": previous["product_name"],
+                "accent_color": previous["accent_color"],
+                "logo_url": previous["logo_url"],
+            },
+            headers=config_admin_headers,
+        )
+
+
+def test_update_branding_config_can_unset_fields_back_to_none(client, config_admin_headers):
+    """`None` bedeutet "Build-Standard verwenden", nicht "Fehler" - ein PUT
+    mit `None`-Feldern muss einen zuvor gesetzten Wert wieder zurücksetzen
+    können."""
+    client.put(
+        "/installation/branding",
+        json={"product_name": "Temporary"},
+        headers=config_admin_headers,
+    )
+    try:
+        response = client.put(
+            "/installation/branding",
+            json={"product_name": None, "accent_color": None, "logo_url": None},
+            headers=config_admin_headers,
+        )
+        assert response.status_code == 200
+        assert response.json()["product_name"] is None
+        assert response.json()["accent_color"] is None
+        assert response.json()["logo_url"] is None
+    finally:
+        client.put(
+            "/installation/branding",
+            json={"product_name": None, "accent_color": None, "logo_url": None},
+            headers=config_admin_headers,
+        )

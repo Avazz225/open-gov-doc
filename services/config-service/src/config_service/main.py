@@ -22,6 +22,7 @@ from config_service.clients import (
     MonitoringServiceClient,
     ObjectTypeServiceClient,
     PermissionServiceClient,
+    RegistryServiceClient,
     WorkflowServiceClient,
 )
 from config_service.schemas import (
@@ -139,6 +140,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.workflow_client = WorkflowServiceClient(settings.workflow_service_base_url)
     app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
     app.state.monitoring_client = MonitoringServiceClient(settings.monitoring_service_base_url)
+    # `branding_config` category (7.3/8, P69-S2, ADR 0201) -
+    # `settings.registry_service_base_url` already exists on
+    # `dms_common.BaseServiceSettings` (self-registration) and already
+    # points at the right place, no new setting/env var needed.
+    app.state.registry_client = RegistryServiceClient(settings.registry_service_base_url)
     app.state.auth_client = AuthServiceClient(settings.auth_service_base_url)
     app.state.approval_client = ApprovalClient(settings.permission_service_base_url)
     await _ensure_bootstrap_permissions()
@@ -183,6 +189,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await app.state.monitoring_client.close()
     await app.state.auth_client.close()
     await app.state.approval_client.close()
+    await app.state.registry_client.close()
 
 
 app = FastAPI(title=settings.service_name, lifespan=lifespan)
@@ -221,6 +228,7 @@ async def export_config(
         permission_client=app.state.permission_client,
         monitoring_client=app.state.monitoring_client,
         auth_client=app.state.auth_client,
+        registry_client=app.state.registry_client,
     )
 
 
@@ -256,6 +264,7 @@ async def compare_config(
             permission_client=app.state.permission_client,
             monitoring_client=app.state.monitoring_client,
             auth_client=app.state.auth_client,
+            registry_client=app.state.registry_client,
         )
     categories_result = compare.compare_documents(
         base_doc, payload.compare, categories=resolved, ignore_regex=payload.ignore_regex
@@ -292,6 +301,7 @@ async def _apply_config_document(payload: dict, categories: list[str] | None) ->
         permission_client=app.state.permission_client,
         monitoring_client=app.state.monitoring_client,
         auth_client=app.state.auth_client,
+        registry_client=app.state.registry_client,
     )
     return ImportResult(schema_version=doc.schema_version, results=results)
 

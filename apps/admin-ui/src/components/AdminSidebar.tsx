@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { useI18n } from "@/i18n";
 import { useAuth } from "@/lib/auth-context";
 
-interface NavItem {
+export interface NavItem {
   href: string;
   labelKey: string;
   // Domain-separated admin roles (4.6, P6-S5): if the capability is
@@ -17,13 +17,17 @@ interface NavItem {
   requiresCapability?: string | string[];
 }
 
-interface NavGroup {
+export interface NavGroup {
   id: string;
   labelKey: string;
   items: NavItem[];
 }
 
-const GROUPS: NavGroup[] = [
+// Exported (P69-S2, ADR 0201) so `DashboardWidgets.tsx` can reuse the exact
+// same group/item/capability data for the home page's role-dependent
+// widget grid, instead of maintaining a second, parallel list that could
+// drift out of sync with the sidebar.
+export const GROUPS: NavGroup[] = [
   {
     id: "management",
     labelKey: "nav.groupManagement",
@@ -189,6 +193,18 @@ const GROUPS: NavGroup[] = [
   },
 ];
 
+// Shared filter (P69-S2, ADR 0201) - same "ANY of these" capability check
+// used by both `AdminSidebar` below and `DashboardWidgets.tsx`.
+export function visibleItems(items: NavItem[], permissions: string[]): NavItem[] {
+  return items.filter((item) => {
+    if (!item.requiresCapability) return true;
+    const required = Array.isArray(item.requiresCapability)
+      ? item.requiresCapability
+      : [item.requiresCapability];
+    return required.some((c) => permissions.includes(c));
+  });
+}
+
 const COLLAPSED_GROUPS_KEY = "dms.admin.collapsedGroups";
 
 function loadCollapsedGroups(): Record<string, boolean> {
@@ -226,14 +242,8 @@ export function AdminSidebar() {
   return (
     <nav className="admin-sidebar" aria-label={t("nav.ariaLabel")}>
       {GROUPS.map((group) => {
-        const visibleItems = group.items.filter((item) => {
-          if (!item.requiresCapability) return true;
-          const required = Array.isArray(item.requiresCapability)
-            ? item.requiresCapability
-            : [item.requiresCapability];
-          return required.some((c) => permissions.includes(c));
-        });
-        if (visibleItems.length === 0) return null;
+        const groupItems = visibleItems(group.items, permissions);
+        if (groupItems.length === 0) return null;
         const isCollapsed = Boolean(collapsed[group.id]);
         return (
           <div className="sidebar-group" key={group.id}>
@@ -247,7 +257,7 @@ export function AdminSidebar() {
             </button>
             {!isCollapsed && (
               <ul className="sidebar-group-items">
-                {visibleItems.map((item) => (
+                {groupItems.map((item) => (
                   <li key={item.href}>
                     <Link
                       href={item.href}

@@ -2,7 +2,67 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P69-S1 (first session of Phase 69 — "UI Customization, Branding & Role-Dependent
+**Last completed:** P69-S2 (second and final session of Phase 69 — "UI Customization, Branding &
+Role-Dependent Views"). Built per P69-S1's scoped design (ADR 0201): `registry-service` gained a
+`BrandingConfig` singleton (`GET`/`PUT /installation/branding`, `id=1`, lazy-seeded, nullable
+`product_name`/`accent_color`/`logo_url`) — its first ever `PermissionServiceClient` consumer,
+`PUT` gated via the reused `admin.object_config` capability, `GET` deliberately ungated (must render on
+the login screen, before any token exists). `config-service` gained `branding_config` as an 11th
+singleton category, mirroring `sensor_config`/`federation_config`'s shape exactly.
+
+**Real deviation found while building, not anticipated by the scoping session**: `GET`/`PUT
+/installation/branding` share one path with opposite authorization needs — every existing
+`gateway-service` `public_routes` entry before this session was either read-only on its own path or
+used only pre-auth on a path with no authenticated counterpart, so `route_key` never needed to know the
+HTTP method. Making the whole path public (the naive approach) would have silently broken the `PUT`
+admin flow (a public route never gets `X-DMS-Principal` set at all, the same failure mode ADR 0058 once
+found for `config-service:config/import`). Fixed with a new `method_route_key` check alongside the
+existing one — a bare `public_routes` entry still matches every method (unchanged), a new
+`"<METHOD> "`-prefixed entry (`"GET registry-service:installation/branding"`) matches that one method
+only. First of its kind in this project, documented in `docs/services/gateway-service.md`.
+
+Five of six frontend apps (`user-ui`/`admin-ui`/`reviewer-ui`/`process-designer`/`migration-console`)
+gained a `BrandingProvider` (deliberately duplicated per app, ADR 0006) applying `product_name`
+(`document.title` + login heading, `admin-ui` additionally its home title) and `accent_color`
+(`--dms-accent`/`-bg`/`-bg-strong` inline override, hex→rgba at 0.15/0.5 alpha matching `tokens.css`'s
+own shape, skipped entirely in high-contrast mode) on top of the static `libs/dms-ui` tokens.
+`office-addin` was explicitly excluded, not silently skipped — documented "follow the host" decision in
+`docs/services/office-addin.md`, same reasoning as its existing ADR 0167/0168 theme/locale stance (no
+login screen or landing page there for a brand identity to attach to). `admin-ui` additionally gained a
+role-dependent dashboard: `DashboardWidgets` renders one card per `AdminSidebar` nav group with at
+least one capability-visible item, reusing `AdminSidebar`'s own exported `GROUPS`/`visibleItems` rather
+than a second authorization mechanism — `user-ui` deliberately did NOT get dashboard widgets (its
+"home" is already the working document workspace, not an empty landing page).
+
+**Verification**: every touched service/app's own test suite green (`registry-service` 58/58 incl. 4
+new, `config-service` 53/53 incl. 1 new import round-trip, `gateway-service` 28/28 incl. 2 new — the 3
+pre-existing unrelated failures unchanged, `admin-ui` 296/296 incl. 6 new, `user-ui`/`reviewer-ui`/
+`process-designer` 287/50/50 incl. 3-4 new branding tests each, `migration-console` 19/20 with the 1
+pre-existing unrelated `transfer-console.test.tsx` failure confirmed via a stash-based baseline
+comparison). A full unfiltered backend regression run afterward reconfirmed no new failures anywhere
+(`auth-service`'s ADR-0190 circular dependency, `gateway-service`'s same 3 pre-existing failures,
+`webdav-connector`'s ADR-0189 timeout pattern — all unchanged). Every touched service/app rebuilt,
+redeployed, and live-verified against the real running stack: `PUT .../branding` round-tripped through
+the real gateway with a real `config-admin` token, `GET` confirmed reachable pre-login via `curl`; all
+five frontend apps' login screens screenshotted showing the live product-name override
+("Musterbehörde DMS"); `admin-ui`'s dashboard screenshotted in both light and dark themes, confirming
+genuine capability-based widget gating (`users-admin`'s real permission set correctly hides
+storage/diagnostics/license widgets it lacks capabilities for). Test branding value reset to `null`
+after each verification round.
+
+New ADR: [0202](docs/adr/0202-p69s2-branding-config-and-role-dependent-dashboard.md). `docs/services/
+config-service.md` (eleven categories now), `registry-service.md`, `gateway-service.md`
+("Method-Scoped Public Routes"), `admin-ui.md`, `user-ui.md` (Open Point struck, dashboard scope
+explained), `office-addin.md` (exclusion decision) all updated.
+
+**Phase 69 is now closed (2/2).**
+
+**Next session:** Phase 70 — Document Declassification Mechanism (ADR 0114/0115). See
+`IMPLEMENTATION_PLAN.md` for the full session breakdown.
+
+---
+
+**Immediately before P69-S2: P69-S1** (first session of Phase 69 — "UI Customization, Branding &
 Views", scoping only, no code). Scoped what Concept 7.3's never-built "UI customizations" export category
 and Concept 8's permanent Open Point ("branding/theming, role-dependent dashboards") concretely mean for
 this codebase. Confirmed the plan's own shape hypothesis (runtime branding config layered on the static
@@ -21,9 +81,6 @@ inclusion/exclusion decision in P69-S2, not silent inclusion. New ADR
 [0201](docs/adr/0201-p69s1-branding-and-role-dependent-dashboard-scoping.md). No tests, no doc corrections
 beyond the ADR (deliberately — `user-ui.md`'s Open Point and `config-service.md`'s "deliberately not
 included" bullet stay unstruck until P69-S2 actually builds this).
-
-**Next session:** P69-S2 — build per P69-S1's recommendation above. See `IMPLEMENTATION_PLAN.md`'s Phase
-69 table and ADR 0201 for the full scoped design.
 
 ---
 

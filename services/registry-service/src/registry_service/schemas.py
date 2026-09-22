@@ -53,3 +53,23 @@ class InstanceOut(BaseModel):
 class LicenseStatusForServiceOut(BaseModel):
     service_type: str
     status: LicenseComponentStatus
+
+
+class BrandingConfigOut(BaseModel):
+    """Installation-level branding (7.3/8, P69-S2, ADR 0201) - `None` for
+    any field means "use this build's static default," not "no branding
+    configured." Deliberately ungated on read (see `get_branding_config`'s
+    own docstring) - a frontend must be able to fetch this before login."""
+
+    product_name: str | None = None
+    accent_color: str | None = None
+    logo_url: str | None = None
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class BrandingConfigUpdate(BaseModel):
+    product_name: str | None = None
+    accent_color: str | None = None
+    logo_url: str | None = None

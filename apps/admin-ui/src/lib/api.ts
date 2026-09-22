@@ -2843,3 +2843,37 @@ export async function listAllTeamspaces(token: string): Promise<TeamspaceAdmin[]
   const response = await request("teamspace-service", "admin/teamspaces", {}, token);
   return response.json();
 }
+
+// Installation-level branding (7.3/8, P69-S2, ADR 0201) - `GET` is
+// deliberately called WITHOUT a token (registry-service's own endpoint is
+// ungated, and the gateway allows this exact path through unauthenticated
+// too, see `gateway_service.settings.public_routes`'s `"GET "`-prefixed
+// entry) - must render on the login screen, before any token exists.
+export interface BrandingConfig {
+  product_name: string | null;
+  accent_color: string | null;
+  logo_url: string | null;
+  updated_at: string;
+}
+
+export async function getBrandingConfig(): Promise<BrandingConfig> {
+  const response = await request("registry-service", "installation/branding");
+  return response.json();
+}
+
+export async function updateBrandingConfig(
+  token: string,
+  payload: { product_name: string | null; accent_color: string | null; logo_url: string | null }
+): Promise<BrandingConfig> {
+  const response = await request(
+    "registry-service",
+    "installation/branding",
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+    token
+  );
+  return response.json();
+}

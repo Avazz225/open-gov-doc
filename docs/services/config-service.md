@@ -15,7 +15,8 @@ origin/license), turning it into a named **configuration package** (14.1) — se
 **Concept reference:** 7.3, 7.5, 14.1, 14.2
 **Own Postgres schema:** none — pure orchestrator, every category is read/written directly at the
 respective owner service (`object-type-service`, `workflow-service`,
-`permission-service`, `monitoring-service`, since P17-S1 additionally `auth-service`), same
+`permission-service`, `monitoring-service`, since P17-S1 additionally `auth-service`, since P69-S2
+additionally `registry-service`), same
 "stateless orchestrator" pattern as `webdav-connector` (P12-S1). Since **P17-S3**, nonetheless a
 pure NATS **consumer** with no own stream (`ensure_stream=False`) — see "Four-Eyes Principle for
 `config.import`" below.
@@ -29,7 +30,7 @@ pure NATS **consumer** with no own stream (`ensure_stream=False`) — see "Four-
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/config/export` | Exports a `ConfigDocument` — optionally `?categories=roles&categories=workflows` to restrict scope, otherwise all ten categories. **Since P61-S3** requires an `X-DMS-Principal` header with `admin.config_read` permission (`401` with no header, `403` without the permission) — see "Authorization for Export/Compare" below |
+| `GET` | `/config/export` | Exports a `ConfigDocument` — optionally `?categories=roles&categories=workflows` to restrict scope, otherwise all eleven categories. **Since P61-S3** requires an `X-DMS-Principal` header with `admin.config_read` permission (`401` with no header, `403` without the permission) — see "Authorization for Export/Compare" below |
 | `POST` | `/config/compare` | **Since P14-S1**: delta/comparison function (7.5) — body `{compare, base?, categories?, ignore_regex?}`; if `base` is missing, the service's own current live export is used as the base instance. Purely read-only/diagnostic. **Since P61-S3** requires the same `admin.config_read` permission as `GET /config/export` (previously ungated — see "Authorization for Export/Compare" below). `422` for an unknown category or invalid `ignore_regex` |
 | `POST` | `/config/import` | Applies a `ConfigDocument` (upsert per category) — requires an `X-DMS-Principal` header with `admin.object_config` permission, otherwise `403`; an unknown `schema_version` with no migration path → `422`. **Since P17-S1 NO LONGER a public gateway route** (see "Gateway Route Split" below). **Since P17-S3** optionally gated via the four-eyes principle (`config.import`, see below) — response `ImportActionResult` (`status: "applied"\|"pending_approval"`, `result`, `approval_request_id`) instead of the previous flat `ImportResult` |
 | `POST` | `/config/fleet-import` | **Since P17-S1** (previously the same route as `/config/import`): identical application logic, but exclusively for `fleet-management-service` — requires `Authorization: Bearer <DMS_FLEET_AGENT_API_KEY>` (3a/P13-S2, [ADR 0037](../adr/0037-fleet-management-service-agent-key-and-gateway-public-routes.md)), no RBAC branch. Remains the public gateway route. **Deliberately still ungated** (see below) |
@@ -68,7 +69,7 @@ Since `config-service` otherwise has no own event bus connection, the consumer r
 `BaseServiceSettings` falls back to `nats://localhost:4222`, which is unreachable in the container
 (a bug found by P17-S3 itself, see [ADR 0060](../adr/0060-egov-paket-teil-2-vier-augen-luecken-und-umlaufmappen-prozessvorlagen.md)).
 
-## The ten categories
+## The eleven categories
 
 | Category | Owner service | Natural key (upsert) | Special notes |
 |---|---|---|---|
@@ -82,10 +83,11 @@ Since `config-service` otherwise has no own event bus connection, the consumer r
 | `federation_config` | workflow-service | — (singleton) | Version compatibility range for federated workflows (7.4, P13-S3) — a `PUT` there immediately triggers a re-registration with the Federation Hub, see `docs/services/workflow-service.md` "Federation" |
 | `realm_roles` | auth-service | Name (plain `list[str]`, not `list[dict]`) | **Since P17-S1** (14.1): Keycloak realm roles (e.g. `dms-poststelle`, 2.5) — unlike `roles` above (permission-service's DB-based `Role`s), a completely separate system. Application is idempotent via `create_realm_role(..., skip_exists=True)`, identical primitive to `bootstrap._ensure_dms_admin_role` |
 | `ad_group_mappings` | auth-service | `ad_group_name`+`role_name` (mappings), `role_name`+group set (composite rules), overwrite (default role) | **Since Post-Roadmap Phase 39 Session 3** ([ADR 0153](../adr/0153-ad-group-mapping-composite-rules-default-role-four-eyes-export.md)): AD/Keycloak group→role mapping config (4.4) — a bundle of simple mappings, composite (AND) rules, and the configurable default role, via `GET`/`POST /ad-group-mapping-config`(`/import`). Idempotent per item like `realm_roles`; import deliberately bypasses this category's own four-eyes, same pre-existing precedent as `realm_roles` |
+| `branding_config` | registry-service | — (singleton) | **Since P69-S2** ([ADR 0201](../adr/0201-p69s1-branding-and-role-dependent-dashboard-scoping.md)/[ADR 0202](../adr/0202-p69s2-branding-config-and-role-dependent-dashboard.md)): installation-level branding (7.3/8) — nullable `product_name`/`accent_color`/`logo_url`, same singleton shape as `sensor_config`/`federation_config`. `registry-service`'s first ever `PermissionServiceClient` consumer; `PUT /installation/branding` requires `admin.object_config` (reused, not a new capability), `GET` stays deliberately ungated (must render on the login screen, before any token exists) |
 
-Deliberately **not** included: "UI customizations" (branding/theming) — does not exist anywhere in the
-code (see ADR 0035), so it was not invented as an empty, fictitious category. AD group mapping rules
-WERE in this list until Post-Roadmap Phase 39 Session 3 (ADR 0153), which closed exactly this gap.
+"UI customizations" (branding/theming) is no longer missing — closed at P69-S2 by the `branding_config`
+category above. AD group mapping rules WERE also in this "not included" list until Post-Roadmap Phase 39
+Session 3 (ADR 0153), which closed that gap the same way.
 
 ## Upsert Semantics
 
@@ -265,7 +267,7 @@ read-only/diagnostic, changes nothing on either side (7.5). See
 `normalize()`/`resolve_pattern()`, `diff_list_category()`/`diff_singleton_category()` each for
 only-in-base/only-in-compare/identical/differing, the ignore-regex example from 7.5 rebuilt verbatim
 (numeric prefixes, content comparison remains complete regardless), plus
-`compare_documents()` across all ten categories. Since **P17-S1**: `diff_string_list_category()`
+`compare_documents()` across all eleven categories. Since **P17-S1**: `diff_string_list_category()`
 (new third diff mode for the pure `list[str]` category `realm_roles`) individually as well as as part
 of `compare_documents()`.
 

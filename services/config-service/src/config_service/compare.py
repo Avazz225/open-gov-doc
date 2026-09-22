@@ -22,7 +22,7 @@ _LIST_IDENTITY_FIELD = {
     "roles": "name",
     "approval_config": "action_type",
 }
-SINGLETON_CATEGORIES = ("sensor_config", "federation_config")
+SINGLETON_CATEGORIES = ("sensor_config", "federation_config", "branding_config")
 # `realm_roles` is a plain name list (`list[str]`, not a
 # `list[dict]` category like the others) - its own, simpler diff mode
 # instead of `_LIST_IDENTITY_FIELD` (which expects `item[identity_field]` on

@@ -19,6 +19,7 @@ PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://l
 WORKFLOW_SERVICE_URL = os.environ.get("TEST_WORKFLOW_SERVICE_URL", "http://localhost:8014")
 OBJECT_TYPE_SERVICE_URL = os.environ.get("TEST_OBJECT_TYPE_SERVICE_URL", "http://localhost:8007")
 AUTH_SERVICE_URL = os.environ.get("TEST_AUTH_SERVICE_URL", "http://localhost:8003")
+REGISTRY_SERVICE_URL = os.environ.get("TEST_REGISTRY_SERVICE_URL", "http://localhost:8001")
 
 
 def _client() -> httpx.Client:
@@ -60,6 +61,8 @@ def test_export_returns_all_categories_by_default():
     assert "global_default" in body["sensor_config"]
     assert body["federation_config"] is not None
     assert "min_compatible_peer_version" in body["federation_config"]
+    assert body["branding_config"] is not None
+    assert "product_name" in body["branding_config"]
 
 
 def test_export_with_categories_filter_returns_only_requested():
@@ -75,6 +78,7 @@ def test_export_with_categories_filter_returns_only_requested():
     assert body["approval_config"] is None
     assert body["sensor_config"] is None
     assert body["federation_config"] is None
+    assert body["branding_config"] is None
 
 
 def test_export_with_unknown_category_returns_422():
@@ -689,3 +693,52 @@ def test_import_federation_config_updates_workflow_service(authorized_principal)
     with httpx.Client(base_url=WORKFLOW_SERVICE_URL) as workflow_client:
         config = workflow_client.get("/federation/config").json()
     assert config["version"] == new_version
+
+
+def test_import_branding_config_updates_registry_service(authorized_principal):
+    """P69-S2/ADR 0201: `branding_config` ist eine reguläre 7.3-Kategorie -
+    Import wirkt tatsächlich auf `registry-service`. Singleton-Zeile,
+    geteilt mit jedem anderen Test dieses Moduls - stellt den vorherigen
+    Stand am Ende wieder her, gleiches Muster wie `workflow-service`'s
+    `test_update_federation_config_round_trip`."""
+    with httpx.Client(base_url=REGISTRY_SERVICE_URL) as registry_client:
+        previous = registry_client.get("/installation/branding").json()
+
+    new_product_name = f"P69-S2-Test-{uuid.uuid4().hex[:8]}"
+    payload = {
+        "schema_version": "1.0",
+        "exported_at": "2026-01-01T00:00:00Z",
+        "branding_config": {
+            "product_name": new_product_name,
+            "accent_color": "#abcdef",
+            "logo_url": None,
+        },
+    }
+    try:
+        with _client() as client:
+            response = client.post(
+                "/config/import", json=payload, headers={"X-DMS-Principal": authorized_principal}
+            )
+        assert response.status_code == 200
+        assert response.json()["result"]["results"]["branding_config"] == {
+            "created": 0,
+            "updated": 1,
+            "skipped": 0,
+            "errors": [],
+        }
+
+        with httpx.Client(base_url=REGISTRY_SERVICE_URL) as registry_client:
+            config = registry_client.get("/installation/branding").json()
+        assert config["product_name"] == new_product_name
+        assert config["accent_color"] == "#abcdef"
+    finally:
+        with httpx.Client(base_url=REGISTRY_SERVICE_URL) as registry_client:
+            registry_client.put(
+                "/installation/branding",
+                json={
+                    "product_name": previous["product_name"],
+                    "accent_color": previous["accent_color"],
+                    "logo_url": previous["logo_url"],
+                },
+                headers={"X-DMS-Principal": authorized_principal},
+            )

@@ -5,6 +5,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useI18n } from "@/i18n";
 import { ApiError, useAuth } from "@/lib/auth-context";
 import { getSsoConfig, oidcAuthorize } from "@/lib/api";
+import { useBranding } from "@/lib/branding-context";
 
 // SSO/automatic login (post-roadmap feature): the storage key for
 // the `state` value that `login/callback/page.tsx` checks against the
@@ -32,6 +33,7 @@ function sanitizeReturnTo(value: string | null): string {
 
 export default function LoginPage() {
   const { login, user, isLoading } = useAuth();
+  const { productName } = useBranding();
   const router = useRouter();
   const { t } = useI18n();
   const [username, setUsername] = useState("");
@@ -116,7 +118,7 @@ export default function LoginPage() {
   return (
     <main className="page">
       <form className="login-form" onSubmit={handleSubmit}>
-        <h1>{t("login.heading")}</h1>
+        <h1>{productName ?? t("login.heading")}</h1>
         <label htmlFor="username">{t("login.username")}</label>
         <input
           id="username"

@@ -463,7 +463,17 @@ Two-stage Docker image (`apps/user-ui/Dockerfile`): Node only in the build stage
 - Search snippet with no highlighting markup (no sanitizing exists in this codebase, see the search section above).
 - No workflow interaction (approvals/tasks) — the workflow engine only exists from Phase 6 onward.
 - ~~No automated browser E2E possible in this environment (no Chrome/Chromium installed) — to be caught up on once an environment with a browser is available (e.g. CI).~~ — **closed**, `playwright.config.ts`/`e2e/` (real Chromium/Desktop Chrome project, `@playwright/test` dependency, `"e2e": "playwright test"` script) has existed for a long time; found stale during Phase 65+'s gap-analysis round.
-- Role-dependent views/branding (Concept 8, "customizability") not part of this foundation.
+- ~~Role-dependent views/branding (Concept 8, "customizability") not part of this foundation.~~ —
+  **branding closed at P69-S2** ([ADR 0202](../adr/0202-p69s2-branding-config-and-role-dependent-dashboard.md)):
+  `BrandingProvider` (`lib/branding-context.tsx`) fetches `registry-service`'s installation branding
+  once at load and applies `product_name` (login heading, `document.title`) and `accent_color`
+  (`--dms-accent`/`-bg`/`-bg-strong` override, skipped in high-contrast mode) on top of the static
+  `libs/dms-ui` tokens. **Role-dependent views deliberately NOT built here** — this app's "home" is
+  already the working document workspace (`DocumentWorkspace`), not an empty landing page needing
+  capability-gated widgets; the role-dependent DASHBOARD half of Concept 8 was instead built in
+  `admin-ui` (see `docs/services/admin-ui.md`), the structurally better fit since domain-admin roles
+  already meaningfully gate its nav — this app's own roles are mostly document-permission-based, not
+  dashboard-relevant.
 - ~~i18n only structurally prepared (ADR 0007), no second language and no UI language switching.~~ — **closed in Phase 47 Session 3**: full English translation (`en.json`, 574 keys) plus `LocaleSwitcher` in `IconRail`'s settings popover, see "i18n: English Translation + Locale Switcher" above. Stale bullet, left un-struck when that session shipped — corrected during a later gap-analysis round.
 - Theme preference has no conflict resolution mechanism between devices (last fetch wins) and no retry on a failed `PUT /me/preferences` (see ADR 0009 "Consequences").
 - ~~Known backend gap, originally surfaced at P4-S4: `DELETE /folders/{id}` (raw hard-delete fallback) still only checks for subfolders, not contained documents. For the regular deletion path used in the UI since **P7-S1b** (`POST .../folders/{id}/trash`), this is fixed — the trash correctly cascades to contained documents (see `docs/services/folder-service.md`); only the less-frequently-used hard-delete fallback itself still has the original gap.~~ — **closed in Phase 51 Session 3**: the hard-delete fallback now also checks contained documents via `document_client.count_active`, same `409` contract as the pre-existing subfolder check, see `docs/services/folder-service.md` "Open Points".

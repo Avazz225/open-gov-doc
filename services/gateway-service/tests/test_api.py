@@ -167,6 +167,24 @@ def test_public_share_link_routes_bypass_gateway_auth_check(client):
         assert response.json().get("detail") != "Fehlender Bearer-Token"
 
 
+def test_branding_get_bypasses_gateway_auth_check(client):
+    """P69-S2/ADR 0201: `GET .../branding` must be reachable from the login
+    screen, before any token exists - see the `"GET "`-prefixed entry in
+    `gateway_service.settings.public_routes`."""
+    response = client.get("/api/registry-service/installation/branding")
+    assert response.json().get("detail") != "Fehlender Bearer-Token"
+
+
+def test_branding_put_still_requires_gateway_auth_check(client):
+    """The first public route this project has ever needed to be public
+    for one method (`GET`) but not another (`PUT`) on the exact same path
+    - proves the new `method_route_key` matching does not accidentally
+    make the whole path public."""
+    response = client.put("/api/registry-service/installation/branding", json={})
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Fehlender Bearer-Token"
+
+
 def test_no_healthy_instance_returns_503(client, make_token):
     token = make_token()
     response = client.get(

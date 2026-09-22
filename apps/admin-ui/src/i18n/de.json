@@ -78,7 +78,8 @@
   },
   "home": {
     "title": "OG Doc Admin",
-    "hint": "Wähle einen Bereich aus der Navigation."
+    "hint": "Wähle einen Bereich aus der Navigation.",
+    "noWidgets": "Für dein Konto sind aktuell keine Verwaltungsbereiche freigeschaltet."
   },
   "users": {
     "pageTitle": "Nutzende & Rollen",

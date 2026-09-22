@@ -8,11 +8,13 @@ from config_service.clients import (
     MonitoringServiceClient,
     ObjectTypeServiceClient,
     PermissionServiceClient,
+    RegistryServiceClient,
     WorkflowServiceClient,
 )
 from config_service.schemas import (
     AdGroupMappingsExport,
     ApprovalConfigExport,
+    BrandingConfigExport,
     BusinessCalendarExport,
     ConfigDocument,
     DmnDefinitionExport,
@@ -136,6 +138,15 @@ async def export_federation_config(client: WorkflowServiceClient) -> FederationC
     )
 
 
+async def export_branding_config(client: RegistryServiceClient) -> BrandingConfigExport:
+    config = await client.get_branding_config()
+    return BrandingConfigExport(
+        product_name=config["product_name"],
+        accent_color=config["accent_color"],
+        logo_url=config["logo_url"],
+    )
+
+
 async def export_realm_roles(client: AuthServiceClient) -> list[str]:
     return await client.list_realm_roles()
 
@@ -157,6 +168,7 @@ async def build_export(
     permission_client: PermissionServiceClient,
     monitoring_client: MonitoringServiceClient,
     auth_client: AuthServiceClient,
+    registry_client: RegistryServiceClient,
 ) -> ConfigDocument:
     doc = ConfigDocument(exported_at=datetime.now(UTC))
     if "object_types" in categories:
@@ -179,4 +191,6 @@ async def build_export(
         doc.realm_roles = await export_realm_roles(auth_client)
     if "ad_group_mappings" in categories:
         doc.ad_group_mappings = await export_ad_group_mappings(auth_client)
+    if "branding_config" in categories:
+        doc.branding_config = await export_branding_config(registry_client)
     return doc

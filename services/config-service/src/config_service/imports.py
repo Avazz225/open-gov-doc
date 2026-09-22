@@ -9,6 +9,7 @@ from config_service.clients import (
     MonitoringServiceClient,
     ObjectTypeServiceClient,
     PermissionServiceClient,
+    RegistryServiceClient,
     WorkflowServiceClient,
 )
 from config_service.schemas import CategoryResult, ConfigDocument
@@ -183,6 +184,20 @@ async def apply_federation_config(client: WorkflowServiceClient, entry) -> Categ
     return result
 
 
+async def apply_branding_config(client: RegistryServiceClient, entry) -> CategoryResult:
+    result = CategoryResult()
+    try:
+        await client.put_branding_config(
+            product_name=entry.product_name,
+            accent_color=entry.accent_color,
+            logo_url=entry.logo_url,
+        )
+        result.updated += 1
+    except Exception as exc:  # noqa: BLE001
+        result.errors.append(str(exc))
+    return result
+
+
 async def apply_realm_roles(client: AuthServiceClient, names: list[str]) -> CategoryResult:
     """No upsert-by-name logic like `apply_roles` needed -
     `auth-service`'s `POST /realm-roles` is itself already idempotent
@@ -231,6 +246,7 @@ async def apply_import(
     permission_client: PermissionServiceClient,
     monitoring_client: MonitoringServiceClient,
     auth_client: AuthServiceClient,
+    registry_client: RegistryServiceClient,
 ) -> dict[str, CategoryResult]:
     results: dict[str, CategoryResult] = {}
     if "object_types" in categories and doc.object_types is not None:
@@ -267,5 +283,9 @@ async def apply_import(
     if "ad_group_mappings" in categories and doc.ad_group_mappings is not None:
         results["ad_group_mappings"] = await apply_ad_group_mappings(
             auth_client, doc.ad_group_mappings
+        )
+    if "branding_config" in categories and doc.branding_config is not None:
+        results["branding_config"] = await apply_branding_config(
+            registry_client, doc.branding_config
         )
     return results

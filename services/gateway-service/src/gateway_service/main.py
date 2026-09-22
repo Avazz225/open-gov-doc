@@ -160,6 +160,11 @@ def _extract_bearer_token(authorization: str | None) -> str:
 @app.api_route("/api/{service_type}/{path:path}", methods=_PROXY_METHODS)
 async def proxy(service_type: str, path: str, request: Request) -> Response:
     route_key = f"{service_type}:{path}"
+    # P69-S2/ADR 0201: lets a public_routes entry be scoped to one HTTP
+    # method (`"GET registry-service:installation/branding"`) instead of
+    # every method on that path - a bare entry (no leading method) keeps
+    # matching regardless of method, unchanged from before this session.
+    method_route_key = f"{request.method} {route_key}"
     client_host = request.client.host if request.client else "unknown"
     rate_limit_key = client_host
     # Fine-grained user tracking (5.5, Post-Roadmap Phase 41 Session 3, ADR
@@ -178,13 +183,17 @@ async def proxy(service_type: str, path: str, request: Request) -> Response:
     # rejects logins server-side for anyone except the superuser (see
     # below).
     maintenance_active = await request.app.state.maintenance_state.is_active()
-    if maintenance_active and route_key not in settings.maintenance_mode_allowed_routes:
+    if (
+        maintenance_active
+        and route_key not in settings.maintenance_mode_allowed_routes
+        and method_route_key not in settings.maintenance_mode_allowed_routes
+    ):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Systemweite Notfallsperre aktiv - Wartungsmodus",
         )
 
-    if route_key not in settings.public_routes:
+    if route_key not in settings.public_routes and method_route_key not in settings.public_routes:
         token = _extract_bearer_token(request.headers.get("authorization"))
         try:
             claims = request.app.state.token_validator.validate(token)

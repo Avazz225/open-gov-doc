@@ -78,7 +78,8 @@
   },
   "home": {
     "title": "OG Doc Admin",
-    "hint": "Select an area from the navigation."
+    "hint": "Select an area from the navigation.",
+    "noWidgets": "No administration areas are currently enabled for your account."
   },
   "users": {
     "pageTitle": "Users & roles",

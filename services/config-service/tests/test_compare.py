@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from config_service import compare
 from config_service.schemas import (
     ApprovalConfigExport,
+    BrandingConfigExport,
     BusinessCalendarExport,
     ConfigDocument,
     DmnDefinitionExport,
@@ -126,7 +127,7 @@ def test_diff_singleton_category_both_absent_is_fully_empty():
     assert delta.identical == []
 
 
-def test_compare_documents_covers_all_nine_categories():
+def test_compare_documents_covers_all_ten_categories():
     base = _doc(
         object_types=[ObjectTypeExport(name="a", applies_to="document")],
         dmn_definitions=[DmnDefinitionExport(name="d1", dmn_xml="<dmn1/>")],
@@ -136,6 +137,7 @@ def test_compare_documents_covers_all_nine_categories():
         sensor_config=SensorConfigExport(global_default=True, overrides={}),
         federation_config=FederationConfigExport(version="1.0", min_compatible_peer_version="1.0"),
         realm_roles=["dms-poststelle"],
+        branding_config=BrandingConfigExport(product_name="A", accent_color=None, logo_url=None),
     )
     compare_doc = _doc(
         object_types=[ObjectTypeExport(name="a", applies_to="document")],
@@ -146,6 +148,7 @@ def test_compare_documents_covers_all_nine_categories():
         sensor_config=SensorConfigExport(global_default=False, overrides={}),
         federation_config=FederationConfigExport(version="2.0", min_compatible_peer_version="1.0"),
         realm_roles=["dms-poststelle", "dms-registratur"],
+        branding_config=BrandingConfigExport(product_name="B", accent_color=None, logo_url=None),
     )
     result = compare.compare_documents(
         base,
@@ -160,6 +163,7 @@ def test_compare_documents_covers_all_nine_categories():
             "sensor_config",
             "federation_config",
             "realm_roles",
+            "branding_config",
         },
     )
     # Kategorie wurde angefragt, aber auf keiner Seite exportiert -> Delta
@@ -182,6 +186,10 @@ def test_compare_documents_covers_all_nine_categories():
     }
     assert result["realm_roles"].identical == ["dms-poststelle"]
     assert result["realm_roles"].only_in_compare == ["dms-registratur"]
+    assert result["branding_config"].differing["branding_config"]["product_name"] == {
+        "base": "A",
+        "compare": "B",
+    }
 
 
 def test_diff_string_list_category_reports_only_in_base_and_only_in_compare():

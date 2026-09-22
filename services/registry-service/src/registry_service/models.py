@@ -37,3 +37,25 @@ class ServiceInstance(Base):
     # any sensor configuration/aggregation, that's done by `monitoring-service`
     # via GET /instances (which simply reads this field along with the rest).
     sensors: Mapped[list[dict]] = mapped_column(JSON, default=list)
+
+
+class BrandingConfig(Base):
+    """Installation-level branding (7.3/8, P69-S2, ADR 0201) - product-name
+    override, accent color, logo URL, all optional/nullable (unset means
+    "use this build's static default"). Singleton row (``id=1``, same
+    pattern as `workflow_service.models.FederationConfig`), seeded lazily
+    on first access rather than at migration time. Deliberately its own DB
+    row (not a `Settings` field) for the same reason `FederationConfig`
+    is: it must be exportable/importable via `config-service`/7.3 and
+    changeable without a container restart. Lives in `registry-service`
+    (not a new service) because it co-locates naturally with the existing
+    `GET /installation` identity endpoint - both describe "what is this
+    installation," one machine-readable, one now also human-facing."""
+
+    __tablename__ = "branding_config"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    product_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    accent_color: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    logo_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

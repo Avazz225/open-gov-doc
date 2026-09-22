@@ -310,6 +310,9 @@ services:
       # depend on registry-service (no depends_on here), so no cycle
       # results, same pattern as with license-service above.
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
+      # Branding config (7.3/8, P69-S2, ADR 0201) - registry-service's
+      # first ever RBAC-gated endpoint (`PUT /installation/branding`).
+      DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
     ports:
       - "${REGISTRY_SERVICE_PORT:-8001}:8000"
     depends_on:

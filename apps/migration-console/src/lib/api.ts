@@ -98,6 +98,23 @@ export async function getEffectivePermissions(
   return body.permissions;
 }
 
+// Installation-level branding (7.3/8, P69-S2, ADR 0201) - `GET` is
+// deliberately called WITHOUT a token (registry-service's own endpoint is
+// ungated, and the gateway allows this exact path through unauthenticated
+// too, see `gateway_service.settings.public_routes`'s `"GET "`-prefixed
+// entry) - must render on the login screen, before any token exists.
+export interface BrandingConfig {
+  product_name: string | null;
+  accent_color: string | null;
+  logo_url: string | null;
+  updated_at: string;
+}
+
+export async function getBrandingConfig(): Promise<BrandingConfig> {
+  const response = await request("registry-service", "installation/branding");
+  return response.json();
+}
+
 export type ThemeName = "light" | "dark" | "high-contrast" | "auto";
 
 export async function getThemePreference(token: string): Promise<ThemeName> {

@@ -3,6 +3,7 @@ import logging
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
+from datetime import UTC, datetime
 
 from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
@@ -13,6 +14,7 @@ from dms_metrics_client import (
     metrics_payload,
     run_gauge_sampler_loop,
 )
+from dms_permission_client import PermissionServiceClient
 from dms_registry_client import maybe_start_registration
 from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 from sqlalchemy import text
@@ -21,13 +23,35 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from registry_service import consumer, metrics, repository
 from registry_service.license_client import LicenseServiceClient
 from registry_service.licensing import ComponentLicenseCache
-from registry_service.models import Base
-from registry_service.schemas import InstanceOut, LicenseStatusForServiceOut, RegisterRequest
+from registry_service.models import Base, BrandingConfig
+from registry_service.schemas import (
+    BrandingConfigOut,
+    BrandingConfigUpdate,
+    InstanceOut,
+    LicenseStatusForServiceOut,
+    RegisterRequest,
+)
 from registry_service.settings import Settings
 
 settings = Settings()
 configure_logging(settings)
 logger = logging.getLogger(__name__)
+
+_BRANDING_CONFIG_ID = 1
+
+
+async def _get_or_seed_branding_config(session: AsyncSession) -> BrandingConfig:
+    """P69-S2/ADR 0201 - same lazy-seed-on-first-access singleton pattern as
+    `workflow_service.main._get_or_seed_federation_config`. All fields
+    start unset (`None`), meaning "use this build's static default" -
+    there is no `Settings`-derived default to seed from, unlike
+    `FederationConfig`."""
+    config = await session.get(BrandingConfig, _BRANDING_CONFIG_ID)
+    if config is None:
+        config = BrandingConfig(id=_BRANDING_CONFIG_ID, updated_at=datetime.now(UTC))
+        session.add(config)
+        await session.flush()
+    return config
 
 
 async def _cleanup_poll_loop(session_factory) -> None:
@@ -97,6 +121,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
+
+    # Branding config (7.3/8, P69-S2, ADR 0201) - registry-service's first
+    # ever `PermissionServiceClient` consumer, for `PUT /installation/
+    # branding`'s `admin.object_config` gate.
+    app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
 
     event_bus = NatsEventBusClient(settings.nats_url, stream="registry")
     await event_bus.connect()
@@ -177,6 +206,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await consumer_bus.close()
     await event_bus.close()
     await app.state.license_cache.close()
+    await app.state.permission_client.close()
     await engine.dispose()
 
 
@@ -225,6 +255,51 @@ def get_installation() -> dict:
     `installation_display_name` are plain configuration values (see
     `dms_common.BaseServiceSettings`), not secret data."""
     return {"id": settings.installation_id, "display_name": settings.installation_display_name}
+
+
+@app.get("/installation/branding", response_model=BrandingConfigOut)
+async def get_branding_config(session: AsyncSession = Depends(get_session)) -> BrandingConfig:
+    """Installation branding (7.3/8, P69-S2, ADR 0201) - deliberately
+    ungated, same reasoning as `GET /installation` above: a frontend must
+    be able to render the correct product name/logo/accent color on the
+    LOGIN screen, before any principal exists to check a permission
+    against. All fields `None` means "use this build's static default" -
+    every consumer must already handle that as a valid, common case, not
+    an error."""
+    config = await _get_or_seed_branding_config(session)
+    await session.commit()
+    return config
+
+
+@app.put("/installation/branding", response_model=BrandingConfigOut)
+async def update_branding_config(
+    payload: BrandingConfigUpdate,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> BrandingConfig:
+    """P69-S2/ADR 0201 - gated behind the already-established domain admin
+    capability `admin.object_config` (the same one `workflow-service`'s
+    federation config / BPMN upload and `config-service`'s own import gate
+    use), rather than minting a new, narrower capability for a single
+    write endpoint on a service that has never needed RBAC before this
+    session. Reachable via `config-service`'s regular 7.3 export/import
+    (see `config-service`'s `CATEGORIES`), same singleton-category shape
+    as `sensor_config`/`federation_config`."""
+    allowed = bool(x_dms_principal) and await app.state.permission_client.has_permission(
+        x_dms_principal, "admin.object_config"
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Fehlende Domain-Admin-Rolle 'Objekttyp-/Workflow-Konfiguration'",
+        )
+    config = await _get_or_seed_branding_config(session)
+    config.product_name = payload.product_name
+    config.accent_color = payload.accent_color
+    config.logo_url = payload.logo_url
+    config.updated_at = datetime.now(UTC)
+    await session.commit()
+    return config
 
 
 @app.get("/metrics")

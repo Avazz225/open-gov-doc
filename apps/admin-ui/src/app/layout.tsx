@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import de from "@/i18n/de.json";
 import { AuthProvider } from "@/lib/auth-context";
+import { BrandingProvider } from "@/lib/branding-context";
 import { InstallationProvider } from "@/lib/installation-context";
 import { LocaleProvider } from "@/lib/locale-context";
 import { ThemeProvider } from "@/lib/theme-context";
@@ -22,7 +23,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <InstallationProvider>
           <AuthProvider>
             <LocaleProvider>
-              <ThemeProvider>{children}</ThemeProvider>
+              <ThemeProvider>
+                <BrandingProvider>{children}</BrandingProvider>
+              </ThemeProvider>
             </LocaleProvider>
           </AuthProvider>
         </InstallationProvider>

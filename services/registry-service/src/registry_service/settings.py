@@ -51,3 +51,11 @@ class Settings(BaseServiceSettings):
     # deliberately sets it. `scripts/rolling-update.sh` reads the same value
     # from `REGISTRY_OPERATOR_KEY` in the operator's own shell environment.
     registry_operator_key: str | None = None
+
+    # Branding config (7.3/8, P69-S2, ADR 0201) - registry-service's first
+    # ever RBAC-gated endpoint (`PUT /installation/branding`), reusing the
+    # already-established `admin.object_config` capability (same one
+    # `workflow-service`'s federation config / BPMN upload and
+    # `config-service`'s own import gate use) rather than minting a new,
+    # narrower capability for a single write endpoint.
+    permission_service_base_url: str = "http://localhost:8004"

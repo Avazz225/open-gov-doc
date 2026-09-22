@@ -283,3 +283,43 @@ class MonitoringServiceClient:
         )
         response.raise_for_status()
         return response.json()
+
+
+class RegistryServiceClient:
+    """P69-S2/ADR 0201: `branding_config` category, `registry-service`'s
+    first ever RBAC-gated endpoint. `PUT /installation/branding` requires
+    `admin.object_config` (registry-service reuses the same capability
+    `WorkflowServiceClient` above already relies on) - the existing
+    `domain-admin-config` bootstrap grant for `_CONFIG_ADMIN_PRINCIPAL_ID`
+    already covers this, no new role needed."""
+
+    _CONFIG_ADMIN_PRINCIPAL_ID = "config-service"
+
+    def __init__(self, base_url: str) -> None:
+        self._client = httpx.AsyncClient(
+            base_url=base_url,
+            timeout=30.0,
+            headers={"X-DMS-Principal": self._CONFIG_ADMIN_PRINCIPAL_ID},
+        )
+
+    async def close(self) -> None:
+        await self._client.aclose()
+
+    async def get_branding_config(self) -> dict:
+        response = await self._client.get("/installation/branding")
+        response.raise_for_status()
+        return response.json()
+
+    async def put_branding_config(
+        self, *, product_name: str | None, accent_color: str | None, logo_url: str | None
+    ) -> dict:
+        response = await self._client.put(
+            "/installation/branding",
+            json={
+                "product_name": product_name,
+                "accent_color": accent_color,
+                "logo_url": logo_url,
+            },
+        )
+        response.raise_for_status()
+        return response.json()

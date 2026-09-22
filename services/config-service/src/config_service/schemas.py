@@ -20,6 +20,7 @@ CATEGORIES = (
     "federation_config",
     "realm_roles",
     "ad_group_mappings",
+    "branding_config",
 )
 
 
@@ -114,6 +115,17 @@ class AdGroupCompositeRuleExport(BaseModel):
     ad_group_names: list[str]
 
 
+class BrandingConfigExport(BaseModel):
+    """Installation-level branding (7.3/8, P69-S2, ADR 0201) - all fields
+    optional/nullable, mirroring `registry-service`'s own
+    `BrandingConfigOut`. `None` means "use this build's static default,"
+    a valid, common export value, not an omission."""
+
+    product_name: str | None = None
+    accent_color: str | None = None
+    logo_url: str | None = None
+
+
 class AdGroupMappingsExport(BaseModel):
     """AD/Keycloak group -> role mapping config (4.4/7.3, Post-Roadmap
     Phase 39 Session 3, ADR 0153) - the other named scope cut from ADR
@@ -168,6 +180,7 @@ class ConfigDocument(BaseModel):
     # `bootstrap._ensure_dms_admin_role`).
     realm_roles: list[str] | None = None
     ad_group_mappings: AdGroupMappingsExport | None = None
+    branding_config: BrandingConfigExport | None = None
 
 
 class CategoryResult(BaseModel):

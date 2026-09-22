@@ -180,6 +180,30 @@ body {
   margin-bottom: var(--dms-space-6);
 }
 
+/* Role-dependent dashboard widgets (Concept 8, P69-S2, ADR 0201) - one
+   `.card` per capability-visible nav group, `auto-fit` so the grid adapts
+   from a single domain-admin's one-widget view up to a superuser's full
+   grid without a fixed column count. */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--dms-space-4);
+}
+
+.dashboard-widget {
+  margin-bottom: 0;
+}
+
+.dashboard-widget h2 {
+  margin-top: 0;
+  font-size: var(--dms-font-size-lg);
+}
+
+.dashboard-widget ul {
+  margin: 0;
+  padding-left: var(--dms-space-4);
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));

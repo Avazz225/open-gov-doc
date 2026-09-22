@@ -87,6 +87,17 @@ class Settings(BaseServiceSettings):
         # token exists yet for the bearer check to verify.
         "auth-service:oidc/authorize",
         "auth-service:oidc/callback",
+        # Branding config (7.3/8, P69-S2, ADR 0201) - `GET .../branding`
+        # must be reachable from the LOGIN screen, before any token exists
+        # (same reasoning as `registry-service:installation` above). Unlike
+        # every entry above, this path's `PUT` counterpart must stay
+        # gated (`admin.object_config`, checked server-side at
+        # registry-service) - the first public route this project has ever
+        # needed to be public for one method but not another on the exact
+        # same path, hence the new `"GET "`-prefixed form below (see
+        # `proxy()`'s `method_route_key` for the matching rule: a bare
+        # entry like the ones above stays method-agnostic/unchanged).
+        "GET registry-service:installation/branding",
     ]
 
     # Emergency shutdown (4.8, P6-S6): while maintenance mode is active,
@@ -108,6 +119,11 @@ class Settings(BaseServiceSettings):
         "auth-service:oidc/callback",
         "permission-service:maintenance-mode",
         "permission-service:maintenance-mode/lift",
+        # Branding config (P69-S2, ADR 0201) - the login screen (reachable
+        # during maintenance, see "auth-service:login" above) must still
+        # render the installation's own branding; `PUT` stays blocked
+        # during maintenance like any other config-mutating route.
+        "GET registry-service:installation/branding",
     ]
     maintenance_cache_ttl_seconds: float = 5.0
 

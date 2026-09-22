@@ -104,7 +104,11 @@ share-link token itself, which travels as a query parameter (`?token=...`,
 not as a path segment) and is checked by `document-service`; as a result,
 these two new entries remain simple, static exact-match strings
 without wildcard matching logic at the gateway itself, see
-[ADR 0047](../adr/0047-public-share-link-query-param-token-and-disable-semantics.md)).
+[ADR 0047](../adr/0047-public-share-link-query-param-token-and-disable-semantics.md));
+since P69-S2 additionally `"GET registry-service:installation/branding"` (installation branding, 7.3/8,
+[ADR 0202](../adr/0202-p69s2-branding-config-and-role-dependent-dashboard.md)) — the first entry ever
+scoped to one HTTP method instead of every method on that path, see "Method-Scoped Public Routes"
+below.
 On success, the identity claims are forwarded to the downstream as
 `X-DMS-Principal`/`X-DMS-Username`/`X-DMS-Roles` headers — originally
 (ADR 0005) consumed by no backend service, but meanwhile the basis of
@@ -146,6 +150,27 @@ for it before then). Fix: a dedicated, still-public path
 `config-service:config/import` has since been a regular, token-required path.
 Test `test_config_import_route_now_requires_gateway_auth_check` explicitly
 confirms that this path has since required a bearer token.
+
+## Method-Scoped Public Routes (P69-S2, [ADR 0202](../adr/0202-p69s2-branding-config-and-role-dependent-dashboard.md))
+
+Every `public_routes`/`maintenance_mode_allowed_routes` entry before this session was either strictly
+read-only on its own path, or used only pre-auth on a path with no authenticated counterpart —
+`route_key = f"{service_type}:{path}"` never needed to know the HTTP method. Installation branding
+broke that assumption: `GET`/`PUT /installation/branding` share the exact same path but need opposite
+authorization (`GET` must be public, reachable from the login screen before any token exists; `PUT`
+must stay gated behind `admin.object_config`, checked server-side at `registry-service`). Making the
+whole path public would have silently broken the authenticated `PUT` flow too — for a public route,
+`proxy()` never sets `X-DMS-Principal` at all (see the P17-S1 "Correction" below, the same failure mode
+recurring), so a real admin's `PUT` would always reach `registry-service` with an empty principal and
+get rejected regardless of their actual permissions.
+
+Fix: `proxy()` now also computes `method_route_key = f"{request.method} {route_key}"` and checks it
+alongside the existing `route_key` against both route lists. A bare entry (no method prefix) keeps
+matching every method on that path, unchanged from before this session. A `"<METHOD> "`-prefixed entry
+(currently only `"GET registry-service:installation/branding"`) matches that one method only — `PUT`
+on the same path falls through to the ordinary bearer-token check. Tests
+`test_branding_get_bypasses_gateway_auth_check`/`test_branding_put_still_requires_gateway_auth_check`
+cover both halves.
 
 ## Emergency Shutdown / Maintenance Mode (4.8, since P6-S6)
 

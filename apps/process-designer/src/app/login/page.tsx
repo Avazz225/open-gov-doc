@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 import { useI18n } from "@/i18n";
 import { ApiError, useAuth } from "@/lib/auth-context";
+import { useBranding } from "@/lib/branding-context";
 
 // Direct links (post-roadmap feature, Phase 27, ADR 0106): only same-origin
 // relative paths starting with exactly one "/" are honored - "//" or "/\\"
@@ -20,6 +21,7 @@ export default function LoginPage() {
   const { login, user, isLoading } = useAuth();
   const router = useRouter();
   const { t } = useI18n();
+  const { productName } = useBranding();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -48,7 +50,7 @@ export default function LoginPage() {
   return (
     <main className="page">
       <form className="login-form" onSubmit={handleSubmit}>
-        <h1>{t("login.heading")}</h1>
+        <h1>{productName ?? t("login.heading")}</h1>
         <label htmlFor="username">{t("login.username")}</label>
         <input
           id="username"
