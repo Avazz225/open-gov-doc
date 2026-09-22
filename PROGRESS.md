@@ -2,7 +2,42 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P69-S2 (second and final session of Phase 69 — "UI Customization, Branding &
+**Last completed:** P70-S1 (first session of Phase 70 — "Document Declassification Mechanism",
+scoping only, no code). Scoped what a real declassification process needs for `document-service`'s
+set-or-raise-only `classification_level` field (`PUT /documents/{id}/classification-level` currently
+rejects any lower rank with `409`, no path anywhere to clear/lower it — ADR 0114/0115's own already-
+documented, deliberately deferred gap). `Konzept.md` has zero text on declassification — the process
+shape was genuinely open, not concept-dictated. Confirmed the plan's own hypothesis (dedicated
+capability, mandatory four-eyes gate reusing ADR 0022, distinct audit entry, single-step-vs-multi-level
+decision), with one correction and one real gap the plan undersold: the "distinct audit trail entry" is
+**already true today** — classification raises already publish a dedicated `document.classification.
+changed` event, not the generic metadata-update one, so no new plumbing is needed; and "mandatory" in
+this codebase's own precedent (`auth.superuser.activate`, ADR 0023) means removing the synchronous
+bypass from the code entirely, not setting a `requires_approval=true` config flag — a materially more
+invasive shape than the optional four-eyes toggle every other `document-service` action uses, with no
+ops/testing fallback. Also surfaced a real, unaddressed question the plan's "lower the field" framing
+skipped: whether declassification also retroactively rewrites past `DocumentVersion` classification
+snapshots, or only the document's current field.
+
+Decision for P70-S2: new `admin.declassification` capability (not a reuse of `admin.deletion_classified`,
+which governs *purging* already-classified documents, a materially different sensitive action per this
+codebase's repeated "two distinct sensitive actions, two distinct domains" pattern); mandatory,
+approval-only execution mirroring ADR 0023's shape exactly (no synchronous path in code, executed only
+by `document-service`'s existing `permission.approval.approved` consumer), with a new
+`required_permission` for the approval config so the approver needs a distinct capability from the
+initiator's; single-step-only rank check by default (`new_rank == current_rank - 1`, `422` for a
+multi-level jump — a one-line relaxation later if policy needs it, deliberately conservative for now);
+reuses `document.classification.changed` with an added `direction` payload marker; `DocumentVersion`
+snapshots stay untouched — not retroactive, same boundary ADR 0114 already drew for raises. New ADR
+[0203](docs/adr/0203-p70s1-declassification-scoping.md). No tests, no doc corrections beyond the ADR
+(deliberately — `document-service.md`'s classification-level docs stay as-is until P70-S2 builds this).
+
+**Next session:** P70-S2 — build per P70-S1's recommendation above. See `IMPLEMENTATION_PLAN.md`'s Phase
+70 table and ADR 0203 for the full scoped design.
+
+---
+
+**Immediately before P70-S1: P69-S2** (second and final session of Phase 69 — "UI Customization, Branding &
 Role-Dependent Views"). Built per P69-S1's scoped design (ADR 0201): `registry-service` gained a
 `BrandingConfig` singleton (`GET`/`PUT /installation/branding`, `id=1`, lazy-seeded, nullable
 `product_name`/`accent_color`/`logo_url`) — its first ever `PermissionServiceClient` consumer,
@@ -56,9 +91,6 @@ config-service.md` (eleven categories now), `registry-service.md`, `gateway-serv
 explained), `office-addin.md` (exclusion decision) all updated.
 
 **Phase 69 is now closed (2/2).**
-
-**Next session:** Phase 70 — Document Declassification Mechanism (ADR 0114/0115). See
-`IMPLEMENTATION_PLAN.md` for the full session breakdown.
 
 ---
 
