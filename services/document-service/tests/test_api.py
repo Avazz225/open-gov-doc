@@ -6,9 +6,9 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import pytest
 from dms_eventbus_client import Event
+from dms_permission_client import PermissionServiceClient
 from document_service import repository
 from document_service.main import app
-from document_service.permission_client import PermissionServiceClient
 from fastapi.testclient import TestClient
 
 
@@ -166,8 +166,7 @@ def _grant_document_read(principal_id: str) -> None:
     Dokumente, die über den `upload()`-Helfer ohne `folder_id` angelegt
     werden, prüfen intern gegen die Ressource `"root"` (siehe main.py's
     Freigabelink-Endpunkte). Dedicated permission, NOT the generic
-    `document.read` (Post-Roadmap Phase 38 Session 4, ADR 0149) - see
-    `permission_client.py`'s `check_read` docstring for why share-link
+    `document.read` (Post-Roadmap Phase 38 Session 4, ADR 0149) - share-link
     creation needs its own, narrower gate now that `document.read` is
     granted to "everyone"."""
     _grant_root_permission(principal_id, "document.share_link.read", "share-link-test-role")

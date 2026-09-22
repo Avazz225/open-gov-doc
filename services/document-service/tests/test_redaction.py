@@ -47,8 +47,7 @@ def _grant_read(principal_id: str, resource_id: str = "root") -> None:
     """Same pattern as test_export.py's `_grant_document_read`, duplicated
     rather than imported (see module docstring). Grants
     `document.redaction.read`, not the generic `document.read` (Post-
-    Roadmap Phase 38 Session 4, ADR 0149 - see `permission_client.py`'s
-    `check_read` docstring)."""
+    Roadmap Phase 38 Session 4, ADR 0149)."""
     role = httpx.post(
         f"{PERMISSION_SERVICE_URL}/roles",
         json={

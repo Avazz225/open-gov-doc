@@ -2,7 +2,47 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P68-S1 (first session of Phase 68 — "Infrastructure Hardening", the largest-blast-
+**Last completed:** P68-S2 (second and final session of Phase 68 — "Infrastructure Hardening"). Migrated
+all five services with a bespoke local `permission_client.py` onto the shared `libs/dms-permission-client`
+package, closing ADR 0154's own named tech debt. `search-service` (100% drop-in, byte-identical
+`check_batch`) and `document-service` (fully covered by the shared surface, but needed explicit
+`permission=`/`access_type=` kwargs added at 13 call sites since its bespoke `check_read`/`check_write`
+had different default-collapsing shapes, plus its hardcoded `timeout=10.0` preserved explicitly) got full
+migrations — both local `permission_client.py` files deleted entirely. `auth-service`/`workflow-service`/
+`mail-connector` each keep genuinely unique methods with no shared-lib equivalent (`requires_approval`/
+`request_approval`/`revoke_all_role_assignments`; `check_delegation` [ADR-0066-excluded]/
+`create_org_hierarchy_grant`/`revoke_org_hierarchy_grant`/`is_supervisor_of`; `is_group_member`,
+respectively) — new design pattern for this migration: each keeps a **local subclass** of the shared
+`PermissionServiceClient`, inheriting the now-deduplicated common methods (`has_permission`/`check`/
+`check_batch`/`is_maintenance_active`/`get_role_id`/`ensure_role_assignment`/`close`) and adding only its
+own extras, preserving every existing call site/type annotation unchanged. `document-service/tests/
+test_api.py`'s import was fixed alongside `main.py`'s (it did class-level monkeypatching against the
+imported class — would have silently no-op'd otherwise).
+
+**Incidental finding, fixed in the same session**: while live-verifying `mail-connector`'s migrated
+client, its container logged a maintenance-mode-check connection failure on every poll tick —
+`infra/docker-compose.yml`'s `mail-connector` block had been missing `DMS_PERMISSION_SERVICE_BASE_URL`
+entirely since ADR 0164 shipped that check (Post-Roadmap Phase 44 Session 3), silently falling back to
+`localhost:8004` inside the container network. Fail-soft, so mail processing itself was never blocked —
+but the maintenance-mode gate was a permanent no-op in every Docker Compose deployment until this fix.
+
+Each of the five services' own test suites plus a full unfiltered `scripts/run-tests.sh` run pass at
+baseline: `document-service` 414/414, `search-service` 76/76, `mail-connector` 80/80, `auth-service`
+138/144 (6 failed/8 errors, confirmed pre-existing via a stash-based baseline comparison — same count on
+unmodified code), `workflow-service` 227-228/228 (one federation/xdomea test flaked on the full run,
+confirmed via isolated rerun passing 228/228). Full-suite run also reconfirmed `gateway-service`'s
+already-documented pre-existing 401/registry-service failures and `webdav-connector`'s already-documented
+ADR-0189 `PROPFIND`-timeout pattern, plus one new isolated-rerun-confirmed flake in `folder-service`
+(unrelated service, untouched this session, 167/167 on rerun). No new ADR — pure mechanical consolidation,
+as the plan anticipated. All five services rebuilt/redeployed; live-verified via real API calls
+(`document-service` `POST /documents` → `201`, `auth-service`'s startup `ensure_role_assignment` bootstrap
+succeeded silently, `workflow-service`'s `check()`-gated `POST /process-definitions` → `403` as expected,
+`mail-connector`'s maintenance-mode poll tick logs clean after the compose fix).
+
+`docs/services/document-service.md` (the "Per-Document RBAC Resource" section's stale "deliberately
+duplicated" framing corrected) and `docs/services/mail-connector.md` (the compose-fix note) updated.
+
+**Immediately before P68-S2: P68-S1** (first session of Phase 68 — "Infrastructure Hardening", the largest-blast-
 radius session of the whole Phase 65+ round; user explicitly chose the big-bang rollout over a phased
 one when asked). Implemented Konzept 3.1's "a DB user per service, `GRANT` restricted exclusively to its
 own schema" for real: 28 new Postgres roles (`svc_<schema>`), each owning exactly its own pre-created
@@ -46,10 +86,10 @@ own API calls (`document-service`/`auth-service`/`workflow-service`/`registry-se
 under the new narrowed Postgres credentials; the case-creation fix confirmed via a real `POST /cases`
 round trip.
 
-**Next session:** P68-S2 — migrate five services' bespoke permission clients
-(`document-service`/`auth-service`/`search-service`/`workflow-service`/`mail-connector`) onto the shared
-`libs/dms-permission-client`, closing ADR 0154's own named tech debt. Smaller and mechanical, no new ADR
-expected. See `IMPLEMENTATION_PLAN.md`'s Phase 68 table for the full description.
+Phase 68 ("Infrastructure Hardening") is now complete (P68-S1 + P68-S2).
+
+**Next session:** Phase 69 — UI Customization, Branding & Role-Dependent Views (Konzept 7.3/8). See
+`IMPLEMENTATION_PLAN.md` for the full session breakdown.
 
 ---
 

@@ -53,9 +53,9 @@ def upload(client, *, content=None, title="Vertrag", created_by="alice", **extra
 def _grant_read(principal_id: str, resource_id: str) -> None:
     """Post-Roadmap Phase 28 (ADR 0107) - grants `document.export.read`
     (not the generic `document.read`, see Post-Roadmap Phase 38 Session
-    4/ADR 0149 - `permission_client.py`'s `check_read` docstring explains
-    why the export/accessibility-check gate needs its own dedicated
-    permission now that `document.read` is granted to "everyone") on
+    4/ADR 0149 - the export/accessibility-check gate needs its own
+    dedicated permission now that `document.read` is granted to
+    "everyone") on
     `resource_id` for `principal_id`, same pattern as test_api.py's
     `_grant_root_permission`/`_grant_document_read`, duplicated rather than
     imported (see module docstring)."""

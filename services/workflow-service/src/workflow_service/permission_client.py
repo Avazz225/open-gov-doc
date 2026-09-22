@@ -1,60 +1,18 @@
 from datetime import datetime
-from typing import Literal
 
-import httpx
+from dms_permission_client import PermissionServiceClient as _BasePermissionServiceClient
 
 
-class PermissionServiceClient:
-    """HTTP client against the Permission Service - Retrofit P6-S6:
-    (a) process definitions (BPMN/script task upload) require the domain
-    admin capability `admin.object_config` (same pattern as `auth-service`'s
-    `_require_user_management`, P6-S5); (b) the SLA poll loop respects the
-    system-wide emergency lock (4.8). Deliberately still its own local
-    copy instead of `libs/dms-permission-client` (P19-S1) - `check_delegation`
-    below is a service-specific extra method that, per ADR 0066, is
-    deliberately not moved into the shared package; a full migration
-    would add no value here."""
-
-    ROOT_RESOURCE_ID = "root"
-
-    def __init__(self, base_url: str) -> None:
-        self._client = httpx.AsyncClient(base_url=base_url, timeout=30.0)
-
-    async def has_permission(self, principal_id: str, permission: str) -> bool:
-        response = await self._client.get(
-            f"/effective-permissions/{principal_id}/{self.ROOT_RESOURCE_ID}"
-        )
-        response.raise_for_status()
-        return permission in response.json()["permissions"]
-
-    async def check(
-        self,
-        *,
-        principal_id: str,
-        resource_id: str,
-        permission: str,
-        access_type: Literal["read", "write"] = "read",
-    ) -> bool:
-        """Post-Roadmap Phase 19 Session 9 (ADR 0074) - single check against
-        `GET /check` (including scope-lock overlay), unlike `has_permission`
-        above (a plain permission list without lock evaluation).
-        Same signature as `libs/dms-permission-client`'s `check`."""
-        response = await self._client.get(
-            "/check",
-            params={
-                "principal_id": principal_id,
-                "resource_id": resource_id,
-                "permission": permission,
-                "access_type": access_type,
-            },
-        )
-        response.raise_for_status()
-        return bool(response.json()["allowed"])
-
-    async def is_maintenance_active(self) -> bool:
-        response = await self._client.get("/maintenance-mode")
-        response.raise_for_status()
-        return response.json()["active"]
+class PermissionServiceClient(_BasePermissionServiceClient):
+    """workflow-service's local extension of the shared `dms-permission-client`
+    base (P68-S2 migration) - keeps only the methods with no shared-lib
+    equivalent: `check_delegation` (deliberately excluded from the shared
+    package per ADR 0066 - a service-specific extra), plus
+    `create_org_hierarchy_grant`/`revoke_org_hierarchy_grant`/
+    `is_supervisor_of` (org-hierarchy dynamic access grants, Post-Roadmap
+    Phase 31 Session 10/P66-S2, likewise not shared-lib material).
+    `has_permission`/`check`/`is_maintenance_active`/`close` now come from
+    the shared base unchanged; `ROOT_RESOURCE_ID` likewise."""
 
     async def check_delegation(
         self,
@@ -150,6 +108,3 @@ class PermissionServiceClient:
         response = await self._client.get(f"/supervisor-chain/{of_principal_id}")
         response.raise_for_status()
         return principal_id in response.json()["supervisor_ids"]
-
-    async def close(self) -> None:
-        await self._client.aclose()

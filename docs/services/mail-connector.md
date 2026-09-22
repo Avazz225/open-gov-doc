@@ -47,7 +47,12 @@ large for one session.
   **Phase 44 Session 3** ([ADR 0164](../adr/0164-maintenance-mode-poll-loop-coverage.md)), the whole
   tick is skipped while system-wide maintenance mode (4.8) is active — the maintenance check itself has
   its own try/except (fail-open on error), since this loop has no single enclosing `try` for the check
-  to piggyback on.
+  to piggyback on. **Found and fixed in P68-S2**: `infra/docker-compose.yml`'s `mail-connector` block
+  was missing `DMS_PERMISSION_SERVICE_BASE_URL` entirely since ADR 0164 shipped it - the container
+  silently fell back to its local-dev default (`localhost:8004`, meaningless inside the container
+  network), so this exact check failed (fail-open, logged) on every single tick since Phase 44 Session
+  3. Mail processing itself was never blocked (fail-open), but the maintenance-mode gate was a
+  permanent no-op in every Docker Compose deployment until this fix.
 - **`source_uid` uniqueness is scoped per mailbox** (`UNIQUE(mailbox_id, source_uid)`, was globally unique
   before this session) — a POP3/IMAP UID is only guaranteed stable within one mail account (RFC 1939), two
   different mailboxes could plausibly reuse the same native UID.

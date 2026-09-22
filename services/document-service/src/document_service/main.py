@@ -19,6 +19,7 @@ from dms_metrics_client import (
     metrics_payload,
     run_gauge_sampler_loop,
 )
+from dms_permission_client import PermissionServiceClient
 from dms_registry_client import maybe_start_registration
 from fastapi import (
     Depends,
@@ -45,7 +46,6 @@ from document_service.html_preview_guard import rewrite_external_references
 from document_service.license_client import LicenseLimitClient
 from document_service.models import Base, Document, DocumentVersion, FolderExportJob
 from document_service.object_type_client import MissingKennzeichenAttributeError, ObjectTypeClient
-from document_service.permission_client import PermissionServiceClient
 from document_service.rendering_client import RenderingClient, RenderingUnavailableError
 from document_service.schemas import (
     AccessibilityCheckOut,
@@ -865,7 +865,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.object_type_client = ObjectTypeClient(settings.object_type_service_base_url)
     app.state.virus_scan_client = VirusScanClient(settings.virus_scan_service_base_url)
     app.state.approval_client = ApprovalClient(settings.permission_service_base_url)
-    app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
+    # P68-S2: timeout=10.0 explicitly, not the shared client's own 30.0
+    # default - this service's own local client always used 10.0, and this
+    # migration is behavior-preserving, not an opportunity to also change
+    # timeout tuning.
+    app.state.permission_client = PermissionServiceClient(
+        settings.permission_service_base_url, timeout=10.0
+    )
     app.state.auth_client = AuthServiceClient(settings.auth_service_base_url)
 
     # Backfill (Post-Roadmap Phase 39 Session 4, ADR 0154): every document
@@ -1678,34 +1684,40 @@ async def _require_document_permission(
     x_dms_principal: str, resource_id: str, *, access_type: str
 ) -> None:
     """RBAC (Post-Roadmap Phase 38 Session 4, ADR 0149) - unlike the
-    handful of "sensitive" endpoints already gated by `check_read`/
-    `check_write` below (share links, WebDAV edit tokens, redaction,
-    exports), the PRIMARY document paths (`POST /documents`, `GET
-    /documents/{id}`, `.../content`, `PATCH`, check-in, trash/restore,
-    listing) previously had NO permission check at all. Checks the same
-    generic `document.read`/`document.write` capabilities against the
-    same resource tree, now granted to "everyone" (preserving default
-    openness for ordinary, non-teamspace documents) while a teamspace's
-    root folder deliberately does NOT inherit that grant (`inherit=
-    False`) - only its own members' existing per-member role assignment
-    (ADR 0043) applies there. See `docs/adr/0149-teamspace-permission-
-    anchoring-broad-rbac-retrofit.md`. `401` without a principal header,
-    `403` without the permission; callers resolve `404` (unknown
-    resource) themselves first, same ordering already established by
-    `check_read`/`check_write`'s own call sites. Since Post-Roadmap Phase
-    39 Session 4 (ADR 0154), most callers pass an EXISTING document's own
+    handful of "sensitive" endpoints already gated by the shared
+    `PermissionServiceClient.check` below (share links, WebDAV edit
+    tokens, redaction, exports), the PRIMARY document paths (`POST
+    /documents`, `GET /documents/{id}`, `.../content`, `PATCH`, check-in,
+    trash/restore, listing) previously had NO permission check at all.
+    Checks the same generic `document.read`/`document.write` capabilities
+    against the same resource tree, now granted to "everyone" (preserving
+    default openness for ordinary, non-teamspace documents) while a
+    teamspace's root folder deliberately does NOT inherit that grant
+    (`inherit=False`) - only its own members' existing per-member role
+    assignment (ADR 0043) applies there. See `docs/adr/0149-teamspace-
+    permission-anchoring-broad-rbac-retrofit.md`. `401` without a
+    principal header, `403` without the permission; callers resolve `404`
+    (unknown resource) themselves first, same ordering already
+    established by those other `check()` call sites. Since Post-Roadmap
+    Phase 39 Session 4 (ADR 0154), most callers pass an EXISTING document's own
     `resource_id` (`document.id`) rather than its containing folder's -
     only `POST /documents` (no document exists yet) and a move's
     destination-folder check still pass a folder `resource_id`."""
     if not x_dms_principal:
         raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
     allowed = (
-        await app.state.permission_client.check_read(
-            principal_id=x_dms_principal, resource_id=resource_id
+        await app.state.permission_client.check(
+            principal_id=x_dms_principal,
+            resource_id=resource_id,
+            permission="document.read",
+            access_type="read",
         )
         if access_type == "read"
-        else await app.state.permission_client.check_write(
-            principal_id=x_dms_principal, resource_id=resource_id
+        else await app.state.permission_client.check(
+            principal_id=x_dms_principal,
+            resource_id=resource_id,
+            permission="document.write",
+            access_type="write",
         )
     )
     if not allowed:
@@ -1975,8 +1987,11 @@ async def list_documents_by_kennzeichen(
     candidates = await repository.list_documents_by_kennzeichen(session, value)
     if not candidates:
         return []
-    allowed = await app.state.permission_client.check_read_batch(
-        principal_id=x_dms_principal, resource_ids=[document.id for document in candidates]
+    allowed = await app.state.permission_client.check_batch(
+        principal_id=x_dms_principal,
+        resource_ids=[document.id for document in candidates],
+        permission="document.read",
+        access_type="read",
     )
     return [document for document in candidates if allowed.get(document.id, False)]
 
@@ -2888,10 +2903,11 @@ async def get_redaction_preview_page_count(
         )
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    allowed = await app.state.permission_client.check_read(
+    allowed = await app.state.permission_client.check(
         principal_id=x_dms_principal,
         resource_id=document.id,
         permission="document.redaction.read",
+        access_type="read",
     )
     if not allowed:
         raise HTTPException(status_code=403, detail="Kein Leserecht auf dieses Dokument")
@@ -2925,10 +2941,11 @@ async def get_redaction_preview_page_image(
         )
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    allowed = await app.state.permission_client.check_read(
+    allowed = await app.state.permission_client.check(
         principal_id=x_dms_principal,
         resource_id=document.id,
         permission="document.redaction.read",
+        access_type="read",
     )
     if not allowed:
         raise HTTPException(status_code=403, detail="Kein Leserecht auf dieses Dokument")
@@ -2992,10 +3009,11 @@ async def redact_document(
         )
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    allowed = await app.state.permission_client.check_read(
+    allowed = await app.state.permission_client.check(
         principal_id=x_dms_principal,
         resource_id=document.id,
         permission="document.redaction.read",
+        access_type="read",
     )
     if not allowed:
         raise HTTPException(status_code=403, detail="Kein Leserecht auf dieses Dokument")
@@ -3620,10 +3638,11 @@ async def create_share_link(
             ),
         )
 
-    allowed = await app.state.permission_client.check_read(
+    allowed = await app.state.permission_client.check(
         principal_id=x_dms_principal,
         resource_id=document.id,
         permission="document.share_link.read",
+        access_type="read",
     )
     if not allowed:
         raise HTTPException(status_code=403, detail="Kein Leserecht auf dieses Dokument")
@@ -3659,10 +3678,11 @@ async def list_share_links(
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    allowed = await app.state.permission_client.check_read(
+    allowed = await app.state.permission_client.check(
         principal_id=x_dms_principal,
         resource_id=document.id,
         permission="document.share_link.read",
+        access_type="read",
     )
     if not allowed:
         raise HTTPException(status_code=403, detail="Kein Leserecht auf dieses Dokument")
@@ -3701,8 +3721,8 @@ async def revoke_share_link_endpoint(
 # --- Office direct editing (post-roadmap feature, WebDAV edit token) -------
 # `ms-word:ofe|u|<url>`/`ms-excel:ofe|u|<url>`/`ms-powerpoint:ofe|u|<url>`
 # against `webdav-connector` - structurally modeled on the share link block
-# above, but NOT purely read-only (see `check_write` instead of
-# `check_read`) and with a significantly more generous validity duration
+# above, but NOT purely read-only (`access_type="write"` instead of
+# `"read"`) and with a significantly more generous validity duration
 # (see settings.py).
 
 
@@ -3726,10 +3746,11 @@ async def create_webdav_edit_token(
 
     # Write permission, not just read permission - this token grants actual
     # editing capability (check-in via WebDAV PUT), unlike a share link.
-    allowed = await app.state.permission_client.check_write(
+    allowed = await app.state.permission_client.check(
         principal_id=x_dms_principal,
         resource_id=document.id,
         permission="document.webdav_edit.write",
+        access_type="write",
     )
     if not allowed:
         raise HTTPException(status_code=403, detail="Kein Schreibrecht auf dieses Dokument")
@@ -3762,10 +3783,11 @@ async def list_webdav_edit_tokens(
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    allowed = await app.state.permission_client.check_write(
+    allowed = await app.state.permission_client.check(
         principal_id=x_dms_principal,
         resource_id=document.id,
         permission="document.webdav_edit.write",
+        access_type="write",
     )
     if not allowed:
         raise HTTPException(status_code=403, detail="Kein Schreibrecht auf dieses Dokument")
@@ -3936,7 +3958,7 @@ async def get_current_versions_batch(
     and the same N+1, so it benefits too. Per-document `document.read`
     checked the same way the single-item endpoint above already does (one
     `POST /check/batch` round trip instead of one `/check` per document,
-    see `PermissionServiceClient.check_read_batch`) - a document that
+    see `PermissionServiceClient.check_batch`) - a document that
     doesn't exist, has no current version, or the caller can't read is
     simply OMITTED from the result, not an error, so one stale/inaccessible
     id in a large folder listing doesn't fail the whole batch."""
@@ -3945,8 +3967,11 @@ async def get_current_versions_batch(
     document_ids = list(dict.fromkeys(payload.document_ids))
     if not document_ids:
         return DocumentVersionsBatchResult(versions={})
-    allowed = await app.state.permission_client.check_read_batch(
-        principal_id=x_dms_principal, resource_ids=document_ids
+    allowed = await app.state.permission_client.check_batch(
+        principal_id=x_dms_principal,
+        resource_ids=document_ids,
+        permission="document.read",
+        access_type="read",
     )
     versions: dict[str, DocumentVersionOut] = {}
     for document_id in document_ids:
@@ -4339,10 +4364,11 @@ async def get_document_export_accessibility_check(
             status_code=409,
             detail="Dokumentinhalt wurde ausgesondert und muss erst zurückgeholt werden",
         )
-    allowed = await app.state.permission_client.check_read(
+    allowed = await app.state.permission_client.check(
         principal_id=x_dms_principal,
         resource_id=document.id,
         permission="document.export.read",
+        access_type="read",
     )
     if not allowed:
         raise HTTPException(status_code=403, detail="Kein Leserecht auf dieses Dokument")
@@ -4390,10 +4416,11 @@ async def export_document(
             status_code=409,
             detail="Dokumentinhalt wurde ausgesondert und muss erst zurückgeholt werden",
         )
-    allowed = await app.state.permission_client.check_read(
+    allowed = await app.state.permission_client.check(
         principal_id=x_dms_principal,
         resource_id=document.id,
         permission="document.export.read",
+        access_type="read",
     )
     if not allowed:
         raise HTTPException(status_code=403, detail="Kein Leserecht auf dieses Dokument")
@@ -4452,8 +4479,11 @@ async def start_folder_export(
         raise HTTPException(
             status_code=422, detail="history_position muss 'before' oder 'after' sein"
         )
-    allowed = await app.state.permission_client.check_read(
-        principal_id=x_dms_principal, resource_id=folder_id, permission="document.export.read"
+    allowed = await app.state.permission_client.check(
+        principal_id=x_dms_principal,
+        resource_id=folder_id,
+        permission="document.export.read",
+        access_type="read",
     )
     if not allowed:
         raise HTTPException(status_code=403, detail="Kein Leserecht auf diesen Ordner")

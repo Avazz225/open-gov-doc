@@ -14,6 +14,7 @@ from dms_metrics_client import (
     http_sensor_declarations,
     metrics_payload,
 )
+from dms_permission_client import PermissionServiceClient
 from dms_registry_client import maybe_start_registration
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from search_service import repository
@@ -27,7 +28,6 @@ from search_service.folder_client import FolderServiceClient
 from search_service.models import Base
 from search_service.object_type_client import ObjectTypeServiceClient
 from search_service.ocr_client import OcrServiceClient
-from search_service.permission_client import PermissionServiceClient
 from search_service.query_language import QuerySyntaxError
 from search_service.rendering_client import RenderingServiceClient
 from search_service.repository import AttrFilter

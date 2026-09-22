@@ -1307,6 +1307,15 @@ services:
       DMS_VIRUS_SCAN_SERVICE_BASE_URL: http://virus-scan-service:8000
       DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
       DMS_CASE_SERVICE_BASE_URL: http://case-service:8000
+      # P32-S3/ADR 0132 added the permission_client.py consumer (department
+      # RBAC + maintenance-mode poll check) but never added this var here -
+      # found live during P68-S2's migration verification: without it, the
+      # container silently fell back to its local-dev default
+      # (`localhost:8004`, meaningless inside the container network),
+      # making the maintenance-mode check fail on every poll tick
+      # (fail-soft, so mail processing itself was never actually blocked,
+      # but the check was a permanent no-op).
+      DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
       # Format-derived candidate pattern (post-roadmap phase 19 session 11,
       # see ADR 0076) - without this variable the client in the container
       # falls back to the local dev default (`localhost:8007`), which points
