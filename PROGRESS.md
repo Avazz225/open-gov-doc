@@ -2,7 +2,33 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P68-S2 (second and final session of Phase 68 — "Infrastructure Hardening"). Migrated
+**Last completed:** P69-S1 (first session of Phase 69 — "UI Customization, Branding & Role-Dependent
+Views", scoping only, no code). Scoped what Concept 7.3's never-built "UI customizations" export category
+and Concept 8's permanent Open Point ("branding/theming, role-dependent dashboards") concretely mean for
+this codebase. Confirmed the plan's own shape hypothesis (runtime branding config layered on the static
+`libs/dms-ui` token system; capability-gated dashboard widgets, not a second UI) but corrected one factual
+error in the plan's own premise: the "OG Doc" rename (Phase 46 Session 1) is **not** a product-name-as-
+config precedent — it was seven hardcoded i18n string edits, the opposite of config-driven, identical
+across every installation. The real, previously-unused hook is `registry-service`'s existing
+`GET /installation`/`DMS_INSTALLATION_DISPLAY_NAME` (P13-S1/ADR 0032 addendum) — zero frontend consumers
+today. Decision for P69-S2: new registry-service-owned singleton `branding_config` (nullable
+logo/accent-color/product-name), added to config-service as an 11th singleton category mirroring
+`sensor_config`/`federation_config`'s shape (not a name-keyed list like `roles`); role-dependent dashboard
+targets `admin-ui` (not `user-ui`, whose "home" is already a working document workspace, not an empty
+landing page) via a new widget grid reusing `AdminSidebar.tsx`'s already-proven `requiresCapability`
+gating pattern verbatim. `office-addin`'s deliberately-reduced theming (ADR 0168) needs its own explicit
+inclusion/exclusion decision in P69-S2, not silent inclusion. New ADR
+[0201](docs/adr/0201-p69s1-branding-and-role-dependent-dashboard-scoping.md). No tests, no doc corrections
+beyond the ADR (deliberately — `user-ui.md`'s Open Point and `config-service.md`'s "deliberately not
+included" bullet stay unstruck until P69-S2 actually builds this).
+
+**Next session:** P69-S2 — build per P69-S1's recommendation above. See `IMPLEMENTATION_PLAN.md`'s Phase
+69 table and ADR 0201 for the full scoped design.
+
+---
+
+**Immediately before P69-S1: P68-S2** (second and final session of Phase 68 — "Infrastructure
+Hardening"). Migrated
 all five services with a bespoke local `permission_client.py` onto the shared `libs/dms-permission-client`
 package, closing ADR 0154's own named tech debt. `search-service` (100% drop-in, byte-identical
 `check_batch`) and `document-service` (fully covered by the shared surface, but needed explicit
@@ -86,10 +112,7 @@ own API calls (`document-service`/`auth-service`/`workflow-service`/`registry-se
 under the new narrowed Postgres credentials; the case-creation fix confirmed via a real `POST /cases`
 round trip.
 
-Phase 68 ("Infrastructure Hardening") is now complete (P68-S1 + P68-S2).
-
-**Next session:** Phase 69 — UI Customization, Branding & Role-Dependent Views (Konzept 7.3/8). See
-`IMPLEMENTATION_PLAN.md` for the full session breakdown.
+Phase 68 ("Infrastructure Hardening") is complete (P68-S1 + P68-S2).
 
 ---
 
