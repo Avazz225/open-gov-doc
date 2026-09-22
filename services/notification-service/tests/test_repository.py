@@ -4,16 +4,22 @@ import pytest
 from notification_service import repository
 
 
-async def test_create_and_send_in_app_is_immediately_sent(session, settings):
+async def test_create_and_send_in_app_is_immediately_sent(session, settings, rate_limiter):
     notification = await repository.create_and_send(
-        session, settings, channel="in_app", recipient="dept-head", subject="S", body="B"
+        session,
+        settings,
+        channel="in_app",
+        recipient="dept-head",
+        subject="S",
+        body="B",
+        rate_limiter=rate_limiter,
     )
     assert notification.status == "sent"
     assert notification.sent_at is not None
     assert notification.error is None
 
 
-async def test_create_and_send_email_via_mailpit_is_sent(session, settings):
+async def test_create_and_send_email_via_mailpit_is_sent(session, settings, rate_limiter):
     notification = await repository.create_and_send(
         session,
         settings,
@@ -21,11 +27,14 @@ async def test_create_and_send_email_via_mailpit_is_sent(session, settings):
         recipient="empfaenger@example.com",
         subject="S",
         body="B",
+        rate_limiter=rate_limiter,
     )
     assert notification.status == "sent"
 
 
-async def test_create_and_send_email_records_failure_when_smtp_unreachable(session, settings):
+async def test_create_and_send_email_records_failure_when_smtp_unreachable(
+    session, settings, rate_limiter
+):
     settings.smtp_host = "127.0.0.1"
     settings.smtp_port = 1
     notification = await repository.create_and_send(
@@ -35,12 +44,15 @@ async def test_create_and_send_email_records_failure_when_smtp_unreachable(sessi
         recipient="empfaenger@example.com",
         subject="S",
         body="B",
+        rate_limiter=rate_limiter,
     )
     assert notification.status == "failed"
     assert notification.error is not None
 
 
-async def test_create_and_send_webhook_records_failure_when_unreachable(session, settings):
+async def test_create_and_send_webhook_records_failure_when_unreachable(
+    session, settings, rate_limiter
+):
     notification = await repository.create_and_send(
         session,
         settings,
@@ -48,12 +60,13 @@ async def test_create_and_send_webhook_records_failure_when_unreachable(session,
         recipient="http://127.0.0.1:1/nope",
         subject="S",
         body="B",
+        rate_limiter=rate_limiter,
     )
     assert notification.status == "failed"
 
 
 async def test_create_and_send_below_max_attempts_stays_failed_and_schedules_retry(
-    session, settings
+    session, settings, rate_limiter
 ):
     """Post-Roadmap Phase 20 Session 3 (ADR 0079): unterhalb von
     `max_notification_attempts` bleibt `status="failed"` (retry-fähig) mit
@@ -66,13 +79,16 @@ async def test_create_and_send_below_max_attempts_stays_failed_and_schedules_ret
         recipient="http://127.0.0.1:1/nope",
         subject="S",
         body="B",
+        rate_limiter=rate_limiter,
     )
     assert notification.status == "failed"
     assert notification.attempts == 1
     assert notification.next_retry_at is not None
 
 
-async def test_create_and_send_reaches_failed_permanent_at_max_attempts(session, settings):
+async def test_create_and_send_reaches_failed_permanent_at_max_attempts(
+    session, settings, rate_limiter
+):
     settings.max_notification_attempts = 1
     notification = await repository.create_and_send(
         session,
@@ -81,13 +97,16 @@ async def test_create_and_send_reaches_failed_permanent_at_max_attempts(session,
         recipient="http://127.0.0.1:1/nope",
         subject="S",
         body="B",
+        rate_limiter=rate_limiter,
     )
     assert notification.status == "failed_permanent"
     assert notification.attempts == 1
     assert notification.next_retry_at is None
 
 
-async def test_list_due_for_retry_excludes_sent_and_failed_permanent(session, settings):
+async def test_list_due_for_retry_excludes_sent_and_failed_permanent(
+    session, settings, rate_limiter
+):
     settings.max_notification_attempts = 5
     retryable = await repository.create_and_send(
         session,
@@ -96,6 +115,7 @@ async def test_list_due_for_retry_excludes_sent_and_failed_permanent(session, se
         recipient="http://127.0.0.1:1/nope",
         subject="S",
         body="B",
+        rate_limiter=rate_limiter,
     )
     # Backoff-Fenster kuenstlich in die Vergangenheit versetzt, damit dieser
     # Test gezielt die Status-Filterung prueft, nicht die Backoff-Zeitsteuerung
@@ -103,7 +123,13 @@ async def test_list_due_for_retry_excludes_sent_and_failed_permanent(session, se
     retryable.next_retry_at = datetime.now(UTC) - timedelta(seconds=1)
     await session.flush()
     sent = await repository.create_and_send(
-        session, settings, channel="in_app", recipient="alice", subject="S", body="B"
+        session,
+        settings,
+        channel="in_app",
+        recipient="alice",
+        subject="S",
+        body="B",
+        rate_limiter=rate_limiter,
     )
     settings.max_notification_attempts = 1
     permanent = await repository.create_and_send(
@@ -113,6 +139,7 @@ async def test_list_due_for_retry_excludes_sent_and_failed_permanent(session, se
         recipient="http://127.0.0.1:1/nope",
         subject="S",
         body="B",
+        rate_limiter=rate_limiter,
     )
 
     due_ids = {n.id for n in await repository.list_due_for_retry(session)}
@@ -122,7 +149,9 @@ async def test_list_due_for_retry_excludes_sent_and_failed_permanent(session, se
     assert permanent.id not in due_ids
 
 
-async def test_list_due_for_retry_excludes_notifications_still_in_backoff(session, settings):
+async def test_list_due_for_retry_excludes_notifications_still_in_backoff(
+    session, settings, rate_limiter
+):
     settings.max_notification_attempts = 5
     await repository.create_and_send(
         session,
@@ -131,6 +160,7 @@ async def test_list_due_for_retry_excludes_notifications_still_in_backoff(sessio
         recipient="http://127.0.0.1:1/nope",
         subject="S",
         body="B",
+        rate_limiter=rate_limiter,
     )
 
     due = await repository.list_due_for_retry(session)
@@ -139,7 +169,7 @@ async def test_list_due_for_retry_excludes_notifications_still_in_backoff(sessio
     assert due == []
 
 
-async def test_retry_now_resets_attempts_and_reattempts_delivery(session, settings):
+async def test_retry_now_resets_attempts_and_reattempts_delivery(session, settings, rate_limiter):
     settings.max_notification_attempts = 1
     notification = await repository.create_and_send(
         session,
@@ -148,6 +178,7 @@ async def test_retry_now_resets_attempts_and_reattempts_delivery(session, settin
         recipient="http://127.0.0.1:1/nope",
         subject="S",
         body="B",
+        rate_limiter=rate_limiter,
     )
     assert notification.status == "failed_permanent"
 
@@ -164,12 +195,24 @@ async def test_get_notification_unknown_raises(session):
         await repository.get_notification(session, 999999)
 
 
-async def test_list_notifications_filters_by_recipient_and_channel(session, settings):
+async def test_list_notifications_filters_by_recipient_and_channel(session, settings, rate_limiter):
     await repository.create_and_send(
-        session, settings, channel="in_app", recipient="alice", subject="S1", body="B"
+        session,
+        settings,
+        channel="in_app",
+        recipient="alice",
+        subject="S1",
+        body="B",
+        rate_limiter=rate_limiter,
     )
     await repository.create_and_send(
-        session, settings, channel="in_app", recipient="bob", subject="S2", body="B"
+        session,
+        settings,
+        channel="in_app",
+        recipient="bob",
+        subject="S2",
+        body="B",
+        rate_limiter=rate_limiter,
     )
     by_recipient = await repository.list_notifications(session, recipient="alice")
     assert len(by_recipient) == 1

@@ -125,7 +125,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await consumer.connect()
     app.state.consumer = consumer
     await start_consuming(
-        consumer, settings.subjects, app.state.session_factory, settings, publish_event
+        consumer,
+        settings.subjects,
+        app.state.session_factory,
+        settings,
+        publish_event,
+        rate_limiter=app.state.notification_rate_limiter,
     )
 
     registration = await maybe_start_registration(
@@ -299,11 +304,6 @@ async def create_notification(
             detail=f"Unbekannte empfangende Person {payload.recipient!r} für Kanal "
             f"{payload.channel!r}",
         )
-    if not app.state.notification_rate_limiter.allow(payload.recipient):
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Rate limit für Empfänger {payload.recipient!r} überschritten",
-        )
     notification = await repository.create_and_send(
         session,
         settings,
@@ -311,7 +311,13 @@ async def create_notification(
         recipient=payload.recipient,
         subject=payload.subject,
         body=payload.body,
+        rate_limiter=app.state.notification_rate_limiter,
     )
+    if notification is None:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Rate limit für Empfänger {payload.recipient!r} überschritten",
+        )
     await session.commit()
     await publish_notification_result(publish_event, notification)
     return notification

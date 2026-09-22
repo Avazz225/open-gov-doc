@@ -1,3 +1,4 @@
+import logging
 from datetime import UTC, datetime, timedelta
 
 from dms_retry import compute_backoff_seconds
@@ -6,7 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from notification_service import delivery
 from notification_service.models import EmailTemplate, Notification
+from notification_service.rate_limiter import RecipientRateLimiter
 from notification_service.settings import Settings
+
+logger = logging.getLogger(__name__)
 
 
 class NotFoundError(Exception):
@@ -58,11 +62,31 @@ async def create_and_send(
     recipient: str,
     subject: str,
     body: str,
-) -> Notification:
+    rate_limiter: RecipientRateLimiter,
+) -> Notification | None:
     """Persists first, then attempts synchronous delivery (Concept 7.1, P6-S2) -
     the result (`status`/`error`/`sent_at`/`attempts`/`next_retry_at`) is written
     directly to the same record. Since Post-Roadmap Phase 20 Session 3 (ADR
-    0079), a failure is no longer immediately terminal, see `attempt_delivery`."""
+    0079), a failure is no longer immediately terminal, see `attempt_delivery`.
+
+    Since Post-Roadmap Phase 73 Session 2, `rate_limiter` is checked FIRST, before
+    any row is created: originally the `RecipientRateLimiter` (Post-Roadmap Phase
+    38 Session 2) was only enforced at the `POST /notifications` HTTP boundary in
+    `main.py`, leaving every internal NATS-consumer call site in `consumer.py`
+    free to flood a recipient without limit. Making this function itself the
+    enforcement point closes that bypass for ALL callers at once, HTTP and
+    internal alike, instead of relying on every caller to remember its own
+    pre-check. When the limit is exceeded, nothing is persisted or delivered and
+    `None` is returned - callers must handle that (see `main.py`'s `429`
+    translation and `consumer.py`'s `publish_notification_result` early-return)."""
+    if not rate_limiter.allow(recipient):
+        logger.warning(
+            "notification rate limit exceeded for recipient=%r channel=%r - dropping",
+            recipient,
+            channel,
+        )
+        return None
+
     now = datetime.now(UTC)
     notification = Notification(
         channel=channel,

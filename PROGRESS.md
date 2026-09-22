@@ -2,16 +2,66 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P73-S1 (first session of the newly-approved Phase 73 — "Security & Correctness
-Hardening", the ninth gap-analysis round's plan). Priority finding: real per-claimant authorization for
-`workflow-service`'s `POST .../complete` — previously gated only by the coarse `workflow.write`
-permission (granted to "everyone" by default), so any authenticated principal could complete any ready
-task, claimed by someone else or not. Now, only when the task has an existing `TaskClaim` (an unclaimed
-task stays fully permissive, unchanged — claiming remains optional/informational per `TaskClaim`'s own
-docstring), the effective principal (`on_behalf_of_principal_id` if a delegated completion, else
-`x_dms_principal`) must be the claim's own `principal_id` or a supervisor of it — reusing the exact
-precedent `reassign_task` established at P66-S2/ADR 0195, composing with rather than duplicating the
-existing on-behalf-of delegation check. New [ADR 0211](docs/adr/0211-workflow-service-per-claimant-task-completion-authorization.md).
+**Last completed:** P73-S2 (second session of Phase 73). Two independent items, one built, one scoped.
+**Built**: `notification-service`'s per-recipient rate limiter closed for internal callers —
+`repository.create_and_send` itself now checks `rate_limiter.allow(recipient)` first, before creating any
+row, so all ~18 `consumer.py` NATS-event handlers (`workflow.task.escalated` etc.) are guarded by the
+same limiter instance the `POST /notifications` HTTP boundary already used, not just the HTTP path.
+`main.py`'s endpoint simplified accordingly (calls `create_and_send` unconditionally, translates a `None`
+return into `429`, no more separate pre-check). 1 new regression test
+(`test_escalated_event_is_dropped_when_rate_limiter_denies_the_recipient`, exhausted limiter passed into
+`make_handler`, asserts zero `Notification` rows + zero `publish_notification_result` calls); all
+existing `create_and_send`/`make_handler` call sites (22 in `consumer.py`, plus `test_repository.py`/
+`test_main.py`) updated for the new required `rate_limiter` argument. `scripts/run-tests.sh
+notification-service`: 107/107 passed, `ruff` clean. Rebuilt/redeployed; live-verified via clean
+container startup (proves the 18-handler parameter threading has no signature mismatch — would have
+crashed at `start_consuming`'s single `make_handler(...)` call otherwise) plus the unchanged HTTP-boundary
+`429` behavior; the internal-consumer path itself was verified via the new regression test against a
+real Postgres DB rather than a live NATS fan-out (no user-facing surface to click through for this
+specific fix — an internal defense-in-depth guard, not a UI-visible change).
+
+**Scoped, not built**: `fleet-management-service`'s four-eyes approval check turned out to have a stale
+premise — the code already rejects `payload.actor == run.proposed_by` (exactly the "approved_by ==
+initiated_by" shape the plan asked for); making it genuinely *cryptographic* would mean giving
+fleet-management-service real per-user auth, reversing [ADR 0038](docs/adr/0038-fleet-update-orchestration-external-gates-not-remote-control.md)'s
+deliberate "no user management of its own" decision. Confirmed the service has ZERO auth today beyond one
+shared static bearer token (`fleet_operator_key`, same pattern as `federation-hub-service`'s
+`hub_operator_key`) — no Keycloak, no login UI, no `apps/*fleet*` app at all. User chose full design over
+a smaller patch, then agreed a proper scoping session should come first (matching this project's own
+established pattern for open-ended architectural questions — P37-S1, P72-S1–3). New
+[ADR 0212](docs/adr/0212-fleet-management-service-per-operator-auth-scoping.md): recommends named,
+individually-revocable per-operator bearer tokens (`fleet.fleet_operator` table,
+`hashlib.sha256` token hashes) — the `migration-service` `paired-installations` shape applied to human/CI
+operators — over a new Keycloak realm/login flow, since the service structurally cannot sit behind
+`gateway-service` (isolation 3a: it must never hold a principal for any single installation's realm) and
+has zero UI callers on its write surface today. Existing `actor != proposed_by` check stays, wrapped
+rather than replaced — only where the two compared strings come from changes (verified token identity,
+not request-body free text). Scope estimate: small. No code diff for this half.
+
+Only one Python service (`notification-service`) actually changed code this session — `scripts/run-tests.sh`
+(unfiltered, full regression) was NOT run, consistent with the standing "full regression only at phase-end,
+not session-end" rule; scoped `notification-service` run is the relevant evidence for this session.
+`docs/services/notification-service.md` updated (Authorization section, Open Points bullet struck, test
+count). No `graphify update .` this session (phase-end only).
+
+**Next session:** P73-S3 — `federation-hub-service` retry-payload persistence (in-flight handover retry
+payloads move from process memory, `app.state.pending_handover_payloads`/`pending_result_payloads`, into
+the existing `federation` schema — a real, if narrow, data-loss risk on a hub restart during an open retry
+window). Needs a new ADR (persistence-design decision). A future, not-yet-numbered build session should
+also be slotted into the plan for ADR 0212's fleet-management-service per-operator-token recommendation.
+
+---
+
+Immediately before P73-S2: **P73-S1** (first session of the newly-approved Phase 73 — "Security &
+Correctness Hardening", the ninth gap-analysis round's plan). Priority finding: real per-claimant
+authorization for `workflow-service`'s `POST .../complete` — previously gated only by the coarse
+`workflow.write` permission (granted to "everyone" by default), so any authenticated principal could
+complete any ready task, claimed by someone else or not. Now, only when the task has an existing
+`TaskClaim` (an unclaimed task stays fully permissive, unchanged — claiming remains optional/informational
+per `TaskClaim`'s own docstring), the effective principal (`on_behalf_of_principal_id` if a delegated
+completion, else `x_dms_principal`) must be the claim's own `principal_id` or a supervisor of it — reusing
+the exact precedent `reassign_task` established at P66-S2/ADR 0195, composing with rather than duplicating
+the existing on-behalf-of delegation check. New [ADR 0211](docs/adr/0211-workflow-service-per-claimant-task-completion-authorization.md).
 **Bundled `folder-service`'s `created_by`/`deleted_by` migration was investigated, started, and then
 reverted**: live tracing found that forcing both fields to always equal `x_dms_principal` would have
 broken `teamspace-service`'s deliberate "trusted intermediary asserts the real human's identity while
@@ -32,11 +82,6 @@ in the same family between the two runs with no code change in between, confirme
 completed by an unrelated bystander → `403`; the same task completed by the claimant → `200`.
 `docs/services/workflow-service.md` updated (new section, Open Points bullet struck/refined, test count).
 No `graphify update .` this session (per the standing "phase-end only" rule, not "session-end").
-
-**Next session:** P73-S2 — Authorization/anti-abuse hardening bundle (`notification-service`'s
-per-recipient rate limiter extended to guard `repository.create_and_send` itself, not only the `POST
-/notifications` HTTP boundary; `fleet-management-service`'s four-eyes approval check replaced with a real
-two-distinct-identity verification).
 
 ---
 

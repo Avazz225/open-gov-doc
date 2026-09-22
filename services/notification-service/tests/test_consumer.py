@@ -1,19 +1,22 @@
 from dms_db_base import make_session_factory
 from dms_eventbus_client import Event
 from notification_service import consumer, repository
+from notification_service.rate_limiter import RecipientRateLimiter
 
 
 def _session_factory(engine):
     return make_session_factory(engine)
 
 
-async def test_escalated_event_creates_in_app_and_email_notification(engine, settings):
+async def test_escalated_event_creates_in_app_and_email_notification(
+    engine, settings, rate_limiter
+):
     published = []
 
     async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
-    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
     event = Event(
         event_type="workflow.task.escalated",
         service_name="workflow-service",
@@ -41,7 +44,9 @@ async def test_escalated_event_creates_in_app_and_email_notification(engine, set
     assert len(published) == 2
 
 
-async def test_escalated_event_email_includes_a_direct_link_when_configured(engine, settings):
+async def test_escalated_event_email_includes_a_direct_link_when_configured(
+    engine, settings, rate_limiter
+):
     """Post-Roadmap Phase 29 (ADR 0109) - `event.subject` (the instance ID)
     becomes a reviewer-ui direct link in the email body, only when
     `reviewer_ui_public_base_url` is actually configured."""
@@ -53,7 +58,9 @@ async def test_escalated_event_email_includes_a_direct_link_when_configured(engi
     configured = settings.model_copy(
         update={"reviewer_ui_public_base_url": "http://localhost:3005"}
     )
-    handler = consumer.make_handler(_session_factory(engine), configured, fake_publish)
+    handler = consumer.make_handler(
+        _session_factory(engine), configured, fake_publish, rate_limiter
+    )
     event = Event(
         event_type="workflow.task.escalated",
         service_name="workflow-service",
@@ -76,7 +83,9 @@ async def test_escalated_event_email_includes_a_direct_link_when_configured(engi
     assert "http://localhost:3005/?instance=instance-1" in email.body
 
 
-async def test_escalated_event_email_has_no_link_when_base_url_unconfigured(engine, settings):
+async def test_escalated_event_email_has_no_link_when_base_url_unconfigured(
+    engine, settings, rate_limiter
+):
     """`settings.reviewer_ui_public_base_url` is `None` by default (see
     `test_consumer.py`'s `settings` fixture / ADR 0105) - no link is
     fabricated in that case."""
@@ -85,7 +94,7 @@ async def test_escalated_event_email_has_no_link_when_base_url_unconfigured(engi
     async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
-    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
     event = Event(
         event_type="workflow.task.escalated",
         service_name="workflow-service",
@@ -108,13 +117,15 @@ async def test_escalated_event_email_has_no_link_when_base_url_unconfigured(engi
     assert "http" not in email.body
 
 
-async def test_escalated_event_without_email_creates_only_in_app_notification(engine, settings):
+async def test_escalated_event_without_email_creates_only_in_app_notification(
+    engine, settings, rate_limiter
+):
     published = []
 
     async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
-    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
     event = Event(
         event_type="workflow.task.escalated",
         service_name="workflow-service",
@@ -139,13 +150,61 @@ async def test_escalated_event_without_email_creates_only_in_app_notification(en
     assert len(published) == 1
 
 
-async def test_superuser_activated_event_creates_security_officer_email(engine, settings):
+async def test_escalated_event_is_dropped_when_rate_limiter_denies_the_recipient(
+    engine, settings, rate_limiter
+):
+    """Regression test for Post-Roadmap Phase 73 Session 2 - the internal
+    NATS-consumer path used to call `repository.create_and_send` without
+    ever consulting the rate limiter at all (only `POST /notifications`
+    did), so a misconfigured/fast-cycling event producer could flood a
+    recipient without limit. `notification_rate_limit_max_per_recipient=0`
+    makes `rate_limiter.allow()` return `False` on the very first call -
+    `create_and_send` must then create NO row and return `None`, and
+    `publish_notification_result` must skip publishing for it entirely
+    (its own new `if notification is None: return` guard)."""
     published = []
 
     async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
-    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    exhausted_settings = settings.model_copy(
+        update={"notification_rate_limit_max_per_recipient": 0}
+    )
+    exhausted_rate_limiter = RecipientRateLimiter(exhausted_settings)
+    handler = consumer.make_handler(
+        _session_factory(engine), settings, fake_publish, exhausted_rate_limiter
+    )
+    event = Event(
+        event_type="workflow.task.escalated",
+        service_name="workflow-service",
+        subject="instance-4",
+        payload={
+            "process_definition_id": 1,
+            "business_key": "doc-1",
+            "task_name": "Freigabe",
+            "lane": "Vorgesetzte",
+            "escalation_email": "supervisor@example.com",
+        },
+    )
+
+    await handler(event.to_bytes())
+
+    session_factory = _session_factory(engine)
+    async with session_factory() as session:
+        notifications = await repository.list_notifications(session)
+    assert notifications == []
+    assert published == []
+
+
+async def test_superuser_activated_event_creates_security_officer_email(
+    engine, settings, rate_limiter
+):
+    published = []
+
+    async def fake_publish(event_type, subject, payload, actor=None):
+        published.append((event_type, subject, payload))
+
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
     event = Event(
         event_type="auth.superuser.activated",
         service_name="auth-service",
@@ -164,14 +223,14 @@ async def test_superuser_activated_event_creates_security_officer_email(engine, 
 
 
 async def test_federation_inbound_received_with_notify_email_creates_in_app_and_email(
-    engine, settings
+    engine, settings, rate_limiter
 ):
     published = []
 
     async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
-    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
     event = Event(
         event_type="workflow.federation.inbound_received",
         service_name="workflow-service",
@@ -199,14 +258,14 @@ async def test_federation_inbound_received_with_notify_email_creates_in_app_and_
 
 
 async def test_federation_inbound_received_without_notify_email_creates_only_in_app(
-    engine, settings
+    engine, settings, rate_limiter
 ):
     published = []
 
     async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
-    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
     event = Event(
         event_type="workflow.federation.inbound_received",
         service_name="workflow-service",
@@ -230,7 +289,7 @@ async def test_federation_inbound_received_without_notify_email_creates_only_in_
 
 
 async def test_folder_deletion_reminder_with_notify_email_creates_in_app_and_email(
-    engine, settings
+    engine, settings, rate_limiter
 ):
     """1:1 dasselbe Muster wie `document.deletion.reminder` (P7-S1), hier für
     `folder.deletion.reminder` (5.2a, P7-S1b)."""
@@ -239,7 +298,7 @@ async def test_folder_deletion_reminder_with_notify_email_creates_in_app_and_ema
     async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
-    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
     event = Event(
         event_type="folder.deletion.reminder",
         service_name="folder-service",
@@ -264,13 +323,15 @@ async def test_folder_deletion_reminder_with_notify_email_creates_in_app_and_ema
     assert len(published) == 2
 
 
-async def test_deletion_reminder_with_notify_email_creates_in_app_and_email(engine, settings):
+async def test_deletion_reminder_with_notify_email_creates_in_app_and_email(
+    engine, settings, rate_limiter
+):
     published = []
 
     async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
-    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
     event = Event(
         event_type="document.deletion.reminder",
         service_name="document-service",
@@ -295,7 +356,9 @@ async def test_deletion_reminder_with_notify_email_creates_in_app_and_email(engi
     assert len(published) == 2
 
 
-async def test_deletion_reminder_email_includes_a_direct_link_when_configured(engine, settings):
+async def test_deletion_reminder_email_includes_a_direct_link_when_configured(
+    engine, settings, rate_limiter
+):
     """Post-Roadmap Phase 29 (ADR 0109)."""
     published = []
 
@@ -303,7 +366,9 @@ async def test_deletion_reminder_email_includes_a_direct_link_when_configured(en
         published.append((event_type, subject, payload))
 
     configured = settings.model_copy(update={"user_ui_public_base_url": "http://localhost:3000"})
-    handler = consumer.make_handler(_session_factory(engine), configured, fake_publish)
+    handler = consumer.make_handler(
+        _session_factory(engine), configured, fake_publish, rate_limiter
+    )
     event = Event(
         event_type="document.deletion.reminder",
         service_name="document-service",
@@ -326,7 +391,7 @@ async def test_deletion_reminder_email_includes_a_direct_link_when_configured(en
 
 
 async def test_folder_deletion_reminder_email_includes_a_direct_link_when_configured(
-    engine, settings
+    engine, settings, rate_limiter
 ):
     """Post-Roadmap Phase 29 (ADR 0109)."""
     published = []
@@ -335,7 +400,9 @@ async def test_folder_deletion_reminder_email_includes_a_direct_link_when_config
         published.append((event_type, subject, payload))
 
     configured = settings.model_copy(update={"user_ui_public_base_url": "http://localhost:3000"})
-    handler = consumer.make_handler(_session_factory(engine), configured, fake_publish)
+    handler = consumer.make_handler(
+        _session_factory(engine), configured, fake_publish, rate_limiter
+    )
     event = Event(
         event_type="folder.deletion.reminder",
         service_name="folder-service",
@@ -357,13 +424,15 @@ async def test_folder_deletion_reminder_email_includes_a_direct_link_when_config
     assert "http://localhost:3000/?folder=folder-2" in email.body
 
 
-async def test_deletion_reminder_without_notify_email_creates_only_in_app(engine, settings):
+async def test_deletion_reminder_without_notify_email_creates_only_in_app(
+    engine, settings, rate_limiter
+):
     published = []
 
     async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
-    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
     event = Event(
         event_type="document.deletion.reminder",
         service_name="document-service",
@@ -387,7 +456,7 @@ async def test_deletion_reminder_without_notify_email_creates_only_in_app(engine
 
 
 async def test_lock_reminder_event_creates_in_app_notification_for_the_lock_holder(
-    engine, settings
+    engine, settings, rate_limiter
 ):
     """Post-Roadmap Phase 30 Session 4 (ADR 0111) - the first notification
     hook for document-service's lock feature. Unlike the deletion
@@ -398,7 +467,7 @@ async def test_lock_reminder_event_creates_in_app_notification_for_the_lock_hold
     async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
-    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
     event = Event(
         event_type="document.lock.reminder",
         service_name="document-service",
@@ -418,7 +487,7 @@ async def test_lock_reminder_event_creates_in_app_notification_for_the_lock_hold
     assert len(published) == 1
 
 
-async def test_lock_reminder_includes_a_direct_link_when_configured(engine, settings):
+async def test_lock_reminder_includes_a_direct_link_when_configured(engine, settings, rate_limiter):
     """Post-Roadmap Phase 29 (ADR 0109), wired up for this new use case in
     Phase 30 Session 4."""
 
@@ -426,7 +495,9 @@ async def test_lock_reminder_includes_a_direct_link_when_configured(engine, sett
         pass
 
     configured = settings.model_copy(update={"user_ui_public_base_url": "http://localhost:3000"})
-    handler = consumer.make_handler(_session_factory(engine), configured, fake_publish)
+    handler = consumer.make_handler(
+        _session_factory(engine), configured, fake_publish, rate_limiter
+    )
     event = Event(
         event_type="document.lock.reminder",
         service_name="document-service",
@@ -442,7 +513,7 @@ async def test_lock_reminder_includes_a_direct_link_when_configured(engine, sett
     assert "http://localhost:3000/?document=doc-21" in notifications[0].body
 
 
-async def test_lock_reminder_uses_configured_template(engine, settings):
+async def test_lock_reminder_uses_configured_template(engine, settings, rate_limiter):
     await _configure_template(
         engine,
         use_case="document.lock.reminder",
@@ -454,7 +525,7 @@ async def test_lock_reminder_uses_configured_template(engine, settings):
     async def fake_publish(event_type, subject, payload, actor=None):
         pass
 
-    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
     event = Event(
         event_type="document.lock.reminder",
         service_name="document-service",
@@ -472,7 +543,7 @@ async def test_lock_reminder_uses_configured_template(engine, settings):
 
 
 async def test_virus_scan_infected_event_creates_in_app_notification_for_the_uploader(
-    engine, settings
+    engine, settings, rate_limiter
 ):
     """Post-Roadmap Phase 44 Session 4 - `virus_scan.completed` was
     already published unconditionally by `virus-scan-service` since it
@@ -484,7 +555,7 @@ async def test_virus_scan_infected_event_creates_in_app_notification_for_the_upl
     async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
-    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
     event = Event(
         event_type="virus_scan.completed",
         service_name="virus-scan-service",
@@ -511,7 +582,7 @@ async def test_virus_scan_infected_event_creates_in_app_notification_for_the_upl
     assert len(published) == 1
 
 
-async def test_virus_scan_clean_event_creates_no_notification(engine, settings):
+async def test_virus_scan_clean_event_creates_no_notification(engine, settings, rate_limiter):
     """The same subject also fires for a clean result (`virus-scan-
     service` publishes `virus_scan.completed` unconditionally) - only an
     actual hit is worth notifying anyone about."""
@@ -519,7 +590,7 @@ async def test_virus_scan_clean_event_creates_no_notification(engine, settings):
     async def fake_publish(event_type, subject, payload, actor=None):
         pass
 
-    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
     event = Event(
         event_type="virus_scan.completed",
         service_name="virus-scan-service",
@@ -542,7 +613,7 @@ async def test_virus_scan_clean_event_creates_no_notification(engine, settings):
 
 
 async def test_virus_scan_infected_event_includes_a_direct_link_when_document_id_known(
-    engine, settings
+    engine, settings, rate_limiter
 ):
     """`document_id` is usually `None` for an infected result (the
     document is never created for one, see `virus-scan-service`'s own
@@ -555,7 +626,9 @@ async def test_virus_scan_infected_event_includes_a_direct_link_when_document_id
         pass
 
     configured = settings.model_copy(update={"user_ui_public_base_url": "http://localhost:3000"})
-    handler = consumer.make_handler(_session_factory(engine), configured, fake_publish)
+    handler = consumer.make_handler(
+        _session_factory(engine), configured, fake_publish, rate_limiter
+    )
     event = Event(
         event_type="virus_scan.completed",
         service_name="virus-scan-service",
@@ -578,7 +651,7 @@ async def test_virus_scan_infected_event_includes_a_direct_link_when_document_id
 
 
 async def test_task_claim_abandoned_event_creates_in_app_notification_for_the_claimant(
-    engine, settings
+    engine, settings, rate_limiter
 ):
     """Post-Roadmap Phase 35 Session 3 (ADR 0145) - the notification half
     of the feature ADR 0121 scoped out. Same shape as the lock-reminder
@@ -589,7 +662,7 @@ async def test_task_claim_abandoned_event_creates_in_app_notification_for_the_cl
     async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
-    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
     event = Event(
         event_type="workflow.task_claim.abandoned",
         service_name="workflow-service",
@@ -614,14 +687,18 @@ async def test_task_claim_abandoned_event_creates_in_app_notification_for_the_cl
     assert len(published) == 1
 
 
-async def test_task_claim_abandoned_includes_a_direct_link_when_configured(engine, settings):
+async def test_task_claim_abandoned_includes_a_direct_link_when_configured(
+    engine, settings, rate_limiter
+):
     async def fake_publish(event_type, subject, payload, actor=None):
         pass
 
     configured = settings.model_copy(
         update={"reviewer_ui_public_base_url": "http://localhost:3005"}
     )
-    handler = consumer.make_handler(_session_factory(engine), configured, fake_publish)
+    handler = consumer.make_handler(
+        _session_factory(engine), configured, fake_publish, rate_limiter
+    )
     event = Event(
         event_type="workflow.task_claim.abandoned",
         service_name="workflow-service",
@@ -642,7 +719,7 @@ async def test_task_claim_abandoned_includes_a_direct_link_when_configured(engin
     assert "http://localhost:3005/?instance=instance-31" in notifications[0].body
 
 
-async def test_task_claim_abandoned_uses_configured_template(engine, settings):
+async def test_task_claim_abandoned_uses_configured_template(engine, settings, rate_limiter):
     await _configure_template(
         engine,
         use_case="workflow.task_claim.abandoned",
@@ -654,7 +731,7 @@ async def test_task_claim_abandoned_uses_configured_template(engine, settings):
     async def fake_publish(event_type, subject, payload, actor=None):
         pass
 
-    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
     event = Event(
         event_type="workflow.task_claim.abandoned",
         service_name="workflow-service",
@@ -676,13 +753,15 @@ async def test_task_claim_abandoned_uses_configured_template(engine, settings):
     assert notifications[0].body == "Prüfung (Vorgang instance-32) seit längerem bei bob"
 
 
-async def test_maintenance_mode_activated_event_creates_security_officer_email(engine, settings):
+async def test_maintenance_mode_activated_event_creates_security_officer_email(
+    engine, settings, rate_limiter
+):
     published = []
 
     async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
-    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
     event = Event(
         event_type="permission.maintenance_mode.activated",
         service_name="permission-service",
@@ -701,13 +780,15 @@ async def test_maintenance_mode_activated_event_creates_security_officer_email(e
     assert len(published) == 1
 
 
-async def test_license_limit_exceeded_event_creates_license_admin_email(engine, settings):
+async def test_license_limit_exceeded_event_creates_license_admin_email(
+    engine, settings, rate_limiter
+):
     published = []
 
     async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
-    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
     event = Event(
         event_type="license.limit_exceeded",
         service_name="license-service",
@@ -726,13 +807,15 @@ async def test_license_limit_exceeded_event_creates_license_admin_email(engine, 
     assert len(published) == 1
 
 
-async def test_license_expiring_soon_event_creates_license_admin_email(engine, settings):
+async def test_license_expiring_soon_event_creates_license_admin_email(
+    engine, settings, rate_limiter
+):
     published = []
 
     async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
-    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
     event = Event(
         event_type="license.expiring_soon",
         service_name="license-service",
@@ -750,13 +833,13 @@ async def test_license_expiring_soon_event_creates_license_admin_email(engine, s
     assert len(published) == 1
 
 
-async def test_license_invalid_event_creates_license_admin_email(engine, settings):
+async def test_license_invalid_event_creates_license_admin_email(engine, settings, rate_limiter):
     published = []
 
     async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
-    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
     event = Event(
         event_type="license.invalid",
         service_name="license-service",
@@ -798,7 +881,7 @@ async def _configure_template(
         await session.commit()
 
 
-async def test_task_escalated_uses_configured_template_when_present(engine, settings):
+async def test_task_escalated_uses_configured_template_when_present(engine, settings, rate_limiter):
     await _configure_template(
         engine,
         use_case="workflow.task.escalated",
@@ -811,7 +894,7 @@ async def test_task_escalated_uses_configured_template_when_present(engine, sett
     async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
-    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
     event = Event(
         event_type="workflow.task.escalated",
         service_name="workflow-service",
@@ -837,7 +920,7 @@ async def test_task_escalated_uses_configured_template_when_present(engine, sett
     assert email.body == "Instanz instance-10, Business Key doc-1"
 
 
-async def test_federation_inbound_received_uses_configured_template(engine, settings):
+async def test_federation_inbound_received_uses_configured_template(engine, settings, rate_limiter):
     await _configure_template(
         engine,
         use_case="workflow.federation.inbound_received",
@@ -850,7 +933,7 @@ async def test_federation_inbound_received_uses_configured_template(engine, sett
     async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
-    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
     event = Event(
         event_type="workflow.federation.inbound_received",
         service_name="workflow-service",
@@ -873,7 +956,7 @@ async def test_federation_inbound_received_uses_configured_template(engine, sett
     assert email.body == "Von install-abc, Instanz instance-11"
 
 
-async def test_deletion_reminder_uses_configured_template(engine, settings):
+async def test_deletion_reminder_uses_configured_template(engine, settings, rate_limiter):
     await _configure_template(
         engine,
         use_case="document.deletion.reminder",
@@ -886,7 +969,7 @@ async def test_deletion_reminder_uses_configured_template(engine, settings):
     async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
-    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
     event = Event(
         event_type="document.deletion.reminder",
         service_name="document-service",
@@ -909,7 +992,9 @@ async def test_deletion_reminder_uses_configured_template(engine, settings):
     assert "physisch zwangsgelöscht" in email.body
 
 
-async def test_deletion_reminder_domain_specific_template_wins_over_catchall(engine, settings):
+async def test_deletion_reminder_domain_specific_template_wins_over_catchall(
+    engine, settings, rate_limiter
+):
     await _configure_template(
         engine,
         use_case="document.deletion.reminder",
@@ -929,7 +1014,7 @@ async def test_deletion_reminder_domain_specific_template_wins_over_catchall(eng
     async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
-    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
     event = Event(
         event_type="document.deletion.reminder",
         service_name="document-service",
@@ -955,7 +1040,7 @@ async def test_deletion_reminder_domain_specific_template_wins_over_catchall(eng
     assert in_app.subject == "Catchall: Vertrag.pdf"
 
 
-async def test_folder_deletion_reminder_uses_configured_template(engine, settings):
+async def test_folder_deletion_reminder_uses_configured_template(engine, settings, rate_limiter):
     await _configure_template(
         engine,
         use_case="folder.deletion.reminder",
@@ -968,7 +1053,7 @@ async def test_folder_deletion_reminder_uses_configured_template(engine, setting
     async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
-    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
     event = Event(
         event_type="folder.deletion.reminder",
         service_name="folder-service",
@@ -990,7 +1075,7 @@ async def test_folder_deletion_reminder_uses_configured_template(engine, setting
     assert email.subject == "[Vorlage] Projektakte"
 
 
-async def test_superuser_activated_uses_configured_template(engine, settings):
+async def test_superuser_activated_uses_configured_template(engine, settings, rate_limiter):
     await _configure_template(
         engine,
         use_case="auth.superuser.activated",
@@ -1003,7 +1088,7 @@ async def test_superuser_activated_uses_configured_template(engine, settings):
     async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
-    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
     event = Event(
         event_type="auth.superuser.activated",
         service_name="auth-service",
@@ -1019,7 +1104,7 @@ async def test_superuser_activated_uses_configured_template(engine, settings):
     assert notifications[0].body == "Läuft ab: 2026-01-01T00:30:00+00:00"
 
 
-async def test_maintenance_mode_activated_uses_configured_template(engine, settings):
+async def test_maintenance_mode_activated_uses_configured_template(engine, settings, rate_limiter):
     await _configure_template(
         engine,
         use_case="permission.maintenance_mode.activated",
@@ -1032,7 +1117,7 @@ async def test_maintenance_mode_activated_uses_configured_template(engine, setti
     async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
-    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
     event = Event(
         event_type="permission.maintenance_mode.activated",
         service_name="permission-service",
@@ -1048,7 +1133,7 @@ async def test_maintenance_mode_activated_uses_configured_template(engine, setti
     assert notifications[0].body == "Von alice: Verdacht auf unautorisierten Zugriff"
 
 
-async def test_license_limit_exceeded_uses_configured_template(engine, settings):
+async def test_license_limit_exceeded_uses_configured_template(engine, settings, rate_limiter):
     await _configure_template(
         engine,
         use_case="license.limit_exceeded",
@@ -1061,7 +1146,7 @@ async def test_license_limit_exceeded_uses_configured_template(engine, settings)
     async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
-    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
     event = Event(
         event_type="license.limit_exceeded",
         service_name="license-service",
@@ -1077,7 +1162,7 @@ async def test_license_limit_exceeded_uses_configured_template(engine, settings)
     assert notifications[0].body == "documents: 1200/1000"
 
 
-async def test_license_expiring_soon_uses_configured_template(engine, settings):
+async def test_license_expiring_soon_uses_configured_template(engine, settings, rate_limiter):
     await _configure_template(
         engine,
         use_case="license.expiring_soon",
@@ -1090,7 +1175,7 @@ async def test_license_expiring_soon_uses_configured_template(engine, settings):
     async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
-    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
     event = Event(
         event_type="license.expiring_soon",
         service_name="license-service",
@@ -1106,7 +1191,7 @@ async def test_license_expiring_soon_uses_configured_template(engine, settings):
     assert notifications[0].body == "Noch 12 Tage"
 
 
-async def test_license_invalid_uses_configured_template(engine, settings):
+async def test_license_invalid_uses_configured_template(engine, settings, rate_limiter):
     await _configure_template(
         engine,
         use_case="license.invalid",
@@ -1119,7 +1204,7 @@ async def test_license_invalid_uses_configured_template(engine, settings):
     async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
-    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
     event = Event(
         event_type="license.invalid",
         service_name="license-service",
@@ -1135,7 +1220,9 @@ async def test_license_invalid_uses_configured_template(engine, settings):
     assert notifications[0].body == "Grund: Lizenz abgelaufen"
 
 
-async def test_deletion_reminder_falls_back_when_template_has_unknown_placeholder(engine, settings):
+async def test_deletion_reminder_falls_back_when_template_has_unknown_placeholder(
+    engine, settings, rate_limiter
+):
     """A misconfigured template (references a placeholder that isn't in the
     catalog for this use_case, e.g. a typo) fails loudly at render time
     (`UnknownPlaceholderError`) - `_render_or_fallback` catches it and keeps
@@ -1153,7 +1240,7 @@ async def test_deletion_reminder_falls_back_when_template_has_unknown_placeholde
     async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
-    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
     event = Event(
         event_type="document.deletion.reminder",
         service_name="document-service",
@@ -1178,7 +1265,9 @@ async def test_deletion_reminder_falls_back_when_template_has_unknown_placeholde
 # --- Force-unlock execution feedback (4.2/4.3, P71-S1) ----------------------
 
 
-async def test_lock_force_released_notifies_the_original_lock_holder(engine, settings):
+async def test_lock_force_released_notifies_the_original_lock_holder(
+    engine, settings, rate_limiter
+):
     """Closes ADR 0022's own named gap ("no execution feedback channel") -
     `document-service` has published `document.lock.force_released`
     unconditionally since P6-S4, just never consumed here before."""
@@ -1187,7 +1276,7 @@ async def test_lock_force_released_notifies_the_original_lock_holder(engine, set
     async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
-    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
     event = Event(
         event_type="document.lock.force_released",
         service_name="document-service",
@@ -1211,7 +1300,7 @@ async def test_lock_force_released_notifies_the_original_lock_holder(engine, set
     assert len(published) == 1
 
 
-async def test_force_unlock_failed_notifies_the_approver(engine, settings):
+async def test_force_unlock_failed_notifies_the_approver(engine, settings, rate_limiter):
     """Counterpart - the approver whose already-approved request could not
     actually be executed is the one who needs to know, not the original
     lock holder (who was never affected)."""
@@ -1220,7 +1309,7 @@ async def test_force_unlock_failed_notifies_the_approver(engine, settings):
     async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
-    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
     event = Event(
         event_type="document.force_unlock.failed",
         service_name="document-service",
@@ -1246,7 +1335,7 @@ async def test_force_unlock_failed_notifies_the_approver(engine, settings):
 # --- Four-eyes approval lifecycle feedback (4.3, P71-S1) --------------------
 
 
-async def test_approval_approved_notifies_the_initiator(engine, settings):
+async def test_approval_approved_notifies_the_initiator(engine, settings, rate_limiter):
     """The initiator of an approval request previously had no way to learn
     its outcome except by polling `GET /approval-requests/{id}` directly -
     `request_id` comes from the payload, not `event.subject`
@@ -1256,7 +1345,7 @@ async def test_approval_approved_notifies_the_initiator(engine, settings):
     async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
-    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
     event = Event(
         event_type="permission.approval.approved",
         service_name="permission-service",
@@ -1280,13 +1369,13 @@ async def test_approval_approved_notifies_the_initiator(engine, settings):
     assert "carol" in notifications[0].body
 
 
-async def test_approval_rejected_notifies_the_initiator_with_reason(engine, settings):
+async def test_approval_rejected_notifies_the_initiator_with_reason(engine, settings, rate_limiter):
     published = []
 
     async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
-    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
     event = Event(
         event_type="permission.approval.rejected",
         service_name="permission-service",
@@ -1313,7 +1402,9 @@ async def test_approval_rejected_notifies_the_initiator_with_reason(engine, sett
 # --- Storage-service alerting (3.6, P71-S1) ----------------------------------
 
 
-async def test_storage_replication_failed_permanent_notifies_the_storage_admin(engine, settings):
+async def test_storage_replication_failed_permanent_notifies_the_storage_admin(
+    engine, settings, rate_limiter
+):
     """`storage-service`'s first ever event bus connection - permanently-
     failed replication was "logged instead of alerted" before this."""
     published = []
@@ -1321,7 +1412,7 @@ async def test_storage_replication_failed_permanent_notifies_the_storage_admin(e
     async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
-    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
     event = Event(
         event_type="storage.replication.failed_permanent",
         service_name="storage-service",
@@ -1345,13 +1436,13 @@ async def test_storage_replication_failed_permanent_notifies_the_storage_admin(e
     assert "s3-secondary" in notifications[0].body
 
 
-async def test_storage_verify_mismatch_notifies_the_storage_admin(engine, settings):
+async def test_storage_verify_mismatch_notifies_the_storage_admin(engine, settings, rate_limiter):
     published = []
 
     async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
-    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
     event = Event(
         event_type="storage.object_verify.mismatch",
         service_name="storage-service",

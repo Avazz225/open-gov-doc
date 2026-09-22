@@ -31,6 +31,7 @@ async def test_run_retry_tick_redelivers_a_due_notification(client, session_fact
             recipient="http://127.0.0.1:1/nope",
             subject="S",
             body="B",
+            rate_limiter=app.state.notification_rate_limiter,
         )
         await session.commit()
         assert notification.status == "failed"
@@ -62,6 +63,7 @@ async def test_run_retry_tick_skips_notifications_not_yet_due(client, session_fa
             recipient="http://127.0.0.1:1/nope",
             subject="S",
             body="B",
+            rate_limiter=app.state.notification_rate_limiter,
         )
         await session.commit()
         assert notification.attempts == 1

@@ -1793,12 +1793,26 @@ round starts at **Phase 73** / **ADR 0211**.
   pattern (ADR 0149) — the same accepted trade-off this project already made for `document-service`'s
   `created_by`/`workflow-service`'s own `completed_by`. `workflow-service` 235/235 (+4, one pre-existing
   test updated), live-verified against the real running stack.
-- **P73-S2 — Authorization/anti-abuse hardening bundle**: `notification-service`'s per-recipient rate
+- ~~**P73-S2 — Authorization/anti-abuse hardening bundle**: `notification-service`'s per-recipient rate
   limiter extended to guard `repository.create_and_send` itself, not only the `POST /notifications` HTTP
   boundary (closes the internal-caller bypass); `fleet-management-service`'s four-eyes approval check
   replaced with a real two-distinct-identity verification consistent with how every other four-eyes gate
   in this project already works (`permission-service`'s `approved_by == initiated_by` rejection, not a
-  plain string compare).
+  plain string compare).~~ **`notification-service` half done; `fleet-management-service` half re-scoped,
+  not built.** `create_and_send` itself now enforces the rate limit (all ~18 internal NATS handlers
+  covered, not just the HTTP boundary), 107/107 tests. The fleet half's premise was stale — the code
+  already does `actor == proposed_by` rejection; a genuinely cryptographic version needs real per-user
+  auth for a service with zero auth infrastructure today (no Keycloak, no login UI), which reverses ADR
+  0038's own deliberate scope decision. [ADR 0212](docs/adr/0212-fleet-management-service-per-operator-auth-scoping.md)
+  recommends named per-operator bearer tokens (small scope, no UI) over a Keycloak realm — a future build
+  session, not yet numbered, should implement it directly from that ADR.
+- **P73-S2b — `fleet-management-service` per-operator auth, build session (newly added, scoped by
+  P73-S2 itself)**: implement [ADR 0212](docs/adr/0212-fleet-management-service-per-operator-auth-scoping.md)
+  directly — new `fleet.fleet_operator` table, `_require_operator_key` becomes an identity-resolving
+  dependency, `mark-done`/`approve`/`reject`/`start` derive their actor identity from the resolved
+  operator instead of trusting request-body strings, bootstrap migration from the existing shared
+  `fleet_operator_key`, `POST`/`GET`/revoke `/operators` endpoints. No new ADR expected (the design
+  decision was already made in ADR 0212; this session executes it).
 - **P73-S3 — `federation-hub-service` retry-payload persistence**: in-flight handover retry payloads
   move from process memory into the existing `federation` schema (a new table or column, following the
   same durability principle every other retry/backoff mechanism in this project already has —

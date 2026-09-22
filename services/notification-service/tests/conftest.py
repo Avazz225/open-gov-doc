@@ -5,6 +5,7 @@ import httpx
 import pytest
 from dms_db_base import build_engine, make_session_factory
 from notification_service.models import Base
+from notification_service.rate_limiter import RecipientRateLimiter
 from notification_service.settings import Settings
 from sqlalchemy import text
 
@@ -70,6 +71,15 @@ def session_factory(engine):
 @pytest.fixture
 def settings() -> Settings:
     return Settings()
+
+
+@pytest.fixture
+def rate_limiter(settings: Settings) -> RecipientRateLimiter:
+    """Generous default limit (20 hits/60s, see `Settings.
+    notification_rate_limit_max_per_recipient`) - Post-Roadmap Phase 73
+    Session 2's `create_and_send`/`make_handler` rate-limiter argument,
+    fresh per test so no test's hits leak into another's."""
+    return RecipientRateLimiter(settings)
 
 
 AUTH_SERVICE_URL = os.environ.get("TEST_AUTH_SERVICE_URL", "http://localhost:8003")

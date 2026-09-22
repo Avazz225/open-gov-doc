@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from notification_service import repository
 from notification_service.links import build_resource_link
+from notification_service.rate_limiter import RecipientRateLimiter
 from notification_service.settings import Settings
 from notification_service.templates import (
     UnknownPlaceholderError,
@@ -44,6 +45,7 @@ def make_handler(
     session_factory: async_sessionmaker[AsyncSession],
     settings: Settings,
     publish_event: Callable[[str, str, dict], Awaitable[None]],
+    rate_limiter: RecipientRateLimiter,
 ) -> Callable[[bytes], Awaitable[None]]:
     """Translates `workflow.task.escalated` into notifications (concept 7.1, P6-S2):
     always an in-app notification (recipient = lane name, otherwise `"unassigned"` - no
@@ -54,63 +56,91 @@ def make_handler(
     async def handle(payload: bytes) -> None:
         event = Event.from_bytes(payload)
         if event.event_type == "auth.superuser.activated":
-            await _handle_superuser_activated(session_factory, settings, publish_event, event)
+            await _handle_superuser_activated(
+                session_factory, settings, publish_event, rate_limiter, event
+            )
             return
         if event.event_type == "permission.maintenance_mode.activated":
             await _handle_maintenance_mode_activated(
-                session_factory, settings, publish_event, event
+                session_factory, settings, publish_event, rate_limiter, event
             )
             return
         if event.event_type == "workflow.federation.inbound_received":
             await _handle_federation_inbound_received(
-                session_factory, settings, publish_event, event
+                session_factory, settings, publish_event, rate_limiter, event
             )
             return
         if event.event_type == "document.deletion.reminder":
-            await _handle_deletion_reminder(session_factory, settings, publish_event, event)
+            await _handle_deletion_reminder(
+                session_factory, settings, publish_event, rate_limiter, event
+            )
             return
         if event.event_type == "folder.deletion.reminder":
-            await _handle_folder_deletion_reminder(session_factory, settings, publish_event, event)
+            await _handle_folder_deletion_reminder(
+                session_factory, settings, publish_event, rate_limiter, event
+            )
             return
         if event.event_type == "document.lock.reminder":
-            await _handle_lock_reminder(session_factory, settings, publish_event, event)
+            await _handle_lock_reminder(
+                session_factory, settings, publish_event, rate_limiter, event
+            )
             return
         if event.event_type == "workflow.task_claim.abandoned":
-            await _handle_task_claim_abandoned(session_factory, settings, publish_event, event)
+            await _handle_task_claim_abandoned(
+                session_factory, settings, publish_event, rate_limiter, event
+            )
             return
         if event.event_type == "virus_scan.completed":
-            await _handle_virus_scan_completed(session_factory, settings, publish_event, event)
+            await _handle_virus_scan_completed(
+                session_factory, settings, publish_event, rate_limiter, event
+            )
             return
         if event.event_type == "license.limit_exceeded":
-            await _handle_license_limit_exceeded(session_factory, settings, publish_event, event)
+            await _handle_license_limit_exceeded(
+                session_factory, settings, publish_event, rate_limiter, event
+            )
             return
         if event.event_type == "license.expiring_soon":
-            await _handle_license_expiring_soon(session_factory, settings, publish_event, event)
+            await _handle_license_expiring_soon(
+                session_factory, settings, publish_event, rate_limiter, event
+            )
             return
         if event.event_type == "license.invalid":
-            await _handle_license_invalid(session_factory, settings, publish_event, event)
+            await _handle_license_invalid(
+                session_factory, settings, publish_event, rate_limiter, event
+            )
             return
         if event.event_type == "document.lock.force_released":
-            await _handle_lock_force_released(session_factory, settings, publish_event, event)
+            await _handle_lock_force_released(
+                session_factory, settings, publish_event, rate_limiter, event
+            )
             return
         if event.event_type == "document.force_unlock.failed":
-            await _handle_force_unlock_failed(session_factory, settings, publish_event, event)
+            await _handle_force_unlock_failed(
+                session_factory, settings, publish_event, rate_limiter, event
+            )
             return
         if event.event_type == "permission.approval.approved":
-            await _handle_approval_approved(session_factory, settings, publish_event, event)
+            await _handle_approval_approved(
+                session_factory, settings, publish_event, rate_limiter, event
+            )
             return
         if event.event_type == "permission.approval.rejected":
-            await _handle_approval_rejected(session_factory, settings, publish_event, event)
+            await _handle_approval_rejected(
+                session_factory, settings, publish_event, rate_limiter, event
+            )
             return
         if event.event_type == "storage.replication.failed_permanent":
             await _handle_storage_replication_failed(
-                session_factory, settings, publish_event, event
+                session_factory, settings, publish_event, rate_limiter, event
             )
             return
         if event.event_type == "storage.object_verify.mismatch":
-            await _handle_storage_verify_mismatch(session_factory, settings, publish_event, event)
+            await _handle_storage_verify_mismatch(
+                session_factory, settings, publish_event, rate_limiter, event
+            )
             return
-        await _handle_task_escalated(session_factory, settings, publish_event, event)
+        await _handle_task_escalated(session_factory, settings, publish_event, rate_limiter, event)
 
     return handle
 
@@ -151,6 +181,7 @@ async def _handle_task_escalated(
     session_factory: async_sessionmaker[AsyncSession],
     settings: Settings,
     publish_event: Callable[[str, str, dict], Awaitable[None]],
+    rate_limiter: RecipientRateLimiter,
     event: Event,
 ) -> None:
     data = event.payload
@@ -186,7 +217,13 @@ async def _handle_task_escalated(
             **placeholders,
         )
         in_app = await repository.create_and_send(
-            session, settings, channel="in_app", recipient=recipient, subject=subject, body=body
+            session,
+            settings,
+            channel="in_app",
+            recipient=recipient,
+            subject=subject,
+            body=body,
+            rate_limiter=rate_limiter,
         )
         await session.commit()
         await publish_notification_result(publish_event, in_app)
@@ -208,6 +245,7 @@ async def _handle_task_escalated(
                 recipient=escalation_email,
                 subject=subject,
                 body=body,
+                rate_limiter=rate_limiter,
             )
             await session.commit()
             await publish_notification_result(publish_event, email_notification)
@@ -217,6 +255,7 @@ async def _handle_federation_inbound_received(
     session_factory: async_sessionmaker[AsyncSession],
     settings: Settings,
     publish_event: Callable[[str, str, dict], Awaitable[None]],
+    rate_limiter: RecipientRateLimiter,
     event: Event,
 ) -> None:
     """Notifies the target installation of an incoming federated
@@ -250,7 +289,13 @@ async def _handle_federation_inbound_received(
             **placeholders,
         )
         in_app = await repository.create_and_send(
-            session, settings, channel="in_app", recipient="unassigned", subject=subject, body=body
+            session,
+            settings,
+            channel="in_app",
+            recipient="unassigned",
+            subject=subject,
+            body=body,
+            rate_limiter=rate_limiter,
         )
         await session.commit()
         await publish_notification_result(publish_event, in_app)
@@ -272,6 +317,7 @@ async def _handle_federation_inbound_received(
                 recipient=notify_email,
                 subject=subject,
                 body=body,
+                rate_limiter=rate_limiter,
             )
             await session.commit()
             await publish_notification_result(publish_event, email_notification)
@@ -281,6 +327,7 @@ async def _handle_deletion_reminder(
     session_factory: async_sessionmaker[AsyncSession],
     settings: Settings,
     publish_event: Callable[[str, str, dict], Awaitable[None]],
+    rate_limiter: RecipientRateLimiter,
     event: Event,
 ) -> None:
     """Deletion reminder before a scheduled retention period/
@@ -320,7 +367,13 @@ async def _handle_deletion_reminder(
             **placeholders,
         )
         in_app = await repository.create_and_send(
-            session, settings, channel="in_app", recipient="unassigned", subject=subject, body=body
+            session,
+            settings,
+            channel="in_app",
+            recipient="unassigned",
+            subject=subject,
+            body=body,
+            rate_limiter=rate_limiter,
         )
         await session.commit()
         await publish_notification_result(publish_event, in_app)
@@ -342,6 +395,7 @@ async def _handle_deletion_reminder(
                 recipient=notify_email,
                 subject=subject,
                 body=body,
+                rate_limiter=rate_limiter,
             )
             await session.commit()
             await publish_notification_result(publish_event, email_notification)
@@ -351,6 +405,7 @@ async def _handle_folder_deletion_reminder(
     session_factory: async_sessionmaker[AsyncSession],
     settings: Settings,
     publish_event: Callable[[str, str, dict], Awaitable[None]],
+    rate_limiter: RecipientRateLimiter,
     event: Event,
 ) -> None:
     """Deletion reminder for folders (5.2a, P7-S1b) - 1:1 the same pattern as
@@ -388,7 +443,13 @@ async def _handle_folder_deletion_reminder(
             **placeholders,
         )
         in_app = await repository.create_and_send(
-            session, settings, channel="in_app", recipient="unassigned", subject=subject, body=body
+            session,
+            settings,
+            channel="in_app",
+            recipient="unassigned",
+            subject=subject,
+            body=body,
+            rate_limiter=rate_limiter,
         )
         await session.commit()
         await publish_notification_result(publish_event, in_app)
@@ -410,6 +471,7 @@ async def _handle_folder_deletion_reminder(
                 recipient=notify_email,
                 subject=subject,
                 body=body,
+                rate_limiter=rate_limiter,
             )
             await session.commit()
             await publish_notification_result(publish_event, email_notification)
@@ -419,6 +481,7 @@ async def _handle_lock_reminder(
     session_factory: async_sessionmaker[AsyncSession],
     settings: Settings,
     publish_event: Callable[[str, str, dict], Awaitable[None]],
+    rate_limiter: RecipientRateLimiter,
     event: Event,
 ) -> None:
     """Reminder for a document locked for a while (4.2, post-roadmap phase
@@ -454,7 +517,13 @@ async def _handle_lock_reminder(
             link=link or "",
         )
         notification = await repository.create_and_send(
-            session, settings, channel="in_app", recipient=locked_by, subject=subject, body=body
+            session,
+            settings,
+            channel="in_app",
+            recipient=locked_by,
+            subject=subject,
+            body=body,
+            rate_limiter=rate_limiter,
         )
         await session.commit()
         await publish_notification_result(publish_event, notification)
@@ -464,6 +533,7 @@ async def _handle_virus_scan_completed(
     session_factory: async_sessionmaker[AsyncSession],
     settings: Settings,
     publish_event: Callable[[str, str, dict], Awaitable[None]],
+    rate_limiter: RecipientRateLimiter,
     event: Event,
 ) -> None:
     """Uploader notification on a virus hit (Post-Roadmap Phase 44 Session
@@ -511,7 +581,13 @@ async def _handle_virus_scan_completed(
             link=link or "",
         )
         notification = await repository.create_and_send(
-            session, settings, channel="in_app", recipient=created_by, subject=subject, body=body
+            session,
+            settings,
+            channel="in_app",
+            recipient=created_by,
+            subject=subject,
+            body=body,
+            rate_limiter=rate_limiter,
         )
         await session.commit()
         await publish_notification_result(publish_event, notification)
@@ -521,6 +597,7 @@ async def _handle_task_claim_abandoned(
     session_factory: async_sessionmaker[AsyncSession],
     settings: Settings,
     publish_event: Callable[[str, str, dict], Awaitable[None]],
+    rate_limiter: RecipientRateLimiter,
     event: Event,
 ) -> None:
     """Claim-abandonment notice (14.2/8, Post-Roadmap Phase 35 Session 3,
@@ -561,7 +638,13 @@ async def _handle_task_claim_abandoned(
             link=link or "",
         )
         notification = await repository.create_and_send(
-            session, settings, channel="in_app", recipient=principal_id, subject=subject, body=body
+            session,
+            settings,
+            channel="in_app",
+            recipient=principal_id,
+            subject=subject,
+            body=body,
+            rate_limiter=rate_limiter,
         )
         await session.commit()
         await publish_notification_result(publish_event, notification)
@@ -571,6 +654,7 @@ async def _handle_superuser_activated(
     session_factory: async_sessionmaker[AsyncSession],
     settings: Settings,
     publish_event: Callable[[str, str, dict], Awaitable[None]],
+    rate_limiter: RecipientRateLimiter,
     event: Event,
 ) -> None:
     """Optional security notification on break-glass activation (4.6,
@@ -594,6 +678,7 @@ async def _handle_superuser_activated(
             recipient=settings.security_officer_email,
             subject=subject,
             body=body,
+            rate_limiter=rate_limiter,
         )
         await session.commit()
         await publish_notification_result(publish_event, notification)
@@ -603,6 +688,7 @@ async def _handle_maintenance_mode_activated(
     session_factory: async_sessionmaker[AsyncSession],
     settings: Settings,
     publish_event: Callable[[str, str, dict], Awaitable[None]],
+    rate_limiter: RecipientRateLimiter,
     event: Event,
 ) -> None:
     """Security notification on emergency-shutdown activation (4.8, P6-S6) -
@@ -627,6 +713,7 @@ async def _handle_maintenance_mode_activated(
             recipient=settings.security_officer_email,
             subject=subject,
             body=body,
+            rate_limiter=rate_limiter,
         )
         await session.commit()
         await publish_notification_result(publish_event, notification)
@@ -636,6 +723,7 @@ async def _handle_license_limit_exceeded(
     session_factory: async_sessionmaker[AsyncSession],
     settings: Settings,
     publish_event: Callable[[str, str, dict], Awaitable[None]],
+    rate_limiter: RecipientRateLimiter,
     event: Event,
 ) -> None:
     """License status notification (9.2, since P9-S1) - same pattern as
@@ -662,6 +750,7 @@ async def _handle_license_limit_exceeded(
             recipient=settings.license_admin_email,
             subject=subject,
             body=body,
+            rate_limiter=rate_limiter,
         )
         await session.commit()
         await publish_notification_result(publish_event, notification)
@@ -671,6 +760,7 @@ async def _handle_license_expiring_soon(
     session_factory: async_sessionmaker[AsyncSession],
     settings: Settings,
     publish_event: Callable[[str, str, dict], Awaitable[None]],
+    rate_limiter: RecipientRateLimiter,
     event: Event,
 ) -> None:
     days_remaining = event.payload.get("days_remaining", "?")
@@ -690,6 +780,7 @@ async def _handle_license_expiring_soon(
             recipient=settings.license_admin_email,
             subject=subject,
             body=body,
+            rate_limiter=rate_limiter,
         )
         await session.commit()
         await publish_notification_result(publish_event, notification)
@@ -699,6 +790,7 @@ async def _handle_license_invalid(
     session_factory: async_sessionmaker[AsyncSession],
     settings: Settings,
     publish_event: Callable[[str, str, dict], Awaitable[None]],
+    rate_limiter: RecipientRateLimiter,
     event: Event,
 ) -> None:
     reason = event.payload.get("reason") or "kein Grund angegeben"
@@ -718,6 +810,7 @@ async def _handle_license_invalid(
             recipient=settings.license_admin_email,
             subject=subject,
             body=body,
+            rate_limiter=rate_limiter,
         )
         await session.commit()
         await publish_notification_result(publish_event, notification)
@@ -727,6 +820,7 @@ async def _handle_lock_force_released(
     session_factory: async_sessionmaker[AsyncSession],
     settings: Settings,
     publish_event: Callable[[str, str, dict], Awaitable[None]],
+    rate_limiter: RecipientRateLimiter,
     event: Event,
 ) -> None:
     """Force-unlock execution feedback, success case (4.2/4.3, P71-S1) -
@@ -772,6 +866,7 @@ async def _handle_lock_force_released(
             recipient=original_locked_by,
             subject=subject,
             body=body,
+            rate_limiter=rate_limiter,
         )
         await session.commit()
         await publish_notification_result(publish_event, notification)
@@ -781,6 +876,7 @@ async def _handle_force_unlock_failed(
     session_factory: async_sessionmaker[AsyncSession],
     settings: Settings,
     publish_event: Callable[[str, str, dict], Awaitable[None]],
+    rate_limiter: RecipientRateLimiter,
     event: Event,
 ) -> None:
     """Force-unlock execution feedback, failure case (4.2/4.3, P71-S1) -
@@ -817,7 +913,13 @@ async def _handle_force_unlock_failed(
             link=link or "",
         )
         notification = await repository.create_and_send(
-            session, settings, channel="in_app", recipient=released_by, subject=subject, body=body
+            session,
+            settings,
+            channel="in_app",
+            recipient=released_by,
+            subject=subject,
+            body=body,
+            rate_limiter=rate_limiter,
         )
         await session.commit()
         await publish_notification_result(publish_event, notification)
@@ -827,6 +929,7 @@ async def _handle_approval_approved(
     session_factory: async_sessionmaker[AsyncSession],
     settings: Settings,
     publish_event: Callable[[str, str, dict], Awaitable[None]],
+    rate_limiter: RecipientRateLimiter,
     event: Event,
 ) -> None:
     """Four-eyes approval lifecycle feedback, approved case (4.3, P71-S1) -
@@ -865,6 +968,7 @@ async def _handle_approval_approved(
             recipient=initiated_by,
             subject=subject,
             body=body,
+            rate_limiter=rate_limiter,
         )
         await session.commit()
         await publish_notification_result(publish_event, notification)
@@ -874,6 +978,7 @@ async def _handle_approval_rejected(
     session_factory: async_sessionmaker[AsyncSession],
     settings: Settings,
     publish_event: Callable[[str, str, dict], Awaitable[None]],
+    rate_limiter: RecipientRateLimiter,
     event: Event,
 ) -> None:
     """Four-eyes approval lifecycle feedback, rejected case (4.3, P71-S1) -
@@ -908,6 +1013,7 @@ async def _handle_approval_rejected(
             recipient=initiated_by,
             subject=subject,
             body=body,
+            rate_limiter=rate_limiter,
         )
         await session.commit()
         await publish_notification_result(publish_event, notification)
@@ -917,6 +1023,7 @@ async def _handle_storage_replication_failed(
     session_factory: async_sessionmaker[AsyncSession],
     settings: Settings,
     publish_event: Callable[[str, str, dict], Awaitable[None]],
+    rate_limiter: RecipientRateLimiter,
     event: Event,
 ) -> None:
     """Permanently-failed replication (3.6, P71-S1) - `storage-service`
@@ -956,6 +1063,7 @@ async def _handle_storage_replication_failed(
             recipient=settings.storage_admin_email,
             subject=subject,
             body=body,
+            rate_limiter=rate_limiter,
         )
         await session.commit()
         await publish_notification_result(publish_event, notification)
@@ -965,6 +1073,7 @@ async def _handle_storage_verify_mismatch(
     session_factory: async_sessionmaker[AsyncSession],
     settings: Settings,
     publish_event: Callable[[str, str, dict], Awaitable[None]],
+    rate_limiter: RecipientRateLimiter,
     event: Event,
 ) -> None:
     """Fixity mismatch (3.6 "regular fixity check", P71-S1) - a data-
@@ -996,6 +1105,7 @@ async def _handle_storage_verify_mismatch(
             recipient=settings.storage_admin_email,
             subject=subject,
             body=body,
+            rate_limiter=rate_limiter,
         )
         await session.commit()
         await publish_notification_result(publish_event, notification)
@@ -1004,6 +1114,9 @@ async def _handle_storage_verify_mismatch(
 async def publish_notification_result(
     publish_event: Callable[[str, str, dict], Awaitable[None]], notification
 ) -> None:
+    # Rate-limited skip (`create_and_send` returned None) - nothing to report.
+    if notification is None:
+        return
     # System-triggered delivery attempt, not a human actor
     # (see P7-S2 convention "system:<component>").
     if notification.status == "sent":
@@ -1032,8 +1145,9 @@ async def start_consuming(
     session_factory: async_sessionmaker[AsyncSession],
     settings: Settings,
     publish_event: Callable[[str, str, dict], Awaitable[None]],
+    rate_limiter: RecipientRateLimiter,
 ) -> None:
-    handler = make_handler(session_factory, settings, publish_event)
+    handler = make_handler(session_factory, settings, publish_event, rate_limiter)
     for subject in subjects:
         # A durable consumer name is unique per stream, not per subject -
         # `workflow.federation.inbound_received` (since P6-S9) shares the
