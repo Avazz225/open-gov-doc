@@ -1702,6 +1702,203 @@ non-trivial decisions (see per-phase notes above for which sessions need one), `
 regression (`scripts/run-tests.sh --build`) + frontend regression (`tsc`/`eslint`/`vitest`/`next build`)
 before closing a session, real browser verification for every UI-visible change.
 
+---
+
+# Phase 73+: Gap Analysis After Phase 72
+
+## Context
+
+After Phase 72 closed (four scoping-only sessions; `PROGRESS.md` explicitly recorded "no Phase 73
+exists" — the project reached a genuine planning boundary), the user asked for another gap-analysis
+round to build a new plan. Same methodology as every prior round (Phase 32+, 38+, 44+, 65+): **four
+research agents in parallel** — (1) a full sweep of all 210 ADRs for self-named, still-open scope in
+their own "Consequences" sections; (2) a full sweep of all `docs/services/*.md` "Open Points" sections
+(36 of ~40 files have one); (3) a Konzept.md coverage check, cross-referencing every numbered subsection
+against `IMPLEMENTATION_PLAN.md`/`PROGRESS.md`; (4) a staleness reassessment of every item across all
+five prior rounds' "Deliberately Not Included" lists.
+
+**Headline result, different in kind from every prior round**: **Konzept.md's core scope is essentially
+fully implemented.** The coverage-check agent found zero numbered subsections with real zero-coverage
+evidence — every remaining gap is either a small residual within an already-built feature, or one of
+three items Konzept 12.2 itself named as deliberately-deferred-since-inception "candidates for later
+extension" (beyond the original concept's own scope, not a gap within it). This means Phase 73+ is
+structurally different from Phases 38+/44+/65+: those were "close what the concept asked for and never
+got"; this one is "harden what exists, finish small completions, then decide whether to go beyond the
+original concept at all."
+
+**Real, previously-unnoticed findings this round**, roughly in priority order:
+- A genuine authorization gap in `workflow-service`/`reviewer-ui`: task completion checks only the
+  coarse `workflow.write` permission — BPMN lanes are never enforced anywhere, so any authenticated
+  principal can complete any task in the system, not just the intended assignee. This is the single most
+  serious finding of this round.
+- Several smaller but real authorization/integrity gaps: `folder-service`'s `created_by`/`deleted_by`
+  remain spoofable client-supplied fields (never migrated to the `X-DMS-Principal` convention used
+  elsewhere); `notification-service`'s per-recipient rate limiter only guards the HTTP endpoint, not the
+  internal `repository.create_and_send` call path; `fleet-management-service`'s four-eyes check is a
+  plain-text `actor != proposed_by` comparison, not a cryptographically anchored two-identity check.
+- A real data-loss risk: `federation-hub-service` keeps in-flight retry payloads only in process memory
+  — a restart during an open retry window silently loses the payload and pushes the handover to terminal
+  failure with no recovery path.
+- A recurring audit-trail completeness gap: `actor` stays `None` on several events
+  (`document.metadata.updated`, `folder.resource.moved`/`.deleted`, `document.restored`/
+  `.retention.updated`) — real blind spots in the forensic trace for who performed these actions.
+- **A genuinely embarrassing finding, not a feature gap**: "gateway-service has 3 pre-existing test
+  failures" has been flagged as a known, unresolved baseline across at least six ADRs since Phase 60
+  (0184, 0185, 0186, 0188, 0193, 0200) — every session that noticed it "flagged it for a future session"
+  and moved on, for over a dozen phases. Letting a known-broken baseline persist this long without ever
+  being root-caused is itself the kind of drift this project's own discipline is usually good at
+  catching — worth finally closing out.
+- **Teamspace group invitation** (ADR 0160) has now been deferred **six times** across every round since
+  Phase 43 — the most-repeated deferral in the project's history. Unlike most repeat-deferrals this one
+  isn't a stable "no": ADR 0160 already contains a concrete, ready-to-build design (a narrow
+  `auth-service` group-members endpoint, a binding table, a poll-loop reconciler). This round recommends
+  a **final, explicit decision** — build it or declare it permanently out of scope — rather than letting
+  it silently recur a seventh time.
+- **Konzept 12.2's three "candidates for later extension"** (ERP/line-of-business connectors, native
+  mobile clients, AI features) remain the only genuinely new-scope work left. All three were already
+  concretely scoped down to their exact attachment points in a dedicated prior session
+  (`docs/extension-points.md`, P14-S3) — no further scoping-only session is needed for any of them, only
+  a prioritization decision on which (if any) to actually build.
+
+**No previously-declined item's blocker was found to have resolved** (Azure Immutable Blob Storage
+still untestable against Azurite, `workflow-service` still single-replica by default, `sqlglot` already
+checked and declined one round ago at P72-S4/ADR 0210) — the full "still correctly declined" list is
+carried forward unchanged at the end of this section.
+
+**Numbering**: last phase in `IMPLEMENTATION_PLAN.md` was Phase 72, highest ADR number is 0210 — this
+round starts at **Phase 73** / **ADR 0211**.
+
+## Phase 73 — Security & Correctness Hardening (cheap, highest value, same principle as Phases 38/44)
+
+- **P73-S1 — `workflow-service`/`reviewer-ui` real per-assignee task authorization (the priority finding
+  of this round)**: today `POST /instances/{id}/tasks/{task_id}/complete` checks only the caller holds
+  the coarse `workflow.write` permission (granted to "everyone" by default, ADR 0067/0074) — BPMN lanes
+  are parsed and displayed but never enforced as an authorization boundary, so any authenticated
+  principal can complete any ready task system-wide, not just their own claimed/assigned one. Session
+  scope: design and build a real enforcement check (claimed-task-claimant-only, or lane-matching where a
+  lane is defined, falling back to today's open behavior only where no narrower assignment exists) —
+  this is a real architectural decision (which enforcement model, how it interacts with the existing
+  claim/delegation/org-hierarchy-grant system from ADR 0121/0145), not a mechanical fix, so budget for a
+  new ADR. Bundle with `folder-service`'s `created_by`/`deleted_by` migration from spoofable client-
+  supplied fields to the `X-DMS-Principal` convention (a smaller, same-shaped "who actually did this"
+  integrity fix).
+- **P73-S2 — Authorization/anti-abuse hardening bundle**: `notification-service`'s per-recipient rate
+  limiter extended to guard `repository.create_and_send` itself, not only the `POST /notifications` HTTP
+  boundary (closes the internal-caller bypass); `fleet-management-service`'s four-eyes approval check
+  replaced with a real two-distinct-identity verification consistent with how every other four-eyes gate
+  in this project already works (`permission-service`'s `approved_by == initiated_by` rejection, not a
+  plain string compare).
+- **P73-S3 — `federation-hub-service` retry-payload persistence**: in-flight handover retry payloads
+  move from process memory into the existing `federation` schema (a new table or column, following the
+  same durability principle every other retry/backoff mechanism in this project already has —
+  `archival-service`/`storage-service`/`rendering-service` all persist their own retry state). Closes a
+  real, if narrow, data-loss risk: a hub restart during an open retry window currently loses the payload
+  silently.
+- **P73-S4 — Audit-trail completeness bundle**: add `actor` to the currently-`None` event types
+  (`document.metadata.updated`, `folder.resource.moved`/`.deleted`, `document.restored`/
+  `.retention.updated`) — each publisher already has `X-DMS-Principal` available at the call site, this
+  is threading it through, not new plumbing. Bundle with `permission-service`'s elevated-audit-priority
+  gap for emergency-shutdown events — reconfirmed still-undecided as of P71-S2/ADR 0206 after two prior
+  explicit declines (ADR 0023, ADR 0024) — this round's own research found no new trigger either, so
+  this bundle's job is a final, explicit "still declining, here's why one more time" ADR update closing
+  the question for good, not a build.
+- **P73-S5 — Root-cause `gateway-service`'s 3 recurring pre-existing test failures**: flagged and
+  deferred across at least six ADRs since Phase 60 without ever being diagnosed. Session scope: actually
+  run them, read the real failure output (not just re-confirm they still fail), and either fix the root
+  cause or, if the conclusion is "these are environment-specific and not fixable in this dev stack,"
+  document that conclusively enough that no seventh ADR re-flags the same three failures.
+
+**Definition of Done**: regression test per fix; new ADR for P73-S1 (a real authorization-model
+decision) and P73-S3 (a real persistence-design decision); P73-S2/S4/S5 likely need no new ADR
+(mechanical hardening of already-established patterns) except P73-S4's audit-priority closure, which
+gets a short ADR specifically because it's a final decision on a three-times-raised question, not a
+build; docs and `PROGRESS.md` updated per session.
+
+## Phase 74 — RBAC/Completion Polish and One Overdue Decision
+
+- **P74-S1 — Case-browsing UI in `reviewer-ui`** (ADR 0141's own named gap, re-confirmed still open at
+  P65-S1): `user-ui` has `CasesPane.tsx`/"Umlaufmappen", `reviewer-ui` has no equivalent — a reviewer
+  handling a case-bound task today has no case-context view of their own, only the generic task list.
+- **P74-S2 — Small RBAC completions bundle**: `auth-service`'s `PUT /user-tracking-config/{principal_id}`
+  gains the same four-eyes gate its sibling AD-group-mapping endpoints already have (ADR 0157's own
+  named, still-open gap); `permission-service`'s superuser bypass (ADR 0190) extended to
+  `workflow-service`'s task-reassignment gate (ADR 0195's own named, deliberately-deferred-until-now
+  gap); `storage-service`'s two remaining ungated maintenance endpoints (`GET /storage/usage`,
+  `/process-pending`) closed the same way ADR 0179 already closed the other eleven.
+- **P74-S3 — Teamspace group invitation: final decision, not another deferral** (ADR 0160, deferred six
+  times since Phase 43). This session either builds the already-designed solution (narrow `auth-service`
+  group-members endpoint, a binding table, a poll-loop reconciler — the design ADR 0160 itself already
+  specifies) or makes an explicit, reasoned, PERMANENT decline — either outcome is acceptable, but
+  "defer again with the same reasoning" is explicitly not, per this round's own finding that six silent
+  carry-forwards is enough.
+
+**Definition of Done**: regression test per fix; new ADR for P74-S3 regardless of which way the decision
+goes (a genuine architectural commitment either way); P74-S1/S2 likely need no new ADR; docs and
+`PROGRESS.md` updated per session.
+
+## Phase 75 — Beyond the Original Concept (a prioritization decision, not a scoping session)
+
+Konzept 12.2's three remaining "candidates for later extension" are the only genuinely new-scope work
+left in this project — all three already have their exact attachment points verified against the real
+code in `docs/extension-points.md` (P14-S3): no further scoping-only session is needed for any of them.
+This phase is presented as **three independent, equally-viable build candidates**, not a recommended
+order — which one (if any) to build first is a product-prioritization call this round deliberately does
+not make on the user's behalf.
+
+| Candidate | Shape | Effort signal |
+|---|---|---|
+| **P75-A — ERP/line-of-business connector** (e.g. DATEV, SAP) | New `services/<x>-connector/` service, reusing `libs/dms-connector-sdk`'s `DmsTreeClient` exactly like `cmis-connector`/`webdav-connector` already do — only the third-party protocol client is genuinely new work. | Smallest conceptual leap — a fourth instance of an already-proven pattern (two real precedents already exist). Needs a concrete target (DATEV vs. SAP vs. other) picked first — a market question, not a technical one. |
+| **P75-B — Native mobile client** (iOS/Android) | A new consumer of the already-existing gateway API, not a new backend service — needs a second, public Keycloak client (Authorization Code + PKCE, `auth-service` bootstrap addition) and a `"push"` notification channel (a small, closed-enum addition to `notification-service`). | Backend work is small and well-understood; the real effort is the native app itself, entirely outside this backend system's own session structure — would need its own separate project/repo treatment, not a normal DMS session. |
+| **P75-C — AI features** (document chat, summarization, process assistance) | New `services/ai-service/`, modeled directly on `signature-service`'s provider-plugin pattern (ADR 0025) — a `local`/`external_api` provider split, `local` a real runnable reference implementation, `external_api` deliberately reserved-but-unimplemented like `signature-service`'s own `qtsp` type. | Raises a genuinely new class of question this project has never had to answer: data-protection/governance for content leaving the installation to an external provider — `docs/extension-points.md` explicitly declines to solve this, correctly, since it's a business/legal question, not an implementation one. Whichever session picks this up should expect to spend real time on that question before writing code. |
+
+**Definition of Done**: whichever candidate (if any) gets picked needs a real build-session ADR (this is
+new architecture, not a completion of existing scope) plus everything Phase 73/74's sessions also need
+(tests, docs, live verification); the other two stay scoped-not-scheduled exactly as
+`docs/extension-points.md` already leaves them, no further action needed until picked up.
+
+## Deliberately Not Included in Phase 73+
+
+Re-confirmed this round via the staleness-reassessment agent, spot-checked against the current code
+(not just re-asserted from a prior round's own text) — no new trigger found for any of these:
+
+- **`storage-service`'s local/Azure WORM gap** — still blocked on a real (non-Azurite) Azure test
+  environment; `azure_backend.py` still contains the Azurite-immutability-unsupported comment verified
+  live this round.
+- **`workflow-service`'s distributed lock for boundary timers across replicas** — still correctly
+  deferred; confirmed live against `infra/k8s/dms/values.yaml` that this service remains
+  `replicas: 1`/`autoscaling.enabled: false` by default, so the premise this gap depends on still
+  doesn't hold.
+- **`signature-service`'s QES/PKCS#11/HSM/OCSP**, **PDF/UA veraPDF formal-conformance validation**,
+  **XDOMEA nested-hierarchy import redesign** (ADR 0142's broader scope, distinct from the narrow fix
+  already closed at P42-S1), **`mail-connector`'s Microsoft Graph/O365 backend** (ADR 0161, needs a real
+  Azure AD tenant), **CheckMK** (user-declined), **SAML 2.0**, **XAdES/CAdES** — all re-checked, all
+  still valid, no new trigger.
+- **The e-government transport protocol (OSCI-Transport) as a Federation Hub alternative** (ADR 0208,
+  P72-S3) — freshly declined one round ago, no new information since.
+- **The free-form query language (Konzept 6.1) and BFF/aggregation layer (Konzept 3.5)** (ADR 0210,
+  P72-S4) — freshly declined one round ago; `sqlglot`'s availability as a non-GPL parser was already
+  factored into that decision and didn't change the outcome.
+- Assorted small, individually-low-value items already carried forward unchanged since Phase 63/65
+  (`permission-service`'s non-subtree-scoped cache invalidation, `registry-service`'s unpolled
+  `health_endpoint`, `mail-connector`'s no-bulk-rescan-on-format-change, `migration-console`'s missing
+  proactive license banner/own approval UI, `reviewer-ui`'s lane-based task pre-selection — blocked on
+  the same BPMN-lane-enforcement gap P73-S1 above finally addresses, so this one may become buildable
+  once P73-S1 lands, worth re-checking then rather than now) — none itemized into their own sessions
+  this round either.
+
+## Definition of Done for Phase 73–75 (unchanged, `CONTRIBUTING.md`)
+
+Same standing rule as every phase above: tests green, `docs/services/*.md` current, new ADR for
+non-trivial decisions (see per-phase notes above for which sessions need one), `PROGRESS.md` update,
+`graphify update .` once at the end of the whole round (not after every session), backend regression
+(`scripts/run-tests.sh`, **never bare `uv run pytest` without `TEST_POSTGRES_DSN`** — see the incident
+recorded in `PROGRESS.md` at P71-S3) + frontend regression (`tsc`/`eslint`/`vitest`/`next build`) once
+per phase (not per session, per the user's own P71-S4 steer) before closing out a phase, real browser
+verification for every UI-visible change.
+
+**This plan is not yet approved for execution** — produced at the user's explicit request for a new
+gap-analysis round, with an equally explicit instruction to wait before starting any session from it.
+
 ## PROGRESS.md — Resume Mechanism
 
 `dms/PROGRESS.md` is created as the first order of business in P0-S1 and is the entry point for every new session:
