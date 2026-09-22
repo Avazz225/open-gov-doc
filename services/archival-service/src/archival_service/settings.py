@@ -21,6 +21,17 @@ class Settings(BaseServiceSettings):
     # same idiom as document-service's `_retention_poll_loop`/
     # reporting-service's `_report_schedule_poll_loop`.
     archival_poll_interval_seconds: int = 3600
+    # P71-S4: a short delay before the loop's very FIRST tick only (every
+    # subsequent tick still waits the full `archival_poll_interval_seconds`
+    # as before) - closes a real, previously-documented test race
+    # (`docs/services/archival-service.md`): `tests/test_api.py`'s `client`
+    # fixture patches `app.state.document_client`/etc. with mocks AFTER
+    # `TestClient(app)`'s lifespan has already started this loop's task, so
+    # a first tick firing in that gap could hit the still-real clients. Two
+    # seconds is far longer than that synchronous patching step takes, and
+    # imperceptible against a background loop that otherwise waits a full
+    # hour between ticks.
+    archival_poll_initial_delay_seconds: int = 2
 
     # Retry/backoff (Post-Roadmap Phase 20 Session 2, ADR 0078) - same
     # numeric value as storage-service's already-existing

@@ -65,7 +65,12 @@ async def _archival_poll_loop(session_factory) -> None:
     its own) - the check gets its own try/except instead, failing OPEN
     (proceeds with the tick) on error, same principle the gateway's own
     maintenance check already uses (ADR 0024) rather than letting a
-    transient `permission-service` error silently skip every phase."""
+    transient `permission-service` error silently skip every phase.
+    P71-S4: a short delay before the first tick only (`Settings.
+    archival_poll_initial_delay_seconds`, see its own docstring) - closes
+    the `tests/test_api.py` `client`-fixture race this loop's task
+    otherwise has against that fixture's own mock-patching step."""
+    await asyncio.sleep(settings.archival_poll_initial_delay_seconds)
     while True:
         try:
             skip_tick = await app.state.permission_client.is_maintenance_active()

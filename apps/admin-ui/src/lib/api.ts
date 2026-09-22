@@ -1484,6 +1484,35 @@ export async function updateSignatureConfig(
   return response.json();
 }
 
+// PAdES-B-LTA archive-timestamp-chain re-timestamping poll loop (3.10,
+// ADR 0155) - admin visibility only (P71-S4). No manual-trigger endpoint:
+// ADR 0155 already explicitly decided against one, citing document-
+// service's own retention poll loop as the established "no manual
+// trigger" precedent - this session found no new justification to
+// reopen that decision.
+export interface SignatureDueForRetimestamp {
+  id: number;
+  document_id: string;
+  version_number: number;
+  level: "ses" | "aes" | "qes";
+  connector_id: string;
+  signer_display_name: string;
+  signed_at: string;
+  last_timestamped_at: string | null;
+}
+
+export async function listSignaturesDueForRetimestamp(
+  token: string
+): Promise<SignatureDueForRetimestamp[]> {
+  const response = await request(
+    "signature-service",
+    "signatures/due-for-retimestamp",
+    {},
+    token
+  );
+  return response.json();
+}
+
 export interface ServiceInstance {
   instance_id: string;
   service_type: string;

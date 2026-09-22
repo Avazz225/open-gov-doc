@@ -179,6 +179,18 @@
     "levels": "Niveaus",
     "saveError": "Speichern fehlgeschlagen"
   },
+  "retimestampStatus": {
+    "heading": "Archiv-Zeitstempel-Erneuerung (PAdES-B-LTA)",
+    "hint": "Signaturen, deren Archiv-Zeitstempel-Kette laut dem automatischen Hintergrund-Poll-Loop erneuert werden muss (3.10) - rein informativ, kein manueller Auslöser (bewusste Entscheidung, siehe ADR 0155).",
+    "unreachable": "Signature Service nicht erreichbar.",
+    "empty": "Keine Signaturen derzeit fällig.",
+    "documentColumn": "Dokument",
+    "levelColumn": "Niveau",
+    "connectorColumn": "Connector",
+    "signerColumn": "Unterzeichner",
+    "signedAtColumn": "Signiert am",
+    "lastTimestampedColumn": "Zuletzt erneuert"
+  },
   "approvalSettings": {
     "pageTitle": "Vier-Augen-Einstellungen",
     "hint": "Steuert je Aktionstyp, ob eine zweite Person die Aktion bestätigen muss, bevor sie wirksam wird (4.3). Fehlt ein Aktionstyp in der Liste, ist er nicht gegated (Standardverhalten).",

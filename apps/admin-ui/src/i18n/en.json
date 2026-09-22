@@ -179,6 +179,18 @@
     "levels": "Levels",
     "saveError": "Failed to save"
   },
+  "retimestampStatus": {
+    "heading": "Archive timestamp renewal (PAdES-B-LTA)",
+    "hint": "Signatures whose archive timestamp chain the automatic background poll loop will renew (3.10) - purely informational, no manual trigger (a deliberate decision, see ADR 0155).",
+    "unreachable": "Signature service not reachable.",
+    "empty": "No signatures currently due.",
+    "documentColumn": "Document",
+    "levelColumn": "Level",
+    "connectorColumn": "Connector",
+    "signerColumn": "Signer",
+    "signedAtColumn": "Signed at",
+    "lastTimestampedColumn": "Last renewed"
+  },
   "approvalSettings": {
     "pageTitle": "Four-eyes settings",
     "hint": "Controls, per action type, whether a second person must confirm the action before it takes effect (4.3). An action type missing from the list is not gated (default behavior).",

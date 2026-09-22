@@ -505,6 +505,31 @@ async def list_signatures(
     return await repository.list_signatures(session, document_id=document_id)
 
 
+@app.get("/signatures/due-for-retimestamp", response_model=list[SignatureOut])
+async def list_signatures_due_for_retimestamp(
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> list[SignatureOut]:
+    """P71-S4 (3.10, ADR 0155): admin-UI visibility for the PAdES-B-LTA
+    poll loop's own due-set - the exact same `cutoff`/query the poll loop
+    itself uses (`repository.list_signatures_due_for_retimestamp`,
+    `main.py._retimestamp_poll_loop`), so this view can never drift from
+    what the loop will actually pick up on its next tick. Deliberately a
+    system-wide listing (unlike `GET /signatures`, which requires
+    `document_id` for per-document RBAC scoping since Phase 59 Session 3)
+    - gated behind `admin.signature_config` instead, the same capability
+    already gating `PUT /signature-config`, since this is an
+    administrative overview of the installation's signature estate as a
+    whole, not a per-document read. Deliberately READ-ONLY: ADR 0155 itself
+    already explicitly decided against a manual trigger for this poll loop
+    (citing `document-service`'s retention poll loop as the established
+    "no manual trigger" precedent) - this session found no new
+    justification to reopen that decision, so none is added here either."""
+    await _require_signature_config_permission(x_dms_principal)
+    cutoff = datetime.now(UTC) - timedelta(days=settings.retimestamp_interval_days)
+    return await repository.list_signatures_due_for_retimestamp(session, cutoff=cutoff)
+
+
 @app.get("/signatures/{signature_id}", response_model=SignatureOut)
 async def get_signature(
     signature_id: int,

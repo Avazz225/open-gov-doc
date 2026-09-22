@@ -67,6 +67,44 @@ def test_build_aussonderung_message_is_deterministic_across_retries():
     assert first_uuid == second_uuid
 
 
+def test_build_aussonderung_message_resolves_a_known_content_type_to_its_real_xdomea_code():
+    """P71-S4 (14.2): `Format/Name` used to be unconditionally code "100"
+    ("Sonstiges") regardless of the actual content type - now resolved
+    against a bounded subset of the real `urn:xoev-de:xdomea:codeliste:
+    dateiformat` codelist (see `xdomea._XDOMEA_FORMAT_CODES`, values
+    fetched directly from the KoSIT xrepository)."""
+    case = {"id": "case-5", "name": "Bekannter Dateityp"}
+    xml_bytes = xdomea.build_aussonderung_message(
+        case, [_document("doc-1", 1, "application/pdf")]
+    )
+
+    root = etree.fromstring(xml_bytes)
+    ns = {"xdomea": xdomea.XDOMEA_NS}
+    code = root.find(".//xdomea:Format/xdomea:Name/code", ns)
+    name = root.find(".//xdomea:Format/xdomea:Name/name", ns)
+    sonstiger_name = root.find(".//xdomea:Format/xdomea:SonstigerName", ns)
+    assert code.text == "018"
+    assert name.text == "pdf - Portable Document Format"
+    # `SonstigerName` still always carries the real content type, even for
+    # a resolved, non-"100" code - the precise MIME type must never be
+    # lost, only the codelist code gains precision.
+    assert sonstiger_name.text == "application/pdf"
+
+
+def test_build_aussonderung_message_falls_back_to_sonstiges_for_an_unknown_content_type():
+    case = {"id": "case-6", "name": "Unbekannter Dateityp"}
+    xml_bytes = xdomea.build_aussonderung_message(
+        case, [_document("doc-1", 1, "application/x-not-a-real-format")]
+    )
+
+    root = etree.fromstring(xml_bytes)
+    ns = {"xdomea": xdomea.XDOMEA_NS}
+    code = root.find(".//xdomea:Format/xdomea:Name/code", ns)
+    name = root.find(".//xdomea:Format/xdomea:Name/name", ns)
+    assert code.text == "100"
+    assert name.text == "Sonstiges"
+
+
 def test_validate_message_raises_on_structurally_invalid_xml():
     invalid = b'<?xml version="1.0"?><NotXdomea xmlns="urn:xoev-de:xdomea:schema:4.0.0"/>'
 

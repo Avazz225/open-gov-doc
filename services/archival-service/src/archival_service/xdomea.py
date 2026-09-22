@@ -72,6 +72,72 @@ def package_filename(document_id: str, version_number: int, content_type: str | 
     return f"{file_uuid}{extension}"
 
 
+# P71-S4 (14.2): the real `urn:xoev-de:xdomea:codeliste:dateiformat`
+# codelist (KoSIT xrepository, version 1.0, fetched directly from
+# https://www.xrepository.de/api/xrepository/urn:xoev-de:xdomea:codeliste:dateiformat_1.0/genericode
+# - not vendored as a schema file, this codelist is a non-schema-enforced
+# vocabulary reference, see docs/services/archival-service.md) - a
+# deliberately bounded subset (the MIME types this project's own services
+# actually produce/accept, not all 46 real codelist entries; legacy-only
+# entries like `wps`/`xlc`/`xlm`/`xlw`/`pot`/`potx`/`dotx`/`xltx` are never
+# reachable from any content type this codebase generates, so mapping them
+# would be dead code). `Beschreibung` values are copied verbatim from the
+# codelist (the exact text XDOMEA's own `Format/Name/name` element is meant
+# to carry) - not re-worded. Falls back to code `"100"`/`"Sonstiges"` for
+# any content type not in this table, exactly the previous unconditional
+# behavior - this is a widened default, not a behavior change for anything
+# already covered.
+_XDOMEA_FORMAT_CODES: dict[str, tuple[str, str]] = {
+    "application/pdf": ("018", "pdf - Portable Document Format"),
+    "application/msword": ("003", "doc - Microsoft Word for Windows Document"),
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": (
+        "035",
+        "docx - Office Open XML Text",
+    ),
+    "application/vnd.ms-excel": ("028", "xls - Binary Interchange File Format (BIFF) Worksheet"),
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": (
+        "036",
+        "xlsx - Office Open XML Spreadsheet",
+    ),
+    "application/vnd.ms-powerpoint": ("020", "ppt - Microsoft PowerPoint"),
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": (
+        "037",
+        "pptx - Office Open XML Presentation",
+    ),
+    "application/vnd.oasis.opendocument.text": ("015", "odt - OpenDocument Text Format"),
+    "application/vnd.oasis.opendocument.spreadsheet": (
+        "014",
+        "ods - OpenDocument Spreadsheet Format",
+    ),
+    "application/vnd.oasis.opendocument.presentation": (
+        "013",
+        "odp - OpenDocument Presentation Format",
+    ),
+    "text/plain": ("045", "txt - Unicode Text File"),
+    "text/csv": ("002", "csv - Comma Separated Values"),
+    "text/html": ("008", "html - Hypertext Markup Language"),
+    "application/xml": ("030", "xml - eXtensible Markup Language"),
+    "text/xml": ("030", "xml - eXtensible Markup Language"),
+    "image/jpeg": ("010", "jpeg - JPEG File Interchange Format"),
+    "image/png": ("019", "png - Portable Network Graphics"),
+    "image/tiff": ("024", "tiff - Tagged Image File Format"),
+    "image/bmp": ("001", "bmp - Windows Bitmap"),
+    "application/rtf": ("022", "rtf - Rich Text Format"),
+    "text/rtf": ("022", "rtf - Rich Text Format"),
+}
+_XDOMEA_FORMAT_FALLBACK = ("100", "Sonstiges")
+
+
+def _xdomea_format_code(content_type: str | None) -> tuple[str, str]:
+    """`(code, name)` for `Format/Name`, see `_XDOMEA_FORMAT_CODES` above.
+    Deliberately looks up the exact MIME string only (no wildcard/prefix
+    matching) - `content_type` as stored is already a single, specific
+    value (`document_service.content_type_sniffer`), never a range."""
+    if content_type is None:
+        return _XDOMEA_FORMAT_FALLBACK
+    return _XDOMEA_FORMAT_CODES.get(content_type, _XDOMEA_FORMAT_FALLBACK)
+
+
 def _build_dokument_wrapper(parent: "etree._Element", document: dict) -> None:
     """Appends one `DokumentOderDokumentMitSchriftstueck` -> `Dokument` to
     `parent` - shared by both the 0503 (nested inside a `Vorgang`) and the
@@ -90,14 +156,18 @@ def _build_dokument_wrapper(parent: "etree._Element", document: dict) -> None:
     version = etree.SubElement(dokument, _qn("Version"))
     etree.SubElement(version, _qn("Nummer")).text = str(document["version_number"])
     fmt = etree.SubElement(version, _qn("Format"))
-    # Always code "100" ("Sonstiges"/other) instead of a full
-    # MIME-type-to-XDOMEA-code-list mapping (concept simplification, see
-    # docs/services/archival-service.md) - `SonstigerName` carries the
-    # actual content type.
+    # Resolved against a bounded subset of the real XDOMEA `Dateiformat`
+    # codelist (P71-S4, see `_XDOMEA_FORMAT_CODES` above) - falls back to
+    # code "100" ("Sonstiges") for any content type not in that table,
+    # same as the previous unconditional behavior. `SonstigerName` still
+    # always carries the actual content type regardless of which code was
+    # resolved, so the precise MIME type is never lost even when a code
+    # more specific than "100" was found.
+    format_code, format_name = _xdomea_format_code(document.get("content_type"))
     name_el = etree.SubElement(fmt, _qn("Name"))
     name_el.set("listVersionID", "1.0")
-    etree.SubElement(name_el, "code").text = "100"
-    etree.SubElement(name_el, "name").text = "Sonstiges"
+    etree.SubElement(name_el, "code").text = format_code
+    etree.SubElement(name_el, "name").text = format_name
     etree.SubElement(fmt, _qn("SonstigerName")).text = (
         document.get("content_type") or "application/octet-stream"
     )

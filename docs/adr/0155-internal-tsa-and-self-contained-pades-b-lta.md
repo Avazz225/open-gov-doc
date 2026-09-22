@@ -99,9 +99,13 @@ by offering a cheaper profile.
   `GET /signatures/{id}`, `NULL` until the first periodic extension.
 - **`docs/services/archival-service.md`** gains the previously-missing cross-reference to 3.10/B-LTA,
   explicitly noting no runtime dependency exists or is planned.
-- **No admin UI or manual trigger** for re-timestamping in this session — purely a backend poll loop,
+- ~~**No admin UI or manual trigger** for re-timestamping in this session — purely a backend poll loop,
   same "backend before frontend" pattern used elsewhere in this project when a session's scope doesn't
-  call for a UI surface.
+  call for a UI surface.~~ — **admin-UI visibility half closed in P71-S4** (`GET /signatures/due-for-retimestamp`,
+  `admin-ui`'s `RetimestampStatus.tsx`): P71-S4's own plan proposed adding both a status view AND a
+  manual trigger; the trigger half was deliberately NOT built — this ADR's own "no manual trigger"
+  decision above was re-verified against the current code first and found still to hold, with no new
+  justification to reopen it. The read-only visibility half closes the actual gap named here.
 - **Every signature produced from now on is larger** (embeds a CA chain, a CRL, and an RFC 3161
   timestamp token in addition to the content signature itself) — no functional impact, but worth noting
   for anyone reasoning about document-service storage growth.

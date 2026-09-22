@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import io
 import os
@@ -7,7 +8,7 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
-from archival_service import crypto, repository, xdomea, xjustiz
+from archival_service import crypto, main, repository, xdomea, xjustiz
 from archival_service.keystore import EnvKeyStore
 from archival_service.main import app
 from fastapi.testclient import TestClient
@@ -103,6 +104,41 @@ def everyone_role_without():
             json={"description": everyone["description"], "permissions": original_permissions},
             headers=role_management_headers,
         ).raise_for_status()
+
+
+async def test_archival_poll_loop_delays_first_tick_before_touching_real_clients(monkeypatch):
+    """P71-S4: regression test for a real, previously-documented test race
+    (`docs/services/archival-service.md`): the `client` fixture above
+    patches `app.state.document_client`/etc. with mocks only AFTER
+    `TestClient(app)`'s lifespan has already started `_archival_poll_loop`
+    as a background task - a first tick firing in that gap could hit the
+    still-real clients. Fixed via `Settings.
+    archival_poll_initial_delay_seconds` (an `asyncio.sleep` before the
+    loop's very first tick only). Proven here by making the mocked
+    `asyncio.sleep` block forever on its first call: if the loop's first
+    action really is that sleep, it can never progress far enough to touch
+    `app.state.document_client`/`.permission_client` (`session_factory` is
+    deliberately `None` - any attempt to use it before the delay resolves
+    would raise, not silently pass)."""
+    real_sleep = asyncio.sleep
+    sleep_calls: list[float] = []
+    blocked = asyncio.Event()
+
+    async def fake_sleep(seconds: float) -> None:
+        sleep_calls.append(seconds)
+        await blocked.wait()
+
+    monkeypatch.setattr(main.asyncio, "sleep", fake_sleep)
+
+    task = asyncio.create_task(main._archival_poll_loop(session_factory=None))
+    try:
+        await real_sleep(0.05)
+        assert sleep_calls == [main.settings.archival_poll_initial_delay_seconds]
+        assert not task.done()
+    finally:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
 
 
 def test_list_archival_transfers_without_principal_header_is_401(client):

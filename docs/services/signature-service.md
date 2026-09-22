@@ -14,6 +14,7 @@
 | `GET` | `/signatures/{id}` | Single signature - `404`. **Since Phase 59 Session 3**: `401`/`403` gate, see "Authorization" below |
 | `GET` | `/signatures/{id}/verify` | Re-verifies the signature against the bytes currently stored at document-service (`valid`, `integrity_intact`, `certificate_expired`, `errors[]`). **Since Phase 59 Session 3**: `401`/`403` gate, see "Authorization" below |
 | `GET` | `/signature-config` | Current connector levels (since **Post-Roadmap Phase 22 Session 6**, [ADR 0091](../adr/0091-connector-operational-config-live-editable.md)) — `id`/`type` structurally from `Settings.signature_providers`, `levels` live-editable, default row seeded from the previous env-var values on first call |
+| `GET` | `/signatures/due-for-retimestamp` | **Since P71-S4**: system-wide list of signatures the PAdES-B-LTA poll loop will re-timestamp on its next tick — gated behind `admin.signature_config`, read-only (no manual trigger, see "PAdES-B-LTA" below) |
 | `PUT` | `/signature-config` | Updates `levels` ONLY for the named connector `id`s (`[{id, levels}]`, ones not named keep their value) — takes effect **without a restart**; `422` on an unknown `id` ("can only edit existing entries"), empty `levels`, or `qes` for `type=internal` (the same rule as `SignatureProviderConfig._check_levels`) |
 | `GET` | `/healthz` | Health check |
 
@@ -71,6 +72,18 @@ choice — 3.10 does not call for one):
   sufficient; see [`docs/services/archival-service.md`](archival-service.md) for the cross-reference.
   Per-item try/except, same fault-tolerant multi-phase poll-loop idiom used throughout this project.
   **No manual HTTP trigger** - same precedent as `document-service`'s retention poll loop.
+- **Admin-UI visibility, since P71-S4**: new `GET /signatures/due-for-retimestamp` (gated behind
+  `admin.signature_config`, the same capability already gating `PUT /signature-config` - a system-wide
+  overview of the installation's signature estate, not a per-document read like `GET /signatures`,
+  which deliberately requires `document_id` for RBAC scoping since Phase 59 Session 3) reuses
+  `repository.list_signatures_due_for_retimestamp` with the real `Settings.retimestamp_interval_days` -
+  the exact same query the poll loop itself runs, so the view can never drift from what the loop will
+  actually pick up next. Surfaced in `admin-ui`'s `RetimestampStatus.tsx`, rendered below
+  `SignatureConfig` on `/signature-config/`. **Deliberately still read-only**: the plan for this session
+  proposed "an optional manual-trigger endpoint" alongside the visibility view - this session verified
+  against ADR 0155 itself first and found it had already explicitly decided against exactly that,
+  citing this same "no manual trigger" precedent above. No new justification was found to reopen that
+  decision, so only the visibility half was built.
 
 ## Minimum Signature Level per Object Type (3.10)
 
@@ -116,7 +129,13 @@ None yet - follows in Phase 11.
 - Object-type minimum-level gate (`400` on a level too low, `201` when sufficient).
 - Rejection on a non-PDF document, unknown document, unknown signer principal, `level="qes"` without a configured connector.
 - List/detail/verify incl. `404` cases.
-- **32 tests since Phase 59 Session 3** (+6: RBAC coverage for `POST /signatures` and the three `GET /signatures*` endpoints — see "Signature data-plane authorization" above; `test_create_signature_without_principal_header_is_401`, `test_create_signature_with_mismatched_signer_is_403`, `test_list_signatures_without_document_id_is_400`, `test_list_signatures_without_principal_header_is_401`, `test_get_signature_without_principal_header_is_401`, `test_verify_signature_without_principal_header_is_401`). Before that, 26 tests since P56-S1 (+1: `test_create_signature_rejected_during_maintenance_mode` — `X-DMS-Maintenance-Active: true` → `503`, fires before the `document_client.get_document` lookup, an unknown `document_id` still gets `503` not `404`). Before that, 25 tests since Post-Roadmap Phase 41 Session 1 (previously 18, +7, [ADR 0155](../adr/0155-internal-tsa-and-self-contained-pades-b-lta.md)): `test_connector_internal_pades_lta.py` (5) unit-tests `InternalSelfSignedConnector` directly (no cross-service dependency) - a real PAdES subfilter (regression test for the fixed silent bug), embedded validation info (`/DSS`), initial verification, and `extend_timestamp_chain` staying verifiable across repeated calls. `test_retimestamp_poll_loop.py` (2) exercises `main._run_retimestamp_tick` end-to-end (real document-service round trip) for both the "due" and "not yet due" cases, using its own engine/session bound to the test's own event loop rather than `TestClient`'s (which runs the app's lifespan-bound asyncpg engine on a separate event loop internally).
+- **35 tests since P71-S4** (+3: `test_due_for_retimestamp_without_principal_header_is_401`,
+  `test_due_for_retimestamp_without_permission_is_403`,
+  `test_due_for_retimestamp_excludes_a_freshly_signed_signature` — the last one deliberately does not
+  also prove the "is due" case within `test_api.py`, since this `TestClient` instance's own real,
+  ambient `_retimestamp_poll_loop` could race a deliberately-backdated signature and re-timestamp it
+  before the test's own assertion runs, see the test's own docstring). Before that, 32 tests since
+  Phase 59 Session 3 (+6: RBAC coverage for `POST /signatures` and the three `GET /signatures*` endpoints — see "Signature data-plane authorization" above; `test_create_signature_without_principal_header_is_401`, `test_create_signature_with_mismatched_signer_is_403`, `test_list_signatures_without_document_id_is_400`, `test_list_signatures_without_principal_header_is_401`, `test_get_signature_without_principal_header_is_401`, `test_verify_signature_without_principal_header_is_401`). Before that, 26 tests since P56-S1 (+1: `test_create_signature_rejected_during_maintenance_mode` — `X-DMS-Maintenance-Active: true` → `503`, fires before the `document_client.get_document` lookup, an unknown `document_id` still gets `503` not `404`). Before that, 25 tests since Post-Roadmap Phase 41 Session 1 (previously 18, +7, [ADR 0155](../adr/0155-internal-tsa-and-self-contained-pades-b-lta.md)): `test_connector_internal_pades_lta.py` (5) unit-tests `InternalSelfSignedConnector` directly (no cross-service dependency) - a real PAdES subfilter (regression test for the fixed silent bug), embedded validation info (`/DSS`), initial verification, and `extend_timestamp_chain` staying verifiable across repeated calls. `test_retimestamp_poll_loop.py` (2) exercises `main._run_retimestamp_tick` end-to-end (real document-service round trip) for both the "due" and "not yet due" cases, using its own engine/session bound to the test's own event loop rather than `TestClient`'s (which runs the app's lifespan-bound asyncpg engine on a separate event loop internally).
 - Before that, 18 tests since Post-Roadmap Phase 38 Session 3 (previously 16, +2): 401/403 pair for `PUT /signature-config` — the service's first-ever RBAC coverage — before that, 16 tests since Post-Roadmap Phase 22 Session 6 (previously 11, +5, [ADR 0091](../adr/0091-connector-operational-config-live-editable.md)): `GET /signature-config` returns the env-var defaults before the first `PUT`, `PUT` with an unknown connector `id`/empty `levels`/`qes` for `type=internal` each return `422`, an end-to-end test removes `aes` from `internal`'s levels and proves live (without a restart) that a subsequent AES signing attempt fails with `400`, while SES continues to work.
 - A pure backend session, no browser test needed (for user-UI integration see `docs/services/user-ui.md`).
 

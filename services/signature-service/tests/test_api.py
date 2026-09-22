@@ -326,6 +326,56 @@ def test_get_signature_without_principal_header_is_401(client, pdf_document, rea
     assert response.status_code == 401
 
 
+def test_due_for_retimestamp_without_principal_header_is_401(client):
+    response = client.get("/signatures/due-for-retimestamp", headers={"X-DMS-Principal": ""})
+    assert response.status_code == 401
+
+
+def test_due_for_retimestamp_without_permission_is_403(client, real_signer):
+    """`real_signer` holds no `admin.signature_config` - the same capability
+    already gating `PUT /signature-config` (Post-Roadmap Phase 38 Session
+    3), reused here since this is an admin overview of the installation's
+    signature estate, not a per-document read."""
+    response = client.get(
+        "/signatures/due-for-retimestamp", headers={"X-DMS-Principal": real_signer}
+    )
+    assert response.status_code == 403
+
+
+def test_due_for_retimestamp_excludes_a_freshly_signed_signature(
+    client, pdf_document, real_signer
+):
+    """P71-S4 (3.10, ADR 0155): read-only admin visibility for the poll
+    loop's own due-set, reusing `repository.list_signatures_due_for_
+    retimestamp` with the real `Settings.retimestamp_interval_days`
+    (365 days by default) - a signature signed moments ago must not
+    appear, the same assertion `test_retimestamp_poll_loop.py`'s own
+    `test_run_retimestamp_tick_skips_signatures_not_yet_due` makes against
+    the underlying query directly. Deliberately does not also prove the
+    "is due" case here: forcing a signature into that state within this
+    file would need a cutoff further in the past than the real interval
+    allows, and this `TestClient` instance's own real, ambient
+    `_retimestamp_poll_loop` runs immediately on its first tick against
+    the true `Settings.retimestamp_interval_days` - anything genuinely
+    due here could be re-timestamped and disappear before this test's own
+    assertion ever runs, see `test_retimestamp_poll_loop.py`'s own
+    docstring for why that background loop makes such a race real.
+    """
+    document_id, _version = pdf_document
+    created = client.post(
+        "/signatures",
+        json={"document_id": document_id, "level": "ses", "signer_principal_id": real_signer},
+        headers={"X-DMS-Username": real_signer},
+    ).json()
+
+    response = client.get(
+        "/signatures/due-for-retimestamp", headers=SIGNATURE_CONFIG_ADMIN_HEADERS
+    )
+
+    assert response.status_code == 200
+    assert created["id"] not in [s["id"] for s in response.json()]
+
+
 def test_verify_signature_without_principal_header_is_401(client, pdf_document, real_signer):
     document_id, _version = pdf_document
     created = client.post(
