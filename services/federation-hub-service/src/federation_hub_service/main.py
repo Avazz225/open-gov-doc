@@ -185,17 +185,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Post-Roadmap Phase 20 Session 5 (ADR 0081): the end-to-end encrypted
     # payload is deliberately NEVER persisted in the `handover` table (see
     # `models.Handover` docstring, ADR 0028) - a payload that still needs to
-    # be redelivered via retry therefore only lives EPHEMERALLY in this
-    # in-process memory dict (keyed by handover_id). A restart of the hub
-    # during an open retry window therefore deliberately loses the ability
-    # to automatically redeliver - documented, not silently worked around
-    # (see `docs/services/federation-hub-service.md` "Open Points").
-    app.state.pending_handover_payloads = {}
-    # Return-path retry (Phase 40 Session 3) - same ephemeral, in-process-
-    # only cache principle, doubled for the result-delivery leg (see
-    # `models.Handover`'s docstring and ADR 0147's memory-pressure note,
-    # which now applies to both caches together).
-    app.state.pending_handover_result_payloads = {}
+    # be redelivered via retry instead lives in the separate
+    # `handover_retry_payload` table (`models.HandoverRetryPayload`). Since
+    # Post-Roadmap Phase 73 Session 3 (ADR 0213) this is persisted there
+    # rather than in an in-process dict, so a hub restart during an open
+    # retry window no longer loses the ability to automatically redeliver -
+    # see `HandoverRetryPayload`'s docstring and
+    # `docs/services/federation-hub-service.md` "Retry & Backoff".
     app.state.permission_client = (
         PermissionServiceClient(settings.permission_service_base_url)
         if settings.permission_service_base_url
@@ -204,8 +200,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     retry_poll_task = asyncio.create_task(
         _handover_retry_poll_loop(
             app.state.session_factory,
-            app.state.pending_handover_payloads,
-            app.state.pending_handover_result_payloads,
             app.state.permission_client,
         )
     )
@@ -227,8 +221,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     samplers = metrics.build_samplers(
         forward_retry_cache_gauge,
         result_retry_cache_gauge,
-        app.state.pending_handover_payloads,
-        app.state.pending_handover_result_payloads,
+        app.state.session_factory,
     )
     sensor_sampler_task = asyncio.create_task(
         run_gauge_sampler_loop(samplers, interval_seconds=settings.sensor_sample_interval_seconds)
@@ -534,7 +527,7 @@ async def _deliver(url: str, body: dict) -> bool:
         return False
 
 
-async def _run_retry_tick(session_factory, pending_payloads: dict[str, dict]) -> None:
+async def _run_retry_tick(session_factory) -> None:
     """A single pass over the due handover retry attempts - factored out of
     `_handover_retry_poll_loop` so that a tick is independently testable
     (same pattern as notification-service's `_run_retry_tick`, ADR 0079)."""
@@ -545,7 +538,7 @@ async def _run_retry_tick(session_factory, pending_payloads: dict[str, dict]) ->
             handover = await session.get(Handover, stale.id)
             if handover is None or handover.status != "pending_retry":
                 continue  # handled differently in the meantime (e.g. manual retry)
-            cached = pending_payloads.get(handover.id)
+            cached = await repository.get_pending_payload(session, handover.id, leg="forward")
             if cached is None:
                 logger.warning(
                     "federation_handover_retry_payload_lost", extra={"handover_id": handover.id}
@@ -571,11 +564,11 @@ async def _run_retry_tick(session_factory, pending_payloads: dict[str, dict]) ->
             # be gone exactly at the moment `POST .../retry` could first use
             # it (both transitions happen in the same tick).
             if delivered:
-                pending_payloads.pop(handover.id, None)
+                await repository.delete_pending_payload(session, handover.id, leg="forward")
             await session.commit()
 
 
-async def _run_result_retry_tick(session_factory, pending_result_payloads: dict[str, dict]) -> None:
+async def _run_result_retry_tick(session_factory) -> None:
     """Return-path counterpart of `_run_retry_tick` (Phase 40 Session 3) -
     same shape exactly, but retries the hub's outbound delivery to
     `from_installation_id` (the handover's origin) inside
@@ -588,7 +581,7 @@ async def _run_result_retry_tick(session_factory, pending_result_payloads: dict[
             handover = await session.get(Handover, stale.id)
             if handover is None or handover.status != "result_pending_retry":
                 continue  # handled differently in the meantime (e.g. manual retry)
-            cached = pending_result_payloads.get(handover.id)
+            cached = await repository.get_pending_payload(session, handover.id, leg="result")
             if cached is None:
                 logger.warning(
                     "federation_handover_result_retry_payload_lost",
@@ -612,14 +605,12 @@ async def _run_result_retry_tick(session_factory, pending_result_payloads: dict[
                 max_attempts=settings.max_handover_delivery_attempts,
             )
             if delivered:
-                pending_result_payloads.pop(handover.id, None)
+                await repository.delete_pending_payload(session, handover.id, leg="result")
             await session.commit()
 
 
 async def _handover_retry_poll_loop(
     session_factory,
-    pending_payloads: dict[str, dict],
-    pending_result_payloads: dict[str, dict],
     permission_client: PermissionServiceClient | None,
 ) -> None:
     """Retries failed initial handover deliveries (Post-Roadmap Phase 20
@@ -653,14 +644,14 @@ async def _handover_retry_poll_loop(
                 await asyncio.sleep(settings.handover_retry_poll_interval_seconds)
                 continue
         try:
-            await _run_retry_tick(session_factory, pending_payloads)
+            await _run_retry_tick(session_factory)
         except Exception:
             logger.exception(
                 "Federation-Handover-Retry-Poll-Tick fehlgeschlagen - "
                 "wird beim naechsten Tick erneut versucht."
             )
         try:
-            await _run_result_retry_tick(session_factory, pending_result_payloads)
+            await _run_result_retry_tick(session_factory)
         except Exception:
             logger.exception(
                 "Federation-Handover-Result-Retry-Poll-Tick fehlgeschlagen - "
@@ -809,9 +800,12 @@ async def create_handover(
         # Stays in the cache even after exhaustion (`delivery_failed`) - a
         # manual `POST .../retry` needs it precisely then. Only a
         # SUCCESSFUL attempt (here or later in the poll loop/retry endpoint)
-        # removes the entry again. See `lifespan`'s comment on the
-        # deliberately ephemeral nature of this cache (ADR 0028, ADR 0081).
-        app.state.pending_handover_payloads[handover.id] = delivery_body
+        # removes the entry again. Persisted (ADR 0213) rather than kept
+        # only in process memory (ADR 0028, ADR 0081) - see `lifespan`'s
+        # comment.
+        await repository.save_pending_payload(
+            session, handover.id, leg="forward", payload=delivery_body
+        )
     await session.commit()
     return handover
 
@@ -863,8 +857,10 @@ async def submit_handover_result(
         # Same retry-cache principle as the forward-delivery leg in
         # `create_handover` (Phase 40 Session 3) - stays cached even after
         # exhaustion (`result_delivery_failed`), a manual `POST .../retry`
-        # needs it precisely then.
-        app.state.pending_handover_result_payloads[handover.id] = result_body
+        # needs it precisely then. Persisted (ADR 0213), see `create_handover`.
+        await repository.save_pending_payload(
+            session, handover.id, leg="result", payload=result_body
+        )
     await session.commit()
     return handover
 
@@ -903,14 +899,14 @@ async def _retry_forward_delivery(session: AsyncSession, handover: Handover) -> 
     `delivery_failed`. MUST reset `attempts`/`next_retry_at` BEFORE the new
     attempt (`repository.reset_for_retry`) - see ADR 0080 "Consequences"
     for the bug this guards against."""
-    cached = app.state.pending_handover_payloads.get(handover.id)
+    cached = await repository.get_pending_payload(session, handover.id, leg="forward")
     if cached is None:
         raise HTTPException(
             status_code=409,
             detail=(
-                "Verschlüsselter Payload ist nicht mehr im Hub-Speicher vorhanden "
-                "(z. B. nach einem Neustart) - die Absenderinstallation muss einen "
-                "neuen Handover mit neuer handover_id einreichen"
+                "Verschlüsselter Payload ist nicht (mehr) im Hub gespeichert - "
+                "die Absenderinstallation muss einen neuen Handover mit neuer "
+                "handover_id einreichen"
             ),
         )
     await repository.reset_for_retry(session, handover)
@@ -929,7 +925,7 @@ async def _retry_forward_delivery(session: AsyncSession, handover: Handover) -> 
     # further manual retry (or a poll loop resumed in the meantime, if
     # attempts hadn't been exhausted yet) can still use it.
     if delivered:
-        app.state.pending_handover_payloads.pop(handover.id, None)
+        await repository.delete_pending_payload(session, handover.id, leg="forward")
     await session.commit()
 
 
@@ -938,14 +934,14 @@ async def _retry_result_delivery(session: AsyncSession, handover: Handover) -> N
     dispatches here for `result_delivery_failed`, mirroring
     `_retry_forward_delivery` exactly but for the hub's outbound delivery
     to `from_installation_id`."""
-    cached = app.state.pending_handover_result_payloads.get(handover.id)
+    cached = await repository.get_pending_payload(session, handover.id, leg="result")
     if cached is None:
         raise HTTPException(
             status_code=409,
             detail=(
-                "Verschlüsselter Ergebnis-Payload ist nicht mehr im Hub-Speicher "
-                "vorhanden (z. B. nach einem Neustart) - die Zielinstallation muss "
-                "das Ergebnis erneut über POST /handovers/{id}/result einreichen"
+                "Verschlüsselter Ergebnis-Payload ist nicht (mehr) im Hub gespeichert - "
+                "die Zielinstallation muss das Ergebnis erneut über "
+                "POST /handovers/{id}/result einreichen"
             ),
         )
     await repository.reset_for_result_retry(session, handover)
@@ -961,7 +957,7 @@ async def _retry_result_delivery(session: AsyncSession, handover: Handover) -> N
         session, handover, success=delivered, max_attempts=settings.max_handover_delivery_attempts
     )
     if delivered:
-        app.state.pending_handover_result_payloads.pop(handover.id, None)
+        await repository.delete_pending_payload(session, handover.id, leg="result")
     await session.commit()
 
 
@@ -977,11 +973,12 @@ async def retry_handover(
     UI can call this single endpoint uniformly regardless of which of the
     two independent legs failed (409 for any other status). Makes a new
     synchronous delivery attempt immediately instead of waiting for the next
-    poll tick, same pattern as ocr-/rendering-service (ADR 0080). Only works
-    as long as the relevant encrypted payload is still in the hub's process
-    memory - after a restart during an open retry window it is irrecoverably
-    lost (deliberate consequence of "no payload is ever persisted",
-    ADR 0028).
+    poll tick, same pattern as ocr-/rendering-service (ADR 0080). Since
+    Post-Roadmap Phase 73 Session 3 (ADR 0213) the relevant encrypted
+    payload is persisted (`handover_retry_payload`) rather than kept only in
+    the hub's process memory, so this now also works across a hub restart -
+    the 409 below is only reached for a genuinely missing/corrupted row
+    (should not happen in practice), not merely "hub was restarted".
 
     Gated via the same `settings.hub_operator_key` bearer secret as
     `POST /installations/{id}/revoke` (Post-Roadmap Phase 44 Session 1,

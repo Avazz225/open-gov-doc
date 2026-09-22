@@ -490,3 +490,104 @@ async def test_purge_stale_handovers_never_removes_a_non_terminal_row_regardless
     deleted = await repository.purge_stale_handovers(session, cleanup_after_seconds=604800.0)
 
     assert deleted == 0
+
+
+# --- Persisted retry payload cache (Post-Roadmap Phase 73 Session 3, ADR 0213) ---
+
+
+async def test_save_get_delete_pending_payload_round_trip(session):
+    handover = await repository.create_handover(
+        session,
+        handover_id=str(uuid.uuid4()),
+        from_installation_id="from-installation",
+        to_installation_id="to-installation",
+        process_type="test-process",
+    )
+    await session.flush()
+
+    assert await repository.get_pending_payload(session, handover.id, leg="forward") is None
+
+    await repository.save_pending_payload(
+        session, handover.id, leg="forward", payload={"encrypted_payload": "opaque"}
+    )
+    assert await repository.get_pending_payload(session, handover.id, leg="forward") == {
+        "encrypted_payload": "opaque"
+    }
+    # The two legs are independent - writing "forward" must not create or
+    # affect a "result" row for the same handover_id.
+    assert await repository.get_pending_payload(session, handover.id, leg="result") is None
+
+    await repository.delete_pending_payload(session, handover.id, leg="forward")
+    assert await repository.get_pending_payload(session, handover.id, leg="forward") is None
+    # Idempotent - deleting an already-absent row is a no-op, not an error
+    # (matches the old dict's `.pop(handover.id, None)`).
+    await repository.delete_pending_payload(session, handover.id, leg="forward")
+
+
+async def test_save_pending_payload_overwrites_an_existing_row(session):
+    """`submit_handover_result` has no uniqueness guard preventing it from
+    running twice for the same `handover_id` before a previous
+    `result_pending_retry` attempt resolves (see `save_pending_payload`'s
+    own docstring) - the upsert must overwrite, not raise or duplicate."""
+    handover = await repository.create_handover(
+        session,
+        handover_id=str(uuid.uuid4()),
+        from_installation_id="from-installation",
+        to_installation_id="to-installation",
+        process_type="test-process",
+    )
+    await session.flush()
+
+    await repository.save_pending_payload(
+        session, handover.id, leg="result", payload={"encrypted_result": "first"}
+    )
+    await repository.save_pending_payload(
+        session, handover.id, leg="result", payload={"encrypted_result": "second"}
+    )
+
+    assert await repository.get_pending_payload(session, handover.id, leg="result") == {
+        "encrypted_result": "second"
+    }
+
+
+async def test_count_pending_payloads_counts_only_the_requested_leg(session):
+    for leg, count in (("forward", 2), ("result", 1)):
+        for _ in range(count):
+            handover = await repository.create_handover(
+                session,
+                handover_id=str(uuid.uuid4()),
+                from_installation_id="from-installation",
+                to_installation_id="to-installation",
+                process_type="test-process",
+            )
+            await session.flush()
+            await repository.save_pending_payload(session, handover.id, leg=leg, payload={})
+
+    assert await repository.count_pending_payloads(session, leg="forward") == 2
+    assert await repository.count_pending_payloads(session, leg="result") == 1
+
+
+async def test_purge_stale_handovers_cascades_to_pending_retry_payload(session):
+    """ADR 0213 cascade proof: `handover_retry_payload.handover_id` has
+    `ON DELETE CASCADE`, so `purge_stale_handovers`'s existing plain bulk
+    `DELETE` (`session.execute(delete(Handover).where(...))`, no ORM object
+    loaded per row - see its own docstring) needs zero Python-side change to
+    also remove an orphaned payload row; the database does it. Covers
+    exactly the `delivery_failed` case where a payload deliberately stays
+    cached past exhaustion for a manual `POST .../retry` (see
+    `models.HandoverRetryPayload`'s docstring)."""
+    await _create_handover_with_age(session, status="delivery_failed", age_seconds=1_000_000)
+    handovers = await repository.list_handovers(session, status="delivery_failed")
+    handover = handovers[0]
+    await repository.save_pending_payload(
+        session, handover.id, leg="forward", payload={"encrypted_payload": "opaque"}
+    )
+    await session.flush()
+    assert await repository.get_pending_payload(session, handover.id, leg="forward") is not None
+
+    deleted = await repository.purge_stale_handovers(session, cleanup_after_seconds=604800.0)
+    assert deleted == 1
+
+    # Queries the payload table directly - confirms no orphaned row survives
+    # the parent `Handover` row's deletion.
+    assert await repository.get_pending_payload(session, handover.id, leg="forward") is None

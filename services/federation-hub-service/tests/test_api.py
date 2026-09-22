@@ -6,8 +6,10 @@ import httpx
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
+from dms_db_base import build_engine, make_session_factory
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
+from federation_hub_service import repository
 from federation_hub_service.crypto_utils import sign_body
 from federation_hub_service.main import app
 from federation_hub_service.main import settings as hub_settings
@@ -481,6 +483,30 @@ def _retry(client, handover_id: str, *, key: str | None = _RETRY_OPERATOR_KEY):
     return client.post(f"/handovers/{handover_id}/retry", headers=headers)
 
 
+async def _has_pending_payload(session_factory, handover_id: str, *, leg: str) -> bool:
+    """Post-Roadmap Phase 73 Session 3 (ADR 0213): replaces the old
+    `handover_id in app.state.pending_handover_payloads`/`..._result_
+    payloads` membership checks. Deliberately queries through the test's
+    OWN `session_factory` fixture (a separate engine/connection from
+    `app.state.session_factory`, which `client`'s `TestClient(app)` lifespan
+    created on its own event loop) rather than reaching into `app.state` -
+    this is exactly the "no in-process state shared with the writer"
+    shape the ADR's fix is about, not merely a style preference."""
+    async with session_factory() as session:
+        return await repository.get_pending_payload(session, handover_id, leg=leg) is not None
+
+
+async def _drop_pending_payload(session_factory, handover_id: str, *, leg: str) -> None:
+    """Simulates the defensive-fallback edge case (a genuinely missing/
+    corrupted row) that `_retry_forward_delivery`/`_retry_result_delivery`
+    still guard against with a `409` even after ADR 0213 - NOT a restart
+    simulation (see `test_main.py` for that; a real restart no longer loses
+    this row at all, which is the whole point of ADR 0213)."""
+    async with session_factory() as session:
+        await repository.delete_pending_payload(session, handover_id, leg=leg)
+        await session.commit()
+
+
 def test_create_handover_delivers_signed_payload_to_target_callback(client):
     sender, sender_key = register_installation(client)
     target, _ = register_installation(client, callback_base_url="http://receiver.test")
@@ -519,7 +545,7 @@ def test_create_handover_delivers_signed_payload_to_target_callback(client):
     assert status_response.json()["status"] == "delivered"
 
 
-def test_create_handover_marks_pending_retry_on_unreachable_target(client):
+async def test_create_handover_marks_pending_retry_on_unreachable_target(client, session_factory):
     """Post-Roadmap Phase 20 Session 5 (ADR 0081): ein transienter erster
     Fehlschlag landet nicht mehr sofort im terminalen `delivery_failed`,
     sondern im retry-fähigen `pending_retry` - solange
@@ -546,11 +572,14 @@ def test_create_handover_marks_pending_retry_on_unreachable_target(client):
     assert body["attempts"] == 1
     assert body["next_retry_at"] is not None
     # Der Payload wird für den späteren Retry (Poll-Loop oder manueller
-    # `POST .../retry`) flüchtig im Hub-Prozessspeicher gehalten.
-    assert body["id"] in app.state.pending_handover_payloads
+    # `POST .../retry`) persistent gehalten (ADR 0213) - über eine eigene,
+    # von der App losgelöste Session geprüft.
+    assert await _has_pending_payload(session_factory, body["id"], leg="forward")
 
 
-def test_create_handover_reaches_delivery_failed_after_exhausting_attempts(client):
+async def test_create_handover_reaches_delivery_failed_after_exhausting_attempts(
+    client, session_factory
+):
     sender, sender_key = register_installation(client)
     target, _ = register_installation(client, callback_base_url="http://unreachable.invalid")
 
@@ -578,8 +607,9 @@ def test_create_handover_reaches_delivery_failed_after_exhausting_attempts(clien
         assert body["next_retry_at"] is None
         # Bleibt trotz Erschöpfung im Cache - genau dafür ist er da: ein
         # manueller `POST .../retry` braucht ihn jetzt. Nur ein ERFOLGREICHER
-        # Versuch entfernt den Eintrag wieder (ADR 0081).
-        assert body["id"] in app.state.pending_handover_payloads
+        # Versuch entfernt den Eintrag wieder (ADR 0081), persistent seit
+        # ADR 0213.
+        assert await _has_pending_payload(session_factory, body["id"], leg="forward")
     finally:
         hub_settings.max_handover_delivery_attempts = original_max_attempts
 
@@ -612,7 +642,7 @@ def test_retry_handover_requires_delivery_failed_status(client):
         hub_settings.hub_operator_key = None
 
 
-def test_retry_handover_reattempts_a_delivery_failed_handover(client):
+async def test_retry_handover_reattempts_a_delivery_failed_handover(client, session_factory):
     """ADR 0081: manueller Neustart setzt `attempts`/`next_retry_at` VOR dem
     erneuten Versuch zurück (`repository.reset_for_retry`) - andernfalls
     zählt `mark_handover_delivered` von der bereits erschöpften Zahl weiter
@@ -641,7 +671,7 @@ def test_retry_handover_reattempts_a_delivery_failed_handover(client):
         assert created["status"] == "delivery_failed"
         # Bleibt nach Erschöpfung im Cache (ADR 0081) - kein manuelles
         # Nachhelfen nötig, das ist der eigentliche Zweck des Fixes.
-        assert created["id"] in app.state.pending_handover_payloads
+        assert await _has_pending_payload(session_factory, created["id"], leg="forward")
 
         stub, received = _make_stub_receiver()
         app.state.http_client = httpx.AsyncClient(transport=httpx.ASGITransport(app=stub))
@@ -654,16 +684,20 @@ def test_retry_handover_reattempts_a_delivery_failed_handover(client):
         # zurueck, ein erfolgreicher Zustellversuch erhoeht sie nicht.
         assert body["attempts"] == 0
         assert len(received) == 1
-        assert created["id"] not in app.state.pending_handover_payloads
+        assert not await _has_pending_payload(session_factory, created["id"], leg="forward")
     finally:
         hub_settings.max_handover_delivery_attempts = original_max_attempts
         hub_settings.hub_operator_key = None
 
 
-def test_retry_handover_without_cached_payload_returns_409(client):
-    """Deckt die dokumentierte Grenze ab: nach einem (simulierten) Neustart
-    ist der Payload nicht mehr im Prozessspeicher - ein manueller Retry kann
-    dann nicht mehr automatisch nachgestellt werden."""
+async def test_retry_handover_without_cached_payload_returns_409(client, session_factory):
+    """Deckt die verbleibende Grenze ab (ADR 0213 "Rationale": defensiver
+    Fallback für eine tatsächlich fehlende/beschädigte Zeile, in der Praxis
+    sollte das nicht vorkommen - ANDERS als vor ADR 0213 ist ein normaler
+    Hub-Neustart hierfür NICHT mehr die Ursache, siehe `test_main.py` für
+    den eigentlichen Restart-Beweis): fehlt die zwischengespeicherte Payload
+    dennoch, kann ein manueller Retry nicht automatisch nachgestellt
+    werden."""
     sender, sender_key = register_installation(client)
     target, _ = register_installation(client, callback_base_url="http://unreachable.invalid")
 
@@ -686,12 +720,11 @@ def test_retry_handover_without_cached_payload_returns_409(client):
             client, "/handovers", payload, sender_key, installation_id=sender["id"]
         ).json()
         assert created["status"] == "delivery_failed"
-        assert created["id"] in app.state.pending_handover_payloads
+        assert await _has_pending_payload(session_factory, created["id"], leg="forward")
 
-        # Simuliert den Verlust des Prozessspeicher-Cache (z. B. Neustart des
-        # Hub) - der einzige Fall, in dem die Payload-Zwischenspeicherung
-        # tatsächlich nicht mehr verfügbar ist.
-        app.state.pending_handover_payloads.pop(created["id"], None)
+        # Simuliert eine fehlende/beschädigte Zeile (nicht mehr durch einen
+        # Neustart erreichbar seit ADR 0213, siehe Docstring oben).
+        await _drop_pending_payload(session_factory, created["id"], leg="forward")
 
         response = _retry(client, created["id"])
         assert response.status_code == 409
@@ -738,7 +771,9 @@ def test_submit_result_only_allowed_by_target_installation(client):
     assert correct_caller.json()["status"] == "completed"
 
 
-def test_submit_result_marks_result_pending_retry_on_unreachable_origin(client):
+async def test_submit_result_marks_result_pending_retry_on_unreachable_origin(
+    client, session_factory
+):
     """Return-path retry (Phase 40 Session 3, mirrors
     `test_create_handover_marks_pending_retry_on_unreachable_target` for the
     OTHER leg): a transient failure delivering the result back to the
@@ -780,10 +815,12 @@ def test_submit_result_marks_result_pending_retry_on_unreachable_origin(client):
     assert body["status"] == "result_pending_retry"
     assert body["result_attempts"] == 1
     assert body["result_next_retry_at"] is not None
-    assert body["id"] in app.state.pending_handover_result_payloads
+    assert await _has_pending_payload(session_factory, body["id"], leg="result")
 
 
-def test_submit_result_reaches_result_delivery_failed_after_exhausting_attempts(client):
+async def test_submit_result_reaches_result_delivery_failed_after_exhausting_attempts(
+    client, session_factory
+):
     sender, sender_key = register_installation(
         client, callback_base_url="http://unreachable.invalid"
     )
@@ -821,12 +858,12 @@ def test_submit_result_reaches_result_delivery_failed_after_exhausting_attempts(
         assert body["status"] == "result_delivery_failed"
         assert body["result_attempts"] == 1
         assert body["result_next_retry_at"] is None
-        assert body["id"] in app.state.pending_handover_result_payloads
+        assert await _has_pending_payload(session_factory, body["id"], leg="result")
     finally:
         hub_settings.max_handover_delivery_attempts = original_max_attempts
 
 
-def test_retry_handover_reattempts_a_result_delivery_failed_handover(client):
+async def test_retry_handover_reattempts_a_result_delivery_failed_handover(client, session_factory):
     """Return-path counterpart of
     `test_retry_handover_reattempts_a_delivery_failed_handover` - the SAME
     `POST .../retry` endpoint dispatches on the current status, no separate
@@ -875,13 +912,13 @@ def test_retry_handover_reattempts_a_result_delivery_failed_handover(client):
         assert body["status"] == "completed"
         assert body["result_attempts"] == 0
         assert len(received) == 1
-        assert handover["id"] not in app.state.pending_handover_result_payloads
+        assert not await _has_pending_payload(session_factory, handover["id"], leg="result")
     finally:
         hub_settings.max_handover_delivery_attempts = original_max_attempts
         hub_settings.hub_operator_key = None
 
 
-def test_retry_handover_without_cached_result_payload_returns_409(client):
+async def test_retry_handover_without_cached_result_payload_returns_409(client, session_factory):
     sender, sender_key = register_installation(
         client, callback_base_url="http://unreachable.invalid"
     )
@@ -917,7 +954,7 @@ def test_retry_handover_without_cached_result_payload_returns_409(client):
         ).json()
         assert created["status"] == "result_delivery_failed"
 
-        app.state.pending_handover_result_payloads.pop(handover["id"], None)
+        await _drop_pending_payload(session_factory, handover["id"], leg="result")
 
         response = _retry(client, handover["id"])
         assert response.status_code == 409
@@ -1187,3 +1224,76 @@ def test_submit_handover_result_rejects_oversized_payload(client):
         assert response.status_code == 413
     finally:
         hub_settings.max_handover_payload_chars = 100_000_000
+
+
+# --- Restart-survival proof (Post-Roadmap Phase 73 Session 3, ADR 0213) ---
+
+
+async def test_manual_retry_survives_a_simulated_hub_restart(client):
+    """The literal claim ADR 0213 makes, proven end to end rather than just
+    asserted against the repository functions in isolation: `create_handover`
+    persists the payload via `app.state.session_factory` (the session the
+    running app itself used); this test then reads it back via a
+    COMPLETELY SEPARATE engine/connection pool it builds itself right here
+    (its own `build_engine(...)`/`make_session_factory(...)` call, sharing
+    no Python object whatsoever with `app.state.engine`) before ever
+    touching `POST /handovers/{id}/retry`. That separate-engine read
+    succeeding is exactly what "survives a hub restart" means for a
+    payload that, before ADR 0213, existed only as a Python dict entry tied
+    to the ONE process/session that wrote it - a restart would have
+    discarded it before any engine, fresh or not, could ever see it again.
+    `POST .../retry` is then driven through the (unavoidably single, still
+    live) app instance to prove the persisted row is also genuinely usable
+    for a real redelivery, not merely present as an inert row."""
+    fresh_engine = build_engine(hub_settings.postgres_dsn)
+    fresh_session_factory = make_session_factory(fresh_engine)
+
+    def _raise(*_args, **_kwargs):
+        raise httpx.ConnectError("no route", request=httpx.Request("POST", "http://x"))
+
+    app.state.http_client = httpx.AsyncClient(transport=httpx.MockTransport(_raise))
+
+    original_max_attempts = hub_settings.max_handover_delivery_attempts
+    hub_settings.max_handover_delivery_attempts = 1
+    hub_settings.hub_operator_key = _RETRY_OPERATOR_KEY
+    try:
+        sender, sender_key = register_installation(client)
+        target, _ = register_installation(client, callback_base_url="http://unreachable.invalid")
+        payload = {
+            "handover_id": str(uuid.uuid4()),
+            "to_installation_id": target["id"],
+            "process_type": "test-process",
+            "encrypted_payload": "opaque",
+        }
+        created = _signed_post(
+            client, "/handovers", payload, sender_key, installation_id=sender["id"]
+        ).json()
+        assert created["status"] == "delivery_failed"
+
+        # Reads through the fresh, unrelated engine built above - not
+        # `app.state.session_factory`, not even the `session_factory`
+        # pytest fixture (itself already a separate engine, but this one is
+        # built fresh right in this test body for maximum clarity).
+        async with fresh_session_factory() as fresh_session:
+            cached = await repository.get_pending_payload(
+                fresh_session, created["id"], leg="forward"
+            )
+        assert cached == {
+            "handover_id": created["id"],
+            "from_installation_id": sender["id"],
+            "process_type": "test-process",
+            "encrypted_payload": "opaque",
+        }
+
+        stub, received = _make_stub_receiver()
+        app.state.http_client = httpx.AsyncClient(transport=httpx.ASGITransport(app=stub))
+
+        response = _retry(client, created["id"])
+        assert response.status_code == 200
+        body = response.json()
+        assert body["status"] == "delivered"
+        assert len(received) == 1
+    finally:
+        hub_settings.max_handover_delivery_attempts = original_max_attempts
+        hub_settings.hub_operator_key = None
+        await fresh_engine.dispose()

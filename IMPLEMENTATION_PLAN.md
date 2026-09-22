@@ -1813,12 +1813,18 @@ round starts at **Phase 73** / **ADR 0211**.
   operator instead of trusting request-body strings, bootstrap migration from the existing shared
   `fleet_operator_key`, `POST`/`GET`/revoke `/operators` endpoints. No new ADR expected (the design
   decision was already made in ADR 0212; this session executes it).
-- **P73-S3 — `federation-hub-service` retry-payload persistence**: in-flight handover retry payloads
+- ~~**P73-S3 — `federation-hub-service` retry-payload persistence**: in-flight handover retry payloads
   move from process memory into the existing `federation` schema (a new table or column, following the
   same durability principle every other retry/backoff mechanism in this project already has —
   `archival-service`/`storage-service`/`rendering-service` all persist their own retry state). Closes a
   real, if narrow, data-loss risk: a hub restart during an open retry window currently loses the payload
-  silently.
+  silently.~~ **Done.** [ADR 0213](docs/adr/0213-federation-hub-service-retry-payload-persistence.md):
+  new `federation.handover_retry_payload` table (composite PK `(handover_id, leg)`, `ON DELETE CASCADE`),
+  a separate table rather than a `Handover` column to preserve that table's own "metadata only" design
+  intent. Does not weaken ADR 0028's e2e encryption — same opaque ciphertext, different storage medium.
+  Sensors switched from `len(dict)` to a real `COUNT(*)` query, incidentally resolving Phase 40 Session 4's
+  own documented cache-vs-DB divergence concern. 89/89 tests, live-verified via a real
+  `docker restart` proving payload survival plus a live cascade-delete check.
 - **P73-S4 — Audit-trail completeness bundle**: add `actor` to the currently-`None` event types
   (`document.metadata.updated`, `folder.resource.moved`/`.deleted`, `document.restored`/
   `.retention.updated`) — each publisher already has `X-DMS-Principal` available at the call site, this

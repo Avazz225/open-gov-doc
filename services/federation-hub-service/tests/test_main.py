@@ -10,6 +10,7 @@ import httpx
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
+from dms_db_base import build_engine, make_session_factory
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from federation_hub_service import repository
@@ -58,6 +59,26 @@ def _signed_post(
     if installation_id is not None:
         headers["X-Installation-Id"] = installation_id
     return client.post(path, content=body, headers=headers)
+
+
+async def _has_pending_payload(session_factory, handover_id: str, *, leg: str) -> bool:
+    """Post-Roadmap Phase 73 Session 3 (ADR 0213): replaces the old
+    `handover_id in app.state.pending_handover_payloads`/`..._result_
+    payloads` membership checks - queries through the test's own
+    `session_factory` fixture, a separate engine/connection from
+    `app.state.session_factory`."""
+    async with session_factory() as session:
+        return await repository.get_pending_payload(session, handover_id, leg=leg) is not None
+
+
+async def _drop_pending_payload(session_factory, handover_id: str, *, leg: str) -> None:
+    """Simulates loss of the cached payload for the defensive-fallback
+    tests below (`cached is None` in `_run_retry_tick`/`_run_result_retry_
+    tick`) - replaces `app.state.pending_handover_payloads.pop(...)`/
+    `..._result_payloads.pop(...)`."""
+    async with session_factory() as session:
+        await repository.delete_pending_payload(session, handover_id, leg=leg)
+        await session.commit()
 
 
 def _make_stub_receiver() -> tuple[FastAPI, list[dict]]:
@@ -119,7 +140,7 @@ async def test_run_retry_tick_redelivers_a_due_handover(client, session_factory)
         ).json()
         assert created["status"] == "pending_retry"
         assert created["attempts"] == 1
-        assert created["id"] in app.state.pending_handover_payloads
+        assert await _has_pending_payload(session_factory, created["id"], leg="forward")
 
         # next_retry_at liegt normalerweise in der (nahen) Zukunft - fuer
         # einen deterministischen Tick-Test direkt in die Vergangenheit gesetzt.
@@ -131,14 +152,14 @@ async def test_run_retry_tick_redelivers_a_due_handover(client, session_factory)
         stub, received = _make_stub_receiver()
         app.state.http_client = httpx.AsyncClient(transport=httpx.ASGITransport(app=stub))
 
-        await _run_retry_tick(session_factory, app.state.pending_handover_payloads)
+        await _run_retry_tick(session_factory)
 
         async with session_factory() as fresh_session:
             fresh = await repository.get_handover(fresh_session, created["id"])
             assert fresh.status == "delivered"
             assert fresh.attempts == 1
         assert len(received) == 1
-        assert created["id"] not in app.state.pending_handover_payloads
+        assert not await _has_pending_payload(session_factory, created["id"], leg="forward")
     finally:
         settings.max_handover_delivery_attempts = original_max_attempts
 
@@ -197,8 +218,6 @@ async def test_handover_retry_poll_loop_skips_tick_while_maintenance_active(
         loop_task = asyncio.create_task(
             _handover_retry_poll_loop(
                 session_factory,
-                app.state.pending_handover_payloads,
-                app.state.pending_handover_result_payloads,
                 fake_permission_client,
             )
         )
@@ -214,7 +233,7 @@ async def test_handover_retry_poll_loop_skips_tick_while_maintenance_active(
         async with session_factory() as fresh_session:
             fresh = await repository.get_handover(fresh_session, created["id"])
             assert fresh.status == "pending_retry"
-        assert created["id"] in app.state.pending_handover_payloads
+        assert await _has_pending_payload(session_factory, created["id"], leg="forward")
     finally:
         settings.max_handover_delivery_attempts = original_max_attempts
         settings.handover_retry_poll_interval_seconds = original_interval
@@ -243,7 +262,7 @@ async def test_run_retry_tick_skips_handovers_not_yet_due(client, session_factor
         ).json()
         assert created["attempts"] == 1
 
-        await _run_retry_tick(session_factory, app.state.pending_handover_payloads)
+        await _run_retry_tick(session_factory)
 
         async with session_factory() as fresh_session:
             fresh = await repository.get_handover(fresh_session, created["id"])
@@ -292,13 +311,13 @@ async def test_run_retry_tick_keeps_cached_payload_after_reaching_delivery_faile
             handover.next_retry_at = datetime.now(UTC) - timedelta(seconds=1)
             await session.commit()
 
-        await _run_retry_tick(session_factory, app.state.pending_handover_payloads)
+        await _run_retry_tick(session_factory)
 
         async with session_factory() as fresh_session:
             fresh = await repository.get_handover(fresh_session, created["id"])
             assert fresh.status == "delivery_failed"
             assert fresh.attempts == 2
-        assert created["id"] in app.state.pending_handover_payloads
+        assert await _has_pending_payload(session_factory, created["id"], leg="forward")
     finally:
         settings.max_handover_delivery_attempts = original_max_attempts
 
@@ -333,15 +352,17 @@ async def test_run_retry_tick_marks_delivery_failed_when_payload_cache_lost(
         ).json()
         assert created["status"] == "pending_retry"
 
-        # Simuliert den Verlust des Prozessspeicher-Cache (z. B. Neustart).
-        app.state.pending_handover_payloads.pop(created["id"], None)
+        # Simuliert eine fehlende/beschädigte Zeile (ADR 0213 "Rationale" -
+        # der defensive Fallback bleibt bestehen, auch wenn ein normaler
+        # Neustart dafür seit ADR 0213 nicht mehr die Ursache sein kann).
+        await _drop_pending_payload(session_factory, created["id"], leg="forward")
 
         async with session_factory() as session:
             handover = await repository.get_handover(session, created["id"])
             handover.next_retry_at = datetime.now(UTC) - timedelta(seconds=1)
             await session.commit()
 
-        await _run_retry_tick(session_factory, app.state.pending_handover_payloads)
+        await _run_retry_tick(session_factory)
 
         async with session_factory() as fresh_session:
             fresh = await repository.get_handover(fresh_session, created["id"])
@@ -400,7 +421,7 @@ async def test_run_result_retry_tick_redelivers_a_due_handover(client, session_f
         ).json()
         assert result["status"] == "result_pending_retry"
         assert result["result_attempts"] == 1
-        assert handover["id"] in app.state.pending_handover_result_payloads
+        assert await _has_pending_payload(session_factory, handover["id"], leg="result")
 
         async with session_factory() as session:
             fresh = await repository.get_handover(session, handover["id"])
@@ -410,14 +431,14 @@ async def test_run_result_retry_tick_redelivers_a_due_handover(client, session_f
         stub, received = _make_stub_receiver()
         app.state.http_client = httpx.AsyncClient(transport=httpx.ASGITransport(app=stub))
 
-        await _run_result_retry_tick(session_factory, app.state.pending_handover_result_payloads)
+        await _run_result_retry_tick(session_factory)
 
         async with session_factory() as fresh_session:
             fresh = await repository.get_handover(fresh_session, handover["id"])
             assert fresh.status == "completed"
             assert fresh.result_attempts == 1
         assert len(received) == 1
-        assert handover["id"] not in app.state.pending_handover_result_payloads
+        assert not await _has_pending_payload(session_factory, handover["id"], leg="result")
     finally:
         settings.max_handover_delivery_attempts = original_max_attempts
 
@@ -447,7 +468,7 @@ async def test_run_result_retry_tick_skips_handovers_not_yet_due(client, session
         ).json()
         assert result["result_attempts"] == 1
 
-        await _run_result_retry_tick(session_factory, app.state.pending_handover_result_payloads)
+        await _run_result_retry_tick(session_factory)
 
         async with session_factory() as fresh_session:
             fresh = await repository.get_handover(fresh_session, handover["id"])
@@ -491,13 +512,13 @@ async def test_run_result_retry_tick_keeps_cached_payload_after_reaching_result_
             fresh.result_next_retry_at = datetime.now(UTC) - timedelta(seconds=1)
             await session.commit()
 
-        await _run_result_retry_tick(session_factory, app.state.pending_handover_result_payloads)
+        await _run_result_retry_tick(session_factory)
 
         async with session_factory() as fresh_session:
             fresh = await repository.get_handover(fresh_session, handover["id"])
             assert fresh.status == "result_delivery_failed"
             assert fresh.result_attempts == 2
-        assert handover["id"] in app.state.pending_handover_result_payloads
+        assert await _has_pending_payload(session_factory, handover["id"], leg="result")
     finally:
         settings.max_handover_delivery_attempts = original_max_attempts
 
@@ -529,14 +550,14 @@ async def test_run_result_retry_tick_marks_result_delivery_failed_when_payload_c
         ).json()
         assert result["status"] == "result_pending_retry"
 
-        app.state.pending_handover_result_payloads.pop(handover["id"], None)
+        await _drop_pending_payload(session_factory, handover["id"], leg="result")
 
         async with session_factory() as session:
             fresh = await repository.get_handover(session, handover["id"])
             fresh.result_next_retry_at = datetime.now(UTC) - timedelta(seconds=1)
             await session.commit()
 
-        await _run_result_retry_tick(session_factory, app.state.pending_handover_result_payloads)
+        await _run_result_retry_tick(session_factory)
 
         async with session_factory() as fresh_session:
             fresh = await repository.get_handover(fresh_session, handover["id"])
@@ -544,3 +565,68 @@ async def test_run_result_retry_tick_marks_result_delivery_failed_when_payload_c
             assert fresh.result_next_retry_at is None
     finally:
         settings.max_handover_delivery_attempts = original_max_attempts
+
+
+# --- Restart-survival proof (Post-Roadmap Phase 73 Session 3, ADR 0213) ---
+
+
+async def test_run_retry_tick_survives_a_simulated_hub_restart(client):
+    """The literal claim ADR 0213 makes, proven end to end rather than just
+    asserted against the repository functions in isolation: `create_handover`
+    persists the payload via `app.state.session_factory` (the session the
+    running app itself used to handle the `POST /handovers` request); this
+    test then drives the ENTIRE automatic-redelivery tick through a
+    COMPLETELY SEPARATE engine/connection pool it builds itself right here
+    (its own `build_engine(...)`/`make_session_factory(...)` call, sharing
+    no Python object whatsoever with `app.state.engine`) - `_run_retry_tick`
+    never touches `app.state.session_factory` at all in this test. That is
+    exactly what "hub restarted" looks like from the payload's perspective:
+    before ADR 0213, the payload existed only as an entry in a Python dict
+    tied to the one process that wrote it - `_run_retry_tick` here would
+    have logged `federation_handover_retry_payload_lost` and given up
+    (`cached is None`) the moment it ran anywhere but that exact process.
+    After ADR 0213, only the DB row matters, so a totally independent
+    engine succeeds just the same."""
+    fresh_engine = build_engine(settings.postgres_dsn)
+    fresh_session_factory = make_session_factory(fresh_engine)
+
+    def _raise(*_args, **_kwargs):
+        raise httpx.ConnectError("no route", request=httpx.Request("POST", "http://x"))
+
+    app.state.http_client = httpx.AsyncClient(transport=httpx.MockTransport(_raise))
+
+    original_max_attempts = settings.max_handover_delivery_attempts
+    settings.max_handover_delivery_attempts = 5
+    try:
+        sender, sender_key = _register(client)
+        target, _ = _register(client, callback_base_url="http://unreachable.invalid")
+        payload = {
+            "handover_id": str(uuid.uuid4()),
+            "to_installation_id": target["id"],
+            "process_type": "test-process",
+            "encrypted_payload": base64.b64encode(b"opaque").decode(),
+        }
+        created = _signed_post(
+            client, "/handovers", payload, sender_key, installation_id=sender["id"]
+        ).json()
+        assert created["status"] == "pending_retry"
+
+        async with fresh_session_factory() as session:
+            handover = await repository.get_handover(session, created["id"])
+            handover.next_retry_at = datetime.now(UTC) - timedelta(seconds=1)
+            await session.commit()
+
+        stub, received = _make_stub_receiver()
+        app.state.http_client = httpx.AsyncClient(transport=httpx.ASGITransport(app=stub))
+
+        # Driven ENTIRELY through the fresh engine built above - proves
+        # `_run_retry_tick` needs nothing from `app.state` to redeliver.
+        await _run_retry_tick(fresh_session_factory)
+
+        async with fresh_session_factory() as fresh_session:
+            fresh = await repository.get_handover(fresh_session, created["id"])
+            assert fresh.status == "delivered"
+        assert len(received) == 1
+    finally:
+        settings.max_handover_delivery_attempts = original_max_attempts
+        await fresh_engine.dispose()

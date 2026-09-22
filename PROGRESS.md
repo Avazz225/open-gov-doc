@@ -2,7 +2,51 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P73-S2 (second session of Phase 73). Two independent items, one built, one scoped.
+**Last completed:** P73-S3 (third session of Phase 73). `federation-hub-service`'s two in-process
+handover-retry-payload caches (`app.state.pending_handover_payloads`/`..._result_payloads`) moved into a
+new `federation.handover_retry_payload` table (composite PK `(handover_id, leg)`, `ON DELETE CASCADE`
+from `handover`, `payload JSON`) — a hub restart during an open retry window no longer loses the ability
+to automatically redeliver, closing a real, previously live-verified (via an actual `docker compose
+restart`, per ADR 0081's own "Consequences") data-loss risk. New
+[ADR 0213](docs/adr/0213-federation-hub-service-retry-payload-persistence.md): does not weaken ADR 0028's
+end-to-end encryption model (the hub still never decrypts the payload, only its storage medium changes);
+kept as a separate table rather than a column on `Handover` itself, preserving that table's own
+"metadata only" design intent; `ON DELETE CASCADE` means the existing bulk-`DELETE`-based
+`purge_stale_handovers` cleanup needed zero Python-side change. Every read/write/pop against the two
+dicts (`create_handover`, `submit_handover_result`, `_retry_forward_delivery`, `_retry_result_delivery`,
+`_run_retry_tick`, `_run_result_retry_tick`) now goes through four new `repository` functions instead;
+the two `app.state` dicts and every dict parameter threaded through the retry poll loop are removed
+outright. The result-leg upsert (`save_pending_payload`) turned out to need real
+get-then-update-or-insert semantics, not a plain insert — `submit_handover_result` has no uniqueness
+guard preventing a legitimate second write before a prior `result_pending_retry` resolves, unlike the
+forward leg (`handover_id` is already the `Handover` table's own PK there). Sensors
+(`forward_retry_cache_gauge`/`result_retry_cache_gauge`, Phase 40 Session 4) switched from `len(dict)` to
+a real `COUNT(*) ... WHERE leg = ...` query — this also resolves that session's own documented
+cache-vs-DB-count divergence-after-restart concern, since there's now only one source of truth.
+
+6 new tests (round-trip, overwrite-upsert, per-leg count, `ON DELETE CASCADE` proof, and two dedicated
+restart-survival tests using a genuinely independent DB engine/session-factory pair sharing zero process
+state with `app.state` — not a shortcut re-entering the same app's lifespan twice, which the implementing
+agent found causes real asyncpg event-loop-mismatch crashes and cross-test contamination, caught and
+fixed before landing). `scripts/run-tests.sh federation-hub-service`: 89/89 passed, `ruff` clean.
+Rebuilt/redeployed; **live-verified against the real running stack** beyond the test suite: manually
+inserted a `handover`+`handover_retry_payload` row, ran a real `docker restart
+dms-federation-hub-service-1`, confirmed the payload row survived unchanged (the literal scenario ADR
+0081 had previously verified as data-loss and this session fixes); deleted the parent `handover` row and
+confirmed the `ON DELETE CASCADE` removed the payload row too, live. `docs/services/federation-hub-service.md`
+updated (schema/endpoint/data-model/retry-backoff/sensors/tests/Open Points sections, restart-loss bullet
+struck, cross-references ADR 0147's "off-heap move" follow-up as also incidentally closed). No
+`graphify update .` this session (phase-end only, Phase 73 not yet closed).
+
+**Next session:** P73-S4 — Audit-trail completeness bundle: add `actor` to the currently-`None` event
+types (`document.metadata.updated`, `folder.resource.moved`/`.deleted`, `document.restored`/
+`.retention.updated`); bundle with `permission-service`'s elevated-audit-priority-for-emergency-events
+question, closed for good with a short ADR update (third decline, citing ADR 0023/0024/ADR 0206).
+
+---
+
+Immediately before P73-S3: **P73-S2** (second session of Phase 73). Two independent items, one built,
+one scoped.
 **Built**: `notification-service`'s per-recipient rate limiter closed for internal callers —
 `repository.create_and_send` itself now checks `rate_limiter.allow(recipient)` first, before creating any
 row, so all ~18 `consumer.py` NATS-event handlers (`workflow.task.escalated` etc.) are guarded by the
@@ -43,12 +87,6 @@ Only one Python service (`notification-service`) actually changed code this sess
 not session-end" rule; scoped `notification-service` run is the relevant evidence for this session.
 `docs/services/notification-service.md` updated (Authorization section, Open Points bullet struck, test
 count). No `graphify update .` this session (phase-end only).
-
-**Next session:** P73-S3 — `federation-hub-service` retry-payload persistence (in-flight handover retry
-payloads move from process memory, `app.state.pending_handover_payloads`/`pending_result_payloads`, into
-the existing `federation` schema — a real, if narrow, data-loss risk on a hub restart during an open retry
-window). Needs a new ADR (persistence-design decision). A future, not-yet-numbered build session should
-also be slotted into the plan for ADR 0212's fleet-management-service per-operator-token recommendation.
 
 ---
 

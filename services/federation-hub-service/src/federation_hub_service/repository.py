@@ -1,11 +1,11 @@
 from datetime import UTC, datetime, timedelta
 
 from dms_retry import compute_backoff_seconds
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from federation_hub_service import crypto_utils
-from federation_hub_service.models import Handover, HubIdentity, Installation
+from federation_hub_service.models import Handover, HandoverRetryPayload, HubIdentity, Installation
 from federation_hub_service.schemas import InstallationRegister
 from federation_hub_service.version_utils import parse_version
 
@@ -438,6 +438,72 @@ async def list_handovers(
 # swept up by the cleanup loop below, however old it looks; only these three
 # genuinely will never transition again.
 _TERMINAL_HANDOVER_STATUSES = ("completed", "delivery_failed", "result_delivery_failed")
+
+
+async def save_pending_payload(
+    session: AsyncSession, handover_id: str, *, leg: str, payload: dict
+) -> None:
+    """Persists the still-undelivered, end-to-end encrypted payload for one
+    retry leg (Post-Roadmap Phase 73 Session 3, ADR 0213) - replaces
+    `app.state.pending_handover_payloads[handover_id] = ...`/
+    `..._result_payloads[handover_id] = ...`. A plain insert would be
+    sufficient for the forward leg alone (`handover_id` is the `Handover`
+    table's own primary key, so `create_handover` can only ever run once per
+    `handover_id` - a second attempt fails on the `Handover` insert itself,
+    long before this call). It would NOT be sufficient for the result leg:
+    `submit_handover_result` has no such uniqueness guard and can legitimately
+    run again for the same `handover_id` while a previous result attempt is
+    still `result_pending_retry` (nothing blocks a target installation from
+    calling `POST .../result` again before the cached row is cleared) - the
+    old dict simply overwrote the entry in that case
+    (`pending_result_payloads[handover.id] = result_body`), never raised.
+    An upsert via `session.get` + update-or-insert reproduces that exact
+    overwrite semantics for both legs uniformly."""
+    existing = await session.get(HandoverRetryPayload, (handover_id, leg))
+    if existing is not None:
+        existing.payload = payload
+        existing.created_at = datetime.now(UTC)
+        await session.flush()
+        return
+    session.add(
+        HandoverRetryPayload(
+            handover_id=handover_id, leg=leg, payload=payload, created_at=datetime.now(UTC)
+        )
+    )
+    await session.flush()
+
+
+async def get_pending_payload(session: AsyncSession, handover_id: str, *, leg: str) -> dict | None:
+    """Returns the cached payload for `(handover_id, leg)`, or `None` if
+    none is cached (replaces `app.state.pending_handover_payloads.get(...)`/
+    `..._result_payloads.get(...)`) - `None` covers both "never cached" and
+    "already delivered and cleared", exactly like the old dict's `.get`."""
+    row = await session.get(HandoverRetryPayload, (handover_id, leg))
+    return row.payload if row is not None else None
+
+
+async def delete_pending_payload(session: AsyncSession, handover_id: str, *, leg: str) -> None:
+    """Idempotent - a missing row is a no-op, never an error, matching the
+    old dict's `.pop(handover.id, None)` (replaces
+    `app.state.pending_handover_payloads.pop(...)`/
+    `..._result_payloads.pop(...)`)."""
+    row = await session.get(HandoverRetryPayload, (handover_id, leg))
+    if row is not None:
+        await session.delete(row)
+        await session.flush()
+
+
+async def count_pending_payloads(session: AsyncSession, *, leg: str) -> int:
+    """Backs `metrics.build_samplers`'s two retry-cache-depth gauges (Post-
+    Roadmap Phase 73 Session 3, ADR 0213) - previously `len(app.state.
+    pending_handover_payloads)`/`len(..._result_payloads)`, now a cheap
+    `COUNT(*)` against the persisted cache instead."""
+    result = await session.execute(
+        select(func.count())
+        .select_from(HandoverRetryPayload)
+        .where(HandoverRetryPayload.leg == leg)
+    )
+    return int(result.scalar_one())
 
 
 async def purge_stale_handovers(session: AsyncSession, *, cleanup_after_seconds: float) -> int:

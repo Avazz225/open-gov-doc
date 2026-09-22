@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from dms_db_base import make_declarative_base
-from sqlalchemy import JSON, DateTime, Integer, LargeBinary, String, Text
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, LargeBinary, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 Base = make_declarative_base("federation")
@@ -99,12 +99,16 @@ class Handover(Base):
     of the mediation process ... not the document contents themselves") -
     deliberately **no** field for the (end-to-end encrypted) payload itself,
     which is forwarded synchronously and never persisted here. This still
-    holds since Post-Roadmap Phase 20 Session 5 (ADR 0081) - a payload that
-    still needs to be redelivered via retry is kept only EPHEMERALLY in
-    process memory (`app.state.pending_handover_payloads`), never in this
-    table - a restart of the hub during an open retry window therefore loses
-    the ability to automatically redeliver (see
-    docs/services/federation-hub-service.md "Open Points")."""
+    holds since Post-Roadmap Phase 20 Session 5 (ADR 0081): a payload that
+    still needs to be redelivered via retry is NOT a column on this table -
+    that invariant is unchanged. What DID change is where it lives instead:
+    since Post-Roadmap Phase 73 Session 3 (ADR 0213), it is persisted in the
+    separate `HandoverRetryPayload` table below (previously it was kept only
+    EPHEMERALLY in process memory, `app.state.pending_handover_payloads`,
+    which a hub restart during an open retry window silently lost). A
+    restart now no longer loses the ability to automatically redeliver -
+    see `HandoverRetryPayload`'s own docstring and
+    docs/services/federation-hub-service.md "Retry & Backoff"."""
 
     __tablename__ = "handover"
 
@@ -132,9 +136,9 @@ class Handover(Base):
     # the RESULT to `from_installation_id` (inside `submit_handover_result`),
     # independent of the forward-delivery leg's own counters. The
     # `encrypted_result` payload that still needs retrying, like the forward
-    # payload, is kept only ephemerally in process memory
-    # (`app.state.pending_handover_result_payloads`), never here - same
-    # ADR 0028/0081 rationale, doubled for this second leg.
+    # payload, is persisted in `HandoverRetryPayload` (`leg="result"`) since
+    # ADR 0213 - same table, same restart-survival guarantee, doubled for
+    # this second leg.
     result_attempts: Mapped[int] = mapped_column(Integer, default=0)
     result_next_retry_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -142,3 +146,42 @@ class Handover(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class HandoverRetryPayload(Base):
+    """Persisted retry cache for the end-to-end encrypted handover payload
+    (Post-Roadmap Phase 73 Session 3, ADR 0213) - replaces the two
+    in-process dicts (`app.state.pending_handover_payloads`/
+    `..._result_payloads`) that held this same data only EPHEMERALLY since
+    ADR 0081/Phase 40 Session 3. Those dicts meant a hub restart during an
+    open retry window silently and permanently lost the ability to
+    automatically redeliver - `_run_retry_tick`/`_run_result_retry_tick`
+    would find the `Handover` row due for retry but no cached payload for
+    it, log `federation_handover_retry_payload_lost`, and give up. Moving
+    the cache here (keyed by `(handover_id, leg)`, `leg` one of "forward"/
+    "result" for the two independent delivery directions on the same
+    handover) closes that gap: the payload now survives a restart exactly
+    like every other piece of retry state already does.
+
+    Deliberately a SEPARATE table from `Handover`, not a nullable payload
+    column on it (see ADR 0213 "Rationale"): `Handover` is a permanent audit
+    record with a "metadata only" design intent (7.4) that this change does
+    not reverse - the retry payload's own lifecycle is transient by
+    definition (it exists only between a failed attempt and the next
+    successful one, then is deleted), which is a different lifecycle from
+    `Handover`'s own. `ON DELETE CASCADE` on `handover_id` means
+    `repository.purge_stale_handovers`'s existing plain bulk `DELETE` on
+    terminal `Handover` rows needs no Python-side change to also clean up
+    any orphaned payload row. This does NOT weaken ADR 0028's end-to-end
+    encryption model - the hub still never decrypts `payload`, it stores the
+    exact same opaque ciphertext bytes it previously only held in RAM, just
+    durably now."""
+
+    __tablename__ = "handover_retry_payload"
+
+    handover_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("federation.handover.id", ondelete="CASCADE"), primary_key=True
+    )
+    leg: Mapped[str] = mapped_column(String(16), primary_key=True)
+    payload: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
