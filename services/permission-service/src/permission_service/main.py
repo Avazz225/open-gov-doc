@@ -348,6 +348,22 @@ async def create_role(
         session, payload.name, payload.description, payload.permissions
     )
     await session.commit()
+    # P71-S2: the four-eyes-approved execution path (`approval_consumer.py`)
+    # has always published this - the far more common DIRECT path (the
+    # default, no installation has `requires_approval=True` for this action
+    # type out of the box) never did, a real forensic-trace coverage gap
+    # (`reporting-service`'s trace categorizes any `permission.role.*`
+    # event automatically, it needed the event to exist at all).
+    await publish_event(
+        "permission.role.created",
+        {
+            "role_id": role.id,
+            "name": role.name,
+            "description": role.description,
+            "permissions": role.permissions,
+        },
+        actor=x_dms_principal,
+    )
     return RoleActionResult(status="created", role=role)
 
 
@@ -402,6 +418,17 @@ async def update_role(
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     await session.commit()
+    # P71-S2: same gap as `create_role` above.
+    await publish_event(
+        "permission.role.updated",
+        {
+            "role_id": role.id,
+            "name": role.name,
+            "description": role.description,
+            "permissions": role.permissions,
+        },
+        actor=x_dms_principal,
+    )
     return RoleActionResult(status="updated", role=role)
 
 
@@ -610,6 +637,19 @@ async def create_role_assignment(
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     await session.commit()
+    # P71-S2: same gap as `create_role` above - the four-eyes-approved path
+    # already publishes this, the direct/default path never did.
+    await publish_event(
+        "permission.role_assignment.created",
+        {
+            "role_assignment_id": assignment.id,
+            "principal_type": assignment.principal_type,
+            "principal_id": assignment.principal_id,
+            "role_id": assignment.role_id,
+            "resource_id": assignment.resource_id,
+        },
+        actor=assignment.principal_id,
+    )
     return RoleAssignmentActionResult(status="created", role_assignment=assignment)
 
 
@@ -626,13 +666,32 @@ async def list_role_assignments(
 
 @app.delete("/role-assignments/{assignment_id}", status_code=204)
 async def delete_role_assignment(
-    assignment_id: int, session: AsyncSession = Depends(get_session)
+    assignment_id: int,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> None:
     try:
-        await repository.delete_role_assignment(session, assignment_id)
+        assignment = await repository.delete_role_assignment(session, assignment_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     await session.commit()
+    # P71-S2: this endpoint never had ANY event at all (not even via
+    # four-eyes - `permission.role_assignment.delete` has never been a
+    # known action type in `approval_consumer.py`). `x_dms_principal` is
+    # new here, attribution-only (not gating - this endpoint remains
+    # ungated, unchanged) - optional header, so an existing caller that
+    # never sent it keeps working identically, just with an empty `actor`.
+    await publish_event(
+        "permission.role_assignment.deleted",
+        {
+            "role_assignment_id": assignment.id,
+            "principal_type": assignment.principal_type,
+            "principal_id": assignment.principal_id,
+            "role_id": assignment.role_id,
+            "resource_id": assignment.resource_id,
+        },
+        actor=x_dms_principal or None,
+    )
 
 
 @app.post("/resources", response_model=ResourceNodeOut, status_code=201)

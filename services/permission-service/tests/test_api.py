@@ -126,6 +126,58 @@ def test_create_role(client, role_management_headers):
     assert body["approval_request_id"] is None
 
 
+def test_create_role_publishes_event(client, role_management_headers, monkeypatch):
+    """P71-S2: the direct/default path (no `requires_approval` configured)
+    never published anything before this - only the four-eyes-approved
+    execution path (`approval_consumer.py`) did, a real forensic-trace
+    coverage gap since installations overwhelmingly use the default path."""
+    published: list[Event] = []
+
+    async def fake_publish(subject: str, data: bytes) -> None:
+        published.append(Event.from_bytes(data))
+
+    monkeypatch.setattr(app.state.publisher, "publish", fake_publish)
+
+    response = client.post(
+        "/roles",
+        json={"name": "Auditor", "description": "", "permissions": ["read"]},
+        headers=role_management_headers,
+    )
+
+    assert response.status_code == 201
+    events = [e for e in published if e.event_type == "permission.role.created"]
+    assert len(events) == 1
+    assert events[0].payload["name"] == "Auditor"
+    assert events[0].actor == role_management_headers["X-DMS-Principal"]
+
+
+def test_update_role_publishes_event(client, role_management_headers, monkeypatch):
+    role_id = client.post(
+        "/roles",
+        json={"name": "Editor", "description": "", "permissions": ["read"]},
+        headers=role_management_headers,
+    ).json()["role"]["id"]
+
+    published: list[Event] = []
+
+    async def fake_publish(subject: str, data: bytes) -> None:
+        published.append(Event.from_bytes(data))
+
+    monkeypatch.setattr(app.state.publisher, "publish", fake_publish)
+
+    response = client.put(
+        f"/roles/{role_id}",
+        json={"description": "updated", "permissions": ["read", "write"]},
+        headers=role_management_headers,
+    )
+
+    assert response.status_code == 200
+    events = [e for e in published if e.event_type == "permission.role.updated"]
+    assert len(events) == 1
+    assert events[0].payload["permissions"] == ["read", "write"]
+    assert events[0].actor == role_management_headers["X-DMS-Principal"]
+
+
 def test_create_role_with_approval_required_defers_creation(client, role_management_headers):
     """Vier-Augen-Retrofit für Rollenanlage (P32-S1, ADR 0130) - identisches
     Muster wie `test_create_role_assignment_with_approval_required_defers_
@@ -738,6 +790,100 @@ def test_check_batch_rejects_access_type_mismatch(client):
         },
     )
     assert response.status_code == 422
+
+
+def test_create_role_assignment_publishes_event(client, role_management_headers, monkeypatch):
+    """P71-S2: same gap as `create_role` - the direct/default path never
+    published anything, only the four-eyes-approved path did."""
+    role_id = client.post(
+        "/roles",
+        json={"name": "Assignable", "permissions": ["read"]},
+        headers=role_management_headers,
+    ).json()["role"]["id"]
+
+    published: list[Event] = []
+
+    async def fake_publish(subject: str, data: bytes) -> None:
+        published.append(Event.from_bytes(data))
+
+    monkeypatch.setattr(app.state.publisher, "publish", fake_publish)
+
+    response = client.post(
+        "/role-assignments",
+        json={
+            "principal_type": "user",
+            "principal_id": "dave",
+            "role_id": role_id,
+            "resource_id": ROOT_RESOURCE_ID,
+        },
+    )
+
+    assert response.status_code == 201
+    events = [e for e in published if e.event_type == "permission.role_assignment.created"]
+    assert len(events) == 1
+    assert events[0].payload["principal_id"] == "dave"
+    assert events[0].actor == "dave"
+
+
+def test_delete_role_assignment_publishes_event(client, role_management_headers, monkeypatch):
+    """P71-S2: this endpoint never had ANY event at all before this
+    (not even via four-eyes - deletion was never a known action type)."""
+    role_id = client.post(
+        "/roles",
+        json={"name": "Revocable", "permissions": ["read"]},
+        headers=role_management_headers,
+    ).json()["role"]["id"]
+    assignment_id = client.post(
+        "/role-assignments",
+        json={
+            "principal_type": "user",
+            "principal_id": "erin",
+            "role_id": role_id,
+            "resource_id": ROOT_RESOURCE_ID,
+        },
+    ).json()["role_assignment"]["id"]
+
+    published: list[Event] = []
+
+    async def fake_publish(subject: str, data: bytes) -> None:
+        published.append(Event.from_bytes(data))
+
+    monkeypatch.setattr(app.state.publisher, "publish", fake_publish)
+
+    response = client.delete(
+        f"/role-assignments/{assignment_id}", headers={"X-DMS-Principal": "admin"}
+    )
+
+    assert response.status_code == 204
+    events = [e for e in published if e.event_type == "permission.role_assignment.deleted"]
+    assert len(events) == 1
+    assert events[0].payload["principal_id"] == "erin"
+    assert events[0].actor == "admin"
+
+
+def test_delete_role_assignment_without_principal_header_still_publishes(
+    client, role_management_headers, monkeypatch
+):
+    """The new header is attribution-only, not gating - an existing caller
+    that never sends it must keep working identically."""
+    role_id = client.post(
+        "/roles",
+        json={"name": "Revocable2", "permissions": ["read"]},
+        headers=role_management_headers,
+    ).json()["role"]["id"]
+    assignment_id = client.post(
+        "/role-assignments",
+        json={
+            "principal_type": "user",
+            "principal_id": "frank",
+            "role_id": role_id,
+            "resource_id": ROOT_RESOURCE_ID,
+        },
+    ).json()["role_assignment"]["id"]
+
+    response = client.delete(f"/role-assignments/{assignment_id}")
+
+    assert response.status_code == 204
 
 
 def test_list_role_assignments_returns_all(client, role_management_headers):

@@ -191,6 +191,19 @@ class TrashConfigOut(TrashConfigIn):
     updated_at: datetime
 
 
+class AuditTraceConfigIn(BaseModel):
+    """Forensic trace base logging depth (5.4b, P71-S2) - whether
+    `GET /folders/{id}` publishes `folder.viewed` at all."""
+
+    log_viewed: bool = True
+
+
+class AuditTraceConfigOut(AuditTraceConfigIn):
+    model_config = {"from_attributes": True}
+
+    updated_at: datetime
+
+
 # --- Structure templates (2.5/7.3, since P15-S6) ---
 
 

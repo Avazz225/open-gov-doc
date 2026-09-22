@@ -682,6 +682,101 @@ def test_retention_config_get_and_put(client):
     )
 
 
+FOLDER_CONFIG_ADMIN_HEADERS = {"X-DMS-Principal": "folder-service-test-folder-config-admin"}
+
+
+def test_get_folder_publishes_viewed_event(client, monkeypatch):
+    """P71-S2: forensic-trace coverage gap closed - mirrors
+    `document_service.get_document`'s own `document.viewed` exactly, only
+    on the single retrieval, never on `GET /folders/{id}/children`."""
+    folder_id = client.post("/folders", json={"name": "Akten", "created_by": "alice"}).json()["id"]
+
+    published: list[Event] = []
+
+    async def fake_publish(subject: str, data: bytes) -> None:
+        published.append(Event.from_bytes(data))
+
+    monkeypatch.setattr(app.state.event_bus, "publish", fake_publish)
+
+    response = client.get(f"/folders/{folder_id}", headers={"X-DMS-Principal": "bob"})
+
+    assert response.status_code == 200
+    viewed_events = [e for e in published if e.event_type == "folder.viewed"]
+    assert len(viewed_events) == 1
+    assert viewed_events[0].actor == "bob"
+
+
+def test_list_children_does_not_publish_viewed_event(client, monkeypatch):
+    """The listing route must NOT fire `folder.viewed` per child - same
+    "avoid dozens of events per listing" reasoning as document-service's
+    own precedent."""
+    parent_id = client.post("/folders", json={"name": "Eltern", "created_by": "alice"}).json()["id"]
+    client.post("/folders", json={"name": "Kind", "created_by": "alice", "parent_id": parent_id})
+
+    published: list[Event] = []
+
+    async def fake_publish(subject: str, data: bytes) -> None:
+        published.append(Event.from_bytes(data))
+
+    monkeypatch.setattr(app.state.event_bus, "publish", fake_publish)
+
+    response = client.get(f"/folders/{parent_id}/children")
+
+    assert response.status_code == 200
+    assert [e for e in published if e.event_type == "folder.viewed"] == []
+
+
+def test_get_folder_does_not_publish_viewed_event_when_disabled(client, monkeypatch):
+    client.put(
+        "/audit-trace-config", json={"log_viewed": False}, headers=FOLDER_CONFIG_ADMIN_HEADERS
+    )
+    folder_id = client.post("/folders", json={"name": "Akten2", "created_by": "alice"}).json()["id"]
+
+    published: list[Event] = []
+
+    async def fake_publish(subject: str, data: bytes) -> None:
+        published.append(Event.from_bytes(data))
+
+    monkeypatch.setattr(app.state.event_bus, "publish", fake_publish)
+
+    try:
+        response = client.get(f"/folders/{folder_id}")
+        assert response.status_code == 200
+        assert [e for e in published if e.event_type == "folder.viewed"] == []
+    finally:
+        client.put(
+            "/audit-trace-config", json={"log_viewed": True}, headers=FOLDER_CONFIG_ADMIN_HEADERS
+        )
+
+
+def test_audit_trace_config_get_and_put(client):
+    response = client.put(
+        "/audit-trace-config", json={"log_viewed": False}, headers=FOLDER_CONFIG_ADMIN_HEADERS
+    )
+    assert response.status_code == 200
+    assert response.json()["log_viewed"] is False
+    assert client.get("/audit-trace-config").json()["log_viewed"] is False
+    client.put(
+        "/audit-trace-config", json={"log_viewed": True}, headers=FOLDER_CONFIG_ADMIN_HEADERS
+    )
+
+
+def test_put_audit_trace_config_without_permission_is_403(client):
+    response = client.put(
+        "/audit-trace-config",
+        json={"log_viewed": False},
+        headers={"X-DMS-Principal": "some-random-authenticated-caller"},
+    )
+    assert response.status_code == 403
+
+
+def test_put_audit_trace_config_without_principal_is_401(client):
+    response = client.put(
+        "/audit-trace-config", json={"log_viewed": False}, headers={"X-DMS-Principal": ""}
+    )
+    assert response.status_code == 401
+
+
 def test_trash_config_get_and_put(client):
     response = client.put(
         "/trash-config", json={"restore_period_days": 10}, headers=RETENTION_ADMIN_HEADERS

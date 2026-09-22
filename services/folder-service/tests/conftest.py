@@ -117,6 +117,34 @@ async def _grant_retention_permission():
         response.raise_for_status()
 
 
+FOLDER_CONFIG_ADMIN_PRINCIPAL_ID = "folder-service-test-folder-config-admin"
+
+
+@pytest.fixture(scope="session", autouse=True)
+async def _grant_folder_config_permission():
+    """P71-S2: `PUT /audit-trace-config` requires `admin.folder_config`."""
+    async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL) as pc:
+        roles = (await pc.get("/roles")).json()
+        role_id = next(r["id"] for r in roles if r["name"] == "domain-admin-folder-config")
+        existing = (
+            await pc.get(
+                "/role-assignments", params={"principal_id": FOLDER_CONFIG_ADMIN_PRINCIPAL_ID}
+            )
+        ).json()
+        if any(a["role_id"] == role_id for a in existing):
+            return
+        response = await pc.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": FOLDER_CONFIG_ADMIN_PRINCIPAL_ID,
+                "role_id": role_id,
+                "resource_id": "root",
+            },
+        )
+        response.raise_for_status()
+
+
 PSEUDONYMIZATION_ADMIN_PRINCIPAL_ID = "folder-service-test-pseudonymization-admin"
 
 
@@ -236,7 +264,7 @@ async def _clean_tables():
             text(
                 "TRUNCATE folder.legal_hold, folder.deletion_register_entry, folder.folder, "
                 "folder.retention_config, folder.trash_config, folder.folder_template, "
-                "folder.folder_document_reference CASCADE"
+                "folder.folder_document_reference, folder.audit_trace_config CASCADE"
             )
         )
     await eng.dispose()

@@ -29,6 +29,8 @@ from folder_service.document_client import DocumentClient
 from folder_service.models import Base, Folder
 from folder_service.object_type_client import ObjectTypeClient
 from folder_service.schemas import (
+    AuditTraceConfigIn,
+    AuditTraceConfigOut,
     DeletionRegisterEntryOut,
     FolderCreate,
     FolderDocumentReferenceAdd,
@@ -674,6 +676,14 @@ async def get_folder(
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     await _require_folder_permission(x_dms_principal, folder_id, access_type="read")
+    # Forensic trace (5.4b, P71-S2) - only on the single retrieval, never on
+    # `GET /folders/{id}/children` (mirrors `document_service.get_document`'s
+    # own `document.viewed`, same "avoid dozens of events per listing"
+    # reasoning documented there).
+    config = await repository.get_audit_trace_config(session)
+    if config.log_viewed:
+        await publish_event("folder.viewed", folder_id, {}, actor=x_dms_principal or None)
+    await session.commit()
     return folder
 
 
@@ -903,6 +913,24 @@ async def restore_folder(
     # No actor known - the endpoint does not accept a restored_by.
     await publish_event("folder.restored", subject=folder_id, payload={})
     return folder
+
+
+async def _require_folder_config_permission(x_dms_principal: str) -> None:
+    """RBAC (P71-S2) - `audit-trace-config` (below) is this service's first
+    installation-wide settings page with no natural existing capability to
+    reuse: `admin.retention` covers retention/disposal policy specifically
+    (a materially different concern), not audit-trace depth. New
+    capability `admin.folder_config` (role "domain-admin-folder-config"),
+    mirroring `document-service`'s own `admin.document_config` - "one
+    capability per owning service for its own settings pages" (same
+    precedent, ADR 0148)."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    if not await app.state.permission_client.has_permission(x_dms_principal, "admin.folder_config"):
+        raise HTTPException(
+            status_code=403,
+            detail="Fehlende Domain-Admin-Rolle 'Ordnerdienst-Konfiguration'",
+        )
 
 
 async def _require_retention_permission(x_dms_principal: str) -> None:
@@ -1668,6 +1696,27 @@ async def put_trash_config(
     config = await repository.update_trash_config(
         session, restore_period_days=body.restore_period_days
     )
+    await session.commit()
+    return config
+
+
+@app.get("/audit-trace-config", response_model=AuditTraceConfigOut)
+async def get_audit_trace_config(
+    session: AsyncSession = Depends(get_session),
+) -> AuditTraceConfigOut:
+    config = await repository.get_audit_trace_config(session)
+    await session.commit()
+    return config
+
+
+@app.put("/audit-trace-config", response_model=AuditTraceConfigOut)
+async def put_audit_trace_config(
+    body: AuditTraceConfigIn,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> AuditTraceConfigOut:
+    await _require_folder_config_permission(x_dms_principal)
+    config = await repository.update_audit_trace_config(session, log_viewed=body.log_viewed)
     await session.commit()
     return config
 

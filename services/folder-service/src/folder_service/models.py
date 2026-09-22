@@ -186,3 +186,22 @@ class TrashConfig(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     restore_period_days: Mapped[int] = mapped_column(Integer, default=30)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class AuditTraceConfig(Base):
+    """Base logging depth for the forensic trace (5.4b, P71-S2) - single-
+    row toggle for whether `GET /folders/{id}` publishes `folder.viewed`
+    at all. Deliberately a SMALLER cut than `document_service.
+    AuditTraceConfig`/`AuditTraceRoleOverride` (no per-role override table,
+    no `log_downloaded` field - folders have no downloadable content of
+    their own): folder-service had no equivalent audit-depth concept at
+    all before this session, and the plan's own scope was "add
+    folder.viewed", not "replicate the full document-service role-override
+    mechanism." Default matches document-service's own default (on -
+    maximum traceability as the factory setting)."""
+
+    __tablename__ = "audit_trace_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    log_viewed: Mapped[bool] = mapped_column(Boolean, default=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

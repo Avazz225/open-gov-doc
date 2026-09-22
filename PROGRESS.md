@@ -2,7 +2,60 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P71-S1 (first session of Phase 71 — "Remaining Moderate-Value Completions").
+**Last completed:** P71-S2 (second session of Phase 71 — "Remaining Moderate-Value Completions").
+Forensic-trace audit-coverage bundle: two of the plan's three bundled sub-items closed real gaps, the
+third was verified as already declined twice before and not reopened. **`permission.role.*` events**:
+the four-eyes-**approved** execution path already published `permission.role.created`/`.updated`/
+`permission.role_assignment.created` — but the far more common **direct** path (`requires_approval=False`,
+the out-of-the-box default) never did. Added `publish_event` calls to the direct-path branches of
+`create_role`, `update_role`, `create_role_assignment`, and (no four-eyes precedent existed for this one
+at all) `delete_role_assignment` — the latter attributed via a new, attribution-only `X-DMS-Principal`
+header (endpoint stays ungated, unchanged). `repository.delete_role_assignment` now returns the deleted
+row (captured before `session.delete()`) so the caller has a payload to publish — a real mid-session
+design correction, the original version returned nothing. **`folder.viewed`**: mirrors
+`document.viewed`'s shape (single-item `GET /folders/{id}` only, never on `/children`) but deliberately a
+**smaller cut** than `document-service`'s own mechanism — one boolean toggle
+(`AuditTraceConfig.log_viewed`), not a full per-role-override replication; new `admin.folder_config`
+capability (`domain-admin-folder-config` role) gates `PUT /audit-trace-config`, since `admin.retention`
+covers a materially different concern. **Priority/severity marker deliberately NOT built**: verified this
+exact ask was already explicitly declined **twice** before — ADR 0023's own "Consequences", ADR 0024,
+and P63-S1 (same reasoning, same citations) — no new justification found to reopen it a third time.
+`audit-service` needed zero code changes (already subscribes to `permission.>`/`folder.>` wildcards);
+`reporting-service`'s forensic-trace categorization needed none either (generic event-type-suffix
+matching, not an explicit allowlist).
+
+**Verification**: `permission-service` 190/190 (+5: role/assignment create/update/delete event-publish
+tests). `folder-service` 173/173 (+6: viewed-event published/not-published/disabled, audit-trace-config
+get/put/permission checks). Both services rebuilt, redeployed, and **live-verified end-to-end against
+the real running stack**: all five new event types (`permission.role.created`, `permission.role.updated`,
+`permission.role_assignment.created`, `permission.role_assignment.deleted`, `folder.viewed`) confirmed
+present in `audit-service`'s real hash-chained `GET /events` trail, each with the correct
+`actor`/`payload`/`subject`. A full unfiltered backend regression run afterward (`scripts/run-tests.sh`,
+no service filter) found zero new failures anywhere — every failure present (`auth-service`'s ADR-0190
+circular dependency, `gateway-service`'s same 3 pre-existing failures, `webdav-connector`'s ADR-0189
+timeout pattern, `workflow-service`'s already-documented intermittent federation/xdomea-dispatch flake
+from ADR 0195, and a pre-existing `ruff` lint issue confined to `loadtest/notebook/analysis.ipynb`,
+untouched by this session) matches what prior sessions' own full runs already documented as pre-existing.
+
+**Real bug caught mid-session by the folder-service test suite itself (not by review)**: `folder-service`'s
+new `_grant_folder_config_permission` fixture failed with 173 `RuntimeError: coroutine raised
+StopIteration` errors — `permission-service` had been rebuilt/redeployed earlier in the same session for
+the role-events work, but NOT again after the later `admin.folder_config`/`domain-admin-folder-config`
+addition, so the live container still had the old role list. Fixed by rebuilding/redeploying
+`permission-service` a second time; both services' suites then passed clean.
+
+New ADR: [0206](docs/adr/0206-p71s2-forensic-trace-coverage-bundle.md). `docs/services/permission-service.md`
+(new `domain-admin-folder-config` role row, four new event-type rows, priority/severity Open Point
+reconfirmed-declined note), `docs/services/folder-service.md` (new `folder.viewed` event row, new "Audit
+Depth" section, new `audit-trace-config` API row), and `docs/services/document-service.md` (closed the
+"folder read access remains unaudited" Open Point it named) all updated.
+
+**Next session:** P71-S3 — `process-designer` completions bundle (DMN `decisionRef` design-time
+validation/cross-reference UI, workflow-service process-definition rollback UI wiring, `admin-ui`'s
+`reference_target` picker for `type:"reference"` attributes). See `IMPLEMENTATION_PLAN.md`'s Phase 71
+table for the full session breakdown.
+
+Immediately before P71-S2: **P71-S1** (first session of Phase 71 — "Remaining Moderate-Value Completions").
 Notification wiring bundle: verified the plan's premise for all five sub-items before building, found
 three held up, one needed a different fix, one had no real target. **Force-unlock**
 (`document.lock.force_released`/`document.force_unlock.failed`) and the **four-eyes approval lifecycle**
@@ -48,9 +101,6 @@ New ADR: [0205](docs/adr/0205-p71s1-notification-wiring-bundle.md). `docs/servic
 (Open Point closed, new consumer section, Events list extended), `docs/services/storage-service.md`
 (Events section — previously "neither publish nor consume events," now describes the new stream), and
 `docs/services/reporting-service.md` (Poll Loop section extended) all updated.
-
-**Next session:** P71-S2 — `reporting-service`'s forensic trace event-type coverage bundle. See
-`IMPLEMENTATION_PLAN.md`'s Phase 71 table for the full session breakdown.
 
 ---
 

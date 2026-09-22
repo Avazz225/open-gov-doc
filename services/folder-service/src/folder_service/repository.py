@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from folder_service.document_client import DocumentClient
 from folder_service.models import (
+    AuditTraceConfig,
     DeletionRegisterEntry,
     Folder,
     FolderDocumentReference,
@@ -673,6 +674,31 @@ async def get_trash_config(session: AsyncSession) -> TrashConfig:
 async def update_trash_config(session: AsyncSession, *, restore_period_days: int) -> TrashConfig:
     config = await get_trash_config(session)
     config.restore_period_days = restore_period_days
+    config.updated_at = datetime.now(UTC)
+    await session.flush()
+    return config
+
+
+_AUDIT_TRACE_CONFIG_ID = 1
+
+
+async def get_audit_trace_config(session: AsyncSession) -> AuditTraceConfig:
+    """Reads the (single) `folder.viewed` logging-depth row, creating it
+    with the default (on) if it was never saved before (P71-S2, same
+    lazy-seed pattern as `get_trash_config` above)."""
+    config = await session.get(AuditTraceConfig, _AUDIT_TRACE_CONFIG_ID)
+    if config is None:
+        config = AuditTraceConfig(
+            id=_AUDIT_TRACE_CONFIG_ID, log_viewed=True, updated_at=datetime.now(UTC)
+        )
+        session.add(config)
+        await session.flush()
+    return config
+
+
+async def update_audit_trace_config(session: AsyncSession, *, log_viewed: bool) -> AuditTraceConfig:
+    config = await get_audit_trace_config(session)
+    config.log_viewed = log_viewed
     config.updated_at = datetime.now(UTC)
     await session.flush()
     return config

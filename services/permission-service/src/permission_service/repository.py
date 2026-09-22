@@ -419,6 +419,19 @@ DOMAIN_ADMIN_ROLES: list[tuple[str, str, list[str]]] = [
         "Deklassifizierungsverwaltung (Verschlusssachen)",
         ["admin.declassification"],
     ),
+    # P71-S2: `folder-service`'s new `GET`/`PUT /audit-trace-config`
+    # (folder.viewed logging toggle, mirroring `document-service`'s own
+    # `admin.document_config`-gated settings pages, ADR 0148 precedent -
+    # "one capability per owning service for its own settings pages, not
+    # per page") - folder-service had no such catch-all settings
+    # capability of its own before this, only the shared cross-service
+    # `admin.retention` (which covers a materially different concern,
+    # retention/disposal policy, not audit-trace depth).
+    (
+        "domain-admin-folder-config",
+        "Ordnerdienst-Konfiguration",
+        ["admin.folder_config"],
+    ),
 ]
 
 
@@ -817,12 +830,24 @@ async def list_role_assignments(
     return list(result.scalars().all())
 
 
-async def delete_role_assignment(session: AsyncSession, assignment_id: int) -> None:
+async def delete_role_assignment(session: AsyncSession, assignment_id: int) -> RoleAssignment:
+    """Returns the now-deleted row (P71-S2, for the caller's own
+    `permission.role_assignment.deleted` event payload) - fields are read
+    before `session.delete()` to avoid relying on SQLAlchemy's post-delete
+    attribute-expiry behavior."""
     assignment = await session.get(RoleAssignment, assignment_id)
     if assignment is None:
         raise NotFoundError(f"role_assignment {assignment_id!r} unbekannt")
+    deleted = RoleAssignment(
+        id=assignment.id,
+        principal_type=assignment.principal_type,
+        principal_id=assignment.principal_id,
+        role_id=assignment.role_id,
+        resource_id=assignment.resource_id,
+    )
     await session.delete(assignment)
     await invalidate_cache(session)
+    return deleted
 
 
 async def set_resource_inherit(

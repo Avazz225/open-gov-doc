@@ -32,6 +32,7 @@
 | `POST` | `/folders/{id}/reconcile-restore-deletion` | Deletion reconciliation after restore (10.4, since P11-S4) — `X-DMS-Roles: dms-admin`, 1:1 the same pattern as `document-service` |
 | `GET`/`PUT` | `/retention-config` | Installation-wide default retention settings for folders (standalone, not the same config as `document-service`), incl. its own `deletion_reason_catalog` since Post-Roadmap Phase 31 Session 1 ([ADR 0112](../adr/0112-deletion-reason-catalog-ux-not-enum.md)) |
 | `GET`/`PUT` | `/trash-config` | Trash restoration period for folders (standalone) |
+| `GET`/`PUT` | `/audit-trace-config` | Whether `GET /folders/{id}` publishes `folder.viewed` (5.4b, since **P71-S2**, [ADR 0206](../adr/0206-p71s2-forensic-trace-coverage-bundle.md)) — `PUT` requires `admin.folder_config`, see "Audit Depth" below |
 | `POST` | `/folder-templates` | Capture a structure template from a subtree (2.5/7.3, since **P15-S6**) — `404` for unknown `source_folder_id`, see "Structure Templates" below |
 | `GET` | `/folder-templates` | All templates (without structure, metadata only) |
 | `GET` | `/folder-templates/{id}` | Single template including the full structure tree — `404` for unknown `id` |
@@ -163,12 +164,19 @@ Publishes (stream `folder`, `ensure_stream=True`) exactly the contract the Permi
 | `folder.deletion.reminder` | `{name, retention_until, full_deletion, notify_email}` (5.2a, since P7-S1b, consumed by `notification-service`) |
 | `folder.force_deleted` | `{reason, triggered_by}` (5.2a, since P7-S1b) |
 | `folder.trash_purged` | `{trigger: "trash_expiry"}` (5.2a, since P7-S1b) |
+| `folder.viewed` | `{}` (5.4b, since **P71-S2**, [ADR 0206](../adr/0206-p71s2-forensic-trace-coverage-bundle.md)) — published only on single-item `GET /folders/{id}`, never on the `/children` listing route (avoids event-volume explosion, mirrors `document.viewed`'s established shape); gated behind `AuditTraceConfig.log_viewed` (default `true`), see "Audit Depth" below |
 
 **Consumes** (since P7-S1b, this service's first consumer ever): `permission.approval.approved` — relevant for `action_type == "folder.force_delete"` (executes a forced deletion previously deferred via the four-eyes principle); all other action types are ignored.
 
 **Audit hookup (since P7-S2, a genuine retrofit)**: `audit-service` was missing `"folder.>"` in its consumed subject list ever since this stream was introduced in P7-S1b — a pre-existing bug discovered during the P7-S2 live smoke test, fixed retroactively including a backfill of the complete prior folder event history (see `docs/services/audit-service.md`).
 
 **`inbox`/`outbox` synchronous registration (Post-Roadmap Phase 38 Session 4, [ADR 0149](../adr/0149-teamspace-permission-anchoring-broad-rbac-retrofit.md))**: unlike every other folder, `inbox`/`outbox` are bootstrapped directly into the DB at startup (`ensure_special_folders`), not via `create_folder`, so they never went through the `folder.resource.created` event above and had no `ResourceNode` in `permission-service` at all. Now registered synchronously at startup via `POST /resources` (the same idempotent, create-if-missing primitive ADR 0144 added) — needed once core folder CRUD started actually checking permission-service's resource tree, since an unregistered `resource_id` denies outright rather than falling back to an ancestor's grant.
+
+## Audit Depth (5.4b, since P71-S2, [ADR 0206](../adr/0206-p71s2-forensic-trace-coverage-bundle.md))
+
+Closes the gap `document-service`'s own docs named verbatim ("folder read access (folder-service) remains unaudited, was not part of the concept text", `docs/services/document-service.md`) — but deliberately a **smaller cut** than `document-service`'s own audit-depth mechanism: a single boolean toggle (`AuditTraceConfig.log_viewed`, default `true`), not a full replication of `document-service`'s `AuditTraceConfig` + per-role `AuditTraceRoleOverride` table. No operator need for a per-role folder-view override has been identified; if one emerges later, the document-service mechanism is the precedent to copy.
+
+`GET`/`PUT /audit-trace-config` mirrors `trash-config`'s existing shape (singleton row, `id=1`). `PUT` requires the new `admin.folder_config` capability (`domain-admin-folder-config` role) — folder-service had no existing catch-all settings capability of its own (`admin.retention` covers a materially different concern: retention/legal-hold, not audit logging).
 
 ## Structure Templates (2.5/7.3, since P15-S6)
 
