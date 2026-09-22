@@ -1770,7 +1770,7 @@ round starts at **Phase 73** / **ADR 0211**.
 
 ## Phase 73 — Security & Correctness Hardening (cheap, highest value, same principle as Phases 38/44)
 
-- **P73-S1 — `workflow-service`/`reviewer-ui` real per-assignee task authorization (the priority finding
+- ~~**P73-S1 — `workflow-service`/`reviewer-ui` real per-assignee task authorization (the priority finding
   of this round)**: today `POST /instances/{id}/tasks/{task_id}/complete` checks only the caller holds
   the coarse `workflow.write` permission (granted to "everyone" by default, ADR 0067/0074) — BPMN lanes
   are parsed and displayed but never enforced as an authorization boundary, so any authenticated
@@ -1781,7 +1781,18 @@ round starts at **Phase 73** / **ADR 0211**.
   claim/delegation/org-hierarchy-grant system from ADR 0121/0145), not a mechanical fix, so budget for a
   new ADR. Bundle with `folder-service`'s `created_by`/`deleted_by` migration from spoofable client-
   supplied fields to the `X-DMS-Principal` convention (a smaller, same-shaped "who actually did this"
-  integrity fix).
+  integrity fix).~~ **Done — claim-based enforcement, not lane-based; `folder-service` half investigated
+  and deliberately reverted.** [ADR 0211](docs/adr/0211-workflow-service-per-claimant-task-completion-authorization.md):
+  a CLAIMED task now requires the claimant, a supervisor, or a valid on-behalf-of delegate to complete
+  it (reusing `reassign_task`'s P66-S2/ADR 0195 precedent); an UNCLAIMED task stays fully open, unchanged
+  — **BPMN-lane enforcement remains genuinely unimplemented**, a different, narrower dimension this
+  session deliberately didn't attempt (see the "reviewer-ui's lane-based task pre-selection" note below,
+  corrected accordingly). The `folder-service` `created_by`/`deleted_by` fix was started, then reverted:
+  forcing both fields to always equal `x_dms_principal` would have broken `teamspace-service`'s
+  deliberate "trusted intermediary asserts the real human's identity under its own technical identity"
+  pattern (ADR 0149) — the same accepted trade-off this project already made for `document-service`'s
+  `created_by`/`workflow-service`'s own `completed_by`. `workflow-service` 235/235 (+4, one pre-existing
+  test updated), live-verified against the real running stack.
 - **P73-S2 — Authorization/anti-abuse hardening bundle**: `notification-service`'s per-recipient rate
   limiter extended to guard `repository.create_and_send` itself, not only the `POST /notifications` HTTP
   boundary (closes the internal-caller bypass); `fleet-management-service`'s four-eyes approval check
@@ -1881,10 +1892,10 @@ Re-confirmed this round via the staleness-reassessment agent, spot-checked again
 - Assorted small, individually-low-value items already carried forward unchanged since Phase 63/65
   (`permission-service`'s non-subtree-scoped cache invalidation, `registry-service`'s unpolled
   `health_endpoint`, `mail-connector`'s no-bulk-rescan-on-format-change, `migration-console`'s missing
-  proactive license banner/own approval UI, `reviewer-ui`'s lane-based task pre-selection — blocked on
-  the same BPMN-lane-enforcement gap P73-S1 above finally addresses, so this one may become buildable
-  once P73-S1 lands, worth re-checking then rather than now) — none itemized into their own sessions
-  this round either.
+  proactive license banner/own approval UI, `reviewer-ui`'s lane-based task pre-selection — **still
+  blocked**: P73-S1 closed the claim-based half of the completion-authorization gap but deliberately did
+  NOT build BPMN-lane enforcement (see P73-S1's "Done" note above), so this item remains exactly as
+  blocked as before, not newly buildable) — none itemized into their own sessions this round either.
 
 ## Phase 76 — Tailwind CSS Migration for a Modern Web UI (user-requested, added after this round's plan
 was first drafted)

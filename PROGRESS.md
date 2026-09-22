@@ -2,8 +2,46 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P72-S4 (fourth and last session of Phase 72 — "Scoping-Only Sessions for Larger
-Candidates", and the **last session in the entire `IMPLEMENTATION_PLAN.md` queue** — no Phase 73 exists).
+**Last completed:** P73-S1 (first session of the newly-approved Phase 73 — "Security & Correctness
+Hardening", the ninth gap-analysis round's plan). Priority finding: real per-claimant authorization for
+`workflow-service`'s `POST .../complete` — previously gated only by the coarse `workflow.write`
+permission (granted to "everyone" by default), so any authenticated principal could complete any ready
+task, claimed by someone else or not. Now, only when the task has an existing `TaskClaim` (an unclaimed
+task stays fully permissive, unchanged — claiming remains optional/informational per `TaskClaim`'s own
+docstring), the effective principal (`on_behalf_of_principal_id` if a delegated completion, else
+`x_dms_principal`) must be the claim's own `principal_id` or a supervisor of it — reusing the exact
+precedent `reassign_task` established at P66-S2/ADR 0195, composing with rather than duplicating the
+existing on-behalf-of delegation check. New [ADR 0211](docs/adr/0211-workflow-service-per-claimant-task-completion-authorization.md).
+**Bundled `folder-service`'s `created_by`/`deleted_by` migration was investigated, started, and then
+reverted**: live tracing found that forcing both fields to always equal `x_dms_principal` would have
+broken `teamspace-service`'s deliberate "trusted intermediary asserts the real human's identity while
+calling under its own technical identity" pattern (ADR 0149) — the same accepted attribution/authorization
+split this project already established for `document-service`'s `created_by` and `workflow-service`'s own
+`completed_by`. Decision: leave `folder-service` unchanged; see ADR 0211's own section for the full
+reasoning, so this doesn't get rediscovered as a "new" gap by a future round without this context.
+
+4 new tests (`test_complete_claimed_task_by_a_non_claimant_non_supervisor_is_403`,
+`_by_the_claimant_succeeds`, `_by_claimants_supervisor_succeeds`,
+`test_complete_unclaimed_task_stays_permissive_for_any_caller`); one pre-existing test
+(`test_completing_task_auto_releases_claim_and_revokes_grant`) updated to complete as the claimant with a
+real `X-DMS-Principal` header, now correctly required by the new gate. `scripts/run-tests.sh
+workflow-service`: 234/235 passed twice in a row (the one remaining failure is the same pre-existing,
+intermittent federation/xdomea-dispatch flake already documented at ADR 0195 — moved to a different test
+in the same family between the two runs with no code change in between, confirmed unrelated).
+`workflow-service` rebuilt/redeployed, **live-verified against the real running stack**: a claimed task
+completed by an unrelated bystander → `403`; the same task completed by the claimant → `200`.
+`docs/services/workflow-service.md` updated (new section, Open Points bullet struck/refined, test count).
+No `graphify update .` this session (per the standing "phase-end only" rule, not "session-end").
+
+**Next session:** P73-S2 — Authorization/anti-abuse hardening bundle (`notification-service`'s
+per-recipient rate limiter extended to guard `repository.create_and_send` itself, not only the `POST
+/notifications` HTTP boundary; `fleet-management-service`'s four-eyes approval check replaced with a real
+two-distinct-identity verification).
+
+---
+
+Immediately before P73-S1: **P72-S4** (fourth and last session of Phase 72 — "Scoping-Only Sessions for
+Larger Candidates", and at the time the last session in the entire `IMPLEMENTATION_PLAN.md` queue).
 Two independent Konzept findings, scoped together: **6.1**'s free-form psql-syntax query language and
 **3.5**'s per-UI backend-for-frontend/aggregation layer. Both examined and **declined to build**:
 6.1 — a real non-GPL alternative to ADR 0031's GPL-blocked `pglast` exists now (`sqlglot`, MIT), but the

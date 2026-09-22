@@ -1233,9 +1233,14 @@ def test_completing_task_auto_releases_claim_and_revokes_grant(
         is True
     )
 
+    # Post-Roadmap Phase 73 Session 1 (ADR 0211): the task is claimed, so
+    # completing it now requires a real `X-DMS-Principal` header matching
+    # the claimant (or their supervisor) - `completed_by` alone no longer
+    # suffices once a claim exists.
     complete_response = client.post(
         f"/instances/{instance['id']}/tasks/{task_id}/complete",
         json={"completed_by": "dora-assignee-g5"},
+        headers={"X-DMS-Principal": "dora-assignee-g5"},
     )
     assert complete_response.status_code == 200
 
@@ -1537,6 +1542,97 @@ def test_complete_task_without_on_behalf_of_needs_no_principal_header(
     response = client.post(
         f"/instances/{instance['id']}/tasks/{task['id']}/complete",
         json={"completed_by": "bob"},
+    )
+
+    assert response.status_code == 200
+
+
+def test_complete_claimed_task_by_a_non_claimant_non_supervisor_is_403(
+    client, manual_task_bpmn, admin_headers
+):
+    """Post-Roadmap Phase 73 Session 1 (ADR 0211) - previously any caller
+    with `workflow.write` (the "everyone"-granted default) could complete
+    ANY task, claimed by someone else or not. Mirrors P66-S2's
+    `reassign_task` fix."""
+    instance = _start_instance_with_one_task(
+        client, manual_task_bpmn, admin_headers, name="Complete-Claim-1"
+    )
+    task_id = client.get(f"/instances/{instance['id']}/tasks").json()[0]["id"]
+    client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/claim",
+        json={"principal_id": "dora-assignee-cc1"},
+    )
+
+    response = client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/complete",
+        json={"completed_by": "unrelated-bystander-cc1"},
+        headers={"X-DMS-Principal": "unrelated-bystander-cc1"},
+    )
+
+    assert response.status_code == 403
+
+
+def test_complete_claimed_task_by_the_claimant_succeeds(client, manual_task_bpmn, admin_headers):
+    instance = _start_instance_with_one_task(
+        client, manual_task_bpmn, admin_headers, name="Complete-Claim-2"
+    )
+    task_id = client.get(f"/instances/{instance['id']}/tasks").json()[0]["id"]
+    client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/claim",
+        json={"principal_id": "dora-assignee-cc2"},
+    )
+
+    response = client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/complete",
+        json={"completed_by": "dora-assignee-cc2"},
+        headers={"X-DMS-Principal": "dora-assignee-cc2"},
+    )
+
+    assert response.status_code == 200
+
+
+def test_complete_claimed_task_by_claimants_supervisor_succeeds(
+    client, manual_task_bpmn, admin_headers, users_admin_headers
+):
+    _create_supervisor_assignment(
+        principal_id="dora-assignee-cc3",
+        supervisor_principal_id="petra-supervisor-cc3",
+        users_admin_headers=users_admin_headers,
+    )
+    instance = _start_instance_with_one_task(
+        client, manual_task_bpmn, admin_headers, name="Complete-Claim-3"
+    )
+    task_id = client.get(f"/instances/{instance['id']}/tasks").json()[0]["id"]
+    client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/claim",
+        json={"principal_id": "dora-assignee-cc3"},
+    )
+
+    response = client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/complete",
+        json={"completed_by": "petra-supervisor-cc3"},
+        headers={"X-DMS-Principal": "petra-supervisor-cc3"},
+    )
+
+    assert response.status_code == 200
+
+
+def test_complete_unclaimed_task_stays_permissive_for_any_caller(
+    client, manual_task_bpmn, admin_headers
+):
+    """Claiming remains optional/informational, not a completion
+    prerequisite (`TaskClaim`'s own docstring) - an UNCLAIMED task must
+    stay fully permissive even for a caller unrelated to anyone, unlike a
+    CLAIMED one."""
+    instance = _start_instance_with_one_task(
+        client, manual_task_bpmn, admin_headers, name="Complete-Claim-4"
+    )
+    task_id = client.get(f"/instances/{instance['id']}/tasks").json()[0]["id"]
+
+    response = client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/complete",
+        json={"completed_by": "some-unrelated-caller-cc4"},
+        headers={"X-DMS-Principal": "some-unrelated-caller-cc4"},
     )
 
     assert response.status_code == 200

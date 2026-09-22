@@ -1592,6 +1592,47 @@ async def _require_delegation_if_on_behalf_of(
         )
 
 
+async def _require_claim_authorization_if_claimed(
+    session: AsyncSession,
+    instance_id: str,
+    task_id: str,
+    payload: TaskCompleteRequest,
+    x_dms_principal: str,
+) -> None:
+    """Real per-assignee completion authorization (Post-Roadmap Phase 73
+    Session 1, ADR 0211) - previously `complete_task` only checked the
+    coarse `workflow.write` permission (granted to "everyone" by default),
+    so ANY caller with that permission could complete ANY task, claimed by
+    someone else or not - unlike `reassign_task`/`create_task_org_hierarchy_grant`
+    (P66-S2/ADR 0195), which already require the caller to be the current
+    claimant or their supervisor. This reuses that exact precedent. An
+    UNCLAIMED task stays fully permissive (claiming remains optional/
+    informational, not a completion prerequisite, per `TaskClaim`'s own
+    docstring) - only a CLAIMED task now enforces who may complete it. When
+    completing on behalf of another principal (`on_behalf_of_principal_id`,
+    already validated above by `_require_delegation_if_on_behalf_of`), the
+    represented principal - not the deputy caller - is who must match the
+    claim or its supervisor chain, so a legitimate deputy can complete work
+    claimed by the person they're standing in for."""
+    claim = await repository.get_task_claim(session, instance_id, task_id)
+    if claim is None:
+        return
+    effective_principal = payload.on_behalf_of_principal_id or x_dms_principal
+    if (
+        effective_principal != claim.principal_id
+        and not await app.state.permission_client.is_supervisor_of(
+            effective_principal, of_principal_id=claim.principal_id
+        )
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Nur der Beanspruchende selbst, dessen Vorgesetzte(r), oder eine "
+                "bevollmächtigte Vertretung dürfen diese beanspruchte Aufgabe abschließen"
+            ),
+        )
+
+
 async def _revoke_claim_grants(delegation_ids: list[str]) -> None:
     """Best-effort cleanup of org-hierarchy-auto-created delegations
     (Post-Roadmap Phase 31 Session 10) - called when a claim is released
@@ -1837,6 +1878,9 @@ async def complete_task(
         await _require_valid_signature_if_needed(session, instance_id, task_id, payload)
         await _reject_manual_federated_completion(session, instance_id, task_id)
         await _require_delegation_if_on_behalf_of(session, instance_id, payload, x_dms_principal)
+        await _require_claim_authorization_if_claimed(
+            session, instance_id, task_id, payload, x_dms_principal
+        )
         instance = await repository.complete_task(
             session, instance_id, task_id, completed_by=payload.completed_by, data=payload.data
         )

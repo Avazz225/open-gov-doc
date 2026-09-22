@@ -216,6 +216,17 @@ Closes the three gaps the section above's own `TaskClaim` description named as d
   action, narrowing (not reversing) ADR 0122's original "purely read-only" framing. See
   `docs/services/reviewer-ui.md`.
 
+### Per-claimant completion authorization (Post-Roadmap Phase 73 Session 1, [ADR 0211](../adr/0211-workflow-service-per-claimant-task-completion-authorization.md))
+
+`POST .../complete` previously checked only the coarse `workflow.write` permission (granted to "everyone"
+by default) — any caller could complete any ready task, claimed by someone else or not. Now, only when
+the task has an existing `TaskClaim` (an unclaimed task stays fully permissive, exactly as before —
+claiming remains optional/informational, not a completion prerequisite), the effective principal
+(`on_behalf_of_principal_id` if set, else `x_dms_principal`) must be either the claim's own `principal_id`
+or a supervisor of it (`is_supervisor_of`, the same precedent `reassign_task` established at P66-S2/ADR
+0195), else `403`. Composes with, not replaces, the existing on-behalf-of delegation check above — the
+represented principal, not the deputy caller, is what's checked against the claim.
+
 ## License demo mode/lock behavior (Concept 9.3, since P9-S2)
 
 `workflow-service` is the only currently real, separately licensable "application component" from Concept 9.1 (CMIS Connector/Migration Service only exist from Phase 12 onward). A new, thin `license_client.py` (`LicenseStatusClient`, modeled on `permission_client.py`) queries its own license status at `registry-service` (`GET /license-status/workflow-service`, TTL cache 15s, fail-open `"licensed"`) — **not** directly at `license-service`, the registry remains the sole intermediary (3.2b).
@@ -345,12 +356,22 @@ None yet — follows in Phase 11.
   BPMN with a `businessRuleTask` referencing it uploaded, the endpoint's response updates to include it;
   the existing `POST /process-definitions/{id}/restore` endpoint (unchanged) exercised through
   `process-designer`'s new restore button, see `docs/services/process-designer.md`.
+- **235 tests since Post-Roadmap Phase 73 Session 1** (previously 231, +4, see "Per-claimant completion
+  authorization" above and [ADR 0211](../adr/0211-workflow-service-per-claimant-task-completion-authorization.md)):
+  `test_api.py` — `test_complete_claimed_task_by_a_non_claimant_non_supervisor_is_403`,
+  `test_complete_claimed_task_by_the_claimant_succeeds`,
+  `test_complete_claimed_task_by_claimants_supervisor_succeeds`,
+  `test_complete_unclaimed_task_stays_permissive_for_any_caller`; a pre-existing test
+  (`test_completing_task_auto_releases_claim_and_revokes_grant`) updated to complete as the claimant with a
+  real `X-DMS-Principal` header, now correctly required by the new gate for a claimed task. Live-verified
+  against the real running stack (see ADR 0211's Consequences).
 - **Live smoke test**: `docker compose build workflow-service` + `up -d`, real BPMN file uploaded via curl, instance started, ready tasks listed, task completed, instance status `"completed"` confirmed — test data deleted afterward. Since P6-S2 additionally: BPMN file with boundary timer + `escalation_email` started, after a short wait confirmed via `notification-service` that an escalation notification was delivered. Since **P6-S9** additionally: a real self-loopback handover round trip (see ADR 0028) against the bundled `federation-hub-service`. Since **Post-Roadmap Phase 35 Session 3**: a real `workflow.task_claim.abandoned` event published directly against the running stack and confirmed to produce a real in-app notification at `notification-service`; a full Playwright pass through `reviewer-ui`'s `/team` page confirming a claimed report task renders and reassigning it via the UI updates the claim (see `docs/services/reviewer-ui.md`). Since **Post-Roadmap Phase 43 Session 1**: a real, full DMS-to-DMS self-loopback XDOMEA handoff against the rebuilt, restarted stack — a real closed case with a real document reference, a `taskType=federated`/`targetProcessType="xdomea.case_handoff"` task pointed at the installation's own registered ID, dispatched through the real hub, imported automatically on the receiving side into a brand-new case (correctly named after the original case, `created_by="federation-hub"`) with the document's real content byte-identical, confirmed back through the hub, and the original task/instance completing end to end with no manual intervention. This same live pass is what found the pre-existing `archival-service` gap noted above (an open case's document references are silently excluded from export).
 - Pure backend session, no browser test needed (not on the UI sessions list of `IMPLEMENTATION_PLAN.md`).
 
 ## Open Points
 
 - ~~Role check since P6-S6 only for process definitions (`admin.object_config`) — instance start/task completion deliberately remain open to every authenticated principal~~ — **fixed in Post-Roadmap Phase 19 Session 9** ([ADR 0074](../adr/0074-workflow-instance-task-rbac.md)): both now check `workflow.write` via `permission-service` (the "everyone" group retains the previous open behavior, but makes it admin-editable). `completed_by`/`created_by` remain purely unchecked strings — the gating decision only affects *whether* an action may be performed, not whether the given name is correct.
+- ~~`workflow.write` alone meant ANY caller could complete ANY ready task system-wide, claimed by someone else or not — BPMN lanes are parsed and displayed but never enforced as an authorization boundary~~ — **claim-based half closed in Post-Roadmap Phase 73 Session 1** ([ADR 0211](../adr/0211-workflow-service-per-claimant-task-completion-authorization.md), see "Per-claimant completion authorization" above): a CLAIMED task now requires the claimant, a supervisor, or a valid delegate to complete it. An UNCLAIMED task stays fully open, unchanged. **Lane-based enforcement (`task_spec.lane`, see "SpiffWorkflow integration" above) remains genuinely unimplemented** — a different, narrower authorization dimension (BPMN-modeled roles, not claim-based assignees) this session deliberately didn't attempt.
 - ~~Script Tasks execute arbitrary Python code embedded in the BPMN XML server-side (SpiffWorkflow's standard scripting environment) — effectively secured since P6-S6 by the `admin.object_config` gating at the upload endpoint, but a single domain admin could previously enable this unobserved~~ — **optional four-eyes gate added in Post-Roadmap Phase 21 Session 4** ([ADR 0087](../adr/0087-bpmn-import-review-gate.md), see "BPMN import review gate" above): with the approval requirement enabled, a second admin must confirm every BPMN import before the contained script code becomes instance-startable. Deliberately *optional* (default remains ungated, as with `config-service`'s P17-S3 retrofit) — an installation without multiple trusted domain admins can leave the gate unused.
 - **SLA poll precision is tied to the poll interval** (default 30s) — no real-time escalation detection, see ADR 0020.
 - **No distributed lock across multiple `workflow-service` replicas** — a horizontally scaled deployment would fire/publish the same boundary timer multiple times, see ADR 0020 "Consequences". **Distinct from, and NOT resolved by,** the single-process race fixed in Phase 60 Session 3 below — this service remains single-replica by default, so this specific gap still doesn't apply, but would become relevant again if that ever changed.
