@@ -2,7 +2,63 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P74-S3 (third and last session of Phase 74 — closes the phase). Teamspace AD-group
+**Last completed:** Phase 74 close (full regression + graphify update outcome, after P74-S3 closed the
+phase). Standard phase-end cadence per `CONTRIBUTING.md`/this project's own negotiated cadence: one
+unfiltered `scripts/run-tests.sh --build` run across all ~30 backend services, frontend regression for
+every app touched this phase, and `graphify update .`.
+
+**Backend regression**: all services green except three already-understood, non-blocking cases.
+`auth-service` (7 failed/144 passed) and `workflow-service` (2 failed/236 passed) reproduce exactly the
+pre-existing, already-documented failures noted in P74-S2/P74-S3's own session entries (the
+`approval_config_override` fixture-timing bug affecting 4 tests total, plus 2 pre-existing
+`test_federation.py`/`test_xdomea_handoff.py` failures already confirmed via `git stash` comparison to
+predate this phase's changes) — no new failures. **`webdav-connector` newly reproduces a real, worsening
+condition**: 15-16 of 18 tests now fail with `httpcore.ReadTimeout` on root `PROPFIND` (confirmed
+reproducible on a second run, not a transient blip). Root-caused: the N+1-to-document-service shape was
+already fixed in Phase 50 Session 4 (batch endpoint), but root `PROPFIND`'s remaining O(N) shape — named
+as a still-open item in `IMPLEMENTATION_PLAN.md`'s own Phase 50 bundle ("root PROPFIND is O(N) and
+degrades with document volume — documented, unfixed") — has now crossed from "slow but passing" to
+"actually timing out" as this dev stack's accumulated data volume grew past **1,639 folders / 1,675
+documents** across 74+ phases of live-verification test data. Unrelated to any code touched this phase
+(no webdav-connector/folder-service/document-service diff exists) — documented here rather than fixed,
+since a real fix needs actual pagination work, out of scope for a phase-close regression pass. `ruff
+check`/`ruff format --check`: only pre-existing, unrelated findings (`apps/libreoffice-addin`,
+`loadtest/notebook/analysis.ipynb`, `services/archival-service/tests/test_xdomea.py`,
+`services/signature-service/tests/test_api.py`) — nothing in any file touched this phase.
+
+**Frontend regression** (apps touched this phase: `reviewer-ui` P74-S1, `admin-ui` P74-S2, `user-ui`
+P74-S3): `admin-ui` 304/304 Vitest, `reviewer-ui` 55/55, `user-ui` 292/292 — all `tsc --noEmit`/`eslint`
+clean.
+
+**`graphify update .`**: hit the same `#479` shrink-guard this project's Phase 73 close already
+encountered once, but far smaller in magnitude this time (net **-85** nodes on the first attempt, vs.
+~900 at Phase 73) — the smaller-chunk-size lesson learned from that incident (~5-8 files per subagent for
+a large changed-docs backlog, instead of the skill's ~20-25 default) worked as intended (83 changed docs
+this round, split into 14 subagent chunks of ~6 files each). Diagnosed the residual loss via
+the same `Counter(source_file)` diff technique that incident established: concentrated almost entirely in
+`PROGRESS.md` (-157) and `IMPLEMENTATION_PLAN.md` (-99) — **not** a chunk-size problem but a **file-size**
+problem: these two files (11,892 and 2,042 lines) exceed the Read tool's window, so the single subagent
+assigned to them in the normal chunking pass literally could not read either file in full and fell back to
+grep-based partial extraction. Fixed by re-extracting just these two files with dedicated, paginated
+subagents (multiple sequential `Read` calls with increasing `offset` to cover the whole file) — even a
+single dedicated pass over all of `PROGRESS.md` still exceeded the 64,000-output-token ceiling, so it was
+further split into 3 line-range subagents (1-4000/4001-8000/8001-11892) run in parallel.
+`IMPLEMENTATION_PLAN.md` fit in one dedicated pass (392 nodes, up from 12). After re-merging with the
+sparse originals stripped out, the net delta flipped to **+607** nodes (18,079 total, up from 17,472) and
+the update completed cleanly: no shrink-guard trip, graph-health diagnostic clean (zero dangling/missing/
+collapsed edges), 1,802 communities (top ~45 hand-labeled, generic labels for the long tail at this
+scale), `graph.html`/`GRAPH_REPORT.md` regenerated. New memory-worthy lesson for a future session: even
+correct chunk sizing doesn't help when a single file in the corpus is itself larger than one subagent's
+read/output budget — that needs per-file pagination, a different fix from per-corpus chunk sizing.
+
+**Next session:** Phase 74 is closed. `IMPLEMENTATION_PLAN.md`'s Phase 75 ("Beyond the Original Concept")
+bundles three independent, not-yet-prioritized initiatives (P75-A ERP/line-of-business connector, P75-B
+native mobile client, P75-C AI features) — deliberately left unordered in the plan, a prioritization
+decision for the user, not something to resolve autonomously.
+
+---
+
+Immediately before Phase 74 close: **P74-S3** (third and last session of Phase 74). Teamspace AD-group
 invitation — the user chose **"build it now"** over permanent decline when explicitly asked (the one
 item in this phase that genuinely needed a real decision, deferred six times before this session). Full
 writeup in [ADR 0217](docs/adr/0217-teamspace-ad-group-invitation-build.md), building essentially as ADR
@@ -38,11 +94,6 @@ unbind button). `docs/services/auth-service.md`, `docs/services/teamspace-servic
 `docs/services/user-ui.md` updated; ADR 0160's own residual note in `docs/services/teamspace-service.md`
 closed (struck through, cross-referenced to ADR 0217, not superseded — ADR 0160 remains the scoping
 record).
-
-**Next session:** Phase 74 is closed. `IMPLEMENTATION_PLAN.md`'s Phase 75 ("Beyond the Original Concept")
-bundles three independent, not-yet-prioritized initiatives (P75-A ERP/line-of-business connector, P75-B
-native mobile client, P75-C AI features) — deliberately left unordered in the plan, a prioritization
-decision for the user, not something to resolve autonomously.
 
 ---
 
