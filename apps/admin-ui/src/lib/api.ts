@@ -401,14 +401,22 @@ export async function setAdGroupMappingDefaultRole(
 // capabilities: `admin.user_tracking` gates config read/write, `admin.
 // user_tracking_view` gates session read - unlike every other admin page,
 // no single capability covers this whole page (see RequireCapability's
-// array form). No four-eyes on any of these three endpoint groups
-// (deliberately out of scope per ADR 0157) - `PUT` responses are the plain
-// resource, not a `{status, ...}` envelope like AD-group-mapping's.
+// array form). Since Post-Roadmap Phase 74 Session 2, `PUT
+// /user-tracking-config/{id}` gained the same optional four-eyes gate the
+// AD-group-mapping endpoints already have (ADR 0157's own named gap) -
+// its response is now a `{status, ...}` envelope like AD-group-mapping's,
+// not the plain resource anymore.
 export interface UserTrackingConfig {
   principal_id: string;
   enabled: boolean;
   updated_by: string;
   updated_at: string;
+}
+
+export interface UserTrackingConfigActionResult {
+  status: "applied" | "pending_approval";
+  config: UserTrackingConfig | null;
+  approval_request_id: string | null;
 }
 
 export async function getUserTrackingConfig(
@@ -428,7 +436,7 @@ export async function setUserTrackingConfig(
   token: string,
   principalId: string,
   params: { enabled: boolean; updatedBy: string }
-): Promise<UserTrackingConfig> {
+): Promise<UserTrackingConfigActionResult> {
   const response = await request(
     "auth-service",
     `user-tracking-config/${encodeURIComponent(principalId)}`,

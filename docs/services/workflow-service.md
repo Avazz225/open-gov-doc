@@ -196,6 +196,10 @@ Closes the three gaps the section above's own `TaskClaim` description named as d
   ~~Gated identically to `POST .../claim` (`workflow.write`) — no new "must be the supervisor" restriction,
   see ADR 0145's Rationale.~~ — **closed in P66-S2** ([ADR 0195](../adr/0195-workflow-service-business-key-validation-and-reassign-authorization.md)): now additionally requires the
   caller to be the current claimant or a supervisor (direct/transitive) of the current claimant.
+  **Since Post-Roadmap Phase 74 Session 2** ([ADR 0190](../adr/0190-permission-service-general-superuser-bypass.md)):
+  an activated break-glass superuser bypasses both this check and ADR 0211's completion check below, via
+  a new `auth_client.py`/`_is_active_superuser()` (same shape as `permission-service`/`query-service`/
+  `plugin-orchestration-service`'s own helper) — this service previously had none at all.
 - **`_task_claim_expiry_poll_loop`** (new poll loop, same `while True`/skip-during-maintenance/
   `finally: sleep` idiom as `_sla_poll_loop`, wired up and torn down identically in `lifespan`) finds claims
   older than `Settings.claim_abandonment_threshold_hours` (default 72h) that haven't already been notified

@@ -976,6 +976,69 @@ def test_reassign_task_by_a_non_claimant_non_supervisor_is_403(
     assert response.status_code == 403
 
 
+def test_reassign_task_bypassed_by_active_superuser_without_being_claimant_or_supervisor(
+    client, manual_task_bpmn, admin_headers, monkeypatch
+):
+    """Superuser bypass (Post-Roadmap Phase 74 Session 2, ADR 0190/ADR
+    0195's own named, deliberately-deferred-until-now gap) - boundary-
+    patches `app.state.auth_client.get_active_superuser`, same "patch the
+    client, not the mechanism it wraps" convention as permission-service's
+    own `test_create_role_bypassed_by_active_superuser_without_explicit_role`."""
+
+    async def fake_get_active_superuser():
+        return True, "root-admin"
+
+    monkeypatch.setattr(app.state.auth_client, "get_active_superuser", fake_get_active_superuser)
+
+    instance = _start_instance_with_one_task(
+        client, manual_task_bpmn, admin_headers, name="Reassign1c"
+    )
+    task_id = client.get(f"/instances/{instance['id']}/tasks").json()[0]["id"]
+    client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/claim",
+        json={"principal_id": "dora-assignee-1c"},
+    )
+
+    response = client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/reassign",
+        json={"new_principal_id": "erik-new-assignee"},
+        headers={"X-DMS-Principal": "root-admin"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["principal_id"] == "erik-new-assignee"
+
+
+def test_reassign_task_not_bypassed_by_a_different_principal_than_the_active_superuser(
+    client, manual_task_bpmn, admin_headers, monkeypatch
+):
+    """The bypass must check that the SPECIFIC caller is the currently
+    active superuser, not merely that some superuser is active somewhere -
+    same "actor must match" check permission-service's own bypass has."""
+
+    async def fake_get_active_superuser():
+        return True, "root-admin"
+
+    monkeypatch.setattr(app.state.auth_client, "get_active_superuser", fake_get_active_superuser)
+
+    instance = _start_instance_with_one_task(
+        client, manual_task_bpmn, admin_headers, name="Reassign1d"
+    )
+    task_id = client.get(f"/instances/{instance['id']}/tasks").json()[0]["id"]
+    client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/claim",
+        json={"principal_id": "dora-assignee-1d"},
+    )
+
+    response = client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/reassign",
+        json={"new_principal_id": "erik-new-assignee"},
+        headers={"X-DMS-Principal": "unrelated-bystander-1d"},
+    )
+
+    assert response.status_code == 403
+
+
 def test_reassign_task_without_existing_claim_returns_404(client, manual_task_bpmn, admin_headers):
     instance = _start_instance_with_one_task(
         client, manual_task_bpmn, admin_headers, name="Reassign2"
@@ -1612,6 +1675,35 @@ def test_complete_claimed_task_by_claimants_supervisor_succeeds(
         f"/instances/{instance['id']}/tasks/{task_id}/complete",
         json={"completed_by": "petra-supervisor-cc3"},
         headers={"X-DMS-Principal": "petra-supervisor-cc3"},
+    )
+
+    assert response.status_code == 200
+
+
+def test_complete_claimed_task_bypassed_by_active_superuser(
+    client, manual_task_bpmn, admin_headers, monkeypatch
+):
+    """Superuser bypass (Post-Roadmap Phase 74 Session 2, ADR 0190/ADR
+    0211's own named, deliberately-deferred-until-now gap)."""
+
+    async def fake_get_active_superuser():
+        return True, "root-admin"
+
+    monkeypatch.setattr(app.state.auth_client, "get_active_superuser", fake_get_active_superuser)
+
+    instance = _start_instance_with_one_task(
+        client, manual_task_bpmn, admin_headers, name="Complete-Claim-4b"
+    )
+    task_id = client.get(f"/instances/{instance['id']}/tasks").json()[0]["id"]
+    client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/claim",
+        json={"principal_id": "dora-assignee-cc4b"},
+    )
+
+    response = client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/complete",
+        json={"completed_by": "root-admin"},
+        headers={"X-DMS-Principal": "root-admin"},
     )
 
     assert response.status_code == 200

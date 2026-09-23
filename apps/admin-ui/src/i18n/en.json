@@ -554,7 +554,8 @@
     "retentionLastChanged": "Last changed on {date}",
     "retentionInvalid": "Retention period must be at least 1 day.",
     "retentionLoadError": "Failed to load",
-    "retentionSaveError": "Failed to save"
+    "retentionSaveError": "Failed to save",
+    "configPendingApproval": "Four-eyes principle active - the change awaits approval from a second person before it takes effect."
   },
   "shareLinkSettings": {
     "pageTitle": "Public share link",

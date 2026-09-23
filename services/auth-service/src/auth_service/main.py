@@ -86,6 +86,7 @@ from auth_service.schemas import (
     UserCreate,
     UserLookupOut,
     UserOut,
+    UserTrackingConfigActionResult,
     UserTrackingConfigIn,
     UserTrackingConfigOut,
     UserTrackingRetentionConfigIn,
@@ -1586,14 +1587,30 @@ async def get_user_tracking_config(
     return config
 
 
-@app.put("/user-tracking-config/{principal_id}", response_model=UserTrackingConfigOut)
+@app.put("/user-tracking-config/{principal_id}", response_model=UserTrackingConfigActionResult)
 async def put_user_tracking_config(
     principal_id: str,
     payload: UserTrackingConfigIn,
     user: dict = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
-) -> UserTrackingConfigOut:
+) -> UserTrackingConfigActionResult:
+    """Since Post-Roadmap Phase 74 Session 2, optionally gated via the
+    generic four-eyes mechanism (`auth.user_tracking_config.update`) -
+    closes ADR 0157's own named, still-open gap ("no four-eyes on the
+    toggle action... small fix if ever pursued, same pattern as ADR
+    0171"). Response shape changes from a bare `UserTrackingConfigOut` to
+    this wrapper regardless of whether approval is configured, same
+    convention as `AdGroupRoleMappingActionResult`."""
     await _require_user_tracking_permission(user)
+    request_id = await _maybe_defer_to_approval(
+        action_type="auth.user_tracking_config.update",
+        initiated_by=user.get("sub"),
+        payload={"principal_id": principal_id, "enabled": payload.enabled},
+    )
+    if request_id is not None:
+        return UserTrackingConfigActionResult(
+            status="pending_approval", approval_request_id=request_id
+        )
     config = await tracking.set_tracking_enabled(
         session, principal_id, enabled=payload.enabled, updated_by=payload.updated_by
     )
@@ -1603,7 +1620,7 @@ async def put_user_tracking_config(
         {"principal_id": principal_id, "enabled": payload.enabled},
         actor=payload.updated_by,
     )
-    return config
+    return UserTrackingConfigActionResult(status="applied", config=config)
 
 
 @app.get("/user-tracking-sessions", response_model=list[UserTrackingSessionOut])

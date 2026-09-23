@@ -2,8 +2,52 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P74-S1 (first session of Phase 74 — "RBAC/Completion Polish and One Overdue
-Decision"). Case-browsing UI in `reviewer-ui` — closes [ADR 0141](docs/adr/0141-case-browsing-ui-user-ui-list-detail.md)'s
+**Last completed:** P74-S2 (second session of Phase 74). Small RBAC completions bundle, three items —
+see [ADR 0216](docs/adr/0216-p74s2-rbac-completions-auth-service-four-eyes-workflow-superuser-bypass.md)
+for the full writeup.
+
+**(a) auth-service four-eyes on `PUT /user-tracking-config/{principal_id}`** — closed ADR 0157's own
+named, still-open gap. Reused the existing generic `_maybe_defer_to_approval` mechanism (ADR 0022/0153)
+under a new `action_type="auth.user_tracking_config.update"`; the endpoint now returns
+`UserTrackingConfigActionResult` (`{status, config, approval_request_id}`), same always-wrapped envelope
+shape as the AD-group-mapping endpoints. `admin-ui`'s `UserTracking.tsx` shows the same pending-approval
+hint as `AdGroupMappings.tsx`. Live-verified end-to-end via direct `curl` against the rebuilt stack: gate
+off → applied; gate on → `pending_approval` with unchanged config; approved → config updated. New test
+`test_put_tracking_config_with_approval_required_defers_the_change` fails against the pre-existing,
+unrelated `approval_config_override` fixture-timing bug (already affects 3 AD-group-mapping tests) — not
+a code bug, proven by the live verification; documented, not fixed (out of scope).
+
+**(b) workflow-service superuser bypass** — closed ADR 0195's and ADR 0211's own named, deliberately-
+deferred gap. New `auth_client.py`/`_is_active_superuser()` (same shape as `permission-service`/
+`query-service`/`plugin-orchestration-service`), applied to both the reassignment-authorization gate and
+the per-claimant completion gate. `infra/docker-compose.yml` gained `DMS_AUTH_SERVICE_BASE_URL` +
+`depends_on: auth-service` for this service (confirmed no dependency cycle). 3 new tests
+(236 passed total, up from 233 baseline). **Live-verified against the real running stack**: activated the
+actual break-glass superuser through its real four-eyes flow (self-approval correctly rejected, needed a
+second distinct approving principal), then against a real claimed task: an unrelated bystander's reassign
+attempt → `403`, the actual activated superuser's identical request → `200`. Superuser deactivated and
+temporary role grants used only for verification revoked afterward — no residual state change.
+2 pre-existing, unrelated `test_federation.py`/`test_xdomea_handoff.py` failures confirmed via
+`git stash` comparison (same 2 failures on the unmodified tree) — not caused by this session.
+
+**(c) storage-service** — investigated, found already closed (P66-S1/P67-S2): `GET /storage/usage` and
+both `/process-pending` endpoints are already gated via `_require_storage_caller`, with
+`_TRUSTED_STORAGE_CALLERS` already including every caller the bundle's premise assumed was missing. Stale
+premise from research predating those sessions — no code change.
+
+`ruff check`/`ruff format --check` clean for `services/auth-service/` and `services/workflow-service/`
+specifically (the full-repo run also flags pre-existing, unrelated issues in `apps/libreoffice-addin`,
+`loadtest/notebook/analysis.ipynb`, and two other services' tests — none touched this session).
+
+**Next session:** P74-S3 — Teamspace group invitation (ADR 0160, deferred six times). This is the one
+item in the current queue that explicitly needs a real user decision, not something to resolve
+autonomously: either build the already-designed solution, or make an explicit, reasoned, PERMANENT
+decline — either outcome is acceptable, "defer again with the same reasoning" is not.
+
+---
+
+Immediately before P74-S2: **P74-S1** (first session of Phase 74 — "RBAC/Completion Polish and One
+Overdue Decision"). Case-browsing UI in `reviewer-ui` — closes [ADR 0141](docs/adr/0141-case-browsing-ui-user-ui-list-detail.md)'s
 own named gap ("a real `case-service` browsing UI in `reviewer-ui` remains out of scope"), re-confirmed
 still open as recently as Phase 65+'s gap-analysis round. Motivating problem: a reviewer working a
 case-bound task previously had no case-context view of their own — `InstanceDetail.tsx` shows the raw
@@ -29,14 +73,6 @@ the API, case list/detail rendered correctly (screenshot), the document title re
 download-event API (`Anschreiben P74S1.txt`). `docs/services/reviewer-ui.md` (new "Case Browsing" section,
 Pages table, tab count, test count) and ADR 0141's own Consequences (the "still deferred" bullet struck)
 updated.
-
-**Next session:** P74-S2 — Small RBAC completions bundle: `auth-service`'s `PUT
-/user-tracking-config/{principal_id}` gains the same four-eyes gate its sibling AD-group-mapping endpoints
-already have (ADR 0157's own named, still-open gap); `permission-service`'s superuser bypass (ADR 0190)
-extended to `workflow-service`'s task-reassignment gate (ADR 0195's own named, deliberately-deferred-until-now
-gap — and, per P73-S1/ADR 0211, its new per-claimant completion gate too, the same shape of gap); `storage-service`'s
-two remaining ungated maintenance endpoints (`GET /storage/usage`, `/process-pending`) closed the same way
-ADR 0179 already closed the other eleven.
 
 ---
 

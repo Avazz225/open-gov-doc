@@ -72,6 +72,19 @@ class UserTrackingConfigOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class UserTrackingConfigActionResult(BaseModel):
+    """Response envelope for `PUT /user-tracking-config/{principal_id}`
+    since Post-Roadmap Phase 74 Session 2 (ADR 0157's own named, still-open
+    gap: "no four-eyes on the toggle action... small fix if ever pursued,
+    same pattern as ADR 0171") - same "always wrapped, regardless of
+    whether approval is configured" convention as
+    `AdGroupRoleMappingActionResult`."""
+
+    status: Literal["applied", "pending_approval"]
+    config: UserTrackingConfigOut | None = None
+    approval_request_id: str | None = None
+
+
 class UserTrackingSessionOut(BaseModel):
     id: str
     principal_id: str

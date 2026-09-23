@@ -79,11 +79,12 @@ speculatively.
   principal is the one whose claimed work is being completed; checking the deputy's own ID against the
   claim would make delegated completion of a colleague's claimed task impossible even when the delegation
   itself is valid, defeating the feature.
-- **Accepted, documented residual**: same as ADR 0195 — `workflow-service` has no local superuser-bypass
+- ~~**Accepted, documented residual**: same as ADR 0195 — `workflow-service` has no local superuser-bypass
   helper; an activated break-glass superuser is not automatically exempted from this new gate either.
   Already tracked as a separate, independently-scoped gap (Phase 74 Session 2 extends ADR 0190's bypass to
   `workflow-service`'s reassignment gate; this new completion gate should be folded into that same future
-  session rather than duplicating the decision here).
+  session rather than duplicating the decision here).~~ — **closed in Post-Roadmap Phase 74 Session 2**,
+  together with ADR 0195's own residual, see there.
 - **Why `document-service`'s matching `trash_document`/`create_document` `deleted_by`/`created_by` gap
   wasn't also closed this session**: identical shape, identical accepted trade-off, but out of this
   session's named scope (`folder-service` only) — noted here so it isn't rediscovered as a "new" finding

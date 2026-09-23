@@ -1869,12 +1869,18 @@ build; docs and `PROGRESS.md` updated per session.
   download links, since this app has no document-preview infrastructure of its own to open one into. No
   new ADR (execution of an already-decided pattern). 55/55 Vitest (+5), new Playwright E2E, live-verified
   in a real headed browser incl. an actual successful file download.
-- **P74-S2 — Small RBAC completions bundle**: `auth-service`'s `PUT /user-tracking-config/{principal_id}`
+- ~~**P74-S2 — Small RBAC completions bundle**: `auth-service`'s `PUT /user-tracking-config/{principal_id}`
   gains the same four-eyes gate its sibling AD-group-mapping endpoints already have (ADR 0157's own
   named, still-open gap); `permission-service`'s superuser bypass (ADR 0190) extended to
   `workflow-service`'s task-reassignment gate (ADR 0195's own named, deliberately-deferred-until-now
   gap); `storage-service`'s two remaining ungated maintenance endpoints (`GET /storage/usage`,
-  `/process-pending`) closed the same way ADR 0179 already closed the other eleven.
+  `/process-pending`) closed the same way ADR 0179 already closed the other eleven.~~ **Done.** (a)
+  auth-service: reused `_maybe_defer_to_approval` under a new `action_type`, new
+  `UserTrackingConfigActionResult` envelope, live-verified full round trip. (b) workflow-service: new
+  `auth_client.py`/`_is_active_superuser()`, applied to both the reassignment gate (ADR 0195) and the
+  per-claimant completion gate (ADR 0211), live-verified against a real activated break-glass superuser.
+  (c) storage-service: investigated, found already closed by P66-S1/P67-S2 — stale premise, no code
+  change. New [ADR 0216](docs/adr/0216-p74s2-rbac-completions-auth-service-four-eyes-workflow-superuser-bypass.md).
 - **P74-S3 — Teamspace group invitation: final decision, not another deferral** (ADR 0160, deferred six
   times since Phase 43). This session either builds the already-designed solution (narrow `auth-service`
   group-members endpoint, a binding table, a poll-loop reconciler — the design ADR 0160 itself already
@@ -1883,7 +1889,8 @@ build; docs and `PROGRESS.md` updated per session.
   carry-forwards is enough.
 
 **Definition of Done**: regression test per fix; new ADR for P74-S3 regardless of which way the decision
-goes (a genuine architectural commitment either way); P74-S1/S2 likely need no new ADR; docs and
+goes (a genuine architectural commitment either way); P74-S1 needed no new ADR, P74-S2 got ADR 0216 after
+all (two real decisions — a new response envelope shape, a cross-service dependency addition); docs and
 `PROGRESS.md` updated per session.
 
 ## Phase 75 — Beyond the Original Concept (a prioritization decision, not a scoping session)

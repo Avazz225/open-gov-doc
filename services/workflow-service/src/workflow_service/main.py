@@ -40,6 +40,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from workflow_service import consumer, federation_crypto, repository, spiff_adapter
 from workflow_service.approval_client import ApprovalClient
 from workflow_service.archival_client import ArchivalServiceClient
+from workflow_service.auth_client import AuthServiceClient
 from workflow_service.case_client import CaseServiceClient
 from workflow_service.document_client import DocumentServiceClient
 from workflow_service.federation_client import FederationHubClient
@@ -467,6 +468,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with app.state.session_factory() as session:
         await repository.refresh_business_calendar_cache(session)
     app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
+    app.state.auth_client = AuthServiceClient(settings.auth_service_base_url)
     app.state.signature_client = SignatureServiceClient(settings.signature_service_base_url)
     app.state.case_client = CaseServiceClient(settings.case_service_base_url)
     app.state.document_client = DocumentServiceClient(settings.document_service_base_url)
@@ -543,6 +545,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await approval_consumer_bus.close()
     await app.state.approval_client.close()
     await app.state.permission_client.close()
+    await app.state.auth_client.close()
     await app.state.signature_client.close()
     await app.state.case_client.close()
     await app.state.document_client.close()
@@ -812,6 +815,20 @@ async def _require_object_config(x_dms_principal: str) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Fehlende Domain-Admin-Rolle 'Objekttyp-/Workflow-Konfiguration'",
         )
+
+
+async def _is_active_superuser(x_dms_principal: str) -> bool:
+    """Superuser bypass (Post-Roadmap Phase 74 Session 2, ADR 0190) - this
+    service previously had no local helper at all, unlike permission-
+    service/query-service/plugin-orchestration-service, an already-named
+    gap in both ADR 0195's and ADR 0211's own "Accepted, documented
+    residual" sections. Same shape as those services' own
+    `_is_active_superuser`: the caller must actually BE the currently
+    active superuser (actor-matching, not "is some superuser active
+    anywhere"), same reasoning as `permission-service`'s own
+    `lift_maintenance_mode`."""
+    active, superuser_principal_id = await app.state.auth_client.get_active_superuser()
+    return active and bool(x_dms_principal) and superuser_principal_id == x_dms_principal
 
 
 async def _require_workflow_permission(x_dms_principal: str, *, access_type: str) -> None:
@@ -1613,9 +1630,18 @@ async def _require_claim_authorization_if_claimed(
     already validated above by `_require_delegation_if_on_behalf_of`), the
     represented principal - not the deputy caller - is who must match the
     claim or its supervisor chain, so a legitimate deputy can complete work
-    claimed by the person they're standing in for."""
+    claimed by the person they're standing in for.
+
+    **Since Post-Roadmap Phase 74 Session 2** (ADR 0190/ADR 0211's own
+    named, deliberately-deferred-until-now gap): an activated superuser
+    bypasses this check too, same as `reassign_task`'s identical gate -
+    checked against the raw caller (`x_dms_principal`), not the "on behalf
+    of" `effective_principal`, since the bypass is about who is actually
+    authenticated, not who they're representing."""
     claim = await repository.get_task_claim(session, instance_id, task_id)
     if claim is None:
+        return
+    if await _is_active_superuser(x_dms_principal):
         return
     effective_principal = payload.on_behalf_of_principal_id or x_dms_principal
     if (
@@ -1747,7 +1773,15 @@ async def reassign_task(
     (self-service handoff, same spirit as delegation's own self-service
     model) or a supervisor of the current claimant, direct or transitive
     chain (`PermissionServiceClient.is_supervisor_of`, reusing `GET
-    /supervisor-chain/{principal_id}`, P31-S9) - `403` otherwise."""
+    /supervisor-chain/{principal_id}`, P31-S9) - `403` otherwise.
+
+    **Since Post-Roadmap Phase 74 Session 2** (ADR 0190/ADR 0195's own
+    named, deliberately-deferred-until-now gap): an activated superuser
+    bypasses the claimant-or-supervisor check, same as every other
+    direct-permission gate this bypass now covers project-wide. The `404`
+    on a genuinely unclaimed task is NOT bypassed - that is a structural
+    "there is nothing to reassign" check, not an authorization check, and
+    stays true regardless of who is calling."""
     await _reject_during_maintenance(x_dms_maintenance_active)
     await _require_workflow_permission(x_dms_principal, access_type="write")
     claim = await repository.get_task_claim(session, instance_id, task_id)
@@ -1761,6 +1795,7 @@ async def reassign_task(
         )
     if (
         claim.principal_id != x_dms_principal
+        and not await _is_active_superuser(x_dms_principal)
         and not await app.state.permission_client.is_supervisor_of(
             x_dms_principal, of_principal_id=claim.principal_id
         )

@@ -5,7 +5,7 @@ from dms_eventbus_client import Event, NatsEventBusClient, SubjectNotFoundError
 from keycloak import KeycloakAdmin
 from keycloak.exceptions import KeycloakGetError
 
-from auth_service import ad_group_mapping, admin_users, superuser
+from auth_service import ad_group_mapping, admin_users, superuser, tracking
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +16,7 @@ _KNOWN_ACTION_TYPES = (
     "auth.ad_group_role_composite_rule.create",
     "auth.ad_group_role_composite_rule.delete",
     "auth.ad_group_mapping.default_role_set",
+    "auth.user_tracking_config.update",
 )
 
 
@@ -66,7 +67,10 @@ def make_handler(
     specific action type. Extended again in Phase 53 Session 1 (ADR 0171)
     with a fifth action type (the default-role setting) and `keycloak_admin`
     (see `_resolve_display_name` above) for the `created_by`/`updated_by`
-    display-name fix."""
+    display-name fix. Extended again in Post-Roadmap Phase 74 Session 2
+    with a sixth action type (`auth.user_tracking_config.update`, ADR
+    0157's own named gap), same optional-four-eyes/display-name-resolution
+    shape as the AD-group-mapping ones."""
 
     async def handle(payload: bytes) -> None:
         event = Event.from_bytes(payload)
@@ -166,6 +170,28 @@ def make_handler(
                     await publish_event(
                         "auth.ad_group_mapping.default_role_set",
                         {"default_role_name": config.default_role_name},
+                        actor=event.actor,
+                    )
+                elif action_type == "auth.user_tracking_config.update":
+                    # Post-Roadmap Phase 74 Session 2 (ADR 0157's own named
+                    # gap) - same shape as the AD-group-mapping handlers
+                    # above, `updated_by` resolved to a display name via
+                    # the same reverse-Keycloak-lookup helper.
+                    config = await tracking.set_tracking_enabled(
+                        session,
+                        action_payload["principal_id"],
+                        enabled=action_payload["enabled"],
+                        updated_by=_resolve_display_name(
+                            keycloak_admin, event.payload.get("initiated_by")
+                        ),
+                    )
+                    await session.commit()
+                    await publish_event(
+                        "auth.user_tracking.config_changed",
+                        {
+                            "principal_id": config.principal_id,
+                            "enabled": config.enabled,
+                        },
                         actor=event.actor,
                     )
             except (

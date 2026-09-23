@@ -54,12 +54,15 @@ existing, read-only `GET /supervisor-chain/{principal_id}` (P31-S9) rather than
   the latter has a real side effect (auto-creates a `Delegation` row) — using it purely as an
   authorization check would create delegation rows nobody asked for. The plain chain lookup is read-only
   and already exists for exactly this kind of query.
-- **Accepted, documented residual**: `workflow-service` has no local `_is_active_superuser` helper at all
+- ~~**Accepted, documented residual**: `workflow-service` has no local `_is_active_superuser` helper at all
   today (unlike `permission-service`/`query-service`/`plugin-orchestration-service`, per ADR 0190's own
   survey) — an activated break-glass superuser is therefore not automatically exempted from the new
   reassignment gate. Wiring up the full superuser-bypass pattern for this service is a separate,
   independently-scoped gap, not attempted here to keep this session's fix narrow and consistent with what
-  the plan asked for.
+  the plan asked for.~~ — **closed in Post-Roadmap Phase 74 Session 2**: `workflow-service` now has its
+  own `AuthServiceClient`/`_is_active_superuser` (same shape as the other three services), applied to
+  both this reassignment gate and ADR 0211's completion gate. Live-verified against the real running
+  stack: an unrelated caller gets `403`, the actual activated superuser gets `200`.
 
 ## Consequences
 

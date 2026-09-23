@@ -16,6 +16,12 @@ class Settings(BaseServiceSettings):
     # the SLA poll loop skips its tick while maintenance mode is active.
     permission_service_base_url: str = "http://localhost:8004"
 
+    # Superuser bypass (Post-Roadmap Phase 74 Session 2, ADR 0190/ADR
+    # 0195/ADR 0211) - `_is_active_superuser` queries this directly (`GET
+    # /superuser/status`), same pattern as query-service/plugin-
+    # orchestration-service's own `auth_service_base_url`.
+    auth_service_base_url: str = "http://localhost:8003"
+
     # Signature Task (3.10, P6-S7): `POST .../tasks/{id}/complete` requires a
     # valid `signature_id` for a task marked as `taskType=signature`,
     # see `signature_client.py`.

@@ -105,10 +105,14 @@ describe("UserTracking", () => {
       updated_at: "2026-01-01T00:00:00Z",
     });
     setUserTrackingConfigMock.mockResolvedValue({
-      principal_id: "alice",
-      enabled: true,
-      updated_by: "admin-1",
-      updated_at: "2026-01-02T00:00:00Z",
+      status: "applied",
+      config: {
+        principal_id: "alice",
+        enabled: true,
+        updated_by: "admin-1",
+        updated_at: "2026-01-02T00:00:00Z",
+      },
+      approval_request_id: null,
     });
 
     renderUserTracking();
@@ -132,6 +136,37 @@ describe("UserTracking", () => {
         updatedBy: "admin-1",
       })
     );
+    await waitFor(() => expect(checkbox).toBeChecked());
+  });
+
+  it("shows a pending-approval hint when the four-eyes gate is active, without applying the toggle", async () => {
+    getUserTrackingConfigMock.mockResolvedValue({
+      principal_id: "alice",
+      enabled: false,
+      updated_by: "",
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+    setUserTrackingConfigMock.mockResolvedValue({
+      status: "pending_approval",
+      config: null,
+      approval_request_id: "req-1",
+    });
+
+    renderUserTracking();
+    await waitFor(() => expect(getUserTrackingRetentionConfigMock).toHaveBeenCalledTimes(1));
+
+    const form = screen.getByRole("form", { name: "Tracking-Einstellung laden" });
+    fireEvent.change(within(form).getByLabelText("Principal-ID"), { target: { value: "alice" } });
+    fireEvent.submit(form);
+
+    const checkbox = await screen.findByLabelText("Tracking aktiv");
+    fireEvent.click(checkbox);
+
+    await screen.findByText(
+      "Vier-Augen-Prinzip aktiv - die Änderung wartet auf Genehmigung durch eine zweite Person, bevor sie wirksam wird."
+    );
+    // Not yet applied - the checkbox still reflects the pre-toggle value.
+    expect(checkbox).not.toBeChecked();
   });
 
   it("lists sessions on mount and re-filters by principal", async () => {

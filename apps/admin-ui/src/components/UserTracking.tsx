@@ -38,6 +38,10 @@ export function UserTracking() {
   const [lookupPrincipalId, setLookupPrincipalId] = useState("");
   const [config, setConfig] = useState<UserTrackingConfig | null>(null);
   const [configSaving, setConfigSaving] = useState(false);
+  // Four-eyes principle (Post-Roadmap Phase 74 Session 2, ADR 0157's own
+  // named gap) - same "don't reload, the toggle wasn't applied yet" idiom
+  // as AdGroupMappings.tsx's own `mappingPending`.
+  const [configPending, setConfigPending] = useState(false);
 
   // Sessions (optionally filtered by principal).
   const [sessionsFilter, setSessionsFilter] = useState("");
@@ -92,12 +96,19 @@ export function UserTracking() {
   async function handleSaveConfig(enabled: boolean) {
     if (!accessToken || !config) return;
     setConfigSaving(true);
+    setConfigPending(false);
     try {
-      const updated = await setUserTrackingConfig(accessToken, config.principal_id, {
+      const result = await setUserTrackingConfig(accessToken, config.principal_id, {
         enabled,
         updatedBy: user?.sub ?? "",
       });
-      setConfig(updated);
+      if (result.status === "pending_approval") {
+        // Four-eyes principle active - not yet applied, so the config
+        // shown stays the previous (pre-toggle) value.
+        setConfigPending(true);
+      } else if (result.config) {
+        setConfig(result.config);
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("userTracking.configSaveError"));
     } finally {
@@ -179,6 +190,7 @@ export function UserTracking() {
                 />
                 {t("userTracking.enabled")}
               </label>
+              {configPending && <p className="hint">{t("userTracking.configPendingApproval")}</p>}
             </div>
           )}
         </section>

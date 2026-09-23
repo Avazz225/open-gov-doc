@@ -48,11 +48,40 @@ def test_put_and_get_tracking_config_roundtrip(client, test_user, grant_role):
         headers=headers,
     )
     assert put_response.status_code == 200
-    assert put_response.json()["enabled"] is True
-    assert put_response.json()["updated_by"] == "tester"
+    body = put_response.json()
+    assert body["status"] == "applied"
+    assert body["config"]["enabled"] is True
+    assert body["config"]["updated_by"] == "tester"
 
     get_response = client.get(f"/user-tracking-config/{principal_id}", headers=headers)
     assert get_response.json()["enabled"] is True
+
+
+def test_put_tracking_config_with_approval_required_defers_the_change(
+    client, test_user, grant_role, approval_config_override
+):
+    """Four-eyes retrofit (Post-Roadmap Phase 74 Session 2, ADR 0157's own
+    named gap) - same pattern as test_ad_group_mapping.py's own
+    `test_create_ad_group_mapping_with_approval_required_defers_creation`
+    (ADR 0153)."""
+    headers, principal_id = _login_headers(client, test_user)
+    grant_role(principal_id, "domain-admin-user-tracking")
+
+    with approval_config_override("auth.user_tracking_config.update", requires_approval=True):
+        put_response = client.put(
+            f"/user-tracking-config/{principal_id}",
+            json={"enabled": True, "updated_by": "tester"},
+            headers=headers,
+        )
+        assert put_response.status_code == 200
+        body = put_response.json()
+        assert body["status"] == "pending_approval"
+        assert body["approval_request_id"] is not None
+        assert body["config"] is None
+
+        # Not yet applied.
+        get_response = client.get(f"/user-tracking-config/{principal_id}", headers=headers)
+        assert get_response.json()["enabled"] is False
 
 
 def test_login_is_not_tracked_when_disabled(client, test_user, grant_role):

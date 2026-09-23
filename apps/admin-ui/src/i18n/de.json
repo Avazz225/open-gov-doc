@@ -554,7 +554,8 @@
     "retentionLastChanged": "Zuletzt geändert am {date}",
     "retentionInvalid": "Aufbewahrungsfrist muss mindestens 1 Tag betragen.",
     "retentionLoadError": "Laden fehlgeschlagen",
-    "retentionSaveError": "Speichern fehlgeschlagen"
+    "retentionSaveError": "Speichern fehlgeschlagen",
+    "configPendingApproval": "Vier-Augen-Prinzip aktiv - die Änderung wartet auf Genehmigung durch eine zweite Person, bevor sie wirksam wird."
   },
   "shareLinkSettings": {
     "pageTitle": "Öffentlicher Freigabelink",

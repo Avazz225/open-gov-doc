@@ -766,6 +766,11 @@ services:
       DMS_SELF_ADDRESS: http://workflow-service:8000
       DMS_SLA_POLL_INTERVAL_SECONDS: ${WORKFLOW_SLA_POLL_INTERVAL_SECONDS:-30}
       DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
+      # Superuser bypass (Post-Roadmap Phase 74 Session 2, ADR 0190/ADR
+      # 0195/ADR 0211) - `_is_active_superuser` queries this directly (`GET
+      # /superuser/status`), same pattern as query-service/plugin-
+      # orchestration-service's own `auth-service` env var.
+      DMS_AUTH_SERVICE_BASE_URL: http://auth-service:8000
       DMS_SIGNATURE_SERVICE_BASE_URL: http://signature-service:8000
       # Federation hub (7.4, P6-S9) - active by default in this bundled dev
       # stack (the bundled `federation-hub-service` runs anyway), so the
@@ -804,6 +809,8 @@ services:
       signature-service:
         condition: service_started
       federation-hub-service:
+        condition: service_started
+      auth-service:
         condition: service_started
     networks:
       - dms-net
