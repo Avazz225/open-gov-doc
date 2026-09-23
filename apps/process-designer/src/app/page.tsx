@@ -17,21 +17,18 @@ function HomePageInner() {
   const { t } = useI18n();
   const [tab, setTab] = useState<Tab>("processes");
 
+  const tabClass = (active: boolean) =>
+    active
+      ? "border-0 border-b-2 border-accent bg-transparent px-1 py-2 font-semibold text-fg"
+      : "border-0 border-b-2 border-transparent bg-transparent px-1 py-2 text-fg opacity-70";
+
   return (
     <>
-      <div className="tab-bar">
-        <button
-          type="button"
-          className={tab === "processes" ? "tab-button active" : "tab-button"}
-          onClick={() => setTab("processes")}
-        >
+      <div className="flex gap-2 px-6 pt-3">
+        <button type="button" className={tabClass(tab === "processes")} onClick={() => setTab("processes")}>
           {t("nav.processesTab")}
         </button>
-        <button
-          type="button"
-          className={tab === "dmn" ? "tab-button active" : "tab-button"}
-          onClick={() => setTab("dmn")}
-        >
+        <button type="button" className={tabClass(tab === "dmn")} onClick={() => setTab("dmn")}>
           {t("nav.dmnTab")}
         </button>
       </div>

@@ -65,5 +65,5 @@ export function DmnDesigner({ initialXml, onImportError, onReady }: DmnDesignerP
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return <div className="designer-canvas dmn-canvas" ref={containerRef} />;
+  return <div className="min-w-0 flex-1 overflow-auto" ref={containerRef} />;
 }

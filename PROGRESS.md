@@ -2,8 +2,52 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P75-S4 (fourth session of Phase 75 — second of the small-apps Tailwind rollout
-group: `migration-console`, fully converted beyond just the login page). See
+**Last completed:** P75-S5 (fifth session of Phase 75 — third of the small-apps Tailwind rollout group:
+`process-designer`, fully converted beyond just the login page). See
+[ADR 0222](docs/adr/0222-process-designer-tailwind-rollout-tab-button-default-styling-fix.md) for the
+full writeup.
+
+**process-designer full conversion**: every remaining hand-written CSS class (`.page`/`.top-bar`/
+`.top-bar-actions`/`.theme-switcher`/`.locale-switcher`/`.tab-bar`/`.tab-button`/`.dmn-canvas`/`.hint`/
+`.entry-list`/`.entry-row`/`.actions`/`.login-form`/`.error-text`/`.success-text`/`.empty-state`/
+`.data-table`/`.badge`/`.maintenance-banner`/`.designer-*`) converted to Tailwind utilities directly on
+`ThemeSwitcher.tsx`, `LocaleSwitcher.tsx`, `MaintenanceBanner.tsx`, `RequireAuth.tsx`,
+`ProcessDefinitionList.tsx`, `DmnDefinitionList.tsx`, the home tab bar (`page.tsx`), `designer/page.tsx`,
+`dmn-designer/page.tsx`, `BpmnDesigner.tsx`, `DmnDesigner.tsx`. `.badge`/`.login-form` were dead CSS
+(confirmed via grep, never referenced), dropped outright. Deliberately NOT touched:
+`FederatedStepPropertiesProvider.tsx`/`SignatureTaskPropertiesProvider.tsx`/
+`DmnValidationPropertiesProvider.tsx` — these render through `bpmn-js-properties-panel`'s own Preact
+tree (a documented constraint from a prior session) and never used any of this app's CSS classes,
+confirmed via grep — genuinely out of scope, not an oversight.
+
+**A third instance of the same defect class, caught before it shipped this time**: the new home tab
+bar's active-tab underline (`border-b-2` alone, no reset of the other three sides) left a full default
+border box AND a default gray background on the tab `<button>`s — found via the same computed-style
+static probe used all session (`borderLeft: "2px"`, a visible box border and gray fill in the probe
+screenshot), fixed with Tailwind's own documented one-sided-border pattern (`border-0 border-b-2
+border-{accent,transparent}`) plus an explicit `bg-transparent` (the original CSS's `background: none`
+was missed in the first pass) — re-verified via the same probe after a rebuild (`borderLeft: "0px"`,
+`background: rgba(0, 0, 0, 0)`). This is the third time this exact "unstyled button carries browser
+defaults" mistake has appeared in this rollout (ADR 0220: full border; ADR 0221: form-element font;
+this session: border+background together) — worth remembering as this rollout's single most common
+mistake going forward.
+
+**Live-verified**: process-designer passes production build, `tsc --noEmit`, `eslint`, Vitest (55/55,
+all green — no flaky tests this time). Login page (unauthenticated, reachable directly) screenshotted
+and computed-style-checked live against the real running Docker container — correct card, correct
+border-0 primary button, correct font. The rest of the UI (tab bar, list tables, designer toolbar,
+canvas/properties-panel layout) required authentication this session had no credentials for — verified
+instead via the same computed-style static-probe technique against the real compiled CSS, rebuilt and
+re-probed after the tab-button fix to confirm it actually took effect. `docs/services/
+process-designer.md` updated for the full rollout.
+
+**Next session:** P75-S3-style continuation — `reviewer-ui` (the last remaining small app in this
+rollout group), then `admin-ui`/`user-ui` each getting their own session.
+
+---
+
+Immediately before P75-S5: **P75-S4** (fourth session of Phase 75 — second of the small-apps Tailwind
+rollout group: `migration-console`, fully converted beyond just the login page). See
 [ADR 0221](docs/adr/0221-migration-console-tailwind-rollout-form-font-inherit-fix.md) for the full
 writeup.
 

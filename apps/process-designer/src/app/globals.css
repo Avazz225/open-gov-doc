@@ -43,193 +43,31 @@
   }
 }
 
-/* Cross-UI-Theming (8, P4-S6, siehe ADR 0009): Farb-Tokens selbst leben seit
-   Phase 48 Session 1 (ADR 0168) in der geteilten libs/dms-ui/tokens.css -
-   diese Datei wendet nur noch den Font-Family-Token an und enthält die
-   App-spezifischen Komponentenstile. */
-:root {
-  font-family: var(--dms-font-family);
-}
+/* Post-Roadmap Phase 75 Session 5: this app's remaining hand-written CSS
+   classes (`.page`/`.top-bar`/`.tab-bar`/`.data-table`/`.designer-*`/etc.)
+   have been replaced by Tailwind utility classes directly on each
+   component (see ThemeSwitcher.tsx, LocaleSwitcher.tsx,
+   MaintenanceBanner.tsx, RequireAuth.tsx, ProcessDefinitionList.tsx,
+   DmnDefinitionList.tsx, designer/page.tsx, dmn-designer/page.tsx,
+   BpmnDesigner.tsx, DmnDesigner.tsx) and removed from here. NOT touched:
+   `FederatedStepPropertiesProvider.tsx`/`SignatureTaskPropertiesProvider.tsx`/
+   `DmnValidationPropertiesProvider.tsx` - these render through bpmn-js-
+   properties-panel's own Preact tree, not this app's React, and never used
+   any of this app's own CSS classes (confirmed via grep - no `className`
+   at all in any of the three) - genuinely out of scope, not an oversight.
+   What remains below is a genuine minimal reset - kept in `@layer base`
+   (before `utilities` in the `@layer` order above) so Tailwind utility
+   classes keep winning, per the cascade-layer bug ADR 0219 found and
+   fixed for office-addin. */
+@layer base {
+  :root {
+    font-family: var(--dms-font-family);
+  }
 
-body {
-  margin: 0;
-  padding: 0;
-  background: var(--dms-bg);
-  color: var(--dms-fg);
-}
-
-.page {
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: var(--dms-space-6);
-}
-
-.top-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--dms-space-3) var(--dms-space-6);
-  border-bottom: 1px solid var(--dms-border);
-}
-
-.top-bar-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--dms-space-4);
-}
-
-.theme-switcher,
-.locale-switcher {
-  display: flex;
-  flex-direction: column;
-  gap: var(--dms-space-1);
-  font-size: var(--dms-font-size-sm);
-}
-
-/* Tab-Umschalter Prozessdefinitionen/DMN-Entscheidungstabellen (P14-S4). */
-.tab-bar {
-  display: flex;
-  gap: var(--dms-space-2);
-  padding: var(--dms-space-3) var(--dms-space-6) 0;
-}
-
-.tab-button {
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  padding: var(--dms-space-2) var(--dms-space-1);
-  cursor: pointer;
-  color: var(--dms-fg);
-  opacity: 0.7;
-}
-
-.tab-button.active {
-  opacity: 1;
-  border-bottom-color: var(--dms-accent);
-  font-weight: 600;
-}
-
-.dmn-canvas {
-  /* dmn-js braucht wie bpmn-js eine explizite Breite/Höhe (siehe
-     .designer-canvas), die Decision-Table-Ansicht scrollt selbst horizontal
-     bei vielen Spalten/Regeln. */
-  overflow: auto;
-}
-
-.hint {
-  opacity: 0.8;
-  font-size: var(--dms-font-size-sm);
-}
-
-.entry-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
-
-.entry-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--dms-space-2) 0;
-  border-bottom: 1px solid var(--dms-border);
-}
-
-.actions {
-  display: flex;
-  gap: var(--dms-space-2);
-}
-
-.login-form {
-  max-width: 320px;
-  margin: 4rem auto;
-  display: flex;
-  flex-direction: column;
-  gap: var(--dms-space-3);
-}
-
-.error-text {
-  color: var(--dms-danger);
-}
-
-.success-text {
-  color: var(--dms-success, #2e7d32);
-}
-
-.empty-state {
-  opacity: 0.7;
-  font-style: italic;
-}
-
-.data-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-bottom: var(--dms-space-6);
-}
-
-.data-table th,
-.data-table td {
-  text-align: left;
-  padding: var(--dms-space-2) var(--dms-space-2);
-  border-bottom: 1px solid var(--dms-border);
-}
-
-.badge {
-  display: inline-block;
-  padding: 0.1rem var(--dms-space-2);
-  border-radius: var(--dms-radius-full);
-  font-size: var(--dms-font-size-xs);
-}
-
-.maintenance-banner {
-  background: var(--dms-danger-bg);
-  color: var(--dms-danger);
-  padding: var(--dms-space-2) var(--dms-space-6);
-  text-align: center;
-  font-weight: 600;
-}
-
-/* Process Designer Canvas (P6-S8, Konzept 7.1) */
-
-.designer-shell {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-}
-
-.designer-toolbar {
-  display: flex;
-  align-items: center;
-  gap: var(--dms-space-3);
-  padding: var(--dms-space-2) var(--dms-space-4);
-  border-bottom: 1px solid var(--dms-border);
-  flex-wrap: wrap;
-}
-
-.designer-toolbar label {
-  display: flex;
-  align-items: center;
-  gap: var(--dms-space-2);
-  font-size: var(--dms-font-size-sm);
-}
-
-.designer-body {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-}
-
-/* bpmn-js braucht einen Container mit expliziter Höhe (verwaltet sein
-   eigenes SVG-Canvas intern) - flex: 1 füllt den verbleibenden Platz unter
-   der Toolbar. */
-.designer-canvas {
-  flex: 1;
-  min-width: 0;
-}
-
-.designer-properties-panel {
-  width: 300px;
-  flex-shrink: 0;
-  border-left: 1px solid var(--dms-border);
-  overflow-y: auto;
+  body {
+    margin: 0;
+    padding: 0;
+    background: var(--dms-bg);
+    color: var(--dms-fg);
+  }
 }

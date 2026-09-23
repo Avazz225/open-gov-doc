@@ -1983,8 +1983,14 @@ not a web app, and has no CSS of any kind to migrate.
   treatment for the first time). Found and fixed a second retroactive defect the same way: login inputs
   across **all five** non-office-addin apps were rendering in `Arial` instead of each app's own font
   stack (no global `font: inherit` reset existed) — fixed for all five. New
-  [ADR 0221](docs/adr/0221-migration-console-tailwind-rollout-form-font-inherit-fix.md). Remaining small
-  apps (`process-designer`, `reviewer-ui`) still queued, then `admin-ui`/`user-ui`.
+  [ADR 0221](docs/adr/0221-migration-console-tailwind-rollout-form-font-inherit-fix.md).
+  **Continuation done** (third of the small-apps group: `process-designer`, fully converted — every
+  component except the three Preact-rendered `bpmn-js`/`dmn-js` properties-panel providers, correctly
+  out of scope). Caught a third instance of the same "unstyled button carries browser defaults" mistake
+  before it shipped, this time app-local (the new home tab bar) — fixed with Tailwind's one-sided-border
+  pattern plus an explicit `bg-transparent`. New
+  [ADR 0222](docs/adr/0222-process-designer-tailwind-rollout-tab-button-default-styling-fix.md).
+  Remaining small app (`reviewer-ui`) still queued, then `admin-ui`/`user-ui`.
 
 **Definition of Done**: P75-S1 needs a real ADR (a genuine architecture decision: which token-integration
 mechanism, shared preset location); P75-S2 needs before/after screenshots in the same message/commit,

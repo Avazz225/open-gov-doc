@@ -173,22 +173,30 @@ function DesignerPageInner() {
     }
   }
 
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1 text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1 text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+
   return (
-    <div className="designer-shell">
-      <div className="designer-toolbar">
+    <div className="flex h-screen flex-col">
+      <div className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-2">
         <Link href="/">
-          <button type="button">{t("common.back")}</button>
+          <button type="button" className={secondaryBtn}>
+            {t("common.back")}
+          </button>
         </Link>
-        <label>
+        <label className="flex items-center gap-2 text-sm">
           {t("designer.nameLabel")}
           <input
             type="text"
             value={name}
             onChange={(event) => setName(event.target.value)}
             disabled={!canManage}
+            className="box-border rounded-md border border-border bg-bg px-2 py-1 text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg"
           />
         </label>
-        <span className="hint">{t("designer.nameHint")}</span>
+        <span className="text-sm opacity-80">{t("designer.nameHint")}</span>
         <input
           ref={fileInputRef}
           type="file"
@@ -196,25 +204,30 @@ function DesignerPageInner() {
           hidden
           onChange={handleImportFile}
         />
-        <button type="button" onClick={() => fileInputRef.current?.click()}>
+        <button type="button" onClick={() => fileInputRef.current?.click()} className={secondaryBtn}>
           {t("designer.importButton")}
         </button>
-        <button type="button" onClick={handleExport}>
+        <button type="button" onClick={handleExport} className={secondaryBtn}>
           {t("designer.exportButton")}
         </button>
         {canManage && (
-          <button type="button" onClick={handleSave} disabled={isSaving || !name.trim()}>
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={isSaving || !name.trim()}
+            className={primaryBtn}
+          >
             {isSaving ? t("designer.saving") : t("designer.saveButton")}
           </button>
         )}
-        {saveSuccess && <span className="success-text">{saveSuccess}</span>}
+        {saveSuccess && <span className="text-success">{saveSuccess}</span>}
         {saveError && (
-          <span className="error-text" role="alert">
+          <span className="text-danger" role="alert">
             {saveError}
           </span>
         )}
         {loadError && (
-          <span className="error-text" role="alert">
+          <span className="text-danger" role="alert">
             {loadError}
           </span>
         )}

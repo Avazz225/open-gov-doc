@@ -96,54 +96,71 @@ export function ProcessDefinitionList() {
     }
   }
 
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1 text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+  const th = "border-b border-border px-2 py-2 text-left";
+  const td = "border-b border-border px-2 py-2 text-left";
+
   return (
-    <section className="page">
-      <div className="top-bar">
+    <section className="mx-auto max-w-[1100px] p-6">
+      <div className="flex items-center justify-between border-b border-border px-6 py-3">
         <h1>{t("processList.heading")}</h1>
         <Link href="/designer/">
-          <button type="button">{t("processList.newButton")}</button>
+          <button type="button" className={secondaryBtn}>
+            {t("processList.newButton")}
+          </button>
         </Link>
       </div>
 
-      {!canManage && <p className="hint">{t("processList.noCapabilityHint")}</p>}
+      {!canManage && <p className="text-sm opacity-80">{t("processList.noCapabilityHint")}</p>}
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
 
       {definitions.length === 0 ? (
-        <p className="empty-state">{t("processList.empty")}</p>
+        <p className="italic opacity-70">{t("processList.empty")}</p>
       ) : (
-        <table className="data-table">
+        <table className="mb-6 w-full border-collapse">
           <thead>
             <tr>
-              <th>{t("processList.nameColumn")}</th>
-              <th>{t("processList.versionColumn")}</th>
-              <th>{t("processList.processIdColumn")}</th>
-              <th>{t("processList.updatedColumn")}</th>
-              <th>{t("processList.actionsColumn")}</th>
+              <th className={th}>{t("processList.nameColumn")}</th>
+              <th className={th}>{t("processList.versionColumn")}</th>
+              <th className={th}>{t("processList.processIdColumn")}</th>
+              <th className={th}>{t("processList.updatedColumn")}</th>
+              <th className={th}>{t("processList.actionsColumn")}</th>
             </tr>
           </thead>
           <tbody>
             {definitions.map((definition) => (
               <Fragment key={definition.id}>
                 <tr>
-                  <td>{definition.name}</td>
-                  <td>{definition.version}</td>
-                  <td>{definition.bpmn_process_id}</td>
-                  <td>{new Date(definition.updated_at).toLocaleString()}</td>
-                  <td className="actions">
+                  <td className={td}>{definition.name}</td>
+                  <td className={td}>{definition.version}</td>
+                  <td className={td}>{definition.bpmn_process_id}</td>
+                  <td className={td}>{new Date(definition.updated_at).toLocaleString()}</td>
+                  <td className={`${td} flex gap-2`}>
                     <Link href={`/designer/?id=${definition.id}`}>
-                      <button type="button">{t("common.open")}</button>
+                      <button type="button" className={secondaryBtn}>
+                        {t("common.open")}
+                      </button>
                     </Link>
-                    <button type="button" onClick={() => toggleHistory(definition.name)}>
+                    <button
+                      type="button"
+                      onClick={() => toggleHistory(definition.name)}
+                      className={secondaryBtn}
+                    >
                       {expandedName === definition.name
                         ? t("processList.historyToggleHide")
                         : t("processList.historyToggleShow")}
                     </button>
                     {canManage && (
-                      <button type="button" onClick={() => handleDelete(definition.id)}>
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(definition.id)}
+                        className={secondaryBtn}
+                      >
                         {t("common.delete")}
                       </button>
                     )}
@@ -151,28 +168,38 @@ export function ProcessDefinitionList() {
                 </tr>
                 {expandedName === definition.name && (
                   <tr key={`${definition.id}-history`}>
-                    <td colSpan={5}>
+                    <td colSpan={5} className="px-2 py-2">
                       <strong>{t("processList.history")}</strong>
-                      <ul className="entry-list">
+                      <ul className="m-0 mt-2 list-none p-0">
                         {history.map((version) => (
-                          <li className="entry-row" key={version.id}>
+                          <li
+                            className="flex items-center justify-between gap-2 border-b border-border py-2"
+                            key={version.id}
+                          >
                             <span>
                               v{version.version} — {new Date(version.created_at).toLocaleString()}
                             </span>
-                            <span className="actions">
+                            <span className="flex gap-2">
                               <Link href={`/designer/?id=${version.id}`}>
-                                <button type="button">{t("common.open")}</button>
+                                <button type="button" className={secondaryBtn}>
+                                  {t("common.open")}
+                                </button>
                               </Link>
                               {canManage && version.id !== definition.id && (
                                 <button
                                   type="button"
                                   onClick={() => handleRestore(version.id, version.name)}
+                                  className={secondaryBtn}
                                 >
                                   {t("processList.restoreButton")}
                                 </button>
                               )}
                               {canManage && (
-                                <button type="button" onClick={() => handleDelete(version.id)}>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDelete(version.id)}
+                                  className={secondaryBtn}
+                                >
                                   {t("common.delete")}
                                 </button>
                               )}

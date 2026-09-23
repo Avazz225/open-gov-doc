@@ -108,9 +108,12 @@ export function BpmnDesigner({
   }, []);
 
   return (
-    <div className="designer-body">
-      <div className="designer-canvas" ref={canvasRef} />
-      <div className="designer-properties-panel" ref={propertiesPanelRef} />
+    <div className="flex min-h-0 flex-1">
+      <div className="min-w-0 flex-1" ref={canvasRef} />
+      <div
+        className="w-[300px] flex-shrink-0 overflow-y-auto border-l border-border"
+        ref={propertiesPanelRef}
+      />
     </div>
   );
 }
