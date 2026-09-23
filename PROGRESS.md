@@ -2,8 +2,51 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P75-S3 (third session of Phase 75 — first of the small-apps Tailwind rollout group:
-`office-addin`, fully converted beyond just the login page). See
+**Last completed:** P75-S4 (fourth session of Phase 75 — second of the small-apps Tailwind rollout
+group: `migration-console`, fully converted beyond just the login page). See
+[ADR 0221](docs/adr/0221-migration-console-tailwind-rollout-form-font-inherit-fix.md) for the full
+writeup.
+
+**migration-console full conversion**: every remaining hand-written CSS class (`.page`/`.top-bar`/
+`.top-bar-actions`/`.tab-nav`/`.hint`/`.actions`/`.login-form`/`.error-text`/`.success-text`/
+`.empty-state`/`.data-table`/`.badge*`/`.maintenance-banner`/`.inline-form`/`.detail-row`) converted to
+Tailwind utilities directly on `Shell.tsx`, `ThemeSwitcher.tsx`, `LocaleSwitcher.tsx`,
+`MaintenanceBanner.tsx`, `RequireAuth.tsx`, `PairedInstallationList.tsx`, `TransferConsole.tsx`. Since
+this app previously had no styling at all on most of its plain buttons/selects (unlike office-addin,
+which at least had a generic `button {...}` rule), this session also gave them a real visual treatment
+for the first time, matching the secondary/primary button language already established on the login
+page. One exception kept as dedicated CSS: the high-contrast badge border (ADR 0119/0135) needs an
+ancestor `[data-theme]` selector with no clean Tailwind utility expression — kept as a small
+`@layer base` rule, applied alongside the Tailwind badge classes.
+
+**A second retroactive defect found via computed-style probing, not just screenshot review**:
+`getComputedStyle()` on migration-console's login input showed `font-family: Arial` instead of the
+app's own font stack. Checking the same property across all five non-office-addin apps' login pages
+found the identical mismatch in every one — none had a genuinely global `input, select, button,
+textarea { font: inherit }` reset (preflight's job, deliberately excluded per ADR 0218); each app's
+pre-existing `font: inherit` rules, where they existed, were scoped to specific old classes, not broad
+enough to cover the new Tailwind-styled login inputs from P75-S2. Fixed by adding this reset, layered
+in `@layer base` (same cascade-ordering precedent as ADR 0219/0220), to all five apps' `globals.css` —
+for `user-ui`/`admin-ui`/`reviewer-ui`/`process-designer` this is a small surgical addition only; their
+own full rollouts stay deferred to their own future dedicated sessions.
+
+**Live-verified**: migration-console passes production build, `tsc --noEmit`, `eslint`, Vitest
+(19/20 — the one failure is the same pre-existing, unrelated flaky `transfer-console.test.tsx`
+`waitFor` assertion, re-confirmed via `git stash` this session). All six apps' Docker images rebuilt and
+redeployed (the font fix touched four other apps too). Font fix confirmed live via `getComputedStyle()`
+on all five apps' real running containers (input font now matches body font in every case).
+migration-console's non-login UI (top bar, tabs, table, badges, buttons) verified via the same
+computed-style static-probe technique against its real compiled CSS, including a high-contrast check
+confirming the badge border renders. `docs/services/migration-console.md` updated for the full
+rollout; the other four apps' docs each got a short correction note for the font fix.
+
+**Next session:** P75-S3/S4-style continuation — `process-designer`, `reviewer-ui` (the remaining small
+apps in this rollout group), then `admin-ui`/`user-ui` each getting their own session.
+
+---
+
+Immediately before P75-S4: **P75-S3** (third session of Phase 75 — first of the small-apps Tailwind
+rollout group: `office-addin`, fully converted beyond just the login page). See
 [ADR 0220](docs/adr/0220-office-addin-tailwind-rollout-primary-button-border-fix.md) for the full
 writeup.
 

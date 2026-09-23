@@ -71,58 +71,84 @@ export function PairedInstallationList() {
     }
   }
 
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1 text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1 text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border w-full rounded-md border border-border bg-bg px-2 py-1.5 text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+  const fieldLabel = "text-sm font-medium text-fg";
+  const th = "border-b border-border px-2 py-2 text-left";
+  const td = "border-b border-border px-2 py-2 text-left";
+
   return (
     <section>
-      <div className="top-bar">
+      <div className="mb-6 flex items-center justify-between border-b border-border pb-3">
         <h1>{t("pairedInstallations.heading")}</h1>
-        <button type="button" onClick={() => setShowForm((v) => !v)}>
+        <button type="button" onClick={() => setShowForm((v) => !v)} className={secondaryBtn}>
           {t("pairedInstallations.newButton")}
         </button>
       </div>
-      <p className="hint">{t("pairedInstallations.hint")}</p>
+      <p className="text-sm opacity-80">{t("pairedInstallations.hint")}</p>
 
       {createdApiKey && (
-        <p className="success-text">
+        <p className="text-success">
           {t("pairedInstallations.apiKeyNotice")} <code>{createdApiKey}</code>
         </p>
       )}
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
 
       {showForm && (
-        <form className="inline-form" onSubmit={handleCreate}>
-          <label htmlFor="display-name">{t("pairedInstallations.displayNameLabel")}</label>
+        <form
+          className="mt-2 flex max-w-[420px] flex-col gap-2 rounded-sm border border-border p-3"
+          onSubmit={handleCreate}
+        >
+          <label htmlFor="display-name" className={fieldLabel}>
+            {t("pairedInstallations.displayNameLabel")}
+          </label>
           <input
             id="display-name"
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
             required
+            className={fieldInput}
           />
-          <label htmlFor="base-url">{t("pairedInstallations.baseUrlLabel")}</label>
+          <label htmlFor="base-url" className={fieldLabel}>
+            {t("pairedInstallations.baseUrlLabel")}
+          </label>
           <input
             id="base-url"
             type="url"
             value={baseUrl}
             onChange={(e) => setBaseUrl(e.target.value)}
             required
+            className={fieldInput}
           />
-          <label htmlFor="api-key">{t("pairedInstallations.apiKeyLabel")}</label>
-          <input id="api-key" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+          <label htmlFor="api-key" className={fieldLabel}>
+            {t("pairedInstallations.apiKeyLabel")}
+          </label>
+          <input
+            id="api-key"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            className={fieldInput}
+          />
           {formError && (
-            <p className="error-text" role="alert">
+            <p className="text-danger" role="alert">
               {formError}
             </p>
           )}
-          <div className="actions">
-            <button type="submit" disabled={submitting}>
+          <div className="flex gap-2">
+            <button type="submit" disabled={submitting} className={primaryBtn}>
               {submitting
                 ? t("pairedInstallations.submitting")
                 : t("pairedInstallations.submit")}
             </button>
-            <button type="button" onClick={() => setShowForm(false)}>
+            <button type="button" onClick={() => setShowForm(false)} className={secondaryBtn}>
               {t("common.cancel")}
             </button>
           </div>
@@ -130,25 +156,29 @@ export function PairedInstallationList() {
       )}
 
       {installations.length === 0 ? (
-        <p className="empty-state">{t("pairedInstallations.empty")}</p>
+        <p className="italic opacity-70">{t("pairedInstallations.empty")}</p>
       ) : (
-        <table className="data-table">
+        <table className="mb-6 w-full border-collapse">
           <thead>
             <tr>
-              <th>{t("pairedInstallations.nameColumn")}</th>
-              <th>{t("pairedInstallations.baseUrlColumn")}</th>
-              <th>{t("pairedInstallations.createdColumn")}</th>
-              <th>{t("pairedInstallations.actionsColumn")}</th>
+              <th className={th}>{t("pairedInstallations.nameColumn")}</th>
+              <th className={th}>{t("pairedInstallations.baseUrlColumn")}</th>
+              <th className={th}>{t("pairedInstallations.createdColumn")}</th>
+              <th className={th}>{t("pairedInstallations.actionsColumn")}</th>
             </tr>
           </thead>
           <tbody>
             {installations.map((installation) => (
               <tr key={installation.id}>
-                <td>{installation.display_name}</td>
-                <td>{installation.base_url}</td>
-                <td>{new Date(installation.created_at).toLocaleString("de-DE")}</td>
-                <td>
-                  <button type="button" onClick={() => handleDelete(installation.id)}>
+                <td className={td}>{installation.display_name}</td>
+                <td className={td}>{installation.base_url}</td>
+                <td className={td}>{new Date(installation.created_at).toLocaleString("de-DE")}</td>
+                <td className={td}>
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(installation.id)}
+                    className={secondaryBtn}
+                  >
                     {t("common.delete")}
                   </button>
                 </td>

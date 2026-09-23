@@ -24,6 +24,25 @@
    header comment. */
 @import "../../../../libs/dms-ui/tailwind-preset.css";
 
+/* Post-Roadmap Phase 75 Session 4 (found live via computed-style probing
+   while verifying office-addin's rollout, not just a screenshot check -
+   see ADR 0221): this app's login page inputs/buttons (P75-S2) were
+   rendering in the browser's default form-control font (Arial) instead
+   of the app's own font stack, because no rule here ever reset `font` on
+   a plain <input>/<button>/<select>/<textarea> - normally preflight's
+   job, deliberately excluded (ADR 0218). Layered in `@layer base`
+   (before `utilities` in the `@layer` order above) so a future Tailwind
+   typography utility on a form element still wins, per the exact
+   cascade-layer bug ADR 0219 already found and fixed for office-addin. */
+@layer base {
+  input,
+  select,
+  button,
+  textarea {
+    font: inherit;
+  }
+}
+
 /* Cross-UI-Theming (8, P4-S6, siehe ADR 0009): Farb-Tokens selbst leben seit
    Phase 48 Session 1 (ADR 0168) in der geteilten libs/dms-ui/tokens.css -
    dieser Block wendet nur noch den Font-Family-Token an. */

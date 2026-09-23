@@ -152,6 +152,8 @@ Identical provider copy from user-ui/admin-ui/process-designer (`ThemeProvider`,
 
 **Correction (Post-Roadmap Phase 75 Session 3, [ADR 0220](../adr/0220-office-addin-tailwind-rollout-primary-button-border-fix.md))**: the login submit button was silently relying on the browser's default unstyled `<button>` border (invisible in a screenshot, found via `getComputedStyle()` while verifying `office-addin`'s rollout) — fixed with an explicit `border-0`.
 
+**Correction (Post-Roadmap Phase 75 Session 3 continuation, [ADR 0221](../adr/0221-migration-console-tailwind-rollout-form-font-inherit-fix.md))**: login inputs were rendering in `Arial` instead of this app's own font stack (no global `input,select,button,textarea{font:inherit}` reset existed) — fixed with a small `@layer base` addition to `globals.css`. This is a surgical fix only; this app's own full Tailwind rollout beyond the login page is still queued as part of the small-apps group, not attempted here.
+
 ## Build & Delivery
 
 Two-stage Docker image (`apps/reviewer-ui/Dockerfile`, `node:22-alpine` build stage → `nginx:alpine` runtime), `NEXT_PUBLIC_GATEWAY_BASE_URL` as a build arg, overridable via `REVIEWER_UI_GATEWAY_BASE_URL` in `infra/.env`. `infra/docker-compose.yml`: port `${REVIEWER_UI_PORT:-3005}:80` — **not** 3003 (already taken by `GRAFANA_PORT`, 10.1, see ADR 0041).

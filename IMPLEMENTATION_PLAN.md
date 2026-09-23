@@ -1977,8 +1977,14 @@ not a web app, and has no CSS of any kind to migrate.
   (P75-S2's five login-page buttons plus this session's office-addin buttons) was silently relying on
   the browser's unstyled default `<button>` border — fixed with an explicit `border-0`, re-verified via
   `getComputedStyle()` against the real running Docker containers. New
-  [ADR 0220](docs/adr/0220-office-addin-tailwind-rollout-primary-button-border-fix.md). Remaining small
-  apps (`migration-console`, `process-designer`, `reviewer-ui`) still queued, then `admin-ui`/`user-ui`.
+  [ADR 0220](docs/adr/0220-office-addin-tailwind-rollout-primary-button-border-fix.md).
+  **Continuation done** (second of the small-apps group: `migration-console`, fully converted — all 7
+  remaining components, including giving previously-unstyled plain buttons/selects a real visual
+  treatment for the first time). Found and fixed a second retroactive defect the same way: login inputs
+  across **all five** non-office-addin apps were rendering in `Arial` instead of each app's own font
+  stack (no global `font: inherit` reset existed) — fixed for all five. New
+  [ADR 0221](docs/adr/0221-migration-console-tailwind-rollout-form-font-inherit-fix.md). Remaining small
+  apps (`process-designer`, `reviewer-ui`) still queued, then `admin-ui`/`user-ui`.
 
 **Definition of Done**: P75-S1 needs a real ADR (a genuine architecture decision: which token-integration
 mechanism, shared preset location); P75-S2 needs before/after screenshots in the same message/commit,

@@ -17,26 +17,35 @@ export function Shell({ children }: { children: ReactNode }) {
   const { t } = useI18n();
   const pathname = usePathname();
 
+  const tabClass = (active: boolean) =>
+    active
+      ? "border-b-2 border-accent pb-1 font-semibold text-fg no-underline"
+      : "pb-1 text-fg no-underline opacity-70";
+
   return (
-    <div className="page">
+    <div className="mx-auto max-w-[1100px] p-6">
       <MaintenanceBanner />
-      <div className="top-bar">
-        <nav className="tab-nav">
-          <Link href="/" className={pathname === "/" ? "tab-active" : undefined}>
+      <div className="mb-6 flex items-center justify-between border-b border-border pb-3">
+        <nav className="flex gap-6">
+          <Link href="/" className={tabClass(pathname === "/")}>
             {t("nav.transfers")}
           </Link>
           <Link
             href="/paired-installations/"
-            className={pathname?.startsWith("/paired-installations") ? "tab-active" : undefined}
+            className={tabClass(Boolean(pathname?.startsWith("/paired-installations")))}
           >
             {t("nav.pairedInstallations")}
           </Link>
         </nav>
-        <div className="top-bar-actions">
+        <div className="flex items-center gap-4">
           <LocaleSwitcher />
           <ThemeSwitcher />
           {user && <span>{user.username}</span>}
-          <button type="button" onClick={logout}>
+          <button
+            type="button"
+            onClick={logout}
+            className="rounded-md border border-border bg-hover-bg px-3 py-1 text-fg transition-colors hover:bg-accent-bg"
+          >
             {t("common.logout")}
           </button>
         </div>

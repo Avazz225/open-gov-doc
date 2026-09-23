@@ -114,6 +114,8 @@ Identical copy of the providers from user-ui/admin-ui (`ThemeProvider`, `I18nPro
 
 **Correction (Post-Roadmap Phase 75 Session 3, [ADR 0220](../adr/0220-office-addin-tailwind-rollout-primary-button-border-fix.md))**: the login submit button was silently relying on the browser's default unstyled `<button>` border (invisible in a screenshot, found via `getComputedStyle()` while verifying `office-addin`'s rollout) — fixed with an explicit `border-0`.
 
+**Correction (Post-Roadmap Phase 75 Session 3 continuation, [ADR 0221](../adr/0221-migration-console-tailwind-rollout-form-font-inherit-fix.md))**: login inputs were rendering in `Arial` instead of this app's own font stack (no global `input,select,button,textarea{font:inherit}` reset existed) — fixed with a small `@layer base` addition to `globals.css`. This is a surgical fix only; this app's own full Tailwind rollout beyond the login page is still queued as part of the small-apps group, not attempted here.
+
 ## Build & Deployment
 
 Two-stage Docker image (`apps/process-designer/Dockerfile`, `node:22-alpine` build stage → `nginx:alpine` runtime), `NEXT_PUBLIC_GATEWAY_BASE_URL` as a build arg, overridable via `PROCESS_DESIGNER_GATEWAY_BASE_URL` in `infra/.env`. `infra/docker-compose.yml`: port `${PROCESS_DESIGNER_PORT:-3002}:80`.

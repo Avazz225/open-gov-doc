@@ -24,167 +24,44 @@
    header comment. */
 @import "../../../../libs/dms-ui/tailwind-preset.css";
 
-/* Cross-UI-Theming (8, P4-S6, siehe ADR 0009): Farb-Tokens selbst leben seit
-   Phase 48 Session 1 (ADR 0168) in der geteilten libs/dms-ui/tokens.css -
-   diese Datei wendet nur noch den Font-Family-Token an und enthält die
-   App-spezifischen Komponentenstile. Die Post-Roadmap Phase 33 Session 1
-   (ADR 0135) high-contrast `--dms-accent-bg`-Korrektur ist jetzt Teil der
-   geteilten Datei (`#000000`, nicht mehr `#ffff00`). */
-:root {
-  font-family: var(--dms-font-family);
-}
+/* Post-Roadmap Phase 75 Session 4: this app's remaining hand-written CSS
+   classes (`.page`/`.top-bar`/`.tab-nav`/`.data-table`/`.badge-*`/etc.)
+   have been replaced by Tailwind utility classes directly on each
+   component (see Shell.tsx, ThemeSwitcher.tsx, LocaleSwitcher.tsx,
+   MaintenanceBanner.tsx, RequireAuth.tsx, PairedInstallationList.tsx,
+   TransferConsole.tsx) and removed from here. What remains below is a
+   genuine minimal reset, plus one small rule that isn't expressible as a
+   Tailwind utility (a high-contrast-only badge border, ADR 0119/0135) -
+   kept in `@layer base` (before `utilities` in the `@layer` order above)
+   so Tailwind utility classes on these same elements keep winning, per
+   the cascade-layer bug ADR 0219 found and fixed for office-addin. */
+@layer base {
+  :root {
+    font-family: var(--dms-font-family);
+  }
 
-body {
-  margin: 0;
-  padding: 0;
-  background: var(--dms-bg);
-  color: var(--dms-fg);
-}
+  body {
+    margin: 0;
+    padding: 0;
+    background: var(--dms-bg);
+    color: var(--dms-fg);
+  }
 
-.page {
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: var(--dms-space-6);
-}
+  input,
+  select,
+  button,
+  textarea {
+    font: inherit;
+  }
 
-.top-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding-bottom: var(--dms-space-3);
-  margin-bottom: var(--dms-space-6);
-  border-bottom: 1px solid var(--dms-border);
-}
-
-.top-bar-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--dms-space-4);
-}
-
-.tab-nav {
-  display: flex;
-  gap: var(--dms-space-6);
-}
-
-.tab-nav a {
-  text-decoration: none;
-  color: var(--dms-fg);
-  opacity: 0.7;
-  padding-bottom: var(--dms-space-1);
-}
-
-.tab-nav a.tab-active {
-  opacity: 1;
-  font-weight: 600;
-  border-bottom: 2px solid var(--dms-accent);
-}
-
-.hint {
-  opacity: 0.8;
-  font-size: var(--dms-font-size-sm);
-}
-
-.actions {
-  display: flex;
-  gap: var(--dms-space-2);
-}
-
-.login-form {
-  max-width: 320px;
-  margin: 4rem auto;
-  display: flex;
-  flex-direction: column;
-  gap: var(--dms-space-3);
-}
-
-.error-text {
-  color: var(--dms-danger);
-}
-
-.success-text {
-  color: var(--dms-success);
-}
-
-.empty-state {
-  opacity: 0.7;
-  font-style: italic;
-}
-
-.data-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-bottom: var(--dms-space-6);
-}
-
-.data-table th,
-.data-table td {
-  text-align: left;
-  padding: var(--dms-space-2) var(--dms-space-2);
-  border-bottom: 1px solid var(--dms-border);
-}
-
-.badge {
-  display: inline-block;
-  padding: 0.1rem var(--dms-space-2);
-  border-radius: var(--dms-radius-full);
-  font-size: var(--dms-font-size-xs);
-}
-
-/* Post-Roadmap Phase 33 Session 1 (accessibility audit, ADR 0119/0135) -
-   high contrast flattens every `--dms-*-bg` token to the page background,
-   so a badge's pill shape - its only remaining visual cue once the fill
-   disappears - needs an explicit border. */
-:root[data-theme="high-contrast"] .badge {
-  border: 1px solid currentColor;
-}
-
-.badge-pending {
-  background: var(--dms-accent-bg);
-  color: var(--dms-accent);
-}
-
-.badge-approved {
-  background: var(--dms-success-bg);
-  color: var(--dms-success);
-}
-
-.badge-rejected {
-  background: var(--dms-danger-bg);
-  color: var(--dms-danger);
-}
-
-.maintenance-banner {
-  background: var(--dms-danger-bg);
-  color: var(--dms-danger);
-  padding: var(--dms-space-2) var(--dms-space-6);
-  text-align: center;
-  font-weight: 600;
-  margin: -1.5rem -1.5rem 1.5rem;
-}
-
-.inline-form {
-  display: flex;
-  flex-direction: column;
-  gap: var(--dms-space-2);
-  max-width: 420px;
-  padding: var(--dms-space-3);
-  margin-top: var(--dms-space-2);
-  border: 1px solid var(--dms-border);
-  border-radius: var(--dms-radius-sm);
-}
-
-.inline-form textarea,
-.inline-form input {
-  font-family: inherit;
-}
-
-.detail-row {
-  background: var(--dms-hover-bg);
-}
-
-.detail-row pre {
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
+  /* Accessibility pass (Post-Roadmap Phase 33 Session 1, ADR 0119/0135) -
+     high contrast flattens every `--dms-*-bg` token to the page
+     background, so a badge's pill shape - its only remaining visual cue
+     once the fill disappears - needs an explicit border. Not expressible
+     as a plain Tailwind utility (no ancestor `[data-theme=...]` variant
+     in this app's utility set), kept as a small dedicated rule instead of
+     an awkward arbitrary-selector utility. */
+  :root[data-theme="high-contrast"] .badge-hc-border {
+    border: 1px solid currentColor;
+  }
 }

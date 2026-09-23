@@ -15,10 +15,12 @@ import { useAuth } from "@/lib/auth-context";
 const TERMINAL_SUCCESS = new Set(["released", "deleted", "dry_run_completed"]);
 const POLL_INTERVAL_MS = 5_000;
 
+const BADGE_BASE = "badge-hc-border inline-block rounded-full px-2 py-[0.1rem] text-xs";
+
 function statusBadgeClass(status: string): string {
-  if (status === "failed") return "badge badge-rejected";
-  if (TERMINAL_SUCCESS.has(status)) return "badge badge-approved";
-  return "badge badge-pending";
+  if (status === "failed") return `${BADGE_BASE} bg-danger-bg text-danger`;
+  if (TERMINAL_SUCCESS.has(status)) return `${BADGE_BASE} bg-success-bg text-success`;
+  return `${BADGE_BASE} bg-accent-bg text-accent`;
 }
 
 const PHASE_FIELDS: { key: keyof Transfer; labelKey: string }[] = [
@@ -112,21 +114,34 @@ export function TransferConsole() {
     }
   }
 
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1 text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1 text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border w-full rounded-md border border-border bg-bg px-2 py-1.5 text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+  const fieldLabel = "text-sm font-medium text-fg";
+  const th = "border-b border-border px-2 py-2 text-left";
+  const td = "border-b border-border px-2 py-2 text-left";
+
   return (
     <section>
-      <div className="top-bar">
+      <div className="mb-6 flex items-center justify-between border-b border-border pb-3">
         <h1>{t("transfers.heading")}</h1>
-        <button type="button" onClick={() => setShowForm((v) => !v)}>
+        <button type="button" onClick={() => setShowForm((v) => !v)} className={secondaryBtn}>
           {t("transfers.newButton")}
         </button>
       </div>
-      <p className="hint">{t("transfers.hint")}</p>
+      <p className="text-sm opacity-80">{t("transfers.hint")}</p>
 
-      <label htmlFor="status-filter">{t("transfers.statusFilterLabel")}</label>{" "}
+      <label htmlFor="status-filter" className={fieldLabel}>
+        {t("transfers.statusFilterLabel")}
+      </label>{" "}
       <select
         id="status-filter"
         value={statusFilter}
         onChange={(e) => setStatusFilter(e.target.value)}
+        className="rounded-md border border-border bg-bg px-1 py-0.5 text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg"
       >
         <option value="">{t("transfers.statusAll")}</option>
         {[
@@ -146,28 +161,37 @@ export function TransferConsole() {
         ))}
       </select>
 
-      {notice && <p className="success-text">{notice}</p>}
+      {notice && <p className="text-success">{notice}</p>}
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
 
       {showForm && (
-        <form className="inline-form" onSubmit={handleCreate}>
-          <label htmlFor="source-folder-id">{t("transfers.sourceFolderIdLabel")}</label>
+        <form
+          className="mt-2 flex max-w-[420px] flex-col gap-2 rounded-sm border border-border p-3"
+          onSubmit={handleCreate}
+        >
+          <label htmlFor="source-folder-id" className={fieldLabel}>
+            {t("transfers.sourceFolderIdLabel")}
+          </label>
           <input
             id="source-folder-id"
             value={sourceFolderId}
             onChange={(e) => setSourceFolderId(e.target.value)}
             required
+            className={fieldInput}
           />
-          <label htmlFor="target-installation">{t("transfers.targetInstallationLabel")}</label>
+          <label htmlFor="target-installation" className={fieldLabel}>
+            {t("transfers.targetInstallationLabel")}
+          </label>
           <select
             id="target-installation"
             value={targetInstallationId}
             onChange={(e) => setTargetInstallationId(e.target.value)}
             required
+            className={fieldInput}
           >
             <option value="" disabled>
               {installations.length === 0
@@ -180,7 +204,7 @@ export function TransferConsole() {
               </option>
             ))}
           </select>
-          <label>
+          <label className={`flex items-center gap-1 ${fieldLabel}`}>
             <input
               type="checkbox"
               checked={dryRun}
@@ -188,7 +212,9 @@ export function TransferConsole() {
             />{" "}
             {t("transfers.dryRunLabel")}
           </label>
-          <label htmlFor="retention-days">{t("transfers.retentionDaysLabel")}</label>
+          <label htmlFor="retention-days" className={fieldLabel}>
+            {t("transfers.retentionDaysLabel")}
+          </label>
           <input
             id="retention-days"
             type="number"
@@ -196,17 +222,18 @@ export function TransferConsole() {
             value={retentionDays}
             onChange={(e) => setRetentionDays(e.target.value)}
             disabled={dryRun}
+            className={fieldInput}
           />
           {formError && (
-            <p className="error-text" role="alert">
+            <p className="text-danger" role="alert">
               {formError}
             </p>
           )}
-          <div className="actions">
-            <button type="submit" disabled={submitting}>
+          <div className="flex gap-2">
+            <button type="submit" disabled={submitting} className={primaryBtn}>
               {submitting ? t("transfers.submitting") : t("transfers.submit")}
             </button>
-            <button type="button" onClick={() => setShowForm(false)}>
+            <button type="button" onClick={() => setShowForm(false)} className={secondaryBtn}>
               {t("common.cancel")}
             </button>
           </div>
@@ -214,61 +241,64 @@ export function TransferConsole() {
       )}
 
       {transfers.length === 0 ? (
-        <p className="empty-state">{t("transfers.empty")}</p>
+        <p className="italic opacity-70">{t("transfers.empty")}</p>
       ) : (
-        <table className="data-table">
+        <table className="mb-6 w-full border-collapse">
           <thead>
             <tr>
-              <th>{t("transfers.idColumn")}</th>
-              <th>{t("transfers.sourceColumn")}</th>
-              <th>{t("transfers.targetColumn")}</th>
-              <th>{t("transfers.statusColumn")}</th>
-              <th>{t("transfers.progressColumn")}</th>
-              <th>{t("transfers.actionsColumn")}</th>
+              <th className={th}>{t("transfers.idColumn")}</th>
+              <th className={th}>{t("transfers.sourceColumn")}</th>
+              <th className={th}>{t("transfers.targetColumn")}</th>
+              <th className={th}>{t("transfers.statusColumn")}</th>
+              <th className={th}>{t("transfers.progressColumn")}</th>
+              <th className={th}>{t("transfers.actionsColumn")}</th>
             </tr>
           </thead>
           <tbody>
             {transfers.map((transfer) => (
               <Fragment key={transfer.id}>
                 <tr>
-                  <td>{transfer.id.slice(0, 8)}</td>
-                  <td>{transfer.source_folder_id}</td>
-                  <td>{installationName(transfer.target_installation_id)}</td>
-                  <td>
+                  <td className={td}>{transfer.id.slice(0, 8)}</td>
+                  <td className={td}>{transfer.source_folder_id}</td>
+                  <td className={td}>{installationName(transfer.target_installation_id)}</td>
+                  <td className={td}>
                     <span className={statusBadgeClass(transfer.status)}>{transfer.status}</span>
                     {transfer.dry_run && (
                       <>
                         {" "}
-                        <span className="badge badge-pending">{t("transfers.dryRunBadge")}</span>
+                        <span className={`${BADGE_BASE} bg-accent-bg text-accent`}>
+                          {t("transfers.dryRunBadge")}
+                        </span>
                       </>
                     )}
                   </td>
-                  <td>
+                  <td className={td}>
                     {t("transfers.documentsProgress", {
                       copied: transfer.documents_copied,
                       total: transfer.documents_total,
                       verified: transfer.documents_verified,
                     })}
                   </td>
-                  <td>
+                  <td className={td}>
                     <button
                       type="button"
                       onClick={() => setExpandedId(expandedId === transfer.id ? null : transfer.id)}
+                      className={secondaryBtn}
                     >
                       {t("transfers.detailButton")}
                     </button>
                   </td>
                 </tr>
                 {expandedId === transfer.id && (
-                  <tr className="detail-row">
-                    <td colSpan={6}>
-                      <h2 className="hint">{t("transfers.detailHeading")}</h2>
+                  <tr className="bg-hover-bg">
+                    <td colSpan={6} className="px-2 py-2">
+                      <h2 className="text-sm opacity-80">{t("transfers.detailHeading")}</h2>
                       {transfer.error_message && (
-                        <p className="error-text">
+                        <p className="text-danger">
                           <strong>{t("transfers.errorLabel")}:</strong> {transfer.error_message}
                         </p>
                       )}
-                      <h3 className="hint">{t("transfers.phasesHeading")}</h3>
+                      <h3 className="text-sm opacity-80">{t("transfers.phasesHeading")}</h3>
                       <ul>
                         {PHASE_FIELDS.map(({ key, labelKey }) => {
                           const value = transfer[key];
