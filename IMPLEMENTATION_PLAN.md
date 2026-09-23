@@ -1922,7 +1922,7 @@ labeled inputs and a submit button, no card/panel treatment, no visual hierarchy
 is explicitly out of scope** — it is a Python/UNO native LibreOffice extension with hand-coded dialogs,
 not a web app, and has no CSS of any kind to migrate.
 
-- **P75-S1 — Tooling foundation and integration approach (real decision needed, not mechanical)**:
+- ~~**P75-S1 — Tooling foundation and integration approach (real decision needed, not mechanical)**:
   decide how Tailwind consumes the EXISTING `--dms-*` tokens rather than introducing a second, parallel,
   disconnected token system — Tailwind's CSS-first theme configuration (mapping utility classes directly
   onto existing CSS custom properties, e.g. `--color-accent: var(--dms-accent)`) is the natural fit given
@@ -1934,7 +1934,15 @@ not a web app, and has no CSS of any kind to migrate.
   precedent Phase 48 itself already established for the token file. Verify the whole pipeline against a
   REAL `next build` in each app's actual `output: "export"` static-export mode before committing to the
   approach (Tailwind is a build-time CSS generator with no runtime dependency, so static export should be
-  unaffected — confirm this live rather than assuming it).
+  unaffected — confirm this live rather than assuming it).~~ **Done.** Tailwind v4, `@theme inline`
+  mapping onto `--dms-*` in a new shared `libs/dms-ui/tailwind-preset.css`, wired into all six apps
+  (`tailwindcss`/`@tailwindcss/postcss`/`postcss` + `postcss.config.mjs` + `@source` scoped per app).
+  **Real regression found and fixed live**: Tailwind's bundled preflight base reset visibly broke
+  `user-ui`'s existing login page (confirmed via before/after screenshot) — fixed by importing the
+  `theme`/`utilities` layers individually, omitting `preflight`, until each app's own P75-S2+ rollout
+  replaces its hand-written CSS. All six apps build clean in real static-export mode (Docker build
+  verified for `user-ui`), `tsc`/`eslint`/`vitest` all green (migration-console's one failure is
+  pre-existing, confirmed via `git stash`). New [ADR 0218](docs/adr/0218-tailwind-css-v4-tooling-foundation.md).
 - **P75-S2 — Pilot: rebuild the login page in Tailwind, across all six apps.** Directly addresses the
   user's own specifically-named pain point first, and the login page is small, self-contained, and
   already near-identical across every app — an ideal proof-of-concept for the new tooling before a much

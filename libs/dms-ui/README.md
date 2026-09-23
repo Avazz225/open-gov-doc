@@ -10,6 +10,17 @@ Shared design tokens for all six frontend apps (concept 8, Phase 48 Session 1, [
 
 (the exact relative depth from `apps/<app>/src/app/globals.css` to this file — verified against a real `next build`, the token actually appears in the compiled CSS output).
 
-Contains: the pre-existing `--dms-*` color tokens (de-drifted to one canonical superset — see the file's own header comment for exactly which apps were missing which token, and one real, still-live high-contrast bug this file fixes as a side effect of adoption) plus new spacing/radius/shadow/typography scales, none of which existed anywhere before this session.
+Contains: the pre-existing `--dms-*` color tokens (de-drifted to one canonical superset — see the file's own header comment for exactly which apps were missing which token, and one real, still-live high-contrast bug this file fixes as a side effect of adoption) plus spacing/radius/shadow/typography scales.
 
-**Not yet consumed by any app** — Phase 48 Session 1 built and got sign-off on this file only; wiring each app's `globals.css` to import it (and updating that app's own hardcoded values to reference the new scales) is Phase 49's job, one app per session.
+~~**Not yet consumed by any app**~~ — **consumed by all six apps since Phase 49** (one app per session, per this file's own original plan) — stale note, found and struck during Post-Roadmap Phase 75 Session 1's own research.
+
+## `tailwind-preset.css` (Post-Roadmap Phase 75 Session 1, [ADR 0218](../../docs/adr/0218-tailwind-css-v4-tooling-foundation.md))
+
+A second shared file, same plain-`@import`-no-npm-package convention as `tokens.css` above: a Tailwind v4 `@theme inline` block mapping Tailwind's utility namespaces (`--color-*`, `--font-*`, `--text-*`, `--radius-*`, `--shadow-*`) directly onto the `--dms-*` variables `tokens.css` already defines — `bg-accent`/`text-fg`/`rounded-md`/etc. generate utilities that reference `var(--dms-*)`, not a frozen literal, so they stay theme-reactive exactly like the hand-written CSS classes already are. Imported after `tokens.css` (references its variables):
+
+```css
+@import "../../../../libs/dms-ui/tokens.css";
+@import "../../../../libs/dms-ui/tailwind-preset.css";
+```
+
+Wired into all six apps' build pipelines (`tailwindcss`/`@tailwindcss/postcss`/`postcss` devDependencies, a `postcss.config.mjs`, `@source` scoped to that app's own `src/`) — but **no app has actually replaced any hand-written CSS with Tailwind utilities yet**, and each app's `globals.css` deliberately omits Tailwind's `preflight` base-reset layer for now (it visibly broke existing hand-written UI when tried, see ADR 0218) — that happens app-by-app starting with the P75-S2 login-page pilot, the same "prove tooling first, redesign after" split `tokens.css` itself already used across Phase 48→49.

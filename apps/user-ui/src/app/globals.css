@@ -1,4 +1,34 @@
+/* Tailwind CSS v4, PREFLIGHT DELIBERATELY OMITTED for this session
+   (Post-Roadmap Phase 75 Session 1, ADR 0218) - `preflight.css`'s base
+   reset (removing default border/background from <input>/<button>,
+   unbolding headings, etc.) visibly broke this app's EXISTING hand-written
+   CSS the moment it was enabled, confirmed live via a real browser
+   screenshot before/after - this app's CSS still relies on browser
+   defaults in places no component has been touched yet to use Tailwind
+   utilities for. This session's own scope is tooling-only (prove the
+   build pipeline, map the token theme) - the actual visual redesign that
+   preflight anticipates is Phase 75 Session 2's job, not this one's, so
+   importing preflight now would silently pre-empt a decision that
+   session is supposed to make deliberately. Import the theme+utilities
+   layers individually instead of the bundled `"tailwindcss"` import (which
+   always includes preflight) - see https://tailwindcss.com/docs/preflight
+   "Disabling preflight". Revisit this exclusion once each app's own P75-S2+
+   rollout session has actually replaced its hand-written CSS with Tailwind
+   utilities - preflight can be re-added then, once nothing depends on the
+   browser defaults it removes. */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities) source(none);
+@source "../../src";
+
 @import "../../../../libs/dms-ui/tokens.css";
+
+/* Tailwind theme mapping (Post-Roadmap Phase 75 Session 1, ADR 0218) - maps
+   Tailwind utility namespaces onto the --dms-* tokens just imported above,
+   via `@theme inline` so generated utilities stay theme-reactive. Must
+   come after tokens.css (references its variables) - see that file's own
+   header comment. */
+@import "../../../../libs/dms-ui/tailwind-preset.css";
 
 /* Cross-UI-Theming (8, P4-S6, siehe ADR 0009): Farb-Tokens selbst leben seit
    Phase 48 Session 1 (ADR 0168) in der geteilten libs/dms-ui/tokens.css -

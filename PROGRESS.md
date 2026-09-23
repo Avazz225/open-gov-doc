@@ -2,9 +2,54 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** Phase 74 close (full regression + graphify update outcome, after P74-S3 closed the
-phase). Standard phase-end cadence per `CONTRIBUTING.md`/this project's own negotiated cadence: one
-unfiltered `scripts/run-tests.sh --build` run across all ~30 backend services, frontend regression for
+**Last completed:** P75-S1 (first session of Phase 75 — Tailwind CSS migration, reordered ahead of the
+ERP/mobile/AI bundle at the user's explicit request). Tooling foundation only, no visual redesign yet
+(that's P75-S2) — see [ADR 0218](docs/adr/0218-tailwind-css-v4-tooling-foundation.md) for the full
+writeup.
+
+**Decision**: Tailwind CSS v4 (`4.3.3`), CSS-first `@theme inline` configuration mapping Tailwind's
+utility namespaces directly onto the EXISTING `--dms-*` tokens (`libs/dms-ui/tokens.css`, ADR 0168) — no
+second, parallel token system. New shared `libs/dms-ui/tailwind-preset.css` (same plain-`@import`-no-npm
+convention as `tokens.css` itself), wired into all six apps: `tailwindcss`/`@tailwindcss/postcss`/`postcss`
+devDependencies, a `postcss.config.mjs`, and `@source` scoped to each app's own `src/` (this repo has no
+npm workspace — six independent sibling projects, verified via Tailwind's own docs that its default
+source-detection heuristic isn't guaranteed safe across that boundary without an explicit scope).
+
+**Real regression found and fixed live, not just anticipated**: importing Tailwind's bundled
+`@import "tailwindcss";` (which always includes the `preflight` base-CSS reset) visibly broke `user-ui`'s
+existing login page the moment it was tried — confirmed via a real before/after browser screenshot
+comparison (input borders and button styling disappeared, the heading lost its bold weight), since that
+page's CSS relies on browser defaults in places no component has been touched yet to use Tailwind
+utilities for. Fixed by importing the `theme`/`utilities` layers individually and deliberately omitting
+`preflight` (Tailwind's own documented mechanism for exactly this situation) — re-verified pixel-identical
+to baseline afterward, both for `user-ui` and `admin-ui` (the app whose login page the user specifically
+named as "clunky, dated"). This exclusion is temporary and per-app: each app's own P75-S2+ rollout session
+should remove it the same session it finishes replacing that app's hand-written CSS with Tailwind
+utilities, not carry it forward indefinitely — left as an explicit comment in every touched `globals.css`.
+
+**Live-verified thoroughly**: all six apps (`user-ui`, `admin-ui`, `reviewer-ui`, `process-designer`,
+`migration-console`, `office-addin`) build clean in their real `output: "export"` static-export mode
+(`npm run build`, not assumed from one app's success), `tsc --noEmit`/`eslint` clean across all six, full
+Vitest green across all six (`migration-console`'s one failure is a pre-existing, unrelated flaky
+`waitFor` timing assertion, confirmed via `git stash` comparison to fail identically on the unmodified
+code). Mapping correctness confirmed directly: a temporary Tailwind-utility probe added to `user-ui`,
+rebuilt, inspected in the real compiled CSS output (`.bg-accent{background-color:var(--dms-accent)}` —
+proof it resolves to the live variable, not a frozen value), then reverted before commit. Also rebuilt and
+redeployed `user-ui`'s real Docker image (a genuinely different build context than the local `npm run
+build`) and screenshotted its login page against the actual running dev stack — pixel-identical to
+baseline. `docs/services/*.md` updated for all six apps plus `libs/dms-ui/README.md` (also fixed a stale
+"not yet consumed by any app" note found while there — all six have imported `tokens.css` since Phase 49).
+
+**Next session:** P75-S2 — pilot: rebuild the login page in Tailwind, across all six apps. The first
+session where Tailwind utilities actually replace hand-written CSS (and where each touched app's
+`preflight` omission gets revisited) — a real visual redesign, before/after screenshots (light/dark/
+high-contrast) required per this project's own non-negotiable UI-change convention.
+
+---
+
+Immediately before P75-S1: **Phase 74 close** (full regression + graphify update outcome, after P74-S3
+closed the phase). Standard phase-end cadence per `CONTRIBUTING.md`/this project's own negotiated cadence:
+one unfiltered `scripts/run-tests.sh --build` run across all ~30 backend services, frontend regression for
 every app touched this phase, and `graphify update .`.
 
 **Backend regression**: all services green except three already-understood, non-blocking cases.
@@ -51,13 +96,12 @@ scale), `graph.html`/`GRAPH_REPORT.md` regenerated. New memory-worthy lesson for
 correct chunk sizing doesn't help when a single file in the corpus is itself larger than one subagent's
 read/output budget — that needs per-file pagination, a different fix from per-corpus chunk sizing.
 
-**Next session:** Phase 74 is closed. Asked the user to prioritize among Phase 75/76's three initiatives
-(ERP connector, native mobile, AI features) — **the user instead asked to swap Phase 75 and Phase 76**:
-do the Tailwind CSS frontend rewrite first (now **Phase 75**, `P75-S1` onward — was Phase 76), then
-return to the ERP/mobile/AI bundle afterward (now **Phase 76**, `P76-A/B/C` — was Phase 75).
-`IMPLEMENTATION_PLAN.md` updated accordingly (both phase sections swapped, all `P75-*`/`P76-*` session
-IDs renumbered to match, the stale "not yet approved for execution" disclaimer struck through). Start
-next session at **P75-S1** (Tailwind tooling foundation/integration approach).
+Afterward: asked the user to prioritize among Phase 75/76's three initiatives (ERP connector, native
+mobile, AI features) — **the user instead asked to swap Phase 75 and Phase 76**: do the Tailwind CSS
+frontend rewrite first (now **Phase 75**, `P75-S1` onward — was Phase 76), then return to the ERP/
+mobile/AI bundle afterward (now **Phase 76**, `P76-A/B/C` — was Phase 75). `IMPLEMENTATION_PLAN.md`
+updated accordingly (both phase sections swapped, all `P75-*`/`P76-*` session IDs renumbered to match,
+the stale "not yet approved for execution" disclaimer struck through).
 
 ---
 

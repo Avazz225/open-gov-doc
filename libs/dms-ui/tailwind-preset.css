@@ -1,0 +1,62 @@
+/* dms-ui Tailwind theme mapping (concept 8, Post-Roadmap Phase 75 Session 1,
+   ADR 0218) - maps Tailwind v4's utility-class namespaces directly onto the
+   EXISTING --dms-* custom properties from tokens.css, via `@theme inline`
+   (not a plain `@theme` block copying values) so the generated utilities
+   (`bg-accent`, `text-fg`, `border-border`, ...) stay theme-reactive at
+   runtime - flipping `data-theme` on `<html>` (ADR 0009's existing
+   mechanism, unchanged by this session) still repaints every Tailwind
+   utility class exactly like it already repaints the hand-written CSS
+   classes today, because the generated utility still references
+   `var(--dms-*)`, not a baked-in literal.
+
+   Consumed the same way tokens.css already is: a plain relative `@import`
+   in each app's own globals.css, no npm package - see that file's own
+   header comment for why (ADR 0168 "Rationale", unchanged reasoning).
+
+   Deliberately does NOT define a spacing scale override: Tailwind v4's own
+   default spacing unit is 0.25rem, multiplied per step (`p-1` = 0.25rem,
+   `p-2` = 0.5rem, `p-3` = 0.75rem, `p-4` = 1rem, `p-6` = 1.5rem, `p-8` =
+   2rem) - this already matches --dms-space-1 through --dms-space-8 exactly
+   (same 4px base grid, ADR 0168), so overriding `--spacing` here would be
+   pure duplication with a real drift risk if the two scales were ever
+   edited independently. Font-size steps ARE mapped below, since Tailwind's
+   own default type scale does NOT happen to coincide with dms-ui's. */
+
+@theme inline {
+  /* Color - every name below resolves live against whichever --dms-*
+     value is currently active for the theme in effect (light/dark/
+     high-contrast/explicit data-theme), exactly like the hand-written CSS
+     using these same variables today. */
+  --color-bg: var(--dms-bg);
+  --color-fg: var(--dms-fg);
+  --color-border: var(--dms-border);
+  --color-hover-bg: var(--dms-hover-bg);
+  --color-accent: var(--dms-accent);
+  --color-accent-bg: var(--dms-accent-bg);
+  --color-accent-bg-strong: var(--dms-accent-bg-strong);
+  --color-danger: var(--dms-danger);
+  --color-danger-bg: var(--dms-danger-bg);
+  --color-success: var(--dms-success);
+  --color-success-bg: var(--dms-success-bg);
+  --color-surface: var(--dms-surface);
+  --color-surface-fg: var(--dms-surface-fg);
+
+  /* Typography */
+  --font-sans: var(--dms-font-family);
+  --font-mono: var(--dms-font-family-mono);
+  --text-xs: var(--dms-font-size-xs);
+  --text-sm: var(--dms-font-size-sm);
+  --text-base: var(--dms-font-size-base);
+  --text-lg: var(--dms-font-size-lg);
+  --text-xl: var(--dms-font-size-xl);
+
+  /* Radius */
+  --radius-sm: var(--dms-radius-sm);
+  --radius-md: var(--dms-radius-md);
+  --radius-lg: var(--dms-radius-lg);
+  --radius-full: var(--dms-radius-full);
+
+  /* Shadow */
+  --shadow-sm: var(--dms-shadow-sm);
+  --shadow-lg: var(--dms-shadow-lg);
+}

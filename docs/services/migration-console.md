@@ -61,6 +61,8 @@ Identical provider copy from user-ui/admin-ui/process-designer/reviewer-ui (`The
 
 **Since Phase 49 Session 1** ([ADR 0168](../adr/0168-shared-design-tokens-and-scales.md)): `globals.css`'s own `--dms-*` color-token declarations (this app already had the ADR 0135 fix, unlike `user-ui`/`admin-ui`/`process-designer`) were removed and replaced by `@import "../../../../libs/dms-ui/tokens.css";` — the shared, de-drifted token source built in Phase 48 Session 1. Visually unchanged (confirmed live via Playwright, both light and high-contrast — the "Dry-Run" badge, which uses `--dms-accent-bg`, remained correctly legible). Component-level hardcoded spacing/radius/font-size values throughout the rest of `globals.css` were also switched to the new `--dms-space-*`/`--dms-radius-*`/`--dms-font-size-*` scale tokens where they matched a scale step.
 
+**Since Post-Roadmap Phase 75 Session 1** ([ADR 0218](../adr/0218-tailwind-css-v4-tooling-foundation.md)): `tailwindcss`/`@tailwindcss/postcss`/`postcss` added as devDependencies, a new `postcss.config.mjs`, and `libs/dms-ui/tailwind-preset.css` imported into `globals.css` (mapping Tailwind utility classes onto the `--dms-*` tokens above) — tooling only, this app's own UI is unchanged (preflight deliberately omitted for now, see the ADR); the actual redesign starts at P75-S2.
+
 ## Build & deployment
 
 Two-stage Docker image (`apps/migration-console/Dockerfile`, `node:22-alpine` build stage → `nginx:alpine` runtime), `NEXT_PUBLIC_GATEWAY_BASE_URL` as a build arg, overridable via `MIGRATION_CONSOLE_GATEWAY_BASE_URL` in `infra/.env`. `infra/docker-compose.yml`: port `${MIGRATION_CONSOLE_PORT:-3004}:80`.

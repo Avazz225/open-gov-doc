@@ -146,6 +146,8 @@ Identical provider copy from user-ui/admin-ui/process-designer (`ThemeProvider`,
 
 **Since Phase 49 Session 1** ([ADR 0168](../adr/0168-shared-design-tokens-and-scales.md)): `globals.css`'s own `--dms-*` color-token declarations (this app already had the ADR 0135 fix, unlike `user-ui`/`admin-ui`/`process-designer`) were removed and replaced by `@import "../../../../libs/dms-ui/tokens.css";` — the shared, de-drifted token source built in Phase 48 Session 1. Visually unchanged (confirmed live via Playwright, both light and high-contrast). Component-level hardcoded spacing/radius/font-size values throughout the rest of `globals.css` were also switched to the new `--dms-space-*`/`--dms-radius-*`/`--dms-font-size-*` scale tokens where they matched a scale step.
 
+**Since Post-Roadmap Phase 75 Session 1** ([ADR 0218](../adr/0218-tailwind-css-v4-tooling-foundation.md)): `tailwindcss`/`@tailwindcss/postcss`/`postcss` added as devDependencies, a new `postcss.config.mjs`, and `libs/dms-ui/tailwind-preset.css` imported into `globals.css` (mapping Tailwind utility classes onto the `--dms-*` tokens above) — tooling only, this app's own UI is unchanged (preflight deliberately omitted for now, see the ADR); the actual redesign starts at P75-S2.
+
 ## Build & Delivery
 
 Two-stage Docker image (`apps/reviewer-ui/Dockerfile`, `node:22-alpine` build stage → `nginx:alpine` runtime), `NEXT_PUBLIC_GATEWAY_BASE_URL` as a build arg, overridable via `REVIEWER_UI_GATEWAY_BASE_URL` in `infra/.env`. `infra/docker-compose.yml`: port `${REVIEWER_UI_PORT:-3005}:80` — **not** 3003 (already taken by `GRAFANA_PORT`, 10.1, see ADR 0041).
