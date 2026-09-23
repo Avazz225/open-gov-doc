@@ -34,7 +34,8 @@
   "nav": {
     "tasks": "Aufgaben",
     "approvals": "Freigaben",
-    "team": "Team"
+    "team": "Team",
+    "cases": "Vorgänge"
   },
   "taskList": {
     "heading": "Freigabeaufgaben",
@@ -133,5 +134,25 @@
     "rejectReasonPlaceholder": "Grund für die Ablehnung...",
     "rejectConfirm": "Ablehnung bestätigen",
     "rejectCancel": "Abbrechen"
+  },
+  "cases": {
+    "paneLabel": "Vorgänge",
+    "heading": "Vorgänge",
+    "hint": "Übersicht über alle Umlaufmappen (14.2) - Auswahl einer Zeile öffnet die Detailansicht mit ihren Dokumenten.",
+    "statusFilterLabel": "Status",
+    "statusAll": "Alle",
+    "statusOpen": "Offen",
+    "statusClosed": "Abgeschlossen",
+    "createdAt": "angelegt am {date}",
+    "closedAt": "abgeschlossen am {date}",
+    "empty": "Keine Vorgänge vorhanden.",
+    "loadError": "Vorgang konnte nicht geladen werden",
+    "backToList": "Zurück zur Übersicht",
+    "documentsHeading": "Dokumente",
+    "documentsEmpty": "Dieser Vorgang enthält noch keine Dokumente.",
+    "documentDeleted": "Dokument gelöscht",
+    "documentTitleUnavailable": "Dokumenttitel nicht verfügbar",
+    "documentAddedAt": "hinzugefügt am {date}",
+    "documentDownloadError": "Dokument konnte nicht heruntergeladen werden"
   }
 }

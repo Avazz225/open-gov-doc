@@ -34,7 +34,8 @@
   "nav": {
     "tasks": "Tasks",
     "approvals": "Approvals",
-    "team": "Team"
+    "team": "Team",
+    "cases": "Cases"
   },
   "taskList": {
     "heading": "Approval tasks",
@@ -133,5 +134,25 @@
     "rejectReasonPlaceholder": "Reason for rejection...",
     "rejectConfirm": "Confirm rejection",
     "rejectCancel": "Cancel"
+  },
+  "cases": {
+    "paneLabel": "Cases",
+    "heading": "Cases",
+    "hint": "Overview of all case binders (14.2) - selecting a row opens the detail view with its documents.",
+    "statusFilterLabel": "Status",
+    "statusAll": "All",
+    "statusOpen": "Open",
+    "statusClosed": "Closed",
+    "createdAt": "created on {date}",
+    "closedAt": "closed on {date}",
+    "empty": "No cases exist.",
+    "loadError": "Case could not be loaded",
+    "backToList": "Back to overview",
+    "documentsHeading": "Documents",
+    "documentsEmpty": "This case does not yet contain any documents.",
+    "documentDeleted": "Document deleted",
+    "documentTitleUnavailable": "Document title not available",
+    "documentAddedAt": "added on {date}",
+    "documentDownloadError": "Document could not be downloaded"
   }
 }

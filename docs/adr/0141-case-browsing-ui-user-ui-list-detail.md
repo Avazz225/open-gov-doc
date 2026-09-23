@@ -68,9 +68,14 @@ resulting documents to the currently-open case; neither can create a new case vi
   differs), and has full unit-test coverage of its own.
 - **No backend change** — this session is frontend-only, consuming already-shipped `case-service` and
   `archival-service` endpoints unchanged.
-- **Still deferred**: a real `case-service` browsing UI in `reviewer-ui` remains out of scope (still
+- ~~**Still deferred**: a real `case-service` browsing UI in `reviewer-ui` remains out of scope (still
   genuinely open as of Phase 65+'s gap-analysis round — `user-ui`'s `CasesPane.tsx` has no `reviewer-ui`
-  counterpart). ~~a process-definition picker for import-creates-new-case remain out of scope~~ —
+  counterpart).~~ — **closed in Post-Roadmap Phase 74 Session 1**: `reviewer-ui` gained its own
+  `CasesPane.tsx` (own route `/cases/`, own `Shell.tsx` tab) — a deliberately smaller cut (no favorites,
+  no XDOMEA/XJustiz archival export/import) but, going further than this session's own `user-ui` version,
+  with resolved document titles doubling as real download links, since `reviewer-ui` has no document-
+  preview/workspace infrastructure of its own to open a document into. See `docs/services/reviewer-ui.md`
+  "Case Browsing". ~~a process-definition picker for import-creates-new-case remain out of scope~~ —
   **closed in Phase 42 Session 1**: `CasesPane.tsx`'s `NewCaseImportSection`. ~~`case-service`'s own
   per-case RBAC resource type (vs. today's delegation-scoping workaround) is already tracked separately
   as P35-S2~~ — **closed by ADR 0144** (P35-S2).

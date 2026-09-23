@@ -2,7 +2,45 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P73-S5 (fifth and last session of Phase 73). Root-caused the 3 `gateway-service` test
+**Last completed:** P74-S1 (first session of Phase 74 — "RBAC/Completion Polish and One Overdue
+Decision"). Case-browsing UI in `reviewer-ui` — closes [ADR 0141](docs/adr/0141-case-browsing-ui-user-ui-list-detail.md)'s
+own named gap ("a real `case-service` browsing UI in `reviewer-ui` remains out of scope"), re-confirmed
+still open as recently as Phase 65+'s gap-analysis round. Motivating problem: a reviewer working a
+case-bound task previously had no case-context view of their own — `InstanceDetail.tsx` shows the raw
+`business_key` as an opaque string, nothing more.
+
+New `CasesPane.tsx` (own route `/cases/`, own `Shell.tsx` tab — now 4 tabs), same list→detail shape as
+`user-ui`'s own `CasesPane.tsx` but a deliberately smaller cut: no favorites (this app has no
+`favorite-service` integration at all), no XDOMEA/XJustiz archival export/import (`archival.write`-gated
+power features, no fit for this app's own "lean, approval-focused" framing). Went one step further than
+`user-ui`'s version in one respect: document titles are resolved (a new, minimal `CaseDocumentSummary`
+type, not the full `DocumentSummary` shape) AND each resolved title doubles as a real download link
+(`downloadDocumentVersion` + the same `triggerBrowserDownload` blob-URL idiom used elsewhere in this
+project) — `reviewer-ui` has no document-preview/workspace infrastructure of its own to open a document
+into (confirmed via grep before building), so "open" here means "download." No new ADR (execution of an
+already-decided pattern per Phase 74's own DoD note, not a new architectural decision).
+
+`reviewer-ui` Vitest: 55/55 (was 50 actually present, drifted from the doc's own last-recorded 47, not
+investigated further — +5 new `cases-pane.test.tsx`), `tsc`/`eslint`/`next build` clean. New real
+Playwright E2E `e2e/cases.spec.ts` (green). **Live-verified in a real, headed browser** against the
+rebuilt running stack, beyond both test suites: a real case and a real case-document reference created via
+the API, case list/detail rendered correctly (screenshot), the document title resolved to its real title
+(not the raw UUID), clicking it triggered a real, successful download confirmed via Playwright's own
+download-event API (`Anschreiben P74S1.txt`). `docs/services/reviewer-ui.md` (new "Case Browsing" section,
+Pages table, tab count, test count) and ADR 0141's own Consequences (the "still deferred" bullet struck)
+updated.
+
+**Next session:** P74-S2 — Small RBAC completions bundle: `auth-service`'s `PUT
+/user-tracking-config/{principal_id}` gains the same four-eyes gate its sibling AD-group-mapping endpoints
+already have (ADR 0157's own named, still-open gap); `permission-service`'s superuser bypass (ADR 0190)
+extended to `workflow-service`'s task-reassignment gate (ADR 0195's own named, deliberately-deferred-until-now
+gap — and, per P73-S1/ADR 0211, its new per-claimant completion gate too, the same shape of gap); `storage-service`'s
+two remaining ungated maintenance endpoints (`GET /storage/usage`, `/process-pending`) closed the same way
+ADR 0179 already closed the other eleven.
+
+---
+
+Immediately before P74-S1: **P73-S5** (fifth and last session of Phase 73). Root-caused the 3 `gateway-service` test
 failures that had recurred on every full regression run since at least Phase 60, re-noted across many
 sessions as "pre-existing, unrelated" without ever being traced to a cause
 ([ADR 0200](docs/adr/0200-p66s2-business-key-validation-regression-correction.md) got closest: identified
@@ -66,11 +104,6 @@ under-dense results either. **Next graphify attempt should use materially smalle
 subagent instead of ~20-25) specifically when catching up a large multi-session backlog like this one**,
 not the skill's generic default sizing, which is tuned for typical corpora, not this project's unusually
 dense per-file documentation style.
-
-**Next session:** P74-S1 — Case-browsing UI in `reviewer-ui` (ADR 0141's own named gap, re-confirmed
-still open at P65-S1): `user-ui` has `CasesPane.tsx`/"Umlaufmappen", `reviewer-ui` has no equivalent — a
-reviewer handling a case-bound task today has no case-context view of their own, only the generic task
-list.
 
 ---
 

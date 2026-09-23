@@ -484,3 +484,90 @@ export async function rejectRequest(
   );
   return response.json();
 }
+
+// Case-browsing (14.2, Post-Roadmap Phase 74 Session 1, ADR 0141's own
+// named gap: "a real case-service browsing UI in reviewer-ui remains out
+// of scope" - a reviewer handling a case-bound task previously had no
+// case-context view of their own, only the generic task list. Deliberately
+// a SMALLER cut than user-ui's own CasesPane.tsx: no favorites (this app
+// has no favorite-service integration at all), no XDOMEA/XJustiz export/
+// import (archival.write-gated power features, not a fit for this app's
+// "lean, approval-focused" shell, see Shell.tsx's own docstring) - just
+// enough case context (fields + document titles + a download link) for a
+// reviewer to understand what they're working on.
+export interface Case {
+  id: string;
+  name: string;
+  status: string;
+  created_at: string;
+  closed_at: string | null;
+  vorgangsnummer: string | null;
+}
+
+export interface CaseDocumentReference {
+  document_id: string;
+  added_at: string;
+  document_deleted_at: string | null;
+}
+
+export interface CaseDocumentSummary {
+  id: string;
+  title: string;
+  current_version_number: number;
+}
+
+export async function listCases(token: string, status?: string): Promise<Case[]> {
+  const path = status ? `cases?status=${encodeURIComponent(status)}` : "cases";
+  const response = await request("case-service", path, {}, token);
+  return response.json();
+}
+
+export async function getCase(token: string, caseId: string): Promise<Case> {
+  const response = await request(
+    "case-service",
+    `cases/${encodeURIComponent(caseId)}`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function listCaseDocuments(
+  token: string,
+  caseId: string
+): Promise<CaseDocumentReference[]> {
+  const response = await request(
+    "case-service",
+    `cases/${encodeURIComponent(caseId)}/documents`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function getCaseDocument(
+  token: string,
+  documentId: string
+): Promise<CaseDocumentSummary> {
+  const response = await request(
+    "document-service",
+    `documents/${encodeURIComponent(documentId)}`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function downloadDocumentVersion(
+  token: string,
+  documentId: string,
+  versionNumber: number
+): Promise<Blob> {
+  const response = await request(
+    "document-service",
+    `documents/${encodeURIComponent(documentId)}/versions/${versionNumber}/content`,
+    {},
+    token
+  );
+  return response.blob();
+}

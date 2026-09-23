@@ -1861,9 +1861,14 @@ build; docs and `PROGRESS.md` updated per session.
 
 ## Phase 74 — RBAC/Completion Polish and One Overdue Decision
 
-- **P74-S1 — Case-browsing UI in `reviewer-ui`** (ADR 0141's own named gap, re-confirmed still open at
+- ~~**P74-S1 — Case-browsing UI in `reviewer-ui`** (ADR 0141's own named gap, re-confirmed still open at
   P65-S1): `user-ui` has `CasesPane.tsx`/"Umlaufmappen", `reviewer-ui` has no equivalent — a reviewer
-  handling a case-bound task today has no case-context view of their own, only the generic task list.
+  handling a case-bound task today has no case-context view of their own, only the generic task list.~~
+  **Done.** New `CasesPane.tsx`/`/cases/` route/4th `Shell.tsx` tab — a smaller cut than `user-ui`'s own
+  (no favorites, no XDOMEA/XJustiz archival actions) but with resolved document titles doubling as real
+  download links, since this app has no document-preview infrastructure of its own to open one into. No
+  new ADR (execution of an already-decided pattern). 55/55 Vitest (+5), new Playwright E2E, live-verified
+  in a real headed browser incl. an actual successful file download.
 - **P74-S2 — Small RBAC completions bundle**: `auth-service`'s `PUT /user-tracking-config/{principal_id}`
   gains the same four-eyes gate its sibling AD-group-mapping endpoints already have (ADR 0157's own
   named, still-open gap); `permission-service`'s superuser bypass (ADR 0190) extended to
