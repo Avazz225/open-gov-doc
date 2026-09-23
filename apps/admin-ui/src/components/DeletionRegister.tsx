@@ -88,18 +88,18 @@ export function DeletionRegister() {
   }, [reload]);
 
   if (isLoading) return <p>{t("common.loading")}</p>;
-  if (unreachable) return <p className="empty-state">{t("deletionRegister.unreachable")}</p>;
+  if (unreachable) return <p className="italic opacity-70">{t("deletionRegister.unreachable")}</p>;
 
   return (
     <div className="card">
-      <p className="hint">{t("deletionRegister.hint")}</p>
+      <p className="text-sm opacity-80">{t("deletionRegister.hint")}</p>
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
       {entries.length === 0 ? (
-        <p className="empty-state">{t("deletionRegister.empty")}</p>
+        <p className="italic opacity-70">{t("deletionRegister.empty")}</p>
       ) : (
         <table className="data-table">
           <thead>

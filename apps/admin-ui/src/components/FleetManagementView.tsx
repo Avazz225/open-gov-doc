@@ -118,7 +118,7 @@ export function FleetManagementView() {
   return (
     <div className="card">
       <h2>{t("fleetManagement.heading")}</h2>
-      <p className="hint">{t("fleetManagement.hint")}</p>
+      <p className="text-sm opacity-80">{t("fleetManagement.hint")}</p>
 
       <label>
         {t("fleetManagement.operatorKey")}
@@ -135,13 +135,13 @@ export function FleetManagementView() {
       </button>
 
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
 
       {newlyCreatedKey && (
-        <div className="hint" role="alert">
+        <div className="text-sm opacity-80" role="alert">
           <p>{t("fleetManagement.newKeyWarning")}</p>
           <code>{newlyCreatedKey.key}</code>
           <button type="button" onClick={() => setNewlyCreatedKey(null)}>
@@ -181,7 +181,7 @@ export function FleetManagementView() {
           </button>
 
           {installations.length === 0 ? (
-            <p className="empty-state">{t("fleetManagement.empty")}</p>
+            <p className="italic opacity-70">{t("fleetManagement.empty")}</p>
           ) : (
             <table className="data-table">
               <thead>

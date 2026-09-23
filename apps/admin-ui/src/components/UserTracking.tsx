@@ -142,7 +142,7 @@ export function UserTracking() {
   return (
     <>
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
@@ -150,7 +150,7 @@ export function UserTracking() {
       {canManage && (
         <section className="card">
           <h2>{t("userTracking.configSectionTitle")}</h2>
-          <p className="hint">{t("userTracking.configHint")}</p>
+          <p className="text-sm opacity-80">{t("userTracking.configHint")}</p>
           <form
             aria-label={t("userTracking.configFormLabel")}
             className="form-grid"
@@ -190,7 +190,7 @@ export function UserTracking() {
                 />
                 {t("userTracking.enabled")}
               </label>
-              {configPending && <p className="hint">{t("userTracking.configPendingApproval")}</p>}
+              {configPending && <p className="text-sm opacity-80">{t("userTracking.configPendingApproval")}</p>}
             </div>
           )}
         </section>
@@ -199,7 +199,7 @@ export function UserTracking() {
       {canView && (
         <section className="card">
           <h2>{t("userTracking.sessionsSectionTitle")}</h2>
-          <p className="hint">{t("userTracking.sessionsHint")}</p>
+          <p className="text-sm opacity-80">{t("userTracking.sessionsHint")}</p>
           <form
             aria-label={t("userTracking.sessionsFormLabel")}
             className="form-grid"
@@ -243,7 +243,7 @@ export function UserTracking() {
             </tbody>
           </table>
           {sessions.length === 0 && (
-            <p className="empty-state">{t("userTracking.sessionsEmpty")}</p>
+            <p className="italic opacity-70">{t("userTracking.sessionsEmpty")}</p>
           )}
         </section>
       )}
@@ -251,7 +251,7 @@ export function UserTracking() {
       {canManage && (
         <section className="card">
           <h2>{t("userTracking.retentionSectionTitle")}</h2>
-          <p className="hint">{t("userTracking.retentionHint")}</p>
+          <p className="text-sm opacity-80">{t("userTracking.retentionHint")}</p>
           <form
             aria-label={t("userTracking.retentionFormLabel")}
             className="form-grid"
@@ -272,7 +272,7 @@ export function UserTracking() {
             </button>
           </form>
           {retention && (
-            <p className="hint">
+            <p className="text-sm opacity-80">
               {t("userTracking.retentionLastChanged", {
                 date: new Date(retention.updated_at).toLocaleString(),
               })}

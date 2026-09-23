@@ -2005,8 +2005,17 @@ not a web app, and has no CSS of any kind to migrate.
   rendered unstyled) plus a subtler black-text-instead-of-theme-color bug on the sidebar toggle, caught
   via the same computed-style probe. New
   [ADR 0224](docs/adr/0224-admin-ui-tailwind-shell-conversion-dead-banner-css-fix.md).
-  Remaining: admin-ui's ~30 route-specific components (future sessions), then all of `user-ui`
-  (similarly large, not yet started).
+  **Strategy change (P75-S8)**: surveying the next planned session (the "Installations" group) showed
+  admin-ui's remaining ~30 pages have almost no page-specific CSS of their own — nearly everything is
+  shared "component classes" (`.card`/`.data-table`/`.badge`/`.form-grid`/etc.) reused across most
+  pages. Switched to converting shared classes across all consumers at once instead of per-route
+  sessions. P75-S8 converted the four single-purpose always-standalone classes (`.hint`/`.error-text`/
+  `.empty-state`/`.actions`) via bulk find-and-replace across 32/33/31/19 files, verified via
+  `tsc`/`eslint`/Vitest (304/304)/build/computed-style probe against the real rebuilt image. New
+  [ADR 0225](docs/adr/0225-admin-ui-shared-class-bulk-conversion-strategy.md).
+  Remaining: the more structurally complex shared classes (`.card`/`.data-table`/`.badge`/`.form-grid`/
+  `.attribute-row`/`.checkbox-group`/`.layout-row`/`.layout-field`/`.deletion-reason-catalog*`), then
+  all of `user-ui` (similarly large, not yet started, needs its own structural survey first).
 
 **Definition of Done**: P75-S1 needs a real ADR (a genuine architecture decision: which token-integration
 mechanism, shared preset location); P75-S2 needs before/after screenshots in the same message/commit,

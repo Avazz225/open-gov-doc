@@ -110,12 +110,12 @@ export function SuperuserBreakGlass() {
   }
 
   if (isLoading) return <p>{t("common.loading")}</p>;
-  if (unreachable) return <p className="error-text">{t("superuser.unreachable")}</p>;
+  if (unreachable) return <p className="text-danger">{t("superuser.unreachable")}</p>;
 
   return (
     <div className="superuser-breakglass">
-      <p className="hint">{t("superuser.hint")}</p>
-      {error && <p className="error-text">{error}</p>}
+      <p className="text-sm opacity-80">{t("superuser.hint")}</p>
+      {error && <p className="text-danger">{error}</p>}
 
       <section>
         <h2>{t("superuser.statusTitle")}</h2>

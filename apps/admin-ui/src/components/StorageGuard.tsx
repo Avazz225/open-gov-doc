@@ -157,12 +157,12 @@ export function StorageGuard() {
 
   return (
     <div className="card">
-      <p className="hint">{t("storageGuard.hint")}</p>
+      <p className="text-sm opacity-80">{t("storageGuard.hint")}</p>
 
       {isLoading ? (
         <p>{t("common.loading")}</p>
       ) : unreachable ? (
-        <p className="empty-state">{t("storageGuard.unreachable")}</p>
+        <p className="italic opacity-70">{t("storageGuard.unreachable")}</p>
       ) : (
         <>
           <table className="data-table" style={{ marginBottom: "1rem" }}>
@@ -239,7 +239,7 @@ export function StorageGuard() {
               ))}
             </tbody>
           </table>
-          {statusEntries.length === 0 && <p className="empty-state">{t("storageGuard.empty")}</p>}
+          {statusEntries.length === 0 && <p className="italic opacity-70">{t("storageGuard.empty")}</p>}
 
           <form onSubmit={handleSubmit}>
             <label className="checkbox-label">
@@ -250,7 +250,7 @@ export function StorageGuard() {
               />
               {t("storageGuard.allowDegradedStart")}
             </label>
-            <div className="actions">
+            <div className="flex gap-2">
               <button type="submit" disabled={isSaving}>
                 {t("common.save")}
               </button>
@@ -260,11 +260,11 @@ export function StorageGuard() {
       )}
 
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
-      {savedAt !== null && !error && <p className="hint">{t("storageGuard.saved")}</p>}
+      {savedAt !== null && !error && <p className="text-sm opacity-80">{t("storageGuard.saved")}</p>}
     </div>
   );
 }

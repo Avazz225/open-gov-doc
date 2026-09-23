@@ -120,7 +120,7 @@ export function AuditTraceSettings() {
 
   return (
     <div>
-      <p className="hint">{t("auditTraceSettings.hint")}</p>
+      <p className="text-sm opacity-80">{t("auditTraceSettings.hint")}</p>
 
       <section className="card">
         <h2 className="pane-heading">{t("auditTraceSettings.baseHeading")}</h2>
@@ -144,7 +144,7 @@ export function AuditTraceSettings() {
               />
               {t("auditTraceSettings.logDownloaded")}
             </label>
-            <div className="actions">
+            <div className="flex gap-2">
               <button type="submit" disabled={isSaving}>
                 {t("common.save")}
               </button>
@@ -152,7 +152,7 @@ export function AuditTraceSettings() {
           </form>
         )}
         {config && (
-          <p className="hint">
+          <p className="text-sm opacity-80">
             {t("auditTraceSettings.updatedAt")}: {new Date(config.updated_at).toLocaleString()}
           </p>
         )}
@@ -160,7 +160,7 @@ export function AuditTraceSettings() {
 
       <section className="card">
         <h2 className="pane-heading">{t("auditTraceSettings.overridesHeading")}</h2>
-        <p className="hint">{t("auditTraceSettings.overridesHint")}</p>
+        <p className="text-sm opacity-80">{t("auditTraceSettings.overridesHint")}</p>
         <form className="inline-form" aria-label={t("auditTraceSettings.addOverrideLabel")} onSubmit={handleAddOverride}>
           <input
             placeholder={t("auditTraceSettings.rolePlaceholder")}
@@ -190,7 +190,7 @@ export function AuditTraceSettings() {
         </form>
 
         {error && (
-          <p className="error-text" role="alert">
+          <p className="text-danger" role="alert">
             {error}
           </p>
         )}
@@ -198,7 +198,7 @@ export function AuditTraceSettings() {
         {isLoading ? (
           <p>{t("common.loading")}</p>
         ) : overrides.length === 0 ? (
-          <p className="empty-state">{t("auditTraceSettings.overridesEmpty")}</p>
+          <p className="italic opacity-70">{t("auditTraceSettings.overridesEmpty")}</p>
         ) : (
           <table className="data-table">
             <thead>

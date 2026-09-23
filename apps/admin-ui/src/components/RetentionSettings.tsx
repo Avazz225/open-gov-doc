@@ -135,12 +135,12 @@ function RetentionSection({
   return (
     <div className="card">
       <h3>{heading}</h3>
-      {hint && <p className="hint">{hint}</p>}
+      {hint && <p className="text-sm opacity-80">{hint}</p>}
 
       {state.isLoading ? (
         <p>{t("common.loading")}</p>
       ) : state.unreachable ? (
-        <p className="empty-state">{unreachableLabel}</p>
+        <p className="italic opacity-70">{unreachableLabel}</p>
       ) : (
         <form className="form-grid" onSubmit={handleSubmit}>
           <label className="checkbox-label">
@@ -155,9 +155,9 @@ function RetentionSection({
           </label>
 
           <div className="deletion-reason-catalog">
-            <span className="hint">{t("retentionSettings.deletionReasonCatalogHint")}</span>
+            <span className="text-sm opacity-80">{t("retentionSettings.deletionReasonCatalogHint")}</span>
             {state.deletionReasonCatalog.length === 0 ? (
-              <p className="empty-state">{t("retentionSettings.deletionReasonCatalogEmpty")}</p>
+              <p className="italic opacity-70">{t("retentionSettings.deletionReasonCatalogEmpty")}</p>
             ) : (
               <ul>
                 {state.deletionReasonCatalog.map((entry, index) => (
@@ -229,7 +229,7 @@ function RetentionSection({
               }
             />
           </label>
-          <div className="actions">
+          <div className="flex gap-2">
             <button type="submit" disabled={state.isSaving}>
               {t("common.save")}
             </button>
@@ -238,15 +238,15 @@ function RetentionSection({
       )}
 
       {state.error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {state.error}
         </p>
       )}
       {state.savedAt !== null && !state.error && (
-        <p className="hint">{t("retentionSettings.saved")}</p>
+        <p className="text-sm opacity-80">{t("retentionSettings.saved")}</p>
       )}
       {state.retentionConfig && state.trashConfig && (
-        <p className="hint">
+        <p className="text-sm opacity-80">
           {t("retentionSettings.updatedAt")}:{" "}
           {new Date(state.retentionConfig.updated_at).toLocaleString()}
         </p>
@@ -263,7 +263,7 @@ export function RetentionSettings() {
 
   return (
     <>
-      <p className="hint">{t("retentionSettings.hint")}</p>
+      <p className="text-sm opacity-80">{t("retentionSettings.hint")}</p>
       <RetentionSection
         heading={t("retentionSettings.documentsHeading")}
         unreachableLabel={t("retentionSettings.unreachable")}

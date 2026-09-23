@@ -126,16 +126,16 @@ export function EmailTemplates() {
 
   return (
     <div className="card">
-      <p className="hint">{t("emailTemplates.hint")}</p>
+      <p className="text-sm opacity-80">{t("emailTemplates.hint")}</p>
 
       {isLoading ? (
         <p>{t("common.loading")}</p>
       ) : unreachable ? (
-        <p className="empty-state">{t("emailTemplates.unreachable")}</p>
+        <p className="italic opacity-70">{t("emailTemplates.unreachable")}</p>
       ) : (
         <>
           {templates.length === 0 ? (
-            <p className="empty-state">{t("emailTemplates.empty")}</p>
+            <p className="italic opacity-70">{t("emailTemplates.empty")}</p>
           ) : (
             <table className="data-table">
               <thead>
@@ -175,7 +175,7 @@ export function EmailTemplates() {
       )}
 
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
@@ -202,7 +202,7 @@ export function EmailTemplates() {
           </select>
         </label>
         {selectedUseCase && (
-          <p className="hint">
+          <p className="text-sm opacity-80">
             {t("emailTemplates.placeholdersLabel")}:{" "}
             {selectedUseCase.placeholders.map((placeholder) => `{${placeholder}}`).join(", ")}
           </p>

@@ -64,12 +64,12 @@ export function UploadSettings() {
 
   return (
     <div className="card">
-      <p className="hint">{t("uploadSettings.hint")}</p>
+      <p className="text-sm opacity-80">{t("uploadSettings.hint")}</p>
 
       {isLoading ? (
         <p>{t("common.loading")}</p>
       ) : unreachable ? (
-        <p className="empty-state">{t("uploadSettings.unreachable")}</p>
+        <p className="italic opacity-70">{t("uploadSettings.unreachable")}</p>
       ) : (
         <form className="form-grid" onSubmit={handleSubmit}>
           <label>
@@ -81,8 +81,8 @@ export function UploadSettings() {
               onChange={(event) => setAllowedContentTypesInput(event.target.value)}
             />
           </label>
-          <p className="hint">{t("uploadSettings.allowedContentTypesHint")}</p>
-          <div className="actions">
+          <p className="text-sm opacity-80">{t("uploadSettings.allowedContentTypesHint")}</p>
+          <div className="flex gap-2">
             <button type="submit" disabled={isSaving}>
               {t("common.save")}
             </button>
@@ -91,13 +91,13 @@ export function UploadSettings() {
       )}
 
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
-      {savedAt !== null && !error && <p className="hint">{t("uploadSettings.saved")}</p>}
+      {savedAt !== null && !error && <p className="text-sm opacity-80">{t("uploadSettings.saved")}</p>}
       {config && (
-        <p className="hint">
+        <p className="text-sm opacity-80">
           {t("uploadSettings.updatedAt")}: {new Date(config.updated_at).toLocaleString()}
         </p>
       )}

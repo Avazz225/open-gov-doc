@@ -62,12 +62,12 @@ export function LicenseStatusView() {
 
   return (
     <div className="card">
-      <p className="hint">{t("license.hint")}</p>
+      <p className="text-sm opacity-80">{t("license.hint")}</p>
 
       {isLoading ? (
         <p>{t("common.loading")}</p>
       ) : status && !status.installed ? (
-        <p className="empty-state">{t("license.notInstalled")}</p>
+        <p className="italic opacity-70">{t("license.notInstalled")}</p>
       ) : status ? (
         <table className="data-table" style={{ marginBottom: "1rem" }}>
           <tbody>
@@ -134,7 +134,7 @@ export function LicenseStatusView() {
           onChange={(event) => setLicenseToken(event.target.value)}
           placeholder={t("license.uploadPlaceholder")}
         />
-        <div className="actions">
+        <div className="flex gap-2">
           <button type="submit" disabled={isUploading || !licenseToken.trim()}>
             {isUploading ? t("common.loading") : t("license.uploadButton")}
           </button>
@@ -142,11 +142,11 @@ export function LicenseStatusView() {
       </form>
 
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
-      {uploadedAt !== null && !error && <p className="hint">{t("license.uploaded")}</p>}
+      {uploadedAt !== null && !error && <p className="text-sm opacity-80">{t("license.uploaded")}</p>}
     </div>
   );
 }

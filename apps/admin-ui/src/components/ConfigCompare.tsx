@@ -74,7 +74,7 @@ function DeltaTable({ category, delta }: { category: string; delta: CategoryDelt
     <div className="card" key={category}>
       <h3>{category}</h3>
       {!hasChanges && delta.only_in_base.length === 0 && (
-        <p className="hint">{t("configCompare.deltaNoChanges")}</p>
+        <p className="text-sm opacity-80">{t("configCompare.deltaNoChanges")}</p>
       )}
       {delta.only_in_compare.length > 0 && (
         <p>
@@ -91,7 +91,7 @@ function DeltaTable({ category, delta }: { category: string; delta: CategoryDelt
         </div>
       )}
       {delta.only_in_base.length > 0 && (
-        <p className="hint">
+        <p className="text-sm opacity-80">
           <strong>{t("configCompare.deltaOnlyInBase")}:</strong> {delta.only_in_base.join(", ")}
         </p>
       )}
@@ -138,13 +138,13 @@ export function ConfigCompare() {
   return (
     <div>
       <div className="card">
-        <p className="hint">{t("configCompare.hint")}</p>
-        <p className="hint">
+        <p className="text-sm opacity-80">{t("configCompare.hint")}</p>
+        <p className="text-sm opacity-80">
           {t("configCompare.baseIsActive", { name: activeInstallation.name })}
         </p>
 
         {otherInstallations.length === 0 ? (
-          <p className="empty-state">{t("configCompare.noOtherInstallations")}</p>
+          <p className="italic opacity-70">{t("configCompare.noOtherInstallations")}</p>
         ) : (
           <form
             aria-label={t("configCompare.formLabel")}
@@ -186,7 +186,7 @@ export function ConfigCompare() {
                 placeholder={t("configCompare.ignoreRegexPlaceholder")}
               />
             </label>
-            <p className="hint">{t("configCompare.ignoreRegexHint")}</p>
+            <p className="text-sm opacity-80">{t("configCompare.ignoreRegexHint")}</p>
             <button type="submit" disabled={isComparing}>
               {t("configCompare.compare")}
             </button>
@@ -195,7 +195,7 @@ export function ConfigCompare() {
       </div>
 
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}

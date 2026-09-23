@@ -2,8 +2,40 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P75-S7 (seventh session of Phase 75 — first session of admin-ui's own rollout,
-converting only its shell/chrome layer). See
+**Last completed:** P75-S8 (eighth session of Phase 75 — a strategy change plus the first shared-class
+conversion batch for admin-ui). See
+[ADR 0225](docs/adr/0225-admin-ui-shared-class-bulk-conversion-strategy.md) for the full writeup.
+
+**Strategy change, found and applied within the same session**: the planned next session ("Installations"
+sidebar group: `InstallationManager.tsx`/`FleetManagementView.tsx`) turned out to have almost no
+page-specific CSS of its own — both components' classes are entirely the shared set left untouched by
+P75-S7 (`.card`/`.hint`/`.error-text`/`.form-grid`/`.data-table`/`.badge`/`.actions`). Checking two of
+admin-ui's largest remaining components (`ObjectTypeEditor.tsx`, `UserManagement.tsx`) confirmed the
+same pattern. Admin-ui's real shape is a small shell (done in P75-S7) plus a shared "component class"
+vocabulary reused across nearly all ~30 pages, not 30 pages each with bespoke CSS — a per-route session
+plan doesn't fit. Switched to converting shared classes across all their consumers at once instead.
+
+**P75-S8 converts the four single-purpose, always-standalone classes**: `.hint`, `.error-text`,
+`.empty-state`, `.actions`. Usage confirmed via grep first — each appears ONLY as a bare
+`className="<name>"`, never combined with another class anywhere in the app (32/33/31/19 files
+respectively) — safe for a mechanical bulk `sed` find-and-replace across every consumer, then the four
+rules deleted from `globals.css`.
+
+**Live-verified**: `tsc --noEmit`/`eslint` clean, full Vitest suite still 304/304, production build
+succeeds across all 34 routes. Rebuilt and redeployed the real Docker image; a computed-style probe
+against the real compiled CSS confirmed all four utility strings resolve to the exact same computed
+values the original CSS produced (`opacity: 0.8`/`font-size: 13.6px` for `.hint`, danger-red for
+`.error-text`, italic + `opacity: 0.7` for `.empty-state`, `display: flex`/`gap: 8px` for `.actions`).
+
+**Next session:** the remaining, more structurally complex shared classes (`.card`, `.data-table`,
+`.badge`, `.form-grid`, `.attribute-row`, `.checkbox-group`, `.layout-row`, `.layout-field`,
+`.deletion-reason-catalog*` — several combine with modifier classes or have nested-selector rules),
+converted the same "one shared class/group across all consumers" way, then all of `user-ui`.
+
+---
+
+Immediately before P75-S8: **P75-S7** (seventh session of Phase 75 — first session of admin-ui's own
+rollout, converting only its shell/chrome layer). See
 [ADR 0224](docs/adr/0224-admin-ui-tailwind-shell-conversion-dead-banner-css-fix.md) for the full
 writeup.
 

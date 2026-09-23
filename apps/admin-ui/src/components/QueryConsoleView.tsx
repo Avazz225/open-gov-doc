@@ -88,7 +88,7 @@ function QueryEventsSection() {
 
   return (
     <div>
-      <p className="hint">{t("queryConsole.hint")}</p>
+      <p className="text-sm opacity-80">{t("queryConsole.hint")}</p>
 
       <section className="card">
         <form className="explorer-toolbar" onSubmit={handleQuery}>
@@ -121,13 +121,13 @@ function QueryEventsSection() {
         </form>
 
         {error && (
-          <p className="error-text" role="alert">
+          <p className="text-danger" role="alert">
             {error}
           </p>
         )}
 
         {hasQueried && !error && (
-          <p className="hint">
+          <p className="text-sm opacity-80">
             {isSuperuser
               ? t("queryConsole.superuserHint")
               : t("queryConsole.filteredHint", {
@@ -140,9 +140,9 @@ function QueryEventsSection() {
         {isLoading ? (
           <p>{t("common.loading")}</p>
         ) : !hasQueried ? (
-          <p className="empty-state">{t("queryConsole.notYetQueried")}</p>
+          <p className="italic opacity-70">{t("queryConsole.notYetQueried")}</p>
         ) : events.length === 0 ? (
-          <p className="empty-state">{t("queryConsole.empty")}</p>
+          <p className="italic opacity-70">{t("queryConsole.empty")}</p>
         ) : (
           <table className="data-table">
             <thead>
@@ -355,12 +355,12 @@ function ManipulationSection() {
   return (
     <div>
       <h2>{t("queryConsole.manipulationTitle")}</h2>
-      <p className="hint">{t("queryConsole.manipulationHint")}</p>
+      <p className="text-sm opacity-80">{t("queryConsole.manipulationHint")}</p>
 
       <section className="card">
         <h3>{t("queryConsole.schutzschalterTitle")}</h3>
         {modeError && (
-          <p className="error-text" role="alert">
+          <p className="text-danger" role="alert">
             {modeError}
           </p>
         )}
@@ -492,7 +492,7 @@ function ManipulationSection() {
         </form>
 
         {dryRunError && (
-          <p className="error-text" role="alert">
+          <p className="text-danger" role="alert">
             {dryRunError}
           </p>
         )}
@@ -501,7 +501,7 @@ function ManipulationSection() {
           <div>
             <p>{dryRun.preview}</p>
             {dryRun.is_critical && (
-              <p className="error-text">{t("queryConsole.criticalBadge")}</p>
+              <p className="text-danger">{t("queryConsole.criticalBadge")}</p>
             )}
             <button type="button" onClick={handleExecute}>
               {t("queryConsole.executeButton")}
@@ -510,7 +510,7 @@ function ManipulationSection() {
         )}
 
         {executeError && (
-          <p className="error-text" role="alert">
+          <p className="text-danger" role="alert">
             {executeError}
           </p>
         )}
@@ -525,12 +525,12 @@ function ManipulationSection() {
       <section className="card">
         <h3>{t("queryConsole.pendingApprovalsTitle")}</h3>
         {approvalsError && (
-          <p className="error-text" role="alert">
+          <p className="text-danger" role="alert">
             {approvalsError}
           </p>
         )}
         {pendingApprovals.length === 0 ? (
-          <p className="empty-state">{t("queryConsole.pendingApprovalsEmpty")}</p>
+          <p className="italic opacity-70">{t("queryConsole.pendingApprovalsEmpty")}</p>
         ) : (
           <table className="data-table">
             <thead>
@@ -552,7 +552,7 @@ function ManipulationSection() {
                     <td>{JSON.stringify(approval.payload)}</td>
                     <td>
                       {rejectingId !== approval.id && (
-                        <div className="actions">
+                        <div className="flex gap-2">
                           <button type="button" onClick={() => handleApprove(approval.id)}>
                             {t("queryConsole.approveButton")}
                           </button>
@@ -579,7 +579,7 @@ function ManipulationSection() {
                               placeholder={t("queryConsole.rejectReasonPlaceholder")}
                             />
                           </label>
-                          <div className="actions">
+                          <div className="flex gap-2">
                             <button type="submit">{t("queryConsole.rejectConfirm")}</button>
                             <button type="button" onClick={handleCancelReject}>
                               {t("queryConsole.rejectCancel")}

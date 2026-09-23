@@ -79,12 +79,12 @@ export function OcrSettings() {
 
   return (
     <div className="card">
-      <p className="hint">{t("ocrSettings.enabledHint")}</p>
+      <p className="text-sm opacity-80">{t("ocrSettings.enabledHint")}</p>
 
       {isLoading ? (
         <p>{t("common.loading")}</p>
       ) : unreachable ? (
-        <p className="empty-state">{t("ocrSettings.unreachable")}</p>
+        <p className="italic opacity-70">{t("ocrSettings.unreachable")}</p>
       ) : (
         <form className="form-grid" onSubmit={handleSubmit}>
           <label>
@@ -117,8 +117,8 @@ export function OcrSettings() {
               onChange={(event) => setAllowedContentTypesInput(event.target.value)}
             />
           </label>
-          <p className="hint">{t("ocrSettings.allowedContentTypesHint")}</p>
-          <div className="actions">
+          <p className="text-sm opacity-80">{t("ocrSettings.allowedContentTypesHint")}</p>
+          <div className="flex gap-2">
             <button type="submit" disabled={isSaving}>
               {t("common.save")}
             </button>
@@ -127,13 +127,13 @@ export function OcrSettings() {
       )}
 
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
-      {savedAt !== null && !error && <p className="hint">{t("ocrSettings.saved")}</p>}
+      {savedAt !== null && !error && <p className="text-sm opacity-80">{t("ocrSettings.saved")}</p>}
       {config && (
-        <p className="hint">
+        <p className="text-sm opacity-80">
           {t("ocrSettings.updatedAt")}: {new Date(config.updated_at).toLocaleString()}
         </p>
       )}

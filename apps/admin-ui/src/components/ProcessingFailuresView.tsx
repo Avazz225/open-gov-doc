@@ -106,26 +106,26 @@ function NotificationFailuresSection() {
     return (
       <div className="card">
         <h2>{t("processingFailures.notificationHeading")}</h2>
-        <p className="empty-state">{t("processingFailures.notificationMissingPermission")}</p>
+        <p className="italic opacity-70">{t("processingFailures.notificationMissingPermission")}</p>
       </div>
     );
   }
   if (isLoading) return <p>{t("common.loading")}</p>;
   if (unreachable) {
-    return <p className="empty-state">{t("processingFailures.notificationUnreachable")}</p>;
+    return <p className="italic opacity-70">{t("processingFailures.notificationUnreachable")}</p>;
   }
 
   return (
     <div className="card">
       <h2>{t("processingFailures.notificationHeading")}</h2>
-      <p className="hint">{t("processingFailures.notificationHint")}</p>
+      <p className="text-sm opacity-80">{t("processingFailures.notificationHint")}</p>
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
       {items.length === 0 ? (
-        <p className="empty-state">{t("processingFailures.notificationEmpty")}</p>
+        <p className="italic opacity-70">{t("processingFailures.notificationEmpty")}</p>
       ) : (
         <table className="data-table">
           <thead>
@@ -211,20 +211,20 @@ function RenditionFailuresSection() {
 
   if (isLoading) return <p>{t("common.loading")}</p>;
   if (unreachable) {
-    return <p className="empty-state">{t("processingFailures.renditionUnreachable")}</p>;
+    return <p className="italic opacity-70">{t("processingFailures.renditionUnreachable")}</p>;
   }
 
   return (
     <div className="card">
       <h2>{t("processingFailures.renditionHeading")}</h2>
-      <p className="hint">{t("processingFailures.renditionHint")}</p>
+      <p className="text-sm opacity-80">{t("processingFailures.renditionHint")}</p>
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
       {items.length === 0 ? (
-        <p className="empty-state">{t("processingFailures.renditionEmpty")}</p>
+        <p className="italic opacity-70">{t("processingFailures.renditionEmpty")}</p>
       ) : (
         <table className="data-table">
           <thead>
@@ -312,20 +312,20 @@ function OcrResultFailuresSection() {
 
   if (isLoading) return <p>{t("common.loading")}</p>;
   if (unreachable) {
-    return <p className="empty-state">{t("processingFailures.ocrUnreachable")}</p>;
+    return <p className="italic opacity-70">{t("processingFailures.ocrUnreachable")}</p>;
   }
 
   return (
     <div className="card">
       <h2>{t("processingFailures.ocrHeading")}</h2>
-      <p className="hint">{t("processingFailures.ocrHint")}</p>
+      <p className="text-sm opacity-80">{t("processingFailures.ocrHint")}</p>
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
       {items.length === 0 ? (
-        <p className="empty-state">{t("processingFailures.ocrEmpty")}</p>
+        <p className="italic opacity-70">{t("processingFailures.ocrEmpty")}</p>
       ) : (
         <table className="data-table">
           <thead>
@@ -422,13 +422,13 @@ function HandoverFailuresSection() {
 
   if (isLoading) return <p>{t("common.loading")}</p>;
   if (unreachable) {
-    return <p className="empty-state">{t("processingFailures.handoverUnreachable")}</p>;
+    return <p className="italic opacity-70">{t("processingFailures.handoverUnreachable")}</p>;
   }
 
   return (
     <div className="card">
       <h2>{t("processingFailures.handoverHeading")}</h2>
-      <p className="hint">{t("processingFailures.handoverHint")}</p>
+      <p className="text-sm opacity-80">{t("processingFailures.handoverHint")}</p>
       <label>
         {t("processingFailures.handoverOperatorKey")}
         <input
@@ -440,12 +440,12 @@ function HandoverFailuresSection() {
         />
       </label>
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
       {items.length === 0 ? (
-        <p className="empty-state">{t("processingFailures.handoverEmpty")}</p>
+        <p className="italic opacity-70">{t("processingFailures.handoverEmpty")}</p>
       ) : (
         <table className="data-table">
           <thead>

@@ -92,12 +92,12 @@ export function ExportSettings() {
 
   return (
     <div className="card">
-      <p className="hint">{t("exportSettings.hint")}</p>
+      <p className="text-sm opacity-80">{t("exportSettings.hint")}</p>
 
       {isLoading ? (
         <p>{t("common.loading")}</p>
       ) : unreachable ? (
-        <p className="empty-state">{t("exportSettings.unreachable")}</p>
+        <p className="italic opacity-70">{t("exportSettings.unreachable")}</p>
       ) : (
         <form className="form-grid" onSubmit={handleSubmit}>
           <label>
@@ -121,7 +121,7 @@ export function ExportSettings() {
             />
             {t("exportSettings.stampEnabled")}
           </label>
-          <p className="hint">{t("exportSettings.stampEnabledHint")}</p>
+          <p className="text-sm opacity-80">{t("exportSettings.stampEnabledHint")}</p>
 
           <label>
             {t("exportSettings.stampType")}
@@ -147,7 +147,7 @@ export function ExportSettings() {
               <option value="bottom-right">{t("exportSettings.stampPositionBottomRight")}</option>
             </select>
           </label>
-          <p className="hint">{t("exportSettings.stampPositionHint")}</p>
+          <p className="text-sm opacity-80">{t("exportSettings.stampPositionHint")}</p>
 
           <label>
             {t("exportSettings.stampValueTemplate")}
@@ -157,9 +157,9 @@ export function ExportSettings() {
               onChange={(event) => setStampValueTemplate(event.target.value)}
             />
           </label>
-          <p className="hint">{t("exportSettings.stampValueTemplateHint")}</p>
+          <p className="text-sm opacity-80">{t("exportSettings.stampValueTemplateHint")}</p>
 
-          <div className="actions">
+          <div className="flex gap-2">
             <button type="submit" disabled={isSaving}>
               {t("common.save")}
             </button>
@@ -168,13 +168,13 @@ export function ExportSettings() {
       )}
 
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
-      {savedAt !== null && !error && <p className="hint">{t("exportSettings.saved")}</p>}
+      {savedAt !== null && !error && <p className="text-sm opacity-80">{t("exportSettings.saved")}</p>}
       {config && (
-        <p className="hint">
+        <p className="text-sm opacity-80">
           {t("exportSettings.updatedAt")}: {new Date(config.updated_at).toLocaleString()}
         </p>
       )}

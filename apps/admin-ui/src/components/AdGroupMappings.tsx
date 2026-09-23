@@ -179,14 +179,14 @@ export function AdGroupMappings() {
   return (
     <>
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
 
       <section className="card">
         <h2>{t("adGroupMappings.mappingsSectionTitle")}</h2>
-        <p className="hint">{t("adGroupMappings.mappingsHint")}</p>
+        <p className="text-sm opacity-80">{t("adGroupMappings.mappingsHint")}</p>
         <form
           aria-label={t("adGroupMappings.mappingsFormLabel")}
           className="form-grid"
@@ -219,7 +219,7 @@ export function AdGroupMappings() {
           </label>
           <button type="submit">{t("common.create")}</button>
         </form>
-        {mappingPending && <p className="hint">{t("adGroupMappings.pendingApproval")}</p>}
+        {mappingPending && <p className="text-sm opacity-80">{t("adGroupMappings.pendingApproval")}</p>}
 
         <table className="data-table">
           <thead>
@@ -243,12 +243,12 @@ export function AdGroupMappings() {
             ))}
           </tbody>
         </table>
-        {mappings.length === 0 && <p className="empty-state">{t("adGroupMappings.mappingsEmpty")}</p>}
+        {mappings.length === 0 && <p className="italic opacity-70">{t("adGroupMappings.mappingsEmpty")}</p>}
       </section>
 
       <section className="card">
         <h2>{t("adGroupMappings.compositeRulesSectionTitle")}</h2>
-        <p className="hint">{t("adGroupMappings.compositeRulesHint")}</p>
+        <p className="text-sm opacity-80">{t("adGroupMappings.compositeRulesHint")}</p>
         <form
           aria-label={t("adGroupMappings.compositeRulesFormLabel")}
           className="form-grid"
@@ -286,7 +286,7 @@ export function AdGroupMappings() {
           </label>
           <button type="submit">{t("common.create")}</button>
         </form>
-        {compositeRulePending && <p className="hint">{t("adGroupMappings.pendingApproval")}</p>}
+        {compositeRulePending && <p className="text-sm opacity-80">{t("adGroupMappings.pendingApproval")}</p>}
 
         <table className="data-table">
           <thead>
@@ -311,13 +311,13 @@ export function AdGroupMappings() {
           </tbody>
         </table>
         {compositeRules.length === 0 && (
-          <p className="empty-state">{t("adGroupMappings.compositeRulesEmpty")}</p>
+          <p className="italic opacity-70">{t("adGroupMappings.compositeRulesEmpty")}</p>
         )}
       </section>
 
       <section className="card">
         <h2>{t("adGroupMappings.defaultRoleSectionTitle")}</h2>
-        <p className="hint">{t("adGroupMappings.defaultRoleHint")}</p>
+        <p className="text-sm opacity-80">{t("adGroupMappings.defaultRoleHint")}</p>
         <form
           aria-label={t("adGroupMappings.defaultRoleFormLabel")}
           className="form-grid"
@@ -341,9 +341,9 @@ export function AdGroupMappings() {
             {t("common.save")}
           </button>
         </form>
-        {defaultRolePending && <p className="hint">{t("adGroupMappings.pendingApproval")}</p>}
+        {defaultRolePending && <p className="text-sm opacity-80">{t("adGroupMappings.pendingApproval")}</p>}
         {defaultRole?.updated_by && (
-          <p className="hint">
+          <p className="text-sm opacity-80">
             {t("adGroupMappings.defaultRoleLastChangedBy", { username: defaultRole.updated_by })}
           </p>
         )}

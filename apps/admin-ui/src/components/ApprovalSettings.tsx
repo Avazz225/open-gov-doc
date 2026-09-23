@@ -96,16 +96,16 @@ export function ApprovalSettings() {
 
   return (
     <div className="card">
-      <p className="hint">{t("approvalSettings.hint")}</p>
+      <p className="text-sm opacity-80">{t("approvalSettings.hint")}</p>
 
       {isLoading ? (
         <p>{t("common.loading")}</p>
       ) : unreachable ? (
-        <p className="empty-state">{t("approvalSettings.unreachable")}</p>
+        <p className="italic opacity-70">{t("approvalSettings.unreachable")}</p>
       ) : (
         <>
           {configs.length === 0 ? (
-            <p className="empty-state">{t("approvalSettings.empty")}</p>
+            <p className="italic opacity-70">{t("approvalSettings.empty")}</p>
           ) : (
             <table className="data-table">
               <thead>
@@ -144,7 +144,7 @@ export function ApprovalSettings() {
       )}
 
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}

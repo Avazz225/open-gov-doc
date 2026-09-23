@@ -73,12 +73,12 @@ export function StorageOperationalConfig() {
 
   return (
     <div className="card">
-      <p className="hint">{t("storageOperationalConfig.hint")}</p>
+      <p className="text-sm opacity-80">{t("storageOperationalConfig.hint")}</p>
 
       {isLoading ? (
         <p>{t("common.loading")}</p>
       ) : unreachable ? (
-        <p className="empty-state">{t("storageOperationalConfig.unreachable")}</p>
+        <p className="italic opacity-70">{t("storageOperationalConfig.unreachable")}</p>
       ) : (
         <form className="form-grid" onSubmit={handleSubmit}>
           <label>
@@ -111,7 +111,7 @@ export function StorageOperationalConfig() {
               onChange={(event) => setMaxReplicationAttempts(event.target.value)}
             />
           </label>
-          <div className="actions">
+          <div className="flex gap-2">
             <button type="submit" disabled={isSaving}>
               {t("common.save")}
             </button>
@@ -120,13 +120,13 @@ export function StorageOperationalConfig() {
       )}
 
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
-      {savedAt !== null && !error && <p className="hint">{t("storageOperationalConfig.saved")}</p>}
+      {savedAt !== null && !error && <p className="text-sm opacity-80">{t("storageOperationalConfig.saved")}</p>}
       {updatedAt && (
-        <p className="hint">
+        <p className="text-sm opacity-80">
           {t("storageOperationalConfig.updatedAt")}: {new Date(updatedAt).toLocaleString()}
         </p>
       )}

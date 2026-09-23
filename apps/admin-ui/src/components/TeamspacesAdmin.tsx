@@ -42,20 +42,20 @@ export function TeamspacesAdmin() {
   }, [reload]);
 
   if (isLoading) return <p>{t("common.loading")}</p>;
-  if (unreachable) return <p className="empty-state">{t("teamspacesAdmin.unreachable")}</p>;
+  if (unreachable) return <p className="italic opacity-70">{t("teamspacesAdmin.unreachable")}</p>;
 
   return (
     <div className="card">
-      <p className="hint">{t("teamspacesAdmin.hint")}</p>
+      <p className="text-sm opacity-80">{t("teamspacesAdmin.hint")}</p>
 
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
 
       {teamspaces.length === 0 ? (
-        <p className="empty-state">{t("teamspacesAdmin.empty")}</p>
+        <p className="italic opacity-70">{t("teamspacesAdmin.empty")}</p>
       ) : (
         <table className="data-table">
           <thead>

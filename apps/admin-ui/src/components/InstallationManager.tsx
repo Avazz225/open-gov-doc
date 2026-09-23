@@ -38,10 +38,10 @@ export function InstallationManager() {
 
   return (
     <>
-      <p className="hint">{t("installations.hint")}</p>
+      <p className="text-sm opacity-80">{t("installations.hint")}</p>
 
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
@@ -88,7 +88,7 @@ export function InstallationManager() {
                   <span className="badge ok">{t("installations.active")}</span>
                 )}
               </td>
-              <td className="actions">
+              <td className="flex gap-2">
                 {installation.id !== activeInstallation.id && (
                   <button type="button" onClick={() => switchInstallation(installation.id)}>
                     {t("installations.switchTo")}

@@ -177,11 +177,11 @@ function DocumentArchivalSection() {
   }
 
   if (isLoading) return <p>{t("common.loading")}</p>;
-  if (unreachable) return <p className="empty-state">{t("archivalTransfers.unreachable")}</p>;
+  if (unreachable) return <p className="italic opacity-70">{t("archivalTransfers.unreachable")}</p>;
 
   return (
     <div className="card">
-      <p className="hint">{t("archivalTransfers.hint")}</p>
+      <p className="text-sm opacity-80">{t("archivalTransfers.hint")}</p>
 
       <form
         onSubmit={handleRequestArchive}
@@ -201,19 +201,19 @@ function DocumentArchivalSection() {
             placeholder={t("archivalTransfers.requestArchivePlaceholder")}
           />
         </label>
-        <div className="actions">
+        <div className="flex gap-2">
           <button type="submit" disabled={isRequestingArchive || !requestDocumentId.trim()}>
             {isRequestingArchive ? t("common.loading") : t("archivalTransfers.requestArchiveButton")}
           </button>
         </div>
       </form>
       {requestError && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {requestError}
         </p>
       )}
       {requestSuccess && !requestError && (
-        <p className="hint">{t("archivalTransfers.requestArchiveSuccess")}</p>
+        <p className="text-sm opacity-80">{t("archivalTransfers.requestArchiveSuccess")}</p>
       )}
 
       <label>
@@ -229,13 +229,13 @@ function DocumentArchivalSection() {
       </label>
 
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
 
       {transfers.length === 0 ? (
-        <p className="empty-state">{t("archivalTransfers.empty")}</p>
+        <p className="italic opacity-70">{t("archivalTransfers.empty")}</p>
       ) : (
         <table className="data-table">
           <thead>
@@ -261,7 +261,7 @@ function DocumentArchivalSection() {
                   </span>
                   {(transfer.status === "failed" || transfer.status === "failed_permanent") &&
                     transfer.error_message && (
-                      <p className="hint">
+                      <p className="text-sm opacity-80">
                         {t("archivalTransfers.errorMessage")}: {transfer.error_message}
                       </p>
                     )}
@@ -408,12 +408,12 @@ function CaseArchivalSection() {
   }
 
   if (isLoading) return <p>{t("common.loading")}</p>;
-  if (unreachable) return <p className="empty-state">{t("archivalTransfers.caseUnreachable")}</p>;
+  if (unreachable) return <p className="italic opacity-70">{t("archivalTransfers.caseUnreachable")}</p>;
 
   return (
     <div className="card">
       <h2>{t("archivalTransfers.caseHeading")}</h2>
-      <p className="hint">{t("archivalTransfers.caseHint")}</p>
+      <p className="text-sm opacity-80">{t("archivalTransfers.caseHint")}</p>
 
       <form onSubmit={handleSaveConfig} aria-label={t("archivalTransfers.caseConfigFormLabel")}>
         <div className="form-grid">
@@ -436,18 +436,18 @@ function CaseArchivalSection() {
             {t("archivalTransfers.caseEncryptionEnabledLabel")}
           </label>
         </div>
-        <div className="actions">
+        <div className="flex gap-2">
           <button type="submit" disabled={isSaving}>
             {t("common.save")}
           </button>
         </div>
       </form>
       {configError && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {configError}
         </p>
       )}
-      {savedAt !== null && !configError && <p className="hint">{t("archivalTransfers.caseConfigSaved")}</p>}
+      {savedAt !== null && !configError && <p className="text-sm opacity-80">{t("archivalTransfers.caseConfigSaved")}</p>}
 
       <label>
         {t("archivalTransfers.filterStatus")}
@@ -462,13 +462,13 @@ function CaseArchivalSection() {
       </label>
 
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
 
       {transfers.length === 0 ? (
-        <p className="empty-state">{t("archivalTransfers.caseEmpty")}</p>
+        <p className="italic opacity-70">{t("archivalTransfers.caseEmpty")}</p>
       ) : (
         <table className="data-table">
           <thead>
@@ -492,7 +492,7 @@ function CaseArchivalSection() {
                   </span>
                   {(transfer.status === "failed" || transfer.status === "failed_permanent") &&
                     transfer.error_message && (
-                      <p className="hint">
+                      <p className="text-sm opacity-80">
                         {t("archivalTransfers.errorMessage")}: {transfer.error_message}
                       </p>
                     )}

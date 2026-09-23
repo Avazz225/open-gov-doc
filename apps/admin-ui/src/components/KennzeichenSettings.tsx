@@ -69,12 +69,12 @@ export function KennzeichenSettings() {
 
   return (
     <div className="card">
-      <p className="hint">{t("kennzeichenSettings.hint")}</p>
+      <p className="text-sm opacity-80">{t("kennzeichenSettings.hint")}</p>
 
       {isLoading ? (
         <p>{t("common.loading")}</p>
       ) : unreachable ? (
-        <p className="empty-state">{t("kennzeichenSettings.unreachable")}</p>
+        <p className="italic opacity-70">{t("kennzeichenSettings.unreachable")}</p>
       ) : (
         <form onSubmit={handleSubmit}>
           <label className="checkbox-label">
@@ -85,7 +85,7 @@ export function KennzeichenSettings() {
             />
             {t("kennzeichenSettings.showBeforeFilename")}
           </label>
-          <div className="actions">
+          <div className="flex gap-2">
             <button type="submit" disabled={isSaving}>
               {t("common.save")}
             </button>
@@ -94,13 +94,13 @@ export function KennzeichenSettings() {
       )}
 
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
-      {savedAt !== null && !error && <p className="hint">{t("kennzeichenSettings.saved")}</p>}
+      {savedAt !== null && !error && <p className="text-sm opacity-80">{t("kennzeichenSettings.saved")}</p>}
       {config && (
-        <p className="hint">
+        <p className="text-sm opacity-80">
           {t("kennzeichenSettings.updatedAt")}: {new Date(config.updated_at).toLocaleString()}
         </p>
       )}

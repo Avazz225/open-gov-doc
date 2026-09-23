@@ -188,16 +188,16 @@ export function LayoutDesigner() {
   return (
     <section className="card">
       <h2>{t("layoutDesigner.heading")}</h2>
-      <p className="hint">{t("layoutDesigner.hint")}</p>
+      <p className="text-sm opacity-80">{t("layoutDesigner.hint")}</p>
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
       {status && <p role="status">{status}</p>}
 
       {objectTypes.length === 0 ? (
-        <p className="empty-state">{t("layoutDesigner.noObjectTypes")}</p>
+        <p className="italic opacity-70">{t("layoutDesigner.noObjectTypes")}</p>
       ) : (
         <>
           <div className="form-grid">
@@ -245,12 +245,12 @@ export function LayoutDesigner() {
               </p>
 
               {layout.rows.length === 0 && (
-                <p className="empty-state">{t("layoutDesigner.emptyLayout")}</p>
+                <p className="italic opacity-70">{t("layoutDesigner.emptyLayout")}</p>
               )}
 
               {layout.rows.map((row, rowIndex) => (
                 <div className="layout-row" key={rowIndex}>
-                  <div className="actions">
+                  <div className="flex gap-2">
                     <strong>{t("layoutDesigner.rowHeading", { n: rowIndex + 1 })}</strong>
                     <button type="button" onClick={() => moveRow(rowIndex, -1)} disabled={rowIndex === 0}>
                       {t("layoutDesigner.moveUp")}
@@ -332,7 +332,7 @@ export function LayoutDesigner() {
                 {t("layoutDesigner.addRow")}
               </button>
 
-              <div className="actions">
+              <div className="flex gap-2">
                 <button type="button" onClick={handleSave}>
                   {t("layoutDesigner.save")}
                 </button>

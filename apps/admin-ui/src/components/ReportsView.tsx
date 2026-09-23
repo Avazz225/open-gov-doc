@@ -76,7 +76,7 @@ function ExportButtons({
   }
 
   return (
-    <span className="actions">
+    <span className="flex gap-2">
       <button type="button" onClick={() => handleExport("csv")}>
         {t("reports.exportCsv")}
       </button>
@@ -84,7 +84,7 @@ function ExportButtons({
         {t("reports.exportPdf")}
       </button>
       {error && (
-        <span className="error-text" role="alert">
+        <span className="text-danger" role="alert">
           {error}
         </span>
       )}
@@ -142,14 +142,14 @@ function DocumentVolumeSection({ token }: { token: string }) {
         <ExportButtons token={token} reportType="document_volume" extraParams={{ group_by: groupBy, folder_id: folderId || undefined }} />
       </div>
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
       {isLoading ? (
         <p>{t("common.loading")}</p>
       ) : entries.length === 0 ? (
-        <p className="empty-state">{t("reports.empty")}</p>
+        <p className="italic opacity-70">{t("reports.empty")}</p>
       ) : (
         <table className="data-table">
           <thead>
@@ -207,14 +207,14 @@ function OpenWorkflowTasksSection({ token }: { token: string }) {
         <ExportButtons token={token} reportType="open_workflow_tasks" />
       </div>
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
       {isLoading ? (
         <p>{t("common.loading")}</p>
       ) : entries.length === 0 ? (
-        <p className="empty-state">{t("reports.empty")}</p>
+        <p className="italic opacity-70">{t("reports.empty")}</p>
       ) : (
         <table className="data-table">
           <thead>
@@ -274,14 +274,14 @@ function StorageUsageSection({ token }: { token: string }) {
         <ExportButtons token={token} reportType="storage_usage" />
       </div>
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
       {isLoading ? (
         <p>{t("common.loading")}</p>
       ) : entries.length === 0 ? (
-        <p className="empty-state">{t("reports.empty")}</p>
+        <p className="italic opacity-70">{t("reports.empty")}</p>
       ) : (
         <table className="data-table">
           <thead>
@@ -345,14 +345,14 @@ function UserActivitySection({ token }: { token: string }) {
         <ExportButtons token={token} reportType="user_activity" extraParams={{ actor: actor || undefined }} />
       </div>
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
       {isLoading ? (
         <p>{t("common.loading")}</p>
       ) : entries.length === 0 ? (
-        <p className="empty-state">{t("reports.empty")}</p>
+        <p className="italic opacity-70">{t("reports.empty")}</p>
       ) : (
         <table className="data-table">
           <thead>
@@ -428,7 +428,7 @@ function ReportScheduleSection({ token }: { token: string }) {
   return (
     <section className="card">
       <h2 className="pane-heading">{t("reports.schedulesHeading")}</h2>
-      <p className="hint">{t("reports.schedulesHint")}</p>
+      <p className="text-sm opacity-80">{t("reports.schedulesHint")}</p>
       <form className="inline-form" aria-label={t("reports.newScheduleFormLabel")} onSubmit={handleCreate}>
         <select value={reportType} onChange={(e) => setReportType(e.target.value as ReportType)}>
           <option value="document_volume">{t("reports.documentVolumeHeading")}</option>
@@ -455,14 +455,14 @@ function ReportScheduleSection({ token }: { token: string }) {
         <button type="submit">{t("reports.createSchedule")}</button>
       </form>
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
       {isLoading ? (
         <p>{t("common.loading")}</p>
       ) : schedules.length === 0 ? (
-        <p className="empty-state">{t("reports.schedulesEmpty")}</p>
+        <p className="italic opacity-70">{t("reports.schedulesEmpty")}</p>
       ) : (
         <table className="data-table">
           <thead>
@@ -486,7 +486,7 @@ function ReportScheduleSection({ token }: { token: string }) {
                 <td>{new Date(schedule.next_run_at).toLocaleString()}</td>
                 <td>
                   {schedule.last_status == null ? (
-                    <span className="hint">{t("reports.lastStatusNeverRun")}</span>
+                    <span className="text-sm opacity-80">{t("reports.lastStatusNeverRun")}</span>
                   ) : schedule.last_status === "sent" ? (
                     <span className="badge ok">{t("reports.lastStatusSent")}</span>
                   ) : (

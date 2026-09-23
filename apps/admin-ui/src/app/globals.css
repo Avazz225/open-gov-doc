@@ -46,24 +46,22 @@
 /* Post-Roadmap Phase 75 Session 7: this app is large enough (~50
    components, ~10800 lines) that its Tailwind rollout is split across
    multiple sessions, unlike the small apps (ADR 0220-0223) which each
-   converted in one pass. This session converts only the SHELL/chrome
-   layer - `AdminShell.tsx`, `AdminSidebar.tsx`, `ThemeSwitcher.tsx`,
+   converted in one pass. Session 7 converted the SHELL/chrome layer -
+   `AdminShell.tsx`, `AdminSidebar.tsx`, `ThemeSwitcher.tsx`,
    `LocaleSwitcher.tsx`, `InstallationSwitcher.tsx`, `MaintenanceBanner.tsx`,
    `LicenseStatusBanner.tsx`, `RequireAuth.tsx`, `RequireCapability.tsx`,
-   `DashboardWidgets.tsx`, the home page, and the login page - the classes
-   scoped ONLY to those files (`.admin-shell`/`.admin-body`/
-   `.admin-sidebar`/`.sidebar-*`/`.admin-content`/`.top-bar`/
-   `.top-bar-actions`/`.installation-switcher`/`.theme-switcher`/`.page`,
-   confirmed via grep before removing each one) are gone from here,
-   replaced by Tailwind utilities directly on those components.
-   `.entry-list`/`.entry-row`/`.login-form` were dead CSS (confirmed via
-   grep, never referenced anywhere in this app), dropped outright.
-   EVERYTHING ELSE below (`.card`/`.data-table`/`.badge`/`.form-grid`/
-   `.attribute-row`/`.checkbox-group`/`.layout-row`/`.layout-field`/
-   `.deletion-reason-catalog*`/`.hint`/`.error-text`/`.empty-state`/
-   `.actions`) is used by 15-30+ of this app's other feature components
-   (confirmed via grep) and is DELIBERATELY left untouched - converting
-   those is each their own future session's job, not this one's. */
+   `DashboardWidgets.tsx`, the home page, and the login page. Session 8
+   converted the four single-purpose classes shared across the whole app
+   (`.hint`/`.error-text`/`.empty-state`/`.actions`, each confirmed via
+   grep to be used ONLY standalone, never combined with another class -
+   safe for a mechanical bulk find-and-replace across every consumer at
+   once). `.entry-list`/`.entry-row`/`.login-form` were dead CSS (confirmed
+   via grep, never referenced anywhere in this app), dropped outright in
+   session 7. EVERYTHING ELSE below (`.card`/`.data-table`/`.badge`/
+   `.form-grid`/`.attribute-row`/`.checkbox-group`/`.layout-row`/
+   `.layout-field`/`.deletion-reason-catalog*`) is still used by 15-30+ of
+   this app's other feature components and stays deliberately untouched -
+   each their own future session's job, not this one's. */
 @layer base {
   :root {
     font-family: var(--dms-font-family);
@@ -80,25 +78,6 @@
   :root[data-theme="high-contrast"] .badge.down {
     border: 1px solid currentColor;
   }
-}
-
-.hint {
-  opacity: 0.8;
-  font-size: var(--dms-font-size-sm);
-}
-
-.actions {
-  display: flex;
-  gap: var(--dms-space-2);
-}
-
-.error-text {
-  color: var(--dms-danger);
-}
-
-.empty-state {
-  opacity: 0.7;
-  font-style: italic;
 }
 
 .card {

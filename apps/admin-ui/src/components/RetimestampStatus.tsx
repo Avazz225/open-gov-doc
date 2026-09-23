@@ -48,10 +48,10 @@ export function RetimestampStatus() {
   return (
     <div className="card">
       <h2>{t("retimestampStatus.heading")}</h2>
-      <p className="hint">{t("retimestampStatus.hint")}</p>
+      <p className="text-sm opacity-80">{t("retimestampStatus.hint")}</p>
 
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
@@ -59,9 +59,9 @@ export function RetimestampStatus() {
       {isLoading ? (
         <p>{t("common.loading")}</p>
       ) : unreachable ? (
-        <p className="empty-state">{t("retimestampStatus.unreachable")}</p>
+        <p className="italic opacity-70">{t("retimestampStatus.unreachable")}</p>
       ) : signatures.length === 0 ? (
-        <p className="empty-state">{t("retimestampStatus.empty")}</p>
+        <p className="italic opacity-70">{t("retimestampStatus.empty")}</p>
       ) : (
         <table className="data-table">
           <thead>

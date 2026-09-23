@@ -22,7 +22,7 @@ export function DashboardWidgets() {
   })).filter((w) => w.items.length > 0);
 
   if (widgets.length === 0) {
-    return <p className="empty-state">{t("home.noWidgets")}</p>;
+    return <p className="italic opacity-70">{t("home.noWidgets")}</p>;
   }
 
   return (

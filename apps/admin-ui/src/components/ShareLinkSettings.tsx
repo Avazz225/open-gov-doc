@@ -74,12 +74,12 @@ export function ShareLinkSettings() {
 
   return (
     <div className="card">
-      <p className="hint">{t("shareLinkSettings.hint")}</p>
+      <p className="text-sm opacity-80">{t("shareLinkSettings.hint")}</p>
 
       {isLoading ? (
         <p>{t("common.loading")}</p>
       ) : unreachable ? (
-        <p className="empty-state">{t("shareLinkSettings.unreachable")}</p>
+        <p className="italic opacity-70">{t("shareLinkSettings.unreachable")}</p>
       ) : (
         <form className="form-grid" onSubmit={handleSubmit}>
           <label className="checkbox-label">
@@ -100,7 +100,7 @@ export function ShareLinkSettings() {
               onChange={(event) => setMaxValidityDaysInput(event.target.value)}
             />
           </label>
-          <div className="actions">
+          <div className="flex gap-2">
             <button type="submit" disabled={isSaving}>
               {t("common.save")}
             </button>
@@ -109,13 +109,13 @@ export function ShareLinkSettings() {
       )}
 
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
-      {savedAt !== null && !error && <p className="hint">{t("shareLinkSettings.saved")}</p>}
+      {savedAt !== null && !error && <p className="text-sm opacity-80">{t("shareLinkSettings.saved")}</p>}
       {config && (
-        <p className="hint">
+        <p className="text-sm opacity-80">
           {t("shareLinkSettings.updatedAt")}: {new Date(config.updated_at).toLocaleString()}
         </p>
       )}

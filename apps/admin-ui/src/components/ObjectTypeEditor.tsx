@@ -399,7 +399,7 @@ export function ObjectTypeEditor() {
   return (
     <>
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
@@ -485,7 +485,7 @@ export function ObjectTypeEditor() {
             )}
           </div>
           {appliesTo === "document" && (
-            <p className="hint">{t("objectTypes.kennzeichenFormatHint")}</p>
+            <p className="text-sm opacity-80">{t("objectTypes.kennzeichenFormatHint")}</p>
           )}
 
           <div className="form-grid">
@@ -550,11 +550,11 @@ export function ObjectTypeEditor() {
             )}
           </div>
           {appliesTo === "document" && (
-            <p className="hint">{t("objectTypes.classificationLevelHint")}</p>
+            <p className="text-sm opacity-80">{t("objectTypes.classificationLevelHint")}</p>
           )}
 
           <h3>{t("objectTypes.attributesHeading")}</h3>
-          {attributes.length === 0 && <p className="empty-state">{t("objectTypes.noAttributes")}</p>}
+          {attributes.length === 0 && <p className="italic opacity-70">{t("objectTypes.noAttributes")}</p>}
           {attributes.map((attribute, index) => (
             <div className="attribute-row" key={index}>
               <div className="form-grid">
@@ -666,7 +666,7 @@ export function ObjectTypeEditor() {
           </button>
 
           <h3>{t("objectTypes.allowedParentTypesLabel")}</h3>
-          <p className="hint">{t("objectTypes.allowedParentTypesHint")}</p>
+          <p className="text-sm opacity-80">{t("objectTypes.allowedParentTypesHint")}</p>
           <div className="checkbox-group">
             <label>
               <input
@@ -688,7 +688,7 @@ export function ObjectTypeEditor() {
             ))}
           </div>
 
-          <div className="actions">
+          <div className="flex gap-2">
             <button type="submit">
               {editingId === null ? t("common.create") : t("objectTypes.save")}
             </button>
@@ -718,7 +718,7 @@ export function ObjectTypeEditor() {
               <td>{ot.applies_to}</td>
               <td>{ot.attributes.length}</td>
               <td>{ot.icon ? iconLabel(t, ot.icon) : "—"}</td>
-              <td className="actions">
+              <td className="flex gap-2">
                 <button type="button" onClick={() => startEdit(ot)}>
                   {t("objectTypes.edit")}
                 </button>
@@ -730,7 +730,7 @@ export function ObjectTypeEditor() {
           ))}
         </tbody>
       </table>
-      {objectTypes.length === 0 && <p className="empty-state">{t("objectTypes.empty")}</p>}
+      {objectTypes.length === 0 && <p className="italic opacity-70">{t("objectTypes.empty")}</p>}
     </>
   );
 }

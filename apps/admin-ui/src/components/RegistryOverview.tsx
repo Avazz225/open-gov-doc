@@ -30,13 +30,13 @@ export function RegistryOverview() {
 
   return (
     <>
-      <div className="actions" style={{ marginBottom: "1rem" }}>
+      <div className="flex gap-2" style={{ marginBottom: "1rem" }}>
         <button type="button" onClick={reload}>
           {t("common.refresh")}
         </button>
       </div>
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
@@ -71,7 +71,7 @@ export function RegistryOverview() {
         </table>
       )}
       {!isLoading && instances.length === 0 && (
-        <p className="empty-state">{t("registry.empty")}</p>
+        <p className="italic opacity-70">{t("registry.empty")}</p>
       )}
     </>
   );

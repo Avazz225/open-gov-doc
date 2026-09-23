@@ -91,7 +91,7 @@ export function ForensicTraceView() {
 
   return (
     <div>
-      <p className="hint">{t("forensicTrace.hint")}</p>
+      <p className="text-sm opacity-80">{t("forensicTrace.hint")}</p>
 
       <section className="card">
         <form className="explorer-toolbar" onSubmit={handleQuery}>
@@ -127,7 +127,7 @@ export function ForensicTraceView() {
           <button type="submit" disabled={isLoading}>
             {t("forensicTrace.query")}
           </button>
-          <span className="actions">
+          <span className="flex gap-2">
             <button type="button" onClick={() => handleExport("csv")}>
               {t("forensicTrace.exportCsv")}
             </button>
@@ -138,18 +138,18 @@ export function ForensicTraceView() {
         </form>
 
         {error && (
-          <p className="error-text" role="alert">
+          <p className="text-danger" role="alert">
             {error}
           </p>
         )}
         {exportError && (
-          <p className="error-text" role="alert">
+          <p className="text-danger" role="alert">
             {exportError}
           </p>
         )}
 
         {hasQueried && !error && (
-          <p className="hint">
+          <p className="text-sm opacity-80">
             {isSuperuser
               ? t("forensicTrace.superuserHint")
               : t("forensicTrace.filteredHint", {
@@ -160,7 +160,7 @@ export function ForensicTraceView() {
         )}
 
         {anomalies.length > 0 && (
-          <div className="error-text" role="alert">
+          <div className="text-danger" role="alert">
             <strong>{t("forensicTrace.anomaliesHeading")}</strong>
             <ul>
               {anomalies.map((anomaly, index) => (
@@ -173,9 +173,9 @@ export function ForensicTraceView() {
         {isLoading ? (
           <p>{t("common.loading")}</p>
         ) : !hasQueried ? (
-          <p className="empty-state">{t("forensicTrace.notYetQueried")}</p>
+          <p className="italic opacity-70">{t("forensicTrace.notYetQueried")}</p>
         ) : entries.length === 0 ? (
-          <p className="empty-state">{t("forensicTrace.empty")}</p>
+          <p className="italic opacity-70">{t("forensicTrace.empty")}</p>
         ) : (
           <table className="data-table">
             <thead>

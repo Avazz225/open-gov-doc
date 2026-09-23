@@ -315,7 +315,7 @@ export function UserManagement() {
   return (
     <>
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
@@ -392,7 +392,7 @@ export function UserManagement() {
             ))}
           </tbody>
         </table>
-        {users.length === 0 && <p className="empty-state">{t("users.empty")}</p>}
+        {users.length === 0 && <p className="italic opacity-70">{t("users.empty")}</p>}
       </section>
 
       <section className="card">
@@ -423,7 +423,7 @@ export function UserManagement() {
           </label>
           <button type="submit">{t("common.create")}</button>
         </form>
-        {rolePending && <p className="hint">{t("roles.pendingApproval")}</p>}
+        {rolePending && <p className="text-sm opacity-80">{t("roles.pendingApproval")}</p>}
 
         <table className="data-table">
           <thead>
@@ -441,12 +441,12 @@ export function UserManagement() {
             ))}
           </tbody>
         </table>
-        {roles.length === 0 && <p className="empty-state">{t("roles.empty")}</p>}
+        {roles.length === 0 && <p className="italic opacity-70">{t("roles.empty")}</p>}
       </section>
 
       <section className="card">
         <h2>{t("groups.sectionTitle")}</h2>
-        <p className="hint">{t("groups.hint")}</p>
+        <p className="text-sm opacity-80">{t("groups.hint")}</p>
         <form aria-label={t("groups.formLabel")} className="form-grid" onSubmit={handleCreateGroup}>
           <label>
             {t("groups.name")}
@@ -471,7 +471,7 @@ export function UserManagement() {
             />{" "}
             {t("groups.isOrgUnit")}
           </label>
-          <p className="hint">{t("groups.isOrgUnitHint")}</p>
+          <p className="text-sm opacity-80">{t("groups.isOrgUnitHint")}</p>
           <button type="submit">{t("common.create")}</button>
         </form>
 
@@ -536,7 +536,7 @@ export function UserManagement() {
                         <button type="submit">{t("groups.addMember")}</button>
                       </form>
                       {(membersByGroup[g.id]?.length ?? 0) === 0 ? (
-                        <p className="empty-state">{t("groups.membersEmpty")}</p>
+                        <p className="italic opacity-70">{t("groups.membersEmpty")}</p>
                       ) : (
                         <ul>
                           {membersByGroup[g.id]!.map((m) => (
@@ -556,12 +556,12 @@ export function UserManagement() {
             ))}
           </tbody>
         </table>
-        {groups.length === 0 && <p className="empty-state">{t("groups.empty")}</p>}
+        {groups.length === 0 && <p className="italic opacity-70">{t("groups.empty")}</p>}
       </section>
 
       <section className="card">
         <h2>{t("orgHierarchy.sectionTitle")}</h2>
-        <p className="hint">{t("orgHierarchy.hint")}</p>
+        <p className="text-sm opacity-80">{t("orgHierarchy.hint")}</p>
         <form
           aria-label={t("orgHierarchy.formLabel")}
           className="form-grid"
@@ -619,7 +619,7 @@ export function UserManagement() {
           </tbody>
         </table>
         {supervisorAssignments.length === 0 && (
-          <p className="empty-state">{t("orgHierarchy.empty")}</p>
+          <p className="italic opacity-70">{t("orgHierarchy.empty")}</p>
         )}
 
         <form
@@ -695,7 +695,7 @@ export function UserManagement() {
           </label>
           <button type="submit">{t("roleAssignments.submit")}</button>
         </form>
-        {assignmentPending && <p className="hint">{t("roleAssignments.pendingApproval")}</p>}
+        {assignmentPending && <p className="text-sm opacity-80">{t("roleAssignments.pendingApproval")}</p>}
 
         <table className="data-table">
           <thead>
@@ -721,7 +721,7 @@ export function UserManagement() {
             ))}
           </tbody>
         </table>
-        {assignments.length === 0 && <p className="empty-state">{t("roleAssignments.empty")}</p>}
+        {assignments.length === 0 && <p className="italic opacity-70">{t("roleAssignments.empty")}</p>}
       </section>
     </>
   );

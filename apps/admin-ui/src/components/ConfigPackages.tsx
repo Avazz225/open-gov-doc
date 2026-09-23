@@ -51,7 +51,7 @@ function DeltaTable({ category, delta }: DeltaTableProps) {
     <div className="card" key={category}>
       <h3>{category}</h3>
       {!hasChanges && delta.only_in_base.length === 0 && (
-        <p className="hint">{t("configPackages.deltaNoChanges")}</p>
+        <p className="text-sm opacity-80">{t("configPackages.deltaNoChanges")}</p>
       )}
       {delta.only_in_compare.length > 0 && (
         <p>
@@ -65,7 +65,7 @@ function DeltaTable({ category, delta }: DeltaTableProps) {
         </p>
       )}
       {delta.only_in_base.length > 0 && (
-        <p className="hint">
+        <p className="text-sm opacity-80">
           <strong>{t("configPackages.deltaOnlyInSystem")}:</strong> {delta.only_in_base.join(", ")}
         </p>
       )}
@@ -184,14 +184,14 @@ export function ConfigPackages() {
   return (
     <div>
       <div className="card">
-        <p className="hint">{t("configPackages.hint")}</p>
-        <div className="actions">
+        <p className="text-sm opacity-80">{t("configPackages.hint")}</p>
+        <div className="flex gap-2">
           <button type="button" onClick={handleExportCurrent} disabled={isExporting}>
             {t("configPackages.exportCurrent")}
           </button>
         </div>
         {exportError && (
-          <p className="error-text" role="alert">
+          <p className="text-danger" role="alert">
             {exportError}
           </p>
         )}
@@ -207,25 +207,25 @@ export function ConfigPackages() {
           />
         </label>
         {parseError && (
-          <p className="error-text" role="alert">
+          <p className="text-danger" role="alert">
             {parseError}
           </p>
         )}
         {configDoc && (
           <div>
-            <p className="hint">
+            <p className="text-sm opacity-80">
               {t("configPackages.loadedFile")}: {fileName}
             </p>
             {configDoc.manifest ? (
               <div className="card">
                 <h3>{configDoc.manifest.name}</h3>
-                <p className="hint">
+                <p className="text-sm opacity-80">
                   {t("configPackages.manifestVersion")}: {configDoc.manifest.version} ·{" "}
                   {t("configPackages.manifestCompatibility")}: {configDoc.manifest.compatibility_range}
                 </p>
                 {configDoc.manifest.description && <p>{configDoc.manifest.description}</p>}
                 {(configDoc.manifest.origin || configDoc.manifest.license) && (
-                  <p className="hint">
+                  <p className="text-sm opacity-80">
                     {configDoc.manifest.origin}
                     {configDoc.manifest.origin && configDoc.manifest.license ? " · " : ""}
                     {configDoc.manifest.license}
@@ -233,7 +233,7 @@ export function ConfigPackages() {
                 )}
               </div>
             ) : (
-              <p className="hint">{t("configPackages.noManifest")}</p>
+              <p className="text-sm opacity-80">{t("configPackages.noManifest")}</p>
             )}
             <ul>
               {presentCategories(configDoc).map((category) => (
@@ -246,7 +246,7 @@ export function ConfigPackages() {
                 </li>
               ))}
             </ul>
-            <div className="actions">
+            <div className="flex gap-2">
               <button type="button" onClick={handlePreview} disabled={isComparing}>
                 {t("configPackages.preview")}
               </button>
@@ -259,7 +259,7 @@ export function ConfigPackages() {
       </div>
 
       {compareError && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {compareError}
         </p>
       )}
@@ -273,12 +273,12 @@ export function ConfigPackages() {
       )}
 
       {importError && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {importError}
         </p>
       )}
       {importResult && importResult.status === "pending_approval" && (
-        <p className="hint">{t("configPackages.pendingApproval")}</p>
+        <p className="text-sm opacity-80">{t("configPackages.pendingApproval")}</p>
       )}
       {importResult && importResult.result && (
         <div className="card">

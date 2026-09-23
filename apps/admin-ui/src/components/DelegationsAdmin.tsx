@@ -92,7 +92,7 @@ export function DelegationsAdmin() {
   }
 
   if (isLoading) return <p>{t("common.loading")}</p>;
-  if (unreachable) return <p className="empty-state">{t("delegationsAdmin.unreachable")}</p>;
+  if (unreachable) return <p className="italic opacity-70">{t("delegationsAdmin.unreachable")}</p>;
 
   const visibleDelegations = orgHierarchyOnly
     ? delegations.filter((d) => d.grant_kind !== null)
@@ -100,10 +100,10 @@ export function DelegationsAdmin() {
 
   return (
     <div className="card">
-      <p className="hint">{t("delegationsAdmin.hint")}</p>
+      <p className="text-sm opacity-80">{t("delegationsAdmin.hint")}</p>
 
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
@@ -118,7 +118,7 @@ export function DelegationsAdmin() {
       </label>
 
       {visibleDelegations.length === 0 ? (
-        <p className="empty-state">{t("delegationsAdmin.empty")}</p>
+        <p className="italic opacity-70">{t("delegationsAdmin.empty")}</p>
       ) : (
         <table className="data-table">
           <thead>
