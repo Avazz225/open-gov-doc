@@ -15,11 +15,12 @@ export function InstallationSwitcher() {
   if (installations.length <= 1) return null;
 
   return (
-    <label className="installation-switcher">
+    <label className="flex items-center gap-2 text-sm text-fg">
       {t("installations.switcherLabel")}
       <select
         value={activeInstallation.id}
         onChange={(event) => switchInstallation(event.target.value)}
+        className="rounded-md border border-border bg-bg px-1 py-0.5 text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg"
       >
         {installations.map((installation) => (
           <option key={installation.id} value={installation.id}>

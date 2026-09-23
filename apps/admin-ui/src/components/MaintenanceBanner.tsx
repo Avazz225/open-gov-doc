@@ -39,5 +39,9 @@ export function MaintenanceBanner() {
   }, [accessToken]);
 
   if (!active) return null;
-  return <div className="maintenance-banner">{t("maintenanceBanner.text")}</div>;
+  return (
+    <div className="bg-danger-bg px-6 py-2 text-center font-semibold text-danger">
+      {t("maintenanceBanner.text")}
+    </div>
+  );
 }

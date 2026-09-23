@@ -21,24 +21,28 @@ export function AdminShell({ title, children }: { title: string; children: React
   const { t } = useI18n();
 
   return (
-    <div className="admin-shell">
+    <div className="flex min-h-screen flex-col">
       <MaintenanceBanner />
       <LicenseStatusBanner />
-      <div className="top-bar">
+      <div className="flex items-center justify-between border-b border-border px-6 py-3">
         <h1>{title}</h1>
-        <div className="top-bar-actions">
+        <div className="flex items-center gap-4">
           <InstallationSwitcher />
           <LocaleSwitcher />
           <ThemeSwitcher />
           {user && <span>{user.username} </span>}
-          <button type="button" onClick={logout}>
+          <button
+            type="button"
+            onClick={logout}
+            className="rounded-md border border-border bg-hover-bg px-3 py-1 text-fg transition-colors hover:bg-accent-bg"
+          >
             {t("common.logout")}
           </button>
         </div>
       </div>
-      <div className="admin-body">
+      <div className="flex min-h-0 flex-1">
         <AdminSidebar />
-        <main className="admin-content">{children}</main>
+        <main className="max-w-[1100px] flex-1 min-w-0 p-6">{children}</main>
       </div>
     </div>
   );

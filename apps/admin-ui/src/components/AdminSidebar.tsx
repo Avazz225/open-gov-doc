@@ -239,30 +239,32 @@ export function AdminSidebar() {
     });
   }
 
+  const linkClass = (active: boolean) =>
+    active
+      ? "block rounded-sm bg-accent-bg px-2 py-1 font-semibold text-inherit no-underline"
+      : "block rounded-sm px-2 py-1 text-inherit no-underline hover:bg-hover-bg";
+
   return (
-    <nav className="admin-sidebar" aria-label={t("nav.ariaLabel")}>
+    <nav className="w-[220px] flex-shrink-0 border-r border-border px-3 py-4" aria-label={t("nav.ariaLabel")}>
       {GROUPS.map((group) => {
         const groupItems = visibleItems(group.items, permissions);
         if (groupItems.length === 0) return null;
         const isCollapsed = Boolean(collapsed[group.id]);
         return (
-          <div className="sidebar-group" key={group.id}>
+          <div className="mb-2" key={group.id}>
             <button
               type="button"
-              className="sidebar-group-toggle"
+              className="block w-full cursor-pointer border-0 bg-transparent px-1 py-2 text-left font-semibold text-fg opacity-85"
               aria-expanded={!isCollapsed}
               onClick={() => toggleGroup(group.id)}
             >
               <span aria-hidden="true">{isCollapsed ? "▸" : "▾"}</span> {t(group.labelKey)}
             </button>
             {!isCollapsed && (
-              <ul className="sidebar-group-items">
+              <ul className="m-0 list-none py-0 pr-0 pl-4">
                 {groupItems.map((item) => (
-                  <li key={item.href}>
-                    <Link
-                      href={item.href}
-                      className={pathname === item.href ? "sidebar-link-active" : undefined}
-                    >
+                  <li className="my-[0.15rem]" key={item.href}>
+                    <Link href={item.href} className={linkClass(pathname === item.href)}>
                       {t(item.labelKey)}
                     </Link>
                   </li>

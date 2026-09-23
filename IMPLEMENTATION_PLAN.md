@@ -1996,7 +1996,17 @@ not a web app, and has no CSS of any kind to migrate.
   instance of the button-default-styling defect this time (avoided proactively, informed by the prior
   three sessions). New
   [ADR 0223](docs/adr/0223-reviewer-ui-tailwind-rollout-cases-pane-dead-css-fix.md).
-  Remaining: `admin-ui`/`user-ui`, each their own dedicated session.
+  **admin-ui shell layer done** (P75-S7, first of admin-ui's own multi-session rollout — real size
+  turned out ~10,800 lines/~50 components, ~4-5x any small app, so it's split rather than one pass like
+  the plan originally implied). Converted the navigation framework every route sits inside
+  (`AdminShell`/`AdminSidebar`/switchers/banners/`RequireAuth`/`RequireCapability`/`DashboardWidgets`/
+  home+login pages); the ~15-30-file-shared classes (`.card`/`.data-table`/`.badge`/etc.) stay untouched
+  for future sessions. Found and fixed two pre-existing dead-CSS-class bugs (both warning banners
+  rendered unstyled) plus a subtler black-text-instead-of-theme-color bug on the sidebar toggle, caught
+  via the same computed-style probe. New
+  [ADR 0224](docs/adr/0224-admin-ui-tailwind-shell-conversion-dead-banner-css-fix.md).
+  Remaining: admin-ui's ~30 route-specific components (future sessions), then all of `user-ui`
+  (similarly large, not yet started).
 
 **Definition of Done**: P75-S1 needs a real ADR (a genuine architecture decision: which token-integration
 mechanism, shared preset location); P75-S2 needs before/after screenshots in the same message/commit,

@@ -46,21 +46,23 @@ export function LicenseStatusBanner() {
 
   if (!status || !shouldWarn(status)) return null;
 
+  const bannerClass = "bg-danger-bg px-6 py-2 text-center font-semibold text-danger";
+
   if (!status.installed) {
-    return <div className="license-banner">{t("license.bannerNotInstalled")}</div>;
+    return <div className={bannerClass}>{t("license.bannerNotInstalled")}</div>;
   }
   if (!status.valid) {
-    return <div className="license-banner">{t("license.bannerInvalid")}</div>;
+    return <div className={bannerClass}>{t("license.bannerInvalid")}</div>;
   }
   if (status.limits_exceeded.length > 0) {
     return (
-      <div className="license-banner">
+      <div className={bannerClass}>
         {t("license.bannerLimitExceeded", { dimensions: status.limits_exceeded.join(", ") })}
       </div>
     );
   }
   return (
-    <div className="license-banner">
+    <div className={bannerClass}>
       {t("license.bannerExpiringSoon", { count: status.days_remaining ?? 0 })}
     </div>
   );

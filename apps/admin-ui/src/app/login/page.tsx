@@ -48,7 +48,7 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="page flex min-h-screen items-center justify-center">
+    <main className="flex min-h-screen items-center justify-center p-6">
       <div className="box-border w-full max-w-sm rounded-lg border border-border bg-surface p-8 shadow-lg">
         <h1 className="text-xl font-bold text-surface-fg">{productName ?? t("login.heading")}</h1>
         <form className="mt-6 flex flex-col gap-4" onSubmit={handleSubmit}>

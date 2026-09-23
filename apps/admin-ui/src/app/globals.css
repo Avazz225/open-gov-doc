@@ -43,136 +43,43 @@
   }
 }
 
-/* Cross-UI-Theming (8, P4-S6, siehe ADR 0009): Farb-Tokens selbst leben seit
-   Phase 48 Session 1 (ADR 0168) in der geteilten libs/dms-ui/tokens.css -
-   dieser Block wendet nur noch den Font-Family-Token an. */
-:root {
-  font-family: var(--dms-font-family);
-}
+/* Post-Roadmap Phase 75 Session 7: this app is large enough (~50
+   components, ~10800 lines) that its Tailwind rollout is split across
+   multiple sessions, unlike the small apps (ADR 0220-0223) which each
+   converted in one pass. This session converts only the SHELL/chrome
+   layer - `AdminShell.tsx`, `AdminSidebar.tsx`, `ThemeSwitcher.tsx`,
+   `LocaleSwitcher.tsx`, `InstallationSwitcher.tsx`, `MaintenanceBanner.tsx`,
+   `LicenseStatusBanner.tsx`, `RequireAuth.tsx`, `RequireCapability.tsx`,
+   `DashboardWidgets.tsx`, the home page, and the login page - the classes
+   scoped ONLY to those files (`.admin-shell`/`.admin-body`/
+   `.admin-sidebar`/`.sidebar-*`/`.admin-content`/`.top-bar`/
+   `.top-bar-actions`/`.installation-switcher`/`.theme-switcher`/`.page`,
+   confirmed via grep before removing each one) are gone from here,
+   replaced by Tailwind utilities directly on those components.
+   `.entry-list`/`.entry-row`/`.login-form` were dead CSS (confirmed via
+   grep, never referenced anywhere in this app), dropped outright.
+   EVERYTHING ELSE below (`.card`/`.data-table`/`.badge`/`.form-grid`/
+   `.attribute-row`/`.checkbox-group`/`.layout-row`/`.layout-field`/
+   `.deletion-reason-catalog*`/`.hint`/`.error-text`/`.empty-state`/
+   `.actions`) is used by 15-30+ of this app's other feature components
+   (confirmed via grep) and is DELIBERATELY left untouched - converting
+   those is each their own future session's job, not this one's. */
+@layer base {
+  :root {
+    font-family: var(--dms-font-family);
+  }
 
-/* NOTE (Phase 49 Session 3, ADR 0168): a `:root[data-theme="high-contrast"]
-   .sidebar-link-active { color: #000000; }` override used to sit here. It
-   compensated for this app's own still-unfixed high-contrast
-   `--dms-accent-bg` (`#ffff00`, identical to `--dms-accent`) - once the
-   shared tokens.css is adopted (accent-bg corrected to `#000000`, matching
-   ADR 0135's already-fixed apps), forcing this link's text to black would
-   instead pair BLACK text on a now-BLACK background, a new illegible
-   pairing in the exact spot the original bug occupied. The exact same bug
-   class already found and fixed in `user-ui`'s `dockview` tab-text override
-   (Phase 49 Session 2) - removed here too rather than carried over. The
-   active sidebar link's text reverts to its normal `color: inherit`
-   (`--dms-fg`, white-on-black in high contrast), same as every other link. */
+  body {
+    margin: 0;
+    padding: 0;
+    background: var(--dms-bg);
+    color: var(--dms-fg);
+  }
 
-:root[data-theme="high-contrast"] .badge.ok,
-:root[data-theme="high-contrast"] .badge.down {
-  border: 1px solid currentColor;
-}
-
-body {
-  margin: 0;
-  padding: 0;
-  background: var(--dms-bg);
-  color: var(--dms-fg);
-}
-
-.page {
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: var(--dms-space-6);
-}
-
-.top-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--dms-space-3) var(--dms-space-6);
-  border-bottom: 1px solid var(--dms-border);
-}
-
-.top-bar-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--dms-space-4);
-}
-
-/* Dashboard-Layout (P4-S5, Nutzer-Feedback nach P4-S3, Konzept 8) */
-
-.admin-shell {
-  display: flex;
-  flex-direction: column;
-  min-height: 100vh;
-}
-
-.admin-body {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-}
-
-.admin-sidebar {
-  width: 220px;
-  flex-shrink: 0;
-  padding: var(--dms-space-4) var(--dms-space-3);
-  border-right: 1px solid var(--dms-border);
-}
-
-.sidebar-group {
-  margin-bottom: var(--dms-space-2);
-}
-
-.sidebar-group-toggle {
-  display: block;
-  width: 100%;
-  text-align: left;
-  background: none;
-  border: none;
-  cursor: pointer;
-  font: inherit;
-  font-weight: 600;
-  padding: var(--dms-space-2) var(--dms-space-1);
-  opacity: 0.85;
-}
-
-.sidebar-group-items {
-  list-style: none;
-  margin: 0;
-  padding: 0 0 0 var(--dms-space-4);
-}
-
-.sidebar-group-items li {
-  margin: 0.15rem 0;
-}
-
-.sidebar-group-items a {
-  display: block;
-  padding: var(--dms-space-1) var(--dms-space-2);
-  border-radius: var(--dms-radius-sm);
-  text-decoration: none;
-  color: inherit;
-}
-
-.sidebar-group-items a:hover {
-  background: var(--dms-hover-bg);
-}
-
-.sidebar-link-active {
-  background: var(--dms-accent-bg);
-  font-weight: 600;
-}
-
-.admin-content {
-  flex: 1;
-  min-width: 0;
-  padding: var(--dms-space-6);
-  max-width: 1100px;
-}
-
-.installation-switcher,
-.theme-switcher {
-  display: flex;
-  align-items: center;
-  gap: var(--dms-space-2);
-  font-size: var(--dms-font-size-sm);
+  :root[data-theme="high-contrast"] .badge.ok,
+  :root[data-theme="high-contrast"] .badge.down {
+    border: 1px solid currentColor;
+  }
 }
 
 .hint {
@@ -180,31 +87,9 @@ body {
   font-size: var(--dms-font-size-sm);
 }
 
-.entry-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
-
-.entry-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--dms-space-2) 0;
-  border-bottom: 1px solid var(--dms-border);
-}
-
 .actions {
   display: flex;
   gap: var(--dms-space-2);
-}
-
-.login-form {
-  max-width: 320px;
-  margin: 4rem auto;
-  display: flex;
-  flex-direction: column;
-  gap: var(--dms-space-3);
 }
 
 .error-text {
@@ -227,24 +112,19 @@ body {
    `.card` per capability-visible nav group, `auto-fit` so the grid adapts
    from a single domain-admin's one-widget view up to a superuser's full
    grid without a fixed column count. */
-.dashboard-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: var(--dms-space-4);
-}
-
+/* Post-Roadmap Phase 75 Session 7: `.dashboard-grid`/the h2/ul child rules
+   above are gone (converted to Tailwind utilities directly in
+   DashboardWidgets.tsx). This one small override rule stays as real CSS,
+   deliberately NOT converted to a Tailwind `mb-0` utility class: `.card`
+   stays unlayered shared CSS (30+ other components still depend on it,
+   out of this session's scope), and per the cascade-layer bug ADR 0219
+   found and fixed for office-addin, an unlayered rule always beats a
+   `@layer utilities` class regardless of source order - a `mb-0` utility
+   combined with `card` on the same element would silently lose to
+   `.card`'s own `margin-bottom`. Kept here instead, after `.card` in file
+   order, so it wins on the same unlayered footing. */
 .dashboard-widget {
   margin-bottom: 0;
-}
-
-.dashboard-widget h2 {
-  margin-top: 0;
-  font-size: var(--dms-font-size-lg);
-}
-
-.dashboard-widget ul {
-  margin: 0;
-  padding-left: var(--dms-space-4);
 }
 
 .form-grid {

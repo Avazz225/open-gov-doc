@@ -2,8 +2,66 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P75-S6 (sixth session of Phase 75 — fourth and last session of the small-apps
-Tailwind rollout group: `reviewer-ui`, fully converted beyond just the login page). See
+**Last completed:** P75-S7 (seventh session of Phase 75 — first session of admin-ui's own rollout,
+converting only its shell/chrome layer). See
+[ADR 0224](docs/adr/0224-admin-ui-tailwind-shell-conversion-dead-banner-css-fix.md) for the full
+writeup.
+
+**Re-scoping found, applied immediately**: admin-ui turned out to have ~50 components and ~10,800
+lines of TSX — roughly 4-5x `process-designer` (the biggest small app, itself a full session for
+~2,500 lines). Converting the whole app in one session would not get the same verification rigor every
+prior session had, so this session applies the same re-scoping discipline already used once before (the
+small-apps group itself was split into four full sessions once real sizes became clear): convert only
+the **shell/chrome layer** this session — `AdminShell.tsx`, `AdminSidebar.tsx`, `ThemeSwitcher.tsx`,
+`LocaleSwitcher.tsx`, `InstallationSwitcher.tsx`, `MaintenanceBanner.tsx`, `LicenseStatusBanner.tsx`,
+`RequireAuth.tsx`, `RequireCapability.tsx`, `DashboardWidgets.tsx`, the home page, and the login page —
+the navigation framework every one of admin-ui's ~30 route pages sits inside.
+
+**Only classes scoped exclusively to those files removed from `globals.css`** (`.admin-shell`/
+`.admin-body`/`.admin-sidebar`/`.sidebar-*`/`.admin-content`/`.top-bar`/`.top-bar-actions`/
+`.installation-switcher`/`.theme-switcher`/`.page`, each confirmed via grep to have no other
+consumers). `.entry-list`/`.entry-row`/`.login-form` were dead CSS, dropped outright. Everything else
+(`.card`/`.data-table`/`.badge`/`.form-grid`/`.attribute-row`/`.checkbox-group`/`.layout-row`/
+`.layout-field`/`.deletion-reason-catalog*`/`.hint`/`.error-text`/`.empty-state`/`.actions`) is used by
+15-30+ of this app's other feature components (confirmed via grep) and was deliberately left untouched
+— each their own future session's job.
+
+**A cascade-layer implication handled correctly**: `.card` stays unlayered, shared CSS.
+`DashboardWidgets.tsx` needs to cancel `.card`'s own `margin-bottom` inside a CSS grid (the grid's own
+`gap` already spaces rows). A Tailwind `mb-0` utility on the same element would lose to `.card`'s
+unlayered rule regardless of order, per the cascade-layer bug already found for office-addin (ADR
+0219) — kept as one small real CSS rule (`.dashboard-widget { margin-bottom: 0; }`) instead, positioned
+after `.card` in file order so it wins on the same unlayered footing.
+
+**Two more dead-CSS-class bugs found and fixed as a byproduct**: `MaintenanceBanner.tsx`'s
+`.maintenance-banner` and `LicenseStatusBanner.tsx`'s `.license-banner` were **both** never defined
+anywhere in `globals.css` — this app's two most important warning banners (system-wide maintenance
+mode, license problems) have been rendering as plain unstyled text this whole time. Given real styling
+now, matching the `bg-danger-bg`/`text-danger` pattern already established for this exact use case in
+the small apps.
+
+**A fourth defect found via the same computed-style probing, novel this session**: the sidebar's
+collapsible group-toggle button had no explicit text-color utility — the probe showed
+`color: rgb(0, 0, 0)` (browser UA default) instead of `rgb(26, 26, 26)` (`--dms-fg`), invisible in
+light theme (both near-black) but would have been a real bug in dark/high-contrast (black text on a
+dark background). Fixed with an explicit `text-fg`, re-verified via the same probe.
+
+**Live-verified**: admin-ui passes production build, `tsc --noEmit`, `eslint`, Vitest (304/304, all
+green across all 34 routes' pages — the jsdom "navigation not implemented" stderr lines are the same
+benign pre-existing pattern seen in other apps). Login page screenshotted and computed-style-checked
+live against the real running Docker container. The shell (banners, top bar, sidebar, switchers,
+dashboard grid) required authentication this session had no credentials for — verified via the same
+computed-style static-probe technique against the real compiled CSS, including the sidebar text-color
+fix re-verified after a rebuild. `docs/services/admin-ui.md` updated.
+
+**Next session:** P75-S8 — admin-ui's own remaining ~30 route-specific components, scoped to one or a
+few related feature areas per session (not attempted as a single pass), then all of `user-ui` once
+admin-ui is done.
+
+---
+
+Immediately before P75-S7: **P75-S6** (sixth session of Phase 75 — fourth and last session of the
+small-apps Tailwind rollout group: `reviewer-ui`, fully converted beyond just the login page). See
 [ADR 0223](docs/adr/0223-reviewer-ui-tailwind-rollout-cases-pane-dead-css-fix.md) for the full writeup.
 
 **reviewer-ui full conversion**: every remaining hand-written CSS class (`.page`/`.top-bar`/

@@ -38,7 +38,7 @@ export function RequireCapability({
   }, [isLoading, allowed, router]);
 
   if (isLoading) {
-    return <p className="page">{t("common.loading")}</p>;
+    return <p className="mx-auto max-w-[1100px] p-6">{t("common.loading")}</p>;
   }
   if (!allowed) {
     return null;
