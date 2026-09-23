@@ -13,10 +13,12 @@ import { useAuth } from "@/lib/auth-context";
 
 type StatusFilter = "" | "pending" | "approved" | "rejected";
 
+const BADGE_BASE = "badge-hc-border inline-block rounded-full px-2 py-[0.1rem] text-xs";
+
 function statusBadgeClass(status: string): string {
-  if (status === "approved") return "badge badge-approved";
-  if (status === "rejected") return "badge badge-rejected";
-  return "badge badge-pending";
+  if (status === "approved") return `${BADGE_BASE} bg-success-bg text-success`;
+  if (status === "rejected") return `${BADGE_BASE} bg-danger-bg text-danger`;
+  return `${BADGE_BASE} bg-accent-bg text-accent`;
 }
 
 // Generic four-eyes approval inbox (4.3, 8, P14-S2) - consumes
@@ -98,16 +100,28 @@ export function ApprovalList() {
     }
   }
 
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1 text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1 text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border w-full rounded-md border border-border bg-bg px-2 py-1.5 text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+  const th = "border-b border-border px-2 py-2 text-left";
+  const td = "border-b border-border px-2 py-2 text-left";
+
   return (
     <section>
       <h1>{t("approvalList.heading")}</h1>
-      <p className="hint">{t("approvalList.hint")}</p>
+      <p className="text-sm opacity-80">{t("approvalList.hint")}</p>
 
-      <label htmlFor="status-filter">{t("approvalList.statusFilterLabel")}</label>{" "}
+      <label htmlFor="status-filter" className="text-sm font-medium text-fg">
+        {t("approvalList.statusFilterLabel")}
+      </label>{" "}
       <select
         id="status-filter"
         value={statusFilter}
         onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+        className="rounded-md border border-border bg-bg px-1 py-0.5 text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg"
       >
         <option value="">{t("approvalList.statusAll")}</option>
         <option value="pending">{t("approvalList.statusPending")}</option>
@@ -116,48 +130,49 @@ export function ApprovalList() {
       </select>
 
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
       {actionError && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {actionError}
         </p>
       )}
 
       {requests.length === 0 ? (
-        <p className="empty-state">{t("approvalList.empty")}</p>
+        <p className="italic opacity-70">{t("approvalList.empty")}</p>
       ) : (
-        <table className="data-table">
+        <table className="mb-6 w-full border-collapse">
           <thead>
             <tr>
-              <th>{t("approvalList.actionTypeColumn")}</th>
-              <th>{t("approvalList.initiatedByColumn")}</th>
-              <th>{t("approvalList.createdColumn")}</th>
-              <th>{t("approvalList.statusColumn")}</th>
-              <th>{t("approvalList.actionsColumn")}</th>
+              <th className={th}>{t("approvalList.actionTypeColumn")}</th>
+              <th className={th}>{t("approvalList.initiatedByColumn")}</th>
+              <th className={th}>{t("approvalList.createdColumn")}</th>
+              <th className={th}>{t("approvalList.statusColumn")}</th>
+              <th className={th}>{t("approvalList.actionsColumn")}</th>
             </tr>
           </thead>
           <tbody>
             {requests.map((request) => (
               <Fragment key={request.id}>
                 <tr>
-                  <td>{request.action_type}</td>
-                  <td>{request.initiated_by}</td>
-                  <td>{new Date(request.created_at).toLocaleString("de-DE")}</td>
-                  <td>
+                  <td className={td}>{request.action_type}</td>
+                  <td className={td}>{request.initiated_by}</td>
+                  <td className={td}>{new Date(request.created_at).toLocaleString("de-DE")}</td>
+                  <td className={td}>
                     <span className={statusBadgeClass(request.status)}>
                       {t(`approvalList.status${request.status[0].toUpperCase()}${request.status.slice(1)}`)}
                     </span>
                   </td>
-                  <td>
-                    <div className="actions">
+                  <td className={td}>
+                    <div className="flex gap-2">
                       <button
                         type="button"
                         onClick={() =>
                           setExpandedId(expandedId === request.id ? null : request.id)
                         }
+                        className={secondaryBtn}
                       >
                         {expandedId === request.id
                           ? t("approvalList.detailsToggleHide")
@@ -169,6 +184,7 @@ export function ApprovalList() {
                             type="button"
                             disabled={busyId === request.id}
                             onClick={() => handleApprove(request)}
+                            className={primaryBtn}
                           >
                             {t("approvalList.approveButton")}
                           </button>
@@ -176,6 +192,7 @@ export function ApprovalList() {
                             type="button"
                             disabled={busyId === request.id}
                             onClick={() => handleStartReject(request.id)}
+                            className={secondaryBtn}
                           >
                             {t("approvalList.rejectButton")}
                           </button>
@@ -185,26 +202,27 @@ export function ApprovalList() {
                   </td>
                 </tr>
                 {rejectingId === request.id && (
-                  <tr className="detail-row">
-                    <td colSpan={5}>
+                  <tr className="bg-hover-bg">
+                    <td colSpan={5} className="px-2 py-2">
                       <form
                         aria-label={t("approvalList.rejectFormLabel")}
-                        className="form-grid"
+                        className="mt-2 flex max-w-[420px] flex-col gap-2 rounded-sm border border-border p-3"
                         onSubmit={(e) => handleConfirmReject(e, request)}
                       >
-                        <label>
+                        <label className="flex flex-col gap-1 text-sm font-medium text-fg">
                           {t("approvalList.rejectReasonLabel")}
                           <input
                             value={rejectReason}
                             onChange={(e) => setRejectReason(e.target.value)}
                             placeholder={t("approvalList.rejectReasonPlaceholder")}
+                            className={fieldInput}
                           />
                         </label>
-                        <div className="actions">
-                          <button type="submit" disabled={busyId === request.id}>
+                        <div className="flex gap-2">
+                          <button type="submit" disabled={busyId === request.id} className={primaryBtn}>
                             {t("approvalList.rejectConfirm")}
                           </button>
-                          <button type="button" onClick={handleCancelReject}>
+                          <button type="button" onClick={handleCancelReject} className={secondaryBtn}>
                             {t("approvalList.rejectCancel")}
                           </button>
                         </div>
@@ -213,9 +231,11 @@ export function ApprovalList() {
                   </tr>
                 )}
                 {expandedId === request.id && (
-                  <tr className="detail-row">
-                    <td colSpan={5}>
-                      <pre>{JSON.stringify(request.payload, null, 2)}</pre>
+                  <tr className="bg-hover-bg">
+                    <td colSpan={5} className="px-2 py-2">
+                      <pre className="m-0 whitespace-pre-wrap break-words">
+                        {JSON.stringify(request.payload, null, 2)}
+                      </pre>
                       {request.reason && (
                         <p>
                           <strong>{t("approvalList.rejectReasonDisplayLabel")}</strong> {request.reason}

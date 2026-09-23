@@ -68,13 +68,17 @@ export function CasesPane() {
   }
 
   return (
-    <section className="cases-pane" aria-label={t("cases.paneLabel")}>
-      <h2 className="pane-heading">{t("cases.heading")}</h2>
-      <p className="hint">{t("cases.hint")}</p>
+    <section aria-label={t("cases.paneLabel")}>
+      <h2 className="m-0 mb-3 text-base">{t("cases.heading")}</h2>
+      <p className="text-sm opacity-80">{t("cases.hint")}</p>
 
-      <label>
+      <label className="flex flex-col gap-1 text-sm font-medium text-fg">
         {t("cases.statusFilterLabel")}
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          className="rounded-md border border-border bg-bg px-1 py-0.5 text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg"
+        >
           <option value="">{t("cases.statusAll")}</option>
           <option value="open">{t("cases.statusOpen")}</option>
           <option value="closed">{t("cases.statusClosed")}</option>
@@ -82,7 +86,7 @@ export function CasesPane() {
       </label>
 
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
@@ -90,20 +94,23 @@ export function CasesPane() {
       {isLoading ? (
         <p>{t("common.loading")}</p>
       ) : cases.length === 0 ? (
-        <p className="empty-state">{t("cases.empty")}</p>
+        <p className="italic opacity-70">{t("cases.empty")}</p>
       ) : (
-        <ul className="entry-list">
+        <ul className="mt-2 mb-0 list-none p-0">
           {cases.map((c) => (
-            <li className="entry-row" key={c.id}>
+            <li
+              className="flex items-center justify-between gap-2 border-b border-border py-2"
+              key={c.id}
+            >
               <button
                 type="button"
-                className="entry-name"
+                className="cursor-pointer border-0 bg-transparent p-0 text-left text-fg"
                 onClick={() => setSelectedCaseId(c.id)}
               >
                 {c.name}
                 {c.vorgangsnummer ? ` (${c.vorgangsnummer})` : ""}
               </button>
-              <span className="entry-meta">
+              <span className="text-xs opacity-70">
                 {c.status === "open" ? t("cases.statusOpen") : t("cases.statusClosed")}
                 {" · "}
                 {t("cases.createdAt", { date: formatDate(c.created_at, locale) })}
@@ -179,14 +186,17 @@ function CaseDetail({
     }
   }
 
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1 text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+
   if (!activeCase) {
     return (
-      <section className="cases-pane" aria-label={t("cases.paneLabel")}>
-        <button type="button" onClick={onBack}>
+      <section aria-label={t("cases.paneLabel")}>
+        <button type="button" onClick={onBack} className={secondaryBtn}>
           {t("cases.backToList")}
         </button>
         {error ? (
-          <p className="error-text" role="alert">
+          <p className="text-danger" role="alert">
             {error}
           </p>
         ) : (
@@ -197,12 +207,12 @@ function CaseDetail({
   }
 
   return (
-    <section className="cases-pane" aria-label={t("cases.paneLabel")}>
-      <button type="button" onClick={onBack}>
+    <section aria-label={t("cases.paneLabel")}>
+      <button type="button" onClick={onBack} className={secondaryBtn}>
         {t("cases.backToList")}
       </button>
-      <h2 className="pane-heading">{activeCase.name}</h2>
-      <p className="hint">
+      <h2 className="m-0 mb-3 text-base">{activeCase.name}</h2>
+      <p className="text-sm opacity-80">
         {activeCase.vorgangsnummer ? `${activeCase.vorgangsnummer} · ` : ""}
         {activeCase.status === "open" ? t("cases.statusOpen") : t("cases.statusClosed")}
         {" · "}
@@ -213,32 +223,35 @@ function CaseDetail({
       </p>
 
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
 
       <h3>{t("cases.documentsHeading")}</h3>
       {documents.length === 0 ? (
-        <p className="empty-state">{t("cases.documentsEmpty")}</p>
+        <p className="italic opacity-70">{t("cases.documentsEmpty")}</p>
       ) : (
-        <ul className="entry-list">
+        <ul className="mt-2 mb-0 list-none p-0">
           {documents.map((ref) => (
-            <li className="entry-row" key={ref.document_id}>
+            <li
+              className="flex items-center justify-between gap-2 border-b border-border py-2"
+              key={ref.document_id}
+            >
               {ref.document_deleted_at ? (
-                <span className="entry-name">{t("cases.documentDeleted")}</span>
+                <span>{t("cases.documentDeleted")}</span>
               ) : documentTitles[ref.document_id] === null ? (
-                <span className="entry-name">{t("cases.documentTitleUnavailable")}</span>
+                <span>{t("cases.documentTitleUnavailable")}</span>
               ) : (
                 <button
                   type="button"
-                  className="entry-name"
+                  className="cursor-pointer border-0 bg-transparent p-0 text-left text-fg"
                   onClick={() => handleDownload(ref.document_id)}
                 >
                   {documentTitles[ref.document_id] ?? ref.document_id}
                 </button>
               )}
-              <span className="entry-meta">
+              <span className="text-xs opacity-70">
                 {t("cases.documentAddedAt", { date: formatDate(ref.added_at, locale) })}
               </span>
             </li>
@@ -246,7 +259,7 @@ function CaseDetail({
         </ul>
       )}
       {downloadError && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {downloadError}
         </p>
       )}

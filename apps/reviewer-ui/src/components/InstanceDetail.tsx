@@ -100,50 +100,62 @@ export function InstanceDetail({
     }
   }
 
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1 text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1 text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border w-full rounded-md border border-border bg-bg px-2 py-1.5 text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+  const fieldLabel = "text-sm font-medium text-fg";
+  const th = "border-b border-border px-2 py-2 text-left";
+  const td = "border-b border-border px-2 py-2 text-left";
+  const badge = "badge-hc-border inline-block rounded-full bg-accent-bg px-2 py-[0.1rem] text-xs text-accent";
+  const inlineForm = "mt-2 flex max-w-[420px] flex-col gap-2 rounded-sm border border-border p-3";
+
   return (
     <section aria-label={t("instanceDetail.paneLabel")}>
-      <button type="button" onClick={onBack}>
+      <button type="button" onClick={onBack} className={secondaryBtn}>
         {t("instanceDetail.back")}
       </button>
       <h1>{t("instanceDetail.heading", { id: instanceId })}</h1>
 
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
 
       {instance && (
-        <dl className="detail-fields">
-          <dt>{t("instanceDetail.statusLabel")}</dt>
-          <dd>
+        <dl className="my-4 mb-6 grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1">
+          <dt className="font-semibold opacity-80">{t("instanceDetail.statusLabel")}</dt>
+          <dd className="m-0">
             {instance.status === "running"
               ? t("instanceDetail.statusRunning")
               : t("instanceDetail.statusCompleted")}
           </dd>
-          <dt>{t("instanceDetail.businessKeyLabel")}</dt>
-          <dd>{instance.business_key ?? "-"}</dd>
-          <dt>{t("instanceDetail.createdByLabel")}</dt>
-          <dd>{instance.created_by}</dd>
-          <dt>{t("instanceDetail.createdAtLabel")}</dt>
-          <dd>{new Date(instance.created_at).toLocaleString()}</dd>
+          <dt className="font-semibold opacity-80">{t("instanceDetail.businessKeyLabel")}</dt>
+          <dd className="m-0">{instance.business_key ?? "-"}</dd>
+          <dt className="font-semibold opacity-80">{t("instanceDetail.createdByLabel")}</dt>
+          <dd className="m-0">{instance.created_by}</dd>
+          <dt className="font-semibold opacity-80">{t("instanceDetail.createdAtLabel")}</dt>
+          <dd className="m-0">{new Date(instance.created_at).toLocaleString()}</dd>
         </dl>
       )}
 
       <h2>{t("instanceDetail.tasksHeading")}</h2>
-      <p className="hint">{t("instanceDetail.tasksHint")}</p>
-      {successMessage && <p className="success-text">{successMessage}</p>}
+      <p className="text-sm opacity-80">{t("instanceDetail.tasksHint")}</p>
+      {successMessage && <p className="text-success">{successMessage}</p>}
 
       {tasks.length === 0 ? (
-        <p className="empty-state">{t("taskList.empty")}</p>
+        <p className="italic opacity-70">{t("taskList.empty")}</p>
       ) : (
-        <table className="data-table">
+        <table className="mb-6 w-full border-collapse">
           <thead>
             <tr>
-              <th>{t("taskList.nameColumn")}</th>
-              <th>{t("taskList.laneColumn")}</th>
-              <th>{t("taskList.claimColumn")}</th>
-              <th>{t("taskList.actionsColumn")}</th>
+              <th className={th}>{t("taskList.nameColumn")}</th>
+              <th className={th}>{t("taskList.laneColumn")}</th>
+              <th className={th}>{t("taskList.claimColumn")}</th>
+              <th className={th}>{t("taskList.actionsColumn")}</th>
             </tr>
           </thead>
           <tbody>
@@ -152,39 +164,34 @@ export function InstanceDetail({
               return (
                 <Fragment key={task.id}>
                   <tr>
-                    <td>
+                    <td className={td}>
                       {task.name}
                       {isSignature && (
                         <>
                           {" "}
-                          <span className="badge badge-pending">
-                            {t("taskList.signatureBadge")}
-                          </span>
+                          <span className={badge}>{t("taskList.signatureBadge")}</span>
                         </>
                       )}
                     </td>
-                    <td>{task.lane ?? "-"}</td>
+                    <td className={td}>{task.lane ?? "-"}</td>
                     {/* Read-only awareness only (post-roadmap phase 31 session
                         10) - claiming/org-hierarchy grants stay a TaskList.tsx
                         action, this view deliberately stays a lightweight
                         status display (ADR 0110), same precedent as omitting
                         the "on behalf of" delegation selector below. */}
-                    <td>{task.claimed_by ?? "-"}</td>
-                    <td>
-                      <button type="button" onClick={() => toggleExpand(task)}>
+                    <td className={td}>{task.claimed_by ?? "-"}</td>
+                    <td className={td}>
+                      <button type="button" onClick={() => toggleExpand(task)} className={secondaryBtn}>
                         {t("taskList.completeButton")}
                       </button>
                     </td>
                   </tr>
                   {expandedTaskId === task.id && (
-                    <tr className="detail-row">
-                      <td colSpan={4}>
-                        <form
-                          className="inline-form"
-                          onSubmit={(event) => handleComplete(task, event)}
-                        >
-                          <h2 className="hint">{t("taskList.completeHeading")}</h2>
-                          <label htmlFor={`completed-by-${task.id}`}>
+                    <tr className="bg-hover-bg">
+                      <td colSpan={4} className="px-2 py-2">
+                        <form className={inlineForm} onSubmit={(event) => handleComplete(task, event)}>
+                          <h2 className="text-sm opacity-80">{t("taskList.completeHeading")}</h2>
+                          <label htmlFor={`completed-by-${task.id}`} className={fieldLabel}>
                             {t("taskList.completedByLabel")}
                           </label>
                           <input
@@ -192,10 +199,11 @@ export function InstanceDetail({
                             value={completedBy}
                             onChange={(e) => setCompletedBy(e.target.value)}
                             required
+                            className={fieldInput}
                           />
                           {isSignature && (
                             <>
-                              <label htmlFor={`signature-id-${task.id}`}>
+                              <label htmlFor={`signature-id-${task.id}`} className={fieldLabel}>
                                 {t("taskList.signatureIdLabel")}
                               </label>
                               <input
@@ -203,27 +211,35 @@ export function InstanceDetail({
                                 value={signatureId}
                                 onChange={(e) => setSignatureId(e.target.value)}
                                 required
+                                className={fieldInput}
                               />
                             </>
                           )}
-                          <label htmlFor={`data-${task.id}`}>{t("taskList.dataLabel")}</label>
+                          <label htmlFor={`data-${task.id}`} className={fieldLabel}>
+                            {t("taskList.dataLabel")}
+                          </label>
                           <textarea
                             id={`data-${task.id}`}
                             rows={3}
                             value={dataJson}
                             onChange={(e) => setDataJson(e.target.value)}
                             placeholder="{}"
+                            className={fieldInput}
                           />
                           {formError && (
-                            <p className="error-text" role="alert">
+                            <p className="text-danger" role="alert">
                               {formError}
                             </p>
                           )}
-                          <div className="actions">
-                            <button type="submit" disabled={submitting}>
+                          <div className="flex gap-2">
+                            <button type="submit" disabled={submitting} className={primaryBtn}>
                               {submitting ? t("taskList.submitting") : t("taskList.submit")}
                             </button>
-                            <button type="button" onClick={() => setExpandedTaskId(null)}>
+                            <button
+                              type="button"
+                              onClick={() => setExpandedTaskId(null)}
+                              className={secondaryBtn}
+                            >
                               {t("common.cancel")}
                             </button>
                           </div>

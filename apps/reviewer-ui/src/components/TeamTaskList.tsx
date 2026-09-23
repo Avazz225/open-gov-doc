@@ -115,56 +115,67 @@ export function TeamTaskList({
     }
   }
 
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1 text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1 text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const th = "border-b border-border px-2 py-2 text-left";
+  const td = "border-b border-border px-2 py-2 text-left";
+
   return (
     <section>
       <h1>{t("teamTaskList.heading")}</h1>
-      <p className="hint">{t("teamTaskList.hint")}</p>
+      <p className="text-sm opacity-80">{t("teamTaskList.hint")}</p>
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
       {actionError && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {actionError}
         </p>
       )}
 
       {directReportIds !== null && directReportIds.length === 0 ? (
-        <p className="empty-state">{t("teamTaskList.noDirectReports")}</p>
+        <p className="italic opacity-70">{t("teamTaskList.noDirectReports")}</p>
       ) : teamTasks.length === 0 ? (
-        <p className="empty-state">{t("teamTaskList.empty")}</p>
+        <p className="italic opacity-70">{t("teamTaskList.empty")}</p>
       ) : (
-        <table className="data-table">
+        <table className="mb-6 w-full border-collapse">
           <thead>
             <tr>
-              <th>{t("taskList.nameColumn")}</th>
-              <th>{t("taskList.processColumn")}</th>
-              <th>{t("taskList.businessKeyColumn")}</th>
-              <th>{t("teamTaskList.statusColumn")}</th>
-              <th></th>
-              <th>{t("taskList.actionsColumn")}</th>
+              <th className={th}>{t("taskList.nameColumn")}</th>
+              <th className={th}>{t("taskList.processColumn")}</th>
+              <th className={th}>{t("taskList.businessKeyColumn")}</th>
+              <th className={th}>{t("teamTaskList.statusColumn")}</th>
+              <th className={th}></th>
+              <th className={th}>{t("taskList.actionsColumn")}</th>
             </tr>
           </thead>
           <tbody>
             {teamTasks.map((task) => (
               <Fragment key={task.id}>
                 <tr>
-                  <td>{task.name}</td>
-                  <td>#{task.process_definition_id}</td>
-                  <td>{task.business_key ?? "-"}</td>
-                  <td>
+                  <td className={td}>{task.name}</td>
+                  <td className={td}>#{task.process_definition_id}</td>
+                  <td className={td}>{task.business_key ?? "-"}</td>
+                  <td className={td}>
                     {task.claimed_by !== null
                       ? t("teamTaskList.statusClaimed", { principalId: task.claimed_by })
                       : t("teamTaskList.statusUnclaimed", { createdBy: task.created_by })}
                   </td>
-                  <td>
-                    <button type="button" onClick={() => onOpenInstance(task.instance_id)}>
+                  <td className={td}>
+                    <button
+                      type="button"
+                      onClick={() => onOpenInstance(task.instance_id)}
+                      className={secondaryBtn}
+                    >
                       {t("taskList.instanceLink")}
                     </button>
                   </td>
-                  <td>
-                    <button type="button" onClick={() => openForm(task.id)}>
+                  <td className={td}>
+                    <button type="button" onClick={() => openForm(task.id)} className={secondaryBtn}>
                       {task.claimed_by === null
                         ? t("teamTaskList.assignButton")
                         : t("teamTaskList.reassignButton")}
@@ -173,9 +184,9 @@ export function TeamTaskList({
                 </tr>
                 {openFormTaskId === task.id && (
                   <tr>
-                    <td colSpan={6}>
+                    <td colSpan={6} className="px-2 py-2">
                       <form
-                        className="inline-form"
+                        className="mt-2 flex max-w-[420px] flex-col gap-2 rounded-sm border border-border p-3"
                         aria-label={
                           task.claimed_by === null
                             ? t("teamTaskList.assignFormLabel")
@@ -187,7 +198,7 @@ export function TeamTaskList({
                             : handleReassign(task, event)
                         }
                       >
-                        <label>
+                        <label className="flex flex-col gap-1 text-sm font-medium text-fg">
                           {task.claimed_by === null
                             ? t("teamTaskList.assignPrincipalIdLabel")
                             : t("teamTaskList.reassignPrincipalIdLabel")}
@@ -195,9 +206,10 @@ export function TeamTaskList({
                             value={principalIdInput}
                             onChange={(e) => setPrincipalIdInput(e.target.value)}
                             required
+                            className="box-border w-full rounded-md border border-border bg-bg px-2 py-1.5 text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg"
                           />
                         </label>
-                        <button type="submit" disabled={submitting}>
+                        <button type="submit" disabled={submitting} className={primaryBtn}>
                           {task.claimed_by === null
                             ? t("teamTaskList.assignButton")
                             : t("teamTaskList.reassignButton")}

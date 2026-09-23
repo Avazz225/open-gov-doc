@@ -1990,7 +1990,13 @@ not a web app, and has no CSS of any kind to migrate.
   before it shipped, this time app-local (the new home tab bar) — fixed with Tailwind's one-sided-border
   pattern plus an explicit `bg-transparent`. New
   [ADR 0222](docs/adr/0222-process-designer-tailwind-rollout-tab-button-default-styling-fix.md).
-  Remaining small app (`reviewer-ui`) still queued, then `admin-ui`/`user-ui`.
+  **Small-apps group complete** (fourth and last: `reviewer-ui`, fully converted). Found and fixed a
+  real pre-existing bug as a byproduct: `CasesPane.tsx` referenced three CSS classes never actually
+  defined anywhere, rendering completely unstyled since Phase 74 — given real styling now. No new
+  instance of the button-default-styling defect this time (avoided proactively, informed by the prior
+  three sessions). New
+  [ADR 0223](docs/adr/0223-reviewer-ui-tailwind-rollout-cases-pane-dead-css-fix.md).
+  Remaining: `admin-ui`/`user-ui`, each their own dedicated session.
 
 **Definition of Done**: P75-S1 needs a real ADR (a genuine architecture decision: which token-integration
 mechanism, shared preset location); P75-S2 needs before/after screenshots in the same message/commit,

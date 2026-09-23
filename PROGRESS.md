@@ -2,8 +2,52 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P75-S5 (fifth session of Phase 75 — third of the small-apps Tailwind rollout group:
-`process-designer`, fully converted beyond just the login page). See
+**Last completed:** P75-S6 (sixth session of Phase 75 — fourth and last session of the small-apps
+Tailwind rollout group: `reviewer-ui`, fully converted beyond just the login page). See
+[ADR 0223](docs/adr/0223-reviewer-ui-tailwind-rollout-cases-pane-dead-css-fix.md) for the full writeup.
+
+**reviewer-ui full conversion**: every remaining hand-written CSS class (`.page`/`.top-bar`/
+`.top-bar-actions`/`.tab-nav`/`.hint`/`.actions`/`.login-form`/`.error-text`/`.success-text`/
+`.empty-state`/`.detail-fields`/`.data-table`/`.badge*`/`.maintenance-banner`/`.inline-form`/
+`.detail-row`) converted to Tailwind utilities directly on `Shell.tsx`, `ThemeSwitcher.tsx`,
+`LocaleSwitcher.tsx`, `MaintenanceBanner.tsx`, `RequireAuth.tsx`, `TaskList.tsx`, `ApprovalList.tsx`,
+`TeamTaskList.tsx`, `InstanceDetail.tsx`, `CasesPane.tsx`. Same high-contrast badge-border exception as
+`migration-console`: kept as a small `@layer base` rule (`.badge-hc-border`).
+
+**A real, pre-existing bug found and fixed as a byproduct, not introduced this session**:
+`CasesPane.tsx` (case-browsing UI, added Post-Roadmap Phase 74 Session 1) referenced three CSS classes
+(`.cases-pane`/`.pane-heading`/`.entry-name`/`.entry-meta`) that were never actually defined anywhere in
+this app's CSS (confirmed via grep before touching anything) — this pane has been rendering completely
+unstyled since it was added. Given real Tailwind styling now, matching the pattern `user-ui`'s own
+working `.pane-heading` establishes, consistent with this rollout's practice of giving previously-
+unstyled elements real treatment. `ApprovalList.tsx`'s reject-reason form similarly referenced a never-
+defined `.form-grid` — replaced with the same inline-form treatment used everywhere else in this app.
+
+**No new instance of the button-default-styling defect this session** (ADR 0220/0221/0222 each found
+one) — every new interactive element used explicit `border`/`bg-*` utilities from the start, informed by
+the prior three sessions, and the computed-style probe confirmed no stray browser defaults leaked
+through this time.
+
+**Live-verified**: reviewer-ui passes production build, `tsc --noEmit`, `eslint`, Vitest (55/55, all
+green — the one `stderr` line in `cases-pane.test.tsx` is a benign, pre-existing jsdom "navigation not
+implemented" warning, not a failure). Login page screenshotted and computed-style-checked live against
+the real running Docker container. The rest of the UI (tab bar, tables, badges including a
+high-contrast border check, detail-fields grid, entry lists) verified via the same computed-style
+static-probe technique against the real compiled CSS. `docs/services/reviewer-ui.md` updated for the
+full rollout.
+
+**Small-apps rollout group now complete** (`office-addin`, `migration-console`, `process-designer`,
+`reviewer-ui` — P75-S3 through P75-S6). Remaining: `admin-ui`/`user-ui`, each sized for its own
+dedicated session per the phase's plan.
+
+**Next session:** P75-S7 — `admin-ui` or `user-ui` (the two large apps), each getting a dedicated
+session given their size and component count. `user-ui` specifically has a much larger `globals.css`
+(972 lines, dockview-specific theming) than any small app converted so far.
+
+---
+
+Immediately before P75-S6: **P75-S5** (fifth session of Phase 75 — third of the small-apps Tailwind
+rollout group: `process-designer`, fully converted beyond just the login page). See
 [ADR 0222](docs/adr/0222-process-designer-tailwind-rollout-tab-button-default-styling-fix.md) for the
 full writeup.
 

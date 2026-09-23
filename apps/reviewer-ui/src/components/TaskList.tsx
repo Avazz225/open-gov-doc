@@ -161,35 +161,47 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
     }
   }
 
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1 text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1 text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border w-full rounded-md border border-border bg-bg px-2 py-1.5 text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+  const fieldLabel = "text-sm font-medium text-fg";
+  const th = "border-b border-border px-2 py-2 text-left";
+  const td = "border-b border-border px-2 py-2 text-left";
+  const badge = "badge-hc-border inline-block rounded-full bg-accent-bg px-2 py-[0.1rem] text-xs text-accent";
+  const inlineForm = "mt-2 flex max-w-[420px] flex-col gap-2 rounded-sm border border-border p-3";
+
   return (
     <section>
       <h1>{t("taskList.heading")}</h1>
-      <p className="hint">{t("taskList.hint")}</p>
+      <p className="text-sm opacity-80">{t("taskList.hint")}</p>
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
-      {successMessage && <p className="success-text">{successMessage}</p>}
+      {successMessage && <p className="text-success">{successMessage}</p>}
       {claimError && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {claimError}
         </p>
       )}
 
       {tasks.length === 0 ? (
-        <p className="empty-state">{t("taskList.empty")}</p>
+        <p className="italic opacity-70">{t("taskList.empty")}</p>
       ) : (
-        <table className="data-table">
+        <table className="mb-6 w-full border-collapse">
           <thead>
             <tr>
-              <th>{t("taskList.nameColumn")}</th>
-              <th>{t("taskList.processColumn")}</th>
-              <th>{t("taskList.businessKeyColumn")}</th>
-              <th>{t("taskList.laneColumn")}</th>
-              <th>{t("taskList.claimColumn")}</th>
-              <th></th>
-              <th>{t("taskList.actionsColumn")}</th>
+              <th className={th}>{t("taskList.nameColumn")}</th>
+              <th className={th}>{t("taskList.processColumn")}</th>
+              <th className={th}>{t("taskList.businessKeyColumn")}</th>
+              <th className={th}>{t("taskList.laneColumn")}</th>
+              <th className={th}>{t("taskList.claimColumn")}</th>
+              <th className={th}></th>
+              <th className={th}>{t("taskList.actionsColumn")}</th>
             </tr>
           </thead>
           <tbody>
@@ -199,26 +211,24 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
               return (
                 <Fragment key={task.id}>
                   <tr>
-                    <td>
+                    <td className={td}>
                       {task.name}
                       {isSignature && (
                         <>
                           {" "}
-                          <span className="badge badge-pending">
-                            {t("taskList.signatureBadge")}
-                          </span>
+                          <span className={badge}>{t("taskList.signatureBadge")}</span>
                         </>
                       )}
                     </td>
-                    <td>#{task.process_definition_id}</td>
-                    <td>{task.business_key ?? "-"}</td>
-                    <td>{task.lane ?? "-"}</td>
-                    <td>
+                    <td className={td}>#{task.process_definition_id}</td>
+                    <td className={td}>{task.business_key ?? "-"}</td>
+                    <td className={td}>{task.lane ?? "-"}</td>
+                    <td className={td}>
                       {/* Task-claim mechanism (post-roadmap phase 31 session
                           10) - the prerequisite for the org-hierarchy access
                           grant offered inside the expanded detail row below. */}
                       {task.claimed_by === null ? (
-                        <button type="button" onClick={() => handleClaim(task)}>
+                        <button type="button" onClick={() => handleClaim(task)} className={secondaryBtn}>
                           {t("taskList.claimButton")}
                         </button>
                       ) : (
@@ -227,7 +237,11 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
                           {isClaimedByMe && (
                             <>
                               {" "}
-                              <button type="button" onClick={() => handleReleaseClaim(task)}>
+                              <button
+                                type="button"
+                                onClick={() => handleReleaseClaim(task)}
+                                className={secondaryBtn}
+                              >
                                 {t("taskList.releaseClaimButton")}
                               </button>
                             </>
@@ -235,32 +249,36 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
                         </>
                       )}
                     </td>
-                    <td>
+                    <td className={td}>
                       {/* Authenticated direct links (post-roadmap phase 29,
                           ADR 0109) - `instance_id` was already fetched for
                           `completeTask` above, but never shown/linked until
                           now. */}
-                      <button type="button" onClick={() => onOpenInstance(task.instance_id)}>
+                      <button
+                        type="button"
+                        onClick={() => onOpenInstance(task.instance_id)}
+                        className={secondaryBtn}
+                      >
                         {t("taskList.instanceLink")}
                       </button>
                     </td>
-                    <td>
-                      <button type="button" onClick={() => toggleExpand(task)}>
+                    <td className={td}>
+                      <button type="button" onClick={() => toggleExpand(task)} className={secondaryBtn}>
                         {t("taskList.completeButton")}
                       </button>
                     </td>
                   </tr>
                   {expandedTaskId === task.id && (
-                    <tr className="detail-row">
-                      <td colSpan={7}>
+                    <tr className="bg-hover-bg">
+                      <td colSpan={7} className="px-2 py-2">
                         {isClaimedByMe && (
                           <form
                             aria-label={t("taskList.grantFormLabel")}
-                            className="inline-form"
+                            className={inlineForm}
                             onSubmit={(event) => handleCreateGrant(task, event)}
                           >
-                            <h2 className="hint">{t("taskList.grantHeading")}</h2>
-                            <label htmlFor={`grant-kind-${task.id}`}>
+                            <h2 className="text-sm opacity-80">{t("taskList.grantHeading")}</h2>
+                            <label htmlFor={`grant-kind-${task.id}`} className={fieldLabel}>
                               {t("taskList.grantKindLabel")}
                             </label>
                             <select
@@ -271,6 +289,7 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
                                   e.target.value as "supervisor" | "supervisor_chain" | "org_unit"
                                 )
                               }
+                              className={fieldInput}
                             >
                               <option value="supervisor">{t("taskList.grantKindSupervisor")}</option>
                               <option value="supervisor_chain">
@@ -280,7 +299,7 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
                             </select>
                             {grantKind === "org_unit" && (
                               <>
-                                <label htmlFor={`grant-org-unit-of-${task.id}`}>
+                                <label htmlFor={`grant-org-unit-of-${task.id}`} className={fieldLabel}>
                                   {t("taskList.grantOrgUnitOfLabel")}
                                 </label>
                                 <select
@@ -289,6 +308,7 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
                                   onChange={(e) =>
                                     setGrantOrgUnitOf(e.target.value as "assignee" | "creator")
                                   }
+                                  className={fieldInput}
                                 >
                                   <option value="assignee">
                                     {t("taskList.grantOrgUnitOfAssignee")}
@@ -299,9 +319,11 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
                                 </select>
                               </>
                             )}
-                            <button type="submit">{t("taskList.grantSubmit")}</button>
+                            <button type="submit" className={primaryBtn}>
+                              {t("taskList.grantSubmit")}
+                            </button>
                             {grantResultByTaskId[task.id] && (
-                              <p className="hint">
+                              <p className="text-sm opacity-80">
                                 {grantResultByTaskId[task.id].length === 0
                                   ? t("taskList.grantEmptyResult")
                                   : t("taskList.grantResult", {
@@ -311,12 +333,9 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
                             )}
                           </form>
                         )}
-                        <form
-                          className="inline-form"
-                          onSubmit={(event) => handleComplete(task, event)}
-                        >
-                          <h2 className="hint">{t("taskList.completeHeading")}</h2>
-                          <label htmlFor={`completed-by-${task.id}`}>
+                        <form className={inlineForm} onSubmit={(event) => handleComplete(task, event)}>
+                          <h2 className="text-sm opacity-80">{t("taskList.completeHeading")}</h2>
+                          <label htmlFor={`completed-by-${task.id}`} className={fieldLabel}>
                             {t("taskList.completedByLabel")}
                           </label>
                           <input
@@ -324,16 +343,18 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
                             value={completedBy}
                             onChange={(e) => setCompletedBy(e.target.value)}
                             required
+                            className={fieldInput}
                           />
                           {delegations.length > 0 && (
                             <>
-                              <label htmlFor={`on-behalf-of-${task.id}`}>
+                              <label htmlFor={`on-behalf-of-${task.id}`} className={fieldLabel}>
                                 {t("taskList.onBehalfOfLabel")}
                               </label>
                               <select
                                 id={`on-behalf-of-${task.id}`}
                                 value={onBehalfOf}
                                 onChange={(e) => setOnBehalfOf(e.target.value)}
+                                className={fieldInput}
                               >
                                 <option value="">{t("taskList.onBehalfOfSelf")}</option>
                                 {delegations.map((delegation) => (
@@ -349,7 +370,7 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
                           )}
                           {isSignature && (
                             <>
-                              <label htmlFor={`signature-id-${task.id}`}>
+                              <label htmlFor={`signature-id-${task.id}`} className={fieldLabel}>
                                 {t("taskList.signatureIdLabel")}
                               </label>
                               <input
@@ -357,28 +378,36 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
                                 value={signatureId}
                                 onChange={(e) => setSignatureId(e.target.value)}
                                 required
+                                className={fieldInput}
                               />
-                              <p className="hint">{t("taskList.signatureIdHint")}</p>
+                              <p className="text-sm opacity-80">{t("taskList.signatureIdHint")}</p>
                             </>
                           )}
-                          <label htmlFor={`data-${task.id}`}>{t("taskList.dataLabel")}</label>
+                          <label htmlFor={`data-${task.id}`} className={fieldLabel}>
+                            {t("taskList.dataLabel")}
+                          </label>
                           <textarea
                             id={`data-${task.id}`}
                             rows={3}
                             value={dataJson}
                             onChange={(e) => setDataJson(e.target.value)}
                             placeholder="{}"
+                            className={fieldInput}
                           />
                           {formError && (
-                            <p className="error-text" role="alert">
+                            <p className="text-danger" role="alert">
                               {formError}
                             </p>
                           )}
-                          <div className="actions">
-                            <button type="submit" disabled={submitting}>
+                          <div className="flex gap-2">
+                            <button type="submit" disabled={submitting} className={primaryBtn}>
                               {submitting ? t("taskList.submitting") : t("taskList.submit")}
                             </button>
-                            <button type="button" onClick={() => setExpandedTaskId(null)}>
+                            <button
+                              type="button"
+                              onClick={() => setExpandedTaskId(null)}
+                              className={secondaryBtn}
+                            >
                               {t("common.cancel")}
                             </button>
                           </div>
