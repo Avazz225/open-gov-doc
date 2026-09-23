@@ -114,7 +114,7 @@ export function MetadataPanel({
   if (!activeDocument) {
     return (
       <section className="metadata-panel" aria-label={t("metadata.paneLabel")}>
-        <p className="empty-state">{t("metadata.noSelection")}</p>
+        <p className="italic opacity-70">{t("metadata.noSelection")}</p>
       </section>
     );
   }
@@ -167,12 +167,12 @@ export function MetadataPanel({
 
   return (
     <section className="metadata-panel" aria-label={t("metadata.paneLabel")}>
-      <h2 className="pane-heading">{t("metadata.heading")}</h2>
+      <h2 className="m-0 mb-3 text-base">{t("metadata.heading")}</h2>
 
       {isDraft && (
         <div className="draft-banner">
           <span className="badge draft">{t("metadata.draftBadge")}</span>
-          <p className="hint">{t("metadata.draftHint")}</p>
+          <p className="text-sm opacity-80">{t("metadata.draftHint")}</p>
           <button type="button" onClick={handleRegister} disabled={isRegistering}>
             {isRegistering ? t("metadata.registering") : t("metadata.registerAction")}
           </button>
@@ -211,7 +211,7 @@ export function MetadataPanel({
           </label>
         )}
         {KENNZEICHEN_ATTRIBUTE in activeDocument.attributes && !isKennzeichenAdmin && (
-          <p className="hint">{t("metadata.kennzeichenReadOnlyHint")}</p>
+          <p className="text-sm opacity-80">{t("metadata.kennzeichenReadOnlyHint")}</p>
         )}
 
         {objectType && layout ? (
@@ -236,11 +236,11 @@ export function MetadataPanel({
             }}
           />
         ) : activeDocument.object_type_id === null ? (
-          <p className="empty-state">{t("metadata.noObjectType")}</p>
+          <p className="italic opacity-70">{t("metadata.noObjectType")}</p>
         ) : null}
 
         {error && (
-          <p className="error-text" role="alert">
+          <p className="text-danger" role="alert">
             {error}
           </p>
         )}

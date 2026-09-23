@@ -113,10 +113,6 @@
   border: 1px solid currentColor;
 }
 
-:root[data-theme="high-contrast"] .icon-rail-active {
-  color: #000000;
-}
-
 /* NOTE (Phase 49 Session 2, ADR 0168): the old `--dv-activegroup-
    visiblepanel-tab-color: #000000` override that used to sit here is
    REMOVED, not merely moved. It compensated for this app's own
@@ -137,133 +133,6 @@ body {
   padding: 0;
   background: var(--dms-bg);
   color: var(--dms-fg);
-}
-
-.page {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: var(--dms-space-6);
-}
-
-.top-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--dms-space-3) var(--dms-space-6);
-  border-bottom: 1px solid var(--dms-border);
-}
-
-/* Dreigeteiltes Explorer-Layout (P4-S4, Nutzer-Feedback nach P4-S3, Konzept 8) */
-
-.workspace {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-}
-
-.workspace-body {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-}
-
-.icon-rail {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--dms-space-2);
-  width: 3rem;
-  padding: var(--dms-space-3) 0;
-  border-right: 1px solid var(--dms-border);
-  flex-shrink: 0;
-}
-
-.icon-rail-button {
-  width: 2.25rem;
-  height: 2.25rem;
-  border: none;
-  background: none;
-  border-radius: var(--dms-radius-md);
-  font-size: var(--dms-font-size-lg);
-  cursor: pointer;
-}
-
-.icon-rail-button:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-}
-
-.icon-rail-active {
-  background: var(--dms-accent-bg);
-}
-
-.icon-rail-settings {
-  position: relative;
-}
-
-.icon-rail-popover {
-  position: absolute;
-  left: 100%;
-  bottom: 0;
-  margin-left: var(--dms-space-2);
-  padding: var(--dms-space-3);
-  background: var(--dms-surface);
-  color: var(--dms-surface-fg);
-  border: 1px solid var(--dms-border);
-  border-radius: var(--dms-radius-md);
-  box-shadow: var(--dms-shadow-sm);
-  /* dockviews eigenes Chrome (Tab-Leiste, Drag-Indikatoren) nutzt
-     `z-index`-Werte bis 9999 (siehe node_modules/dockview-react/dist/styles/
-     dockview.css) - alle App-eigenen Overlays müssen darüber liegen, sonst
-     verschwinden sie teilweise hinter dockview-Elementen (P17-S3-Folgesession-Fund). */
-  z-index: 10000;
-  white-space: nowrap;
-}
-
-/* Generisches Rechtsklick-Kontextmenü (5.2, seit P7-S1c) - `position: fixed`
-   statt relativ zu einem Elternelement, da es am tatsächlichen Klickpunkt
-   erscheinen muss, nicht an einer festen UI-Ecke wie `.icon-rail-popover`. */
-.context-menu {
-  position: fixed;
-  min-width: 12rem;
-  padding: var(--dms-space-1);
-  background: var(--dms-surface);
-  color: var(--dms-surface-fg);
-  border: 1px solid var(--dms-border);
-  border-radius: var(--dms-radius-md);
-  box-shadow: var(--dms-shadow-sm);
-  /* Siehe Kommentar bei `.icon-rail-popover` - muss über dockviews Chrome
-     liegen (max. z-index 9999 dort). */
-  z-index: 10001;
-}
-
-.context-menu-item {
-  display: block;
-  width: 100%;
-  padding: var(--dms-space-2) var(--dms-space-3);
-  text-align: left;
-  background: none;
-  border: none;
-  border-radius: var(--dms-radius-sm);
-  color: inherit;
-  cursor: pointer;
-}
-
-.context-menu-item:hover:not(:disabled) {
-  background: var(--dms-accent);
-  color: var(--dms-accent-fg, #fff);
-}
-
-.context-menu-item:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.theme-switcher {
-  display: flex;
-  flex-direction: column;
-  gap: var(--dms-space-1);
-  font-size: var(--dms-font-size-sm);
 }
 
 /* Dockbarer Arbeitsbereich (Konzept 8, P16-S1, `dockview-react`) - ersetzt
@@ -414,11 +283,6 @@ body {
 
 .explorer-pane {
   border-bottom: 1px solid var(--dms-border);
-}
-
-.pane-heading {
-  font-size: var(--dms-font-size-base);
-  margin: 0 0 var(--dms-space-3);
 }
 
 .preview-thumbnail {
@@ -851,11 +715,6 @@ body {
   padding: 0;
 }
 
-.actions {
-  display: flex;
-  gap: var(--dms-space-2);
-}
-
 .heading-with-favorite {
   display: flex;
   align-items: center;
@@ -876,23 +735,6 @@ body {
   line-height: 1;
   padding: 0 var(--dms-space-1);
   color: var(--dms-accent);
-}
-
-.login-form {
-  max-width: 320px;
-  margin: 4rem auto;
-  display: flex;
-  flex-direction: column;
-  gap: var(--dms-space-3);
-}
-
-.error-text {
-  color: var(--dms-danger);
-}
-
-.empty-state {
-  opacity: 0.7;
-  font-style: italic;
 }
 
 .modal-backdrop {
@@ -956,10 +798,6 @@ body {
   align-items: center;
   justify-content: space-between;
   margin-bottom: var(--dms-space-2);
-}
-
-.modal-header .pane-heading {
-  margin: 0;
 }
 
 .modal-close {

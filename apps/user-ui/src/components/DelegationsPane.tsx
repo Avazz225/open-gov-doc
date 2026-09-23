@@ -151,11 +151,11 @@ export function DelegationsPane({
 
   return (
     <section className="delegations-pane" aria-label={t("delegations.paneLabel")}>
-      <h2 className="pane-heading">{t("delegations.heading")}</h2>
-      <p className="hint">{t("delegations.hint")}</p>
+      <h2 className="m-0 mb-3 text-base">{t("delegations.heading")}</h2>
+      <p className="text-sm opacity-80">{t("delegations.hint")}</p>
 
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
@@ -198,7 +198,7 @@ export function DelegationsPane({
             ))}
           </select>
         </label>
-        <p className="hint">{t("delegations.scopeObjectTypesHint")}</p>
+        <p className="text-sm opacity-80">{t("delegations.scopeObjectTypesHint")}</p>
         <label>
           {t("delegations.scopeFolderResourceIdsLabel")}
           <input
@@ -207,7 +207,7 @@ export function DelegationsPane({
             onChange={(e) => setScopeFolderResourceIdsText(e.target.value)}
           />
         </label>
-        <p className="hint">{t("delegations.scopeFolderResourceIdsHint")}</p>
+        <p className="text-sm opacity-80">{t("delegations.scopeFolderResourceIdsHint")}</p>
         <label>
           {t("delegations.scopeCaseResourceIdsLabel")}
           <input
@@ -216,7 +216,7 @@ export function DelegationsPane({
             onChange={(e) => setScopeCaseResourceIdsText(e.target.value)}
           />
         </label>
-        <p className="hint">{t("delegations.scopeCaseResourceIdsHint")}</p>
+        <p className="text-sm opacity-80">{t("delegations.scopeCaseResourceIdsHint")}</p>
         <button type="submit" disabled={isCreating}>
           {t("delegations.createButton")}
         </button>
@@ -225,7 +225,7 @@ export function DelegationsPane({
       {isLoading ? (
         <p>{t("common.loading")}</p>
       ) : myDelegations.length === 0 ? (
-        <p className="empty-state">{t("delegations.myDelegationsEmpty")}</p>
+        <p className="italic opacity-70">{t("delegations.myDelegationsEmpty")}</p>
       ) : (
         <ul className="entry-list">
           {myDelegations.map((delegation) => (
@@ -242,7 +242,7 @@ export function DelegationsPane({
                     : ""}
               </span>
               {isActive(delegation) && (
-                <span className="actions">
+                <span className="flex gap-2">
                   <button type="button" onClick={() => handleRevoke(delegation)}>
                     {t("delegations.revokeButton")}
                   </button>
@@ -254,9 +254,9 @@ export function DelegationsPane({
       )}
 
       <h3>{t("delegations.deputyForHeading")}</h3>
-      <p className="hint">{t("delegations.deputyForHint")}</p>
+      <p className="text-sm opacity-80">{t("delegations.deputyForHint")}</p>
       {deputyFor.length === 0 ? (
-        <p className="empty-state">{t("delegations.deputyForEmpty")}</p>
+        <p className="italic opacity-70">{t("delegations.deputyForEmpty")}</p>
       ) : (
         <ul className="entry-list">
           {deputyFor.map((delegation) => (

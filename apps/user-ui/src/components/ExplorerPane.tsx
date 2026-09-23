@@ -623,17 +623,17 @@ export function ExplorerPane({
       )}
 
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
 
-      {deleteMessage && <p className="hint">{deleteMessage}</p>}
+      {deleteMessage && <p className="text-sm opacity-80">{deleteMessage}</p>}
 
-      {linkCopyMessage && <p className="hint">{linkCopyMessage}</p>}
+      {linkCopyMessage && <p className="text-sm opacity-80">{linkCopyMessage}</p>}
 
       {folderExportJob && folderExportJob.status !== "completed" && (
-        <p className="hint" role="status">
+        <p className="text-sm opacity-80" role="status">
           {folderExportJob.status === "failed_permanent"
             ? t("explorer.exportFolderFailed", {
                 name: folderExportName ?? "",
@@ -645,7 +645,7 @@ export function ExplorerPane({
 
       {selectedKeys.size > 0 && (
         <div className="explorer-toolbar">
-          <span className="hint">{t("bulkEdit.selectedCount", { count: selectedKeys.size })}</span>
+          <span className="text-sm opacity-80">{t("bulkEdit.selectedCount", { count: selectedKeys.size })}</span>
           <button type="button" onClick={() => setShowBulkEdit(true)}>
             {t("bulkEdit.openButton")}
           </button>
@@ -656,7 +656,7 @@ export function ExplorerPane({
       )}
 
       {favoriteError && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {favoriteError}
         </p>
       )}
@@ -664,14 +664,14 @@ export function ExplorerPane({
       {showTrash ? (
         <>
           {trashError && (
-            <p className="error-text" role="alert">
+            <p className="text-danger" role="alert">
               {trashError}
             </p>
           )}
           {isTrashLoading ? (
             <p>{t("common.loading")}</p>
           ) : trashDocuments.length === 0 && trashFolders.length === 0 ? (
-            <p className="empty-state">{t("explorer.trashEmpty")}</p>
+            <p className="italic opacity-70">{t("explorer.trashEmpty")}</p>
           ) : (
             <ul className="entry-list">
               {trashFolders.map((folder) => (
@@ -682,7 +682,7 @@ export function ExplorerPane({
                     )}{" "}
                     {folder.name}
                   </span>
-                  <span className="actions">
+                  <span className="flex gap-2">
                     <button type="button" onClick={() => handleRestoreFolder(folder)}>
                       {t("explorer.restoreFolder")}
                     </button>
@@ -694,7 +694,7 @@ export function ExplorerPane({
                   <span className="entry-name">
                     📄 {formatDocumentTitle(doc, documentTypeById, kennzeichenShowByDefault)}
                   </span>
-                  <span className="actions">
+                  <span className="flex gap-2">
                     <button type="button" onClick={() => handleRestore(doc)}>
                       {t("explorer.restoreDocument")}
                     </button>
@@ -723,7 +723,7 @@ export function ExplorerPane({
       ) : (
         <>
           {folders.length === 0 && documents.length === 0 && (
-            <p className="empty-state">{t("folderBrowser.emptyFolder")}</p>
+            <p className="italic opacity-70">{t("folderBrowser.emptyFolder")}</p>
           )}
           <ul className="entry-list">
             {folders.map((folder) => (
@@ -775,7 +775,7 @@ export function ExplorerPane({
                       )}{" "}
                       {folder.name}
                     </button>
-                    <span className="actions">
+                    <span className="flex gap-2">
                       <button
                         type="button"
                         aria-label={t("explorer.renameFolder", { name: folder.name })}

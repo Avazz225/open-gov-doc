@@ -65,10 +65,13 @@ export function IconRail({
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   return (
-    <nav className="icon-rail" aria-label={t("iconRail.label")}>
+    <nav
+      className="flex w-12 flex-shrink-0 flex-col items-center gap-2 border-r border-border py-3"
+      aria-label={t("iconRail.label")}
+    >
       <button
         type="button"
-        className={`icon-rail-button${activeView === "documents" ? " icon-rail-active" : ""}`}
+        className={`w-9 h-9 rounded-md border-0 p-0 text-lg text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "documents" ? "bg-accent-bg" : "bg-transparent"}`}
         title={t("iconRail.documents")}
         aria-current={activeView === "documents" ? "page" : undefined}
         onClick={() => onSelectView("documents")}
@@ -77,7 +80,7 @@ export function IconRail({
       </button>
       <button
         type="button"
-        className={`icon-rail-button${activeView === "search" ? " icon-rail-active" : ""}`}
+        className={`w-9 h-9 rounded-md border-0 p-0 text-lg text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "search" ? "bg-accent-bg" : "bg-transparent"}`}
         title={t("iconRail.search")}
         aria-current={activeView === "search" ? "page" : undefined}
         onClick={() => onSelectView("search")}
@@ -86,7 +89,7 @@ export function IconRail({
       </button>
       <button
         type="button"
-        className={`icon-rail-button${activeView === "approvals" ? " icon-rail-active" : ""}`}
+        className={`w-9 h-9 rounded-md border-0 p-0 text-lg text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "approvals" ? "bg-accent-bg" : "bg-transparent"}`}
         title={t("iconRail.approvals")}
         aria-current={activeView === "approvals" ? "page" : undefined}
         onClick={() => onSelectView("approvals")}
@@ -95,7 +98,7 @@ export function IconRail({
       </button>
       <button
         type="button"
-        className={`icon-rail-button${activeView === "favorites" ? " icon-rail-active" : ""}`}
+        className={`w-9 h-9 rounded-md border-0 p-0 text-lg text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "favorites" ? "bg-accent-bg" : "bg-transparent"}`}
         title={t("iconRail.favorites")}
         aria-current={activeView === "favorites" ? "page" : undefined}
         onClick={() => onSelectView("favorites")}
@@ -104,7 +107,7 @@ export function IconRail({
       </button>
       <button
         type="button"
-        className={`icon-rail-button${activeView === "teamspaces" ? " icon-rail-active" : ""}`}
+        className={`w-9 h-9 rounded-md border-0 p-0 text-lg text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "teamspaces" ? "bg-accent-bg" : "bg-transparent"}`}
         title={t("iconRail.teamspaces")}
         aria-current={activeView === "teamspaces" ? "page" : undefined}
         onClick={() => onSelectView("teamspaces")}
@@ -113,7 +116,7 @@ export function IconRail({
       </button>
       <button
         type="button"
-        className={`icon-rail-button${activeView === "delegations" ? " icon-rail-active" : ""}`}
+        className={`w-9 h-9 rounded-md border-0 p-0 text-lg text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "delegations" ? "bg-accent-bg" : "bg-transparent"}`}
         title={t("iconRail.delegations")}
         aria-current={activeView === "delegations" ? "page" : undefined}
         onClick={() => onSelectView("delegations")}
@@ -122,7 +125,7 @@ export function IconRail({
       </button>
       <button
         type="button"
-        className={`icon-rail-button${activeView === "trash" ? " icon-rail-active" : ""}`}
+        className={`w-9 h-9 rounded-md border-0 p-0 text-lg text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "trash" ? "bg-accent-bg" : "bg-transparent"}`}
         title={t("iconRail.trash")}
         aria-current={activeView === "trash" ? "page" : undefined}
         onClick={() => onSelectView("trash")}
@@ -132,7 +135,7 @@ export function IconRail({
       {isQuarantineAdmin && (
         <button
           type="button"
-          className={`icon-rail-button${activeView === "quarantine" ? " icon-rail-active" : ""}`}
+          className={`w-9 h-9 rounded-md border-0 p-0 text-lg text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "quarantine" ? "bg-accent-bg" : "bg-transparent"}`}
           title={t("iconRail.quarantine")}
           aria-current={activeView === "quarantine" ? "page" : undefined}
           onClick={() => onSelectView("quarantine")}
@@ -143,7 +146,7 @@ export function IconRail({
       {isRecordsQuarantineAdmin && (
         <button
           type="button"
-          className={`icon-rail-button${activeView === "recordsQuarantine" ? " icon-rail-active" : ""}`}
+          className={`w-9 h-9 rounded-md border-0 p-0 text-lg text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "recordsQuarantine" ? "bg-accent-bg" : "bg-transparent"}`}
           title={t("iconRail.recordsQuarantine")}
           aria-current={activeView === "recordsQuarantine" ? "page" : undefined}
           onClick={() => onSelectView("recordsQuarantine")}
@@ -154,7 +157,7 @@ export function IconRail({
       {isPoststelle && (
         <button
           type="button"
-          className={`icon-rail-button${activeView === "poststelle" ? " icon-rail-active" : ""}`}
+          className={`w-9 h-9 rounded-md border-0 p-0 text-lg text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "poststelle" ? "bg-accent-bg" : "bg-transparent"}`}
           title={t("iconRail.poststelle")}
           aria-current={activeView === "poststelle" ? "page" : undefined}
           onClick={() => onSelectView("poststelle")}
@@ -164,7 +167,7 @@ export function IconRail({
       )}
       <button
         type="button"
-        className={`icon-rail-button${activeView === "kontakte" ? " icon-rail-active" : ""}`}
+        className={`w-9 h-9 rounded-md border-0 p-0 text-lg text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "kontakte" ? "bg-accent-bg" : "bg-transparent"}`}
         title={t("iconRail.kontakte")}
         aria-current={activeView === "kontakte" ? "page" : undefined}
         onClick={() => onSelectView("kontakte")}
@@ -174,7 +177,7 @@ export function IconRail({
       {isArchivalAccess && (
         <button
           type="button"
-          className={`icon-rail-button${activeView === "aussonderung" ? " icon-rail-active" : ""}`}
+          className={`w-9 h-9 rounded-md border-0 p-0 text-lg text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "aussonderung" ? "bg-accent-bg" : "bg-transparent"}`}
           title={t("iconRail.aussonderung")}
           aria-current={activeView === "aussonderung" ? "page" : undefined}
           onClick={() => onSelectView("aussonderung")}
@@ -184,7 +187,7 @@ export function IconRail({
       )}
       <button
         type="button"
-        className={`icon-rail-button${activeView === "vorlagen" ? " icon-rail-active" : ""}`}
+        className={`w-9 h-9 rounded-md border-0 p-0 text-lg text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "vorlagen" ? "bg-accent-bg" : "bg-transparent"}`}
         title={t("iconRail.vorlagen")}
         aria-current={activeView === "vorlagen" ? "page" : undefined}
         onClick={() => onSelectView("vorlagen")}
@@ -197,7 +200,7 @@ export function IconRail({
           individually gated on `archival.write`, not the pane itself). */}
       <button
         type="button"
-        className={`icon-rail-button${activeView === "cases" ? " icon-rail-active" : ""}`}
+        className={`w-9 h-9 rounded-md border-0 p-0 text-lg text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "cases" ? "bg-accent-bg" : "bg-transparent"}`}
         title={t("iconRail.cases")}
         aria-current={activeView === "cases" ? "page" : undefined}
         onClick={() => onSelectView("cases")}
@@ -212,17 +215,17 @@ export function IconRail({
           pane itself. */}
       <button
         type="button"
-        className={`icon-rail-button${activeView === "handFolders" ? " icon-rail-active" : ""}`}
+        className={`w-9 h-9 rounded-md border-0 p-0 text-lg text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "handFolders" ? "bg-accent-bg" : "bg-transparent"}`}
         title={t("iconRail.handFolders")}
         aria-current={activeView === "handFolders" ? "page" : undefined}
         onClick={() => onSelectView("handFolders")}
       >
         <span aria-hidden="true">🗂️</span>
       </button>
-      <div className="icon-rail-settings">
+      <div className="relative">
         <button
           type="button"
-          className={`icon-rail-button${isSettingsOpen ? " icon-rail-active" : ""}`}
+          className={`w-9 h-9 rounded-md border-0 p-0 text-lg text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${isSettingsOpen ? "bg-accent-bg" : "bg-transparent"}`}
           title={t("iconRail.settings")}
           aria-haspopup="true"
           aria-expanded={isSettingsOpen}
@@ -231,7 +234,10 @@ export function IconRail({
           <span aria-hidden="true">⚙️</span>
         </button>
         {isSettingsOpen && (
-          <div className="icon-rail-popover" aria-label={t("iconRail.settings")}>
+          <div
+            className="absolute bottom-0 left-full z-[10000] ml-2 whitespace-nowrap rounded-md border border-border bg-surface p-3 text-surface-fg shadow-sm"
+            aria-label={t("iconRail.settings")}
+          >
             <LocaleSwitcher />
             <ThemeSwitcher />
           </div>

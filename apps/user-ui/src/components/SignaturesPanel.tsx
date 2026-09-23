@@ -116,10 +116,10 @@ export function SignaturesPanel({
 
   return (
     <section className="signatures-panel" aria-label={t("signatures.heading")}>
-      <h2 className="pane-heading">{t("signatures.heading")}</h2>
+      <h2 className="m-0 mb-3 text-base">{t("signatures.heading")}</h2>
 
       {signatures.length === 0 ? (
-        <p className="empty-state">{t("signatures.noSignatures")}</p>
+        <p className="italic opacity-70">{t("signatures.noSignatures")}</p>
       ) : (
         <ul className="signature-list">
           {signatures.map((signature) => {
@@ -154,7 +154,7 @@ export function SignaturesPanel({
       )}
 
       {isSignable ? (
-        <div className="signature-actions">
+        <div className="flex items-center gap-2">
           <label>
             {t("signatures.levelLabel")}
             <select value={level} onChange={(e) => setLevel(e.target.value as SignatureLevel)}>
@@ -170,11 +170,11 @@ export function SignaturesPanel({
           </button>
         </div>
       ) : (
-        <p className="hint">{t("signatures.notSignable")}</p>
+        <p className="text-sm opacity-80">{t("signatures.notSignable")}</p>
       )}
 
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}

@@ -106,11 +106,11 @@ export function RecordsQuarantinePanel({ document: activeDocument }: { document:
 
   return (
     <section className="records-quarantine-panel" aria-label={t("recordsQuarantine.heading")}>
-      <h2 className="pane-heading">{t("recordsQuarantine.heading")}</h2>
+      <h2 className="m-0 mb-3 text-base">{t("recordsQuarantine.heading")}</h2>
 
       {activeEntry ? (
         <div className="quarantine-active">
-          <p className="hint">
+          <p className="text-sm opacity-80">
             {t("recordsQuarantine.active", { setBy: activeEntry.set_by })}
             {activeEntry.reason ? ` (${activeEntry.reason})` : ""}
             {activeEntry.auto_delete_at
@@ -144,7 +144,7 @@ export function RecordsQuarantinePanel({ document: activeDocument }: { document:
       )}
 
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}

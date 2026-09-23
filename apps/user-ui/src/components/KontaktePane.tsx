@@ -59,8 +59,8 @@ export function KontaktePane({ token }: { token: string }) {
 
   return (
     <section className="kontakte-pane" aria-label={t("kontakte.paneLabel")}>
-      <h2 className="pane-heading">{t("kontakte.heading")}</h2>
-      <p className="hint">{t("kontakte.hint")}</p>
+      <h2 className="m-0 mb-3 text-base">{t("kontakte.heading")}</h2>
+      <p className="text-sm opacity-80">{t("kontakte.hint")}</p>
 
       <form onSubmit={runSearch}>
         <input
@@ -86,7 +86,7 @@ export function KontaktePane({ token }: { token: string }) {
       </form>
 
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
@@ -96,7 +96,7 @@ export function KontaktePane({ token }: { token: string }) {
       ) : localResults === null ? null : (
         <>
           {localResults.length === 0 && federatedResults.length === 0 ? (
-            <p className="empty-state">{t("kontakte.empty")}</p>
+            <p className="italic opacity-70">{t("kontakte.empty")}</p>
           ) : (
             <>
               {localResults.length > 0 && (

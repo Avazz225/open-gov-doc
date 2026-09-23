@@ -153,11 +153,11 @@ export function CasesPane({
 
   return (
     <section className="cases-pane" aria-label={t("cases.paneLabel")}>
-      <h2 className="pane-heading">{t("cases.heading")}</h2>
-      <p className="hint">{t("cases.hint")}</p>
+      <h2 className="m-0 mb-3 text-base">{t("cases.heading")}</h2>
+      <p className="text-sm opacity-80">{t("cases.hint")}</p>
 
       {favoriteError && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {favoriteError}
         </p>
       )}
@@ -172,7 +172,7 @@ export function CasesPane({
       </label>
 
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
@@ -180,7 +180,7 @@ export function CasesPane({
       {isLoading ? (
         <p>{t("common.loading")}</p>
       ) : cases.length === 0 ? (
-        <p className="empty-state">{t("cases.empty")}</p>
+        <p className="italic opacity-70">{t("cases.empty")}</p>
       ) : (
         <ul className="entry-list">
           {cases.map((c) => (
@@ -319,7 +319,7 @@ function NewCaseImportSection({
   return (
     <>
       <h3>{t("cases.newCaseImportHeading")}</h3>
-      <p className="hint">{t("cases.newCaseImportHint")}</p>
+      <p className="text-sm opacity-80">{t("cases.newCaseImportHint")}</p>
 
       <button type="button" onClick={() => setXdomeaOpen((prev) => !prev)}>
         {t("cases.xdomeaImport")}
@@ -353,7 +353,7 @@ function NewCaseImportSection({
               ))}
             </select>
           </label>
-          <span className="actions">
+          <span className="flex gap-2">
             <button
               type="button"
               disabled={
@@ -370,7 +370,7 @@ function NewCaseImportSection({
         </div>
       )}
       {xdomeaError && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {xdomeaError}
         </p>
       )}
@@ -407,7 +407,7 @@ function NewCaseImportSection({
               ))}
             </select>
           </label>
-          <span className="actions">
+          <span className="flex gap-2">
             <button
               type="button"
               disabled={
@@ -424,7 +424,7 @@ function NewCaseImportSection({
         </div>
       )}
       {xjustizError && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {xjustizError}
         </p>
       )}
@@ -619,7 +619,7 @@ function CaseDetail({
           {t("cases.backToList")}
         </button>
         {error ? (
-          <p className="error-text" role="alert">
+          <p className="text-danger" role="alert">
             {error}
           </p>
         ) : (
@@ -635,7 +635,7 @@ function CaseDetail({
         {t("cases.backToList")}
       </button>
       <span className="heading-with-favorite">
-        <h2 className="pane-heading">{activeCase.name}</h2>
+        <h2 className="m-0 mb-3 text-base">{activeCase.name}</h2>
         <button
           type="button"
           className="favorite-toggle"
@@ -649,7 +649,7 @@ function CaseDetail({
           {isFavorite ? "★" : "☆"}
         </button>
       </span>
-      <p className="hint">
+      <p className="text-sm opacity-80">
         {activeCase.vorgangsnummer ? `${activeCase.vorgangsnummer} · ` : ""}
         {activeCase.status === "open" ? t("cases.statusOpen") : t("cases.statusClosed")}
         {" · "}
@@ -660,19 +660,19 @@ function CaseDetail({
       </p>
 
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
       {favoriteError && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {favoriteError}
         </p>
       )}
 
       <h3>{t("cases.documentsHeading")}</h3>
       {documents.length === 0 ? (
-        <p className="empty-state">{t("cases.documentsEmpty")}</p>
+        <p className="italic opacity-70">{t("cases.documentsEmpty")}</p>
       ) : (
         <ul className="entry-list">
           {documents.map((ref) => (
@@ -718,7 +718,7 @@ function CaseDetail({
                   placeholder={t("cases.xdomeaExportLeserPlaceholder")}
                 />
               </label>
-              <span className="actions">
+              <span className="flex gap-2">
                 <button
                   type="button"
                   disabled={xdomeaExporting || !xdomeaLeserName.trim()}
@@ -733,7 +733,7 @@ function CaseDetail({
             </div>
           )}
           {xdomeaExportError && (
-            <p className="error-text" role="alert">
+            <p className="text-danger" role="alert">
               {xdomeaExportError}
             </p>
           )}
@@ -753,7 +753,7 @@ function CaseDetail({
                   placeholder={t("cases.xjustizExportEmpfaengerPlaceholder")}
                 />
               </label>
-              <span className="actions">
+              <span className="flex gap-2">
                 <button
                   type="button"
                   disabled={xjustizExporting || !xjustizEmpfaengerName.trim()}
@@ -768,13 +768,13 @@ function CaseDetail({
             </div>
           )}
           {xjustizExportError && (
-            <p className="error-text" role="alert">
+            <p className="text-danger" role="alert">
               {xjustizExportError}
             </p>
           )}
 
           <h3>{t("cases.importHeading")}</h3>
-          <p className="hint">{t("cases.importHint")}</p>
+          <p className="text-sm opacity-80">{t("cases.importHint")}</p>
           {/* Case-level XDOMEA import (ADR 0128/0139) - deliberately always
               attaches to THIS case (`case_id`), never creates a new one -
               the "create a new case from an import" path lives instead on
@@ -800,7 +800,7 @@ function CaseDetail({
                   onChange={(e) => setXdomeaImportFolderId(e.target.value)}
                 />
               </label>
-              <span className="actions">
+              <span className="flex gap-2">
                 <button
                   type="button"
                   disabled={xdomeaImporting || !xdomeaImportFile || !xdomeaImportFolderId.trim()}
@@ -815,12 +815,12 @@ function CaseDetail({
             </div>
           )}
           {xdomeaImportError && (
-            <p className="error-text" role="alert">
+            <p className="text-danger" role="alert">
               {xdomeaImportError}
             </p>
           )}
           {xdomeaImportSuccess && (
-            <p className="hint" role="status">
+            <p className="text-sm opacity-80" role="status">
               {xdomeaImportSuccess}
             </p>
           )}
@@ -846,7 +846,7 @@ function CaseDetail({
                   onChange={(e) => setXjustizImportFolderId(e.target.value)}
                 />
               </label>
-              <span className="actions">
+              <span className="flex gap-2">
                 <button
                   type="button"
                   disabled={
@@ -863,12 +863,12 @@ function CaseDetail({
             </div>
           )}
           {xjustizImportError && (
-            <p className="error-text" role="alert">
+            <p className="text-danger" role="alert">
               {xjustizImportError}
             </p>
           )}
           {xjustizImportSuccess && (
-            <p className="hint" role="status">
+            <p className="text-sm opacity-80" role="status">
               {xjustizImportSuccess}
             </p>
           )}

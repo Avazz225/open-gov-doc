@@ -143,8 +143,8 @@ export function TrashPane({ token }: { token: string }) {
 
   return (
     <section className="trash-pane" aria-label={t("trash.paneLabel")}>
-      <h2 className="pane-heading">{t("trash.heading")}</h2>
-      <p className="hint">{t("trash.hint")}</p>
+      <h2 className="m-0 mb-3 text-base">{t("trash.heading")}</h2>
+      <p className="text-sm opacity-80">{t("trash.hint")}</p>
 
       <span className="view-mode-toggle" role="group" aria-label={t("trash.scopeLabel")}>
         <button
@@ -178,7 +178,7 @@ export function TrashPane({ token }: { token: string }) {
       </span>
 
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
@@ -186,7 +186,7 @@ export function TrashPane({ token }: { token: string }) {
       {isLoading ? (
         <p>{t("common.loading")}</p>
       ) : isEmpty ? (
-        <p className="empty-state">{t("trash.empty")}</p>
+        <p className="italic opacity-70">{t("trash.empty")}</p>
       ) : (
         <ul className="entry-list">
           {folders.map((folder) => (
@@ -194,7 +194,7 @@ export function TrashPane({ token }: { token: string }) {
               <span className="entry-name">
                 {t("trash.typeFolder")} {folder.name}
               </span>
-              <span className="actions">
+              <span className="flex gap-2">
                 <button
                   type="button"
                   onClick={() => handleRestoreFolder(folder)}
@@ -219,7 +219,7 @@ export function TrashPane({ token }: { token: string }) {
               <span className="entry-name">
                 {t("trash.typeDocument")} {document.title}
               </span>
-              <span className="actions">
+              <span className="flex gap-2">
                 <button
                   type="button"
                   onClick={() => handleRestoreDocument(document)}

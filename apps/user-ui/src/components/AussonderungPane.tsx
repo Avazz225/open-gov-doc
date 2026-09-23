@@ -94,8 +94,8 @@ export function AussonderungPane({ token }: { token: string }) {
 
   return (
     <section className="aussonderung-pane" aria-label={t("aussonderung.paneLabel")}>
-      <h2 className="pane-heading">{t("aussonderung.heading")}</h2>
-      <p className="hint">{t("aussonderung.hint")}</p>
+      <h2 className="m-0 mb-3 text-base">{t("aussonderung.heading")}</h2>
+      <p className="text-sm opacity-80">{t("aussonderung.hint")}</p>
 
       <form onSubmit={runSearch}>
         <input
@@ -111,7 +111,7 @@ export function AussonderungPane({ token }: { token: string }) {
       </form>
 
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
@@ -119,7 +119,7 @@ export function AussonderungPane({ token }: { token: string }) {
       {isLoading ? (
         <p>{t("common.loading")}</p>
       ) : items.length === 0 ? (
-        <p className="empty-state">{t("aussonderung.empty")}</p>
+        <p className="italic opacity-70">{t("aussonderung.empty")}</p>
       ) : (
         <ul className="entry-list">
           {items.map((item) => (
@@ -136,7 +136,7 @@ export function AussonderungPane({ token }: { token: string }) {
                   ? ` · ${t("aussonderung.purgeAt", { date: formatDate(item.purge_at, locale) })}`
                   : ""}
               </span>
-              <span className="actions">
+              <span className="flex gap-2">
                 {item.kind === "document" ? (
                   <button
                     type="button"

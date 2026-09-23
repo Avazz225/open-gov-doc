@@ -2,8 +2,62 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P75-S9 (ninth session of Phase 75 — `.card` conversion, a real regression fix, and
-admin-ui's Tailwind rollout declared functionally complete). See
+**Last completed:** P75-S10 (tenth session of Phase 75 — user-ui's shell + shared-class conversion,
+first session of user-ui's own rollout). See
+[ADR 0227](docs/adr/0227-user-ui-tailwind-shell-and-shared-class-conversion.md) for the full writeup.
+
+**Structural survey found a genuinely different shape than admin-ui**: not ~30 thin routes over a
+shared component-class vocabulary, but a single-page dockview-based workspace (990-line `globals.css`,
+~65 distinct classes, many single-file feature-specific — redaction, OCR overlay, splitter,
+breadcrumbs, dockview theme-variable mapping). This session converts the shell/chrome layer
+(`DocumentWorkspace.tsx`'s workspace/top-bar/workspace-body wrapper, `IconRail.tsx`, `ContextMenu.tsx`,
+`ThemeSwitcher.tsx`, `LocaleSwitcher.tsx`, `RequireAuth.tsx`, `MaintenanceBanner.tsx`, login/callback/
+share pages) plus every single-element shared class confirmed via grep to be standalone-only (`.hint`,
+`.error-text`, `.empty-state`, `.actions`, `.pane-heading` — 18-29 files each). `.login-form` was
+already dead CSS (0 usages).
+
+**Four pre-existing dead-CSS-class bugs found and fixed as a byproduct**: `.maintenance-banner` (never
+defined — same bug independently present here as admin-ui's ADR 0224 found; this app's maintenance-mode
+banner has been rendering unstyled); two hint modifier classes that never added anything
+(`hint accessibility-warning` in `PreviewPane.tsx`, `hint search-syntax-hint` in `SearchPane.tsx`,
+collapsed into the same real `.hint` styling); `.signature-actions` in `SignaturesPanel.tsx` (never
+defined, found while auditing `.actions`), given real `flex items-center gap-2` styling.
+
+**Two real regressions caught before shipping, via the same techniques prior sessions established**:
+1. **A margin-utility conflict**: `.modal-header .pane-heading { margin: 0; }` used to cancel the base
+   class's margin for headings inside a modal. The bulk `.pane-heading` → `m-0 mb-3 text-base`
+   replacement gave all 6 modal headings **both** `m-0` and `mb-3` simultaneously — a same-layer utility
+   conflict with no guaranteed winner. Fixed by checking each of the 6 usages individually and removing
+   the incorrect `mb-3`.
+2. **A background-utility conflict freshly introduced in `IconRail.tsx`'s own conversion**: the button
+   template literal put `bg-transparent` in the shared base class and appended `bg-accent-bg` for the
+   active state, so active buttons carried both. A computed-style probe against the real compiled CSS
+   confirmed `bg-transparent` was winning — the icon rail's active-view highlight was silently broken.
+   Fixed so the ternary supplies exactly one of the two, never both, re-verified via the same probe
+   (`rgba(37, 99, 235, 0.15)` on active, transparent on inactive) and a full screenshot.
+
+**Deliberate stopping point for user-ui's remaining shared classes**, same reasoning as admin-ui's ADR
+0226: dockview `--dv-*` theming, `.badge` + modifiers, redaction/OCR-specific classes, entry-row/
+tree-row patterns, `.layout-grid*`, `.share-card`/`.share-download-button` (2-file shared) all stay as
+permanent, deliberately-kept component classes for now, not attempted this session.
+
+**Live-verified**: `tsc --noEmit` clean, `eslint` clean (2 pre-existing, unrelated `<img>` warnings),
+full Vitest suite 292/292 across all 38 test files, production build succeeds across all 5 routes.
+Rebuilt and redeployed the real Docker image; login and share pages screenshotted and computed-style-
+checked live; the shell (banner, top bar, icon rail active/inactive states, settings popover, context
+menu including hover state) verified via the same computed-style static-probe technique against the
+real compiled CSS, rebuilt and re-probed after both regression fixes to confirm they actually took
+effect.
+
+**Next session:** Phase 75's own phase-close — full regression across every touched app
+(`user-ui`/`admin-ui`/`reviewer-ui`/`migration-console`/`process-designer`/`office-addin`) plus
+`graphify update .`, per this project's standing phase-end cadence (full regression/graphify only at
+phase end, not per session).
+
+---
+
+Immediately before P75-S10: **P75-S9** (ninth session of Phase 75 — `.card` conversion, a real
+regression fix, and admin-ui's Tailwind rollout declared functionally complete). See
 [ADR 0226](docs/adr/0226-admin-ui-card-conversion-shared-component-class-boundary.md) for the full
 writeup.
 

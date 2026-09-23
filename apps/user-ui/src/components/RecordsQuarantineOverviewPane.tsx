@@ -99,11 +99,11 @@ export function RecordsQuarantineOverviewPane({
       className="records-quarantine-overview-pane"
       aria-label={t("recordsQuarantineOverview.paneLabel")}
     >
-      <h2 className="pane-heading">{t("recordsQuarantineOverview.heading")}</h2>
-      <p className="hint">{t("recordsQuarantineOverview.hint")}</p>
+      <h2 className="m-0 mb-3 text-base">{t("recordsQuarantineOverview.heading")}</h2>
+      <p className="text-sm opacity-80">{t("recordsQuarantineOverview.hint")}</p>
 
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
@@ -111,7 +111,7 @@ export function RecordsQuarantineOverviewPane({
       {isLoading ? (
         <p>{t("common.loading")}</p>
       ) : rows.length === 0 ? (
-        <p className="empty-state">{t("recordsQuarantineOverview.empty")}</p>
+        <p className="italic opacity-70">{t("recordsQuarantineOverview.empty")}</p>
       ) : (
         <ul className="entry-list">
           {rows.map((row) => (
@@ -132,7 +132,7 @@ export function RecordsQuarantineOverviewPane({
                     })}`
                   : ""}
               </span>
-              <span className="actions">
+              <span className="flex gap-2">
                 <button
                   type="button"
                   onClick={() => handleRelease(row)}

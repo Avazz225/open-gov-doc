@@ -151,11 +151,11 @@ export function RetentionPanel({ document: activeDocument }: { document: Documen
 
   return (
     <section className="retention-panel" aria-label={t("retention.heading")}>
-      <h2 className="pane-heading">{t("retention.heading")}</h2>
+      <h2 className="m-0 mb-3 text-base">{t("retention.heading")}</h2>
 
       {activeHold ? (
         <div className="legal-hold-active">
-          <p className="hint">
+          <p className="text-sm opacity-80">
             {t("retention.legalHoldActive", { setBy: activeHold.set_by })}
             {activeHold.reason ? ` (${activeHold.reason})` : ""}
           </p>
@@ -260,11 +260,11 @@ export function RetentionPanel({ document: activeDocument }: { document: Documen
       </button>
 
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
-      {saved && !error && <p className="hint">{t("retention.saved")}</p>}
+      {saved && !error && <p className="text-sm opacity-80">{t("retention.saved")}</p>}
     </section>
   );
 }

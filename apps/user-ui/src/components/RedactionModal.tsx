@@ -141,7 +141,7 @@ export function RedactionModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-header">
-          <h2 className="pane-heading">{t("redaction.title")}</h2>
+          <h2 className="m-0 text-base">{t("redaction.title")}</h2>
           <button
             type="button"
             className="modal-close"
@@ -151,7 +151,7 @@ export function RedactionModal({
             ×
           </button>
         </div>
-        <p className="hint">{t("redaction.hint")}</p>
+        <p className="text-sm opacity-80">{t("redaction.hint")}</p>
 
         {pageCount !== null && pageCount > 1 && (
           <div className="redaction-page-nav">
@@ -226,12 +226,12 @@ export function RedactionModal({
         )}
 
         {error && (
-          <p className="error-text" role="alert">
+          <p className="text-danger" role="alert">
             {error}
           </p>
         )}
 
-        <div className="actions">
+        <div className="flex gap-2">
           <button type="button" onClick={handleSubmit} disabled={regions.length === 0 || isSubmitting}>
             {isSubmitting ? t("redaction.submitting") : t("redaction.submitAction")}
           </button>

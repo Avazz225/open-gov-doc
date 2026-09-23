@@ -122,12 +122,12 @@ export function HandFolderReferencesModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-header">
-          <h2 className="pane-heading">{t("handFolder.heading", { name: folder.name })}</h2>
+          <h2 className="m-0 text-base">{t("handFolder.heading", { name: folder.name })}</h2>
           <button type="button" className="modal-close" aria-label={t("common.close")} onClick={onClose}>
             ×
           </button>
         </div>
-        <p className="hint">{t("handFolder.description")}</p>
+        <p className="text-sm opacity-80">{t("handFolder.description")}</p>
 
         <div className="inline-form">
           <label>
@@ -142,7 +142,7 @@ export function HandFolderReferencesModal({
         {isLoading ? (
           <p>{t("common.loading")}</p>
         ) : active.length === 0 ? (
-          <p className="empty-state">{t("handFolder.empty")}</p>
+          <p className="italic opacity-70">{t("handFolder.empty")}</p>
         ) : (
           <ul className="entry-list">
             {active.map(({ reference, document }) => (
@@ -151,7 +151,7 @@ export function HandFolderReferencesModal({
                   {document?.title ?? t("handFolder.unresolvedTitle", { id: reference.document_id })}
                   {reference.document_deleted_at ? ` (${t("handFolder.deletedHint")})` : ""}
                 </span>
-                <span className="actions">
+                <span className="flex gap-2">
                   <button
                     type="button"
                     onClick={() => handleRemove(reference)}
@@ -166,7 +166,7 @@ export function HandFolderReferencesModal({
         )}
 
         {error && (
-          <p className="error-text" role="alert">
+          <p className="text-danger" role="alert">
             {error}
           </p>
         )}

@@ -30,7 +30,7 @@ export function DerivedDocumentsPanel({ document: activeDocument }: { document: 
 
   return (
     <section className="derived-documents-panel" aria-label={t("derivedDocuments.heading")}>
-      <h2 className="pane-heading">{t("derivedDocuments.heading")}</h2>
+      <h2 className="m-0 mb-3 text-base">{t("derivedDocuments.heading")}</h2>
       <ul>
         {derived.map((doc) => (
           <li key={doc.id}>

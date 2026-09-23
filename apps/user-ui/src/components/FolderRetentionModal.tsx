@@ -140,7 +140,7 @@ export function FolderRetentionModal({ folder, onClose }: { folder: Folder; onCl
         onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-header">
-          <h2 className="pane-heading">{t("folderRetention.heading", { name: folder.name })}</h2>
+          <h2 className="m-0 text-base">{t("folderRetention.heading", { name: folder.name })}</h2>
           <button type="button" className="modal-close" aria-label={t("common.close")} onClick={onClose}>
             ×
           </button>
@@ -148,7 +148,7 @@ export function FolderRetentionModal({ folder, onClose }: { folder: Folder; onCl
 
         {activeHold ? (
           <div className="legal-hold-active">
-            <p className="hint">
+            <p className="text-sm opacity-80">
               {t("retention.legalHoldActive", { setBy: activeHold.set_by })}
               {activeHold.reason ? ` (${activeHold.reason})` : ""}
             </p>
@@ -253,11 +253,11 @@ export function FolderRetentionModal({ folder, onClose }: { folder: Folder; onCl
         </button>
 
         {error && (
-          <p className="error-text" role="alert">
+          <p className="text-danger" role="alert">
             {error}
           </p>
         )}
-        {saved && !error && <p className="hint">{t("retention.saved")}</p>}
+        {saved && !error && <p className="text-sm opacity-80">{t("retention.saved")}</p>}
       </div>
     </div>
   );

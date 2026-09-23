@@ -56,7 +56,7 @@ export default function LoginCallbackPage() {
   }, []);
 
   return (
-    <main className="page">
+    <main className="mx-auto max-w-[960px] p-6">
       <p>{t("login.ssoRedirecting")}</p>
     </main>
   );

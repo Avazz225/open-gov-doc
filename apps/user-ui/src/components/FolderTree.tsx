@@ -182,14 +182,14 @@ export function FolderTree({
     if (!node) {
       return loadingIds.has(folderId) ? (
         <ul className="tree-children">
-          <li className="empty-state">{t("common.loading")}</li>
+          <li className="italic opacity-70">{t("common.loading")}</li>
         </ul>
       ) : null;
     }
     if (node.folders.length === 0 && node.documents.length === 0) {
       return (
         <ul className="tree-children">
-          <li className="empty-state">{t("folderBrowser.emptyFolder")}</li>
+          <li className="italic opacity-70">{t("folderBrowser.emptyFolder")}</li>
         </ul>
       );
     }
@@ -254,7 +254,7 @@ export function FolderTree({
   return (
     <div className="folder-tree" aria-label={t("explorer.treeLabel")}>
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}

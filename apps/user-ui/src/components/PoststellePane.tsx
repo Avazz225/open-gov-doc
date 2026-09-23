@@ -214,8 +214,8 @@ export function PoststellePane({ token }: { token: string }) {
 
   return (
     <section className="poststelle-pane" aria-label={t("poststelle.paneLabel")}>
-      <h2 className="pane-heading">{t("poststelle.heading")}</h2>
-      <p className="hint">{t("poststelle.hint")}</p>
+      <h2 className="m-0 mb-3 text-base">{t("poststelle.heading")}</h2>
+      <p className="text-sm opacity-80">{t("poststelle.hint")}</p>
 
       <span className="view-mode-toggle" role="group" aria-label={t("poststelle.tabLabel")}>
         <button
@@ -292,7 +292,7 @@ export function PoststellePane({ token }: { token: string }) {
       )}
 
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
@@ -301,7 +301,7 @@ export function PoststellePane({ token }: { token: string }) {
         <p>{t("common.loading")}</p>
       ) : tab === "inbox" ? (
         inbound.length === 0 ? (
-          <p className="empty-state">{t("poststelle.inboxEmpty")}</p>
+          <p className="italic opacity-70">{t("poststelle.inboxEmpty")}</p>
         ) : (
           <ul className="entry-list">
             {inbound.map((message) => (
@@ -312,7 +312,7 @@ export function PoststellePane({ token }: { token: string }) {
                   {mailboxes.length > 1 && ` · ${mailboxName(message.mailbox_id)}`}
                 </span>
                 {(message.status === "unassigned" || message.status === "proposed_match") && (
-                  <span className="actions">
+                  <span className="flex gap-2">
                     <button
                       type="button"
                       onClick={() => startAction(message)}
@@ -366,7 +366,7 @@ export function PoststellePane({ token }: { token: string }) {
                         onChange={(e) => setRouteReason(e.target.value)}
                       />
                     </label>
-                    <span className="actions">
+                    <span className="flex gap-2">
                       <button
                         type="button"
                         disabled={busyId === message.id || !routeTargetMailboxId}
@@ -406,7 +406,7 @@ export function PoststellePane({ token }: { token: string }) {
                         />
                       </label>
                     )}
-                    <span className="actions">
+                    <span className="flex gap-2">
                       <button
                         type="button"
                         disabled={
@@ -494,7 +494,7 @@ export function PoststellePane({ token }: { token: string }) {
             </div>
           )}
           {outbound.length === 0 ? (
-            <p className="empty-state">{t("poststelle.outboxEmpty")}</p>
+            <p className="italic opacity-70">{t("poststelle.outboxEmpty")}</p>
           ) : (
             <ul className="entry-list">
               {outbound.map((message) => (
@@ -508,7 +508,7 @@ export function PoststellePane({ token }: { token: string }) {
           )}
         </>
       ) : postbuch.length === 0 ? (
-        <p className="empty-state">{t("poststelle.postbuchEmpty")}</p>
+        <p className="italic opacity-70">{t("poststelle.postbuchEmpty")}</p>
       ) : (
         <ul className="entry-list poststelle-postbuch-list">
           {postbuch.map((entry) => (

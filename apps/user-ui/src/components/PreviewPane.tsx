@@ -626,7 +626,7 @@ export function PreviewPane({
   if (!activeDocument) {
     return (
       <section className="preview-pane" aria-label={t("preview.paneLabel")}>
-        <p className="empty-state">{t("preview.noSelection")}</p>
+        <p className="italic opacity-70">{t("preview.noSelection")}</p>
       </section>
     );
   }
@@ -646,7 +646,7 @@ export function PreviewPane({
       className="preview-pane"
       aria-label={t("preview.paneLabelFor", { title: activeDocument.title })}
     >
-      <h2 className="pane-heading">{activeDocument.title}</h2>
+      <h2 className="m-0 mb-3 text-base">{activeDocument.title}</h2>
 
       {versions.length > 0 && (
         <>
@@ -712,7 +712,7 @@ export function PreviewPane({
         </label>
       )}
 
-      {previewKind === "loading" && <p className="empty-state">{t("preview.loading")}</p>}
+      {previewKind === "loading" && <p className="italic opacity-70">{t("preview.loading")}</p>}
 
       {previewKind === "text" && textContent !== null && (
         <pre className="preview-text">{textContent}</pre>
@@ -781,14 +781,14 @@ export function PreviewPane({
         />
       )}
 
-      {previewKind === "none" && <p className="empty-state">{t("preview.noRendition")}</p>}
+      {previewKind === "none" && <p className="italic opacity-70">{t("preview.noRendition")}</p>}
 
       {ocrResult?.status === "needs_review" && (
         <p className="ocr-review-hint">⚠ {t("preview.ocrNeedsReview")}</p>
       )}
 
       {downloadError && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {downloadError}
         </p>
       )}
@@ -800,7 +800,7 @@ export function PreviewPane({
         {exporting ? t("preview.exporting") : t("preview.export")}
       </button>
       {exportError && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {exportError}
         </p>
       )}
@@ -812,7 +812,7 @@ export function PreviewPane({
           nothing - fail silent, the export action itself already fails
           cleanly if unauthorized. */}
       {accessibilityCheck && !accessibilityCheck.is_tagged && (
-        <p className="hint accessibility-warning" role="status">
+        <p className="text-sm opacity-80" role="status">
           ⚠️{" "}
           {accessibilityCheck.is_pdf
             ? t("preview.exportNotTaggedPdfWarning")
@@ -838,7 +838,7 @@ export function PreviewPane({
               placeholder={t("preview.xdomeaExportLeserPlaceholder")}
             />
           </label>
-          <span className="actions">
+          <span className="flex gap-2">
             <button
               type="button"
               disabled={xdomeaExporting || !xdomeaLeserName.trim()}
@@ -853,7 +853,7 @@ export function PreviewPane({
         </div>
       )}
       {xdomeaExportError && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {xdomeaExportError}
         </p>
       )}
@@ -878,7 +878,7 @@ export function PreviewPane({
               placeholder={t("preview.xjustizExportEmpfaengerPlaceholder")}
             />
           </label>
-          <span className="actions">
+          <span className="flex gap-2">
             <button
               type="button"
               disabled={xjustizExporting || !xjustizEmpfaengerName.trim()}
@@ -893,14 +893,14 @@ export function PreviewPane({
         </div>
       )}
       {xjustizExportError && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {xjustizExportError}
         </p>
       )}
       <button type="button" onClick={handleCopyLink}>
         {t("preview.copyLink")}
       </button>
-      {linkCopyMessage && <span className="hint">{linkCopyMessage}</span>}
+      {linkCopyMessage && <span className="text-sm opacity-80">{linkCopyMessage}</span>}
       {officeLaunchInfo(currentContentType) && (
         <button type="button" onClick={handleOfficeLaunch}>
           {t("preview.openInOffice", { app: officeLaunchInfo(currentContentType)!.label })}

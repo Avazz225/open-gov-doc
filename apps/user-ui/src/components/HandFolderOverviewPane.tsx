@@ -96,20 +96,20 @@ export function HandFolderOverviewPane({
 
   return (
     <section className="hand-folder-overview-pane" aria-label={t("handFolderOverview.paneLabel")}>
-      <h2 className="pane-heading">{t("handFolderOverview.heading")}</h2>
+      <h2 className="m-0 mb-3 text-base">{t("handFolderOverview.heading")}</h2>
 
       <section aria-labelledby="hand-folder-references-heading">
         <h3 id="hand-folder-references-heading">{t("handFolderOverview.referencesHeading")}</h3>
-        <p className="hint">{t("handFolderOverview.referencesHint")}</p>
+        <p className="text-sm opacity-80">{t("handFolderOverview.referencesHint")}</p>
         {referencesError && (
-          <p className="error-text" role="alert">
+          <p className="text-danger" role="alert">
             {referencesError}
           </p>
         )}
         {referencesLoading ? (
           <p>{t("common.loading")}</p>
         ) : references.length === 0 ? (
-          <p className="empty-state">{t("handFolderOverview.referencesEmpty")}</p>
+          <p className="italic opacity-70">{t("handFolderOverview.referencesEmpty")}</p>
         ) : (
           <table className="data-table">
             <thead>
@@ -144,16 +144,16 @@ export function HandFolderOverviewPane({
 
       <section aria-labelledby="work-tray-heading">
         <h3 id="work-tray-heading">{t("handFolderOverview.workTrayHeading")}</h3>
-        <p className="hint">{t("handFolderOverview.workTrayHint")}</p>
+        <p className="text-sm opacity-80">{t("handFolderOverview.workTrayHint")}</p>
         {workTrayError && (
-          <p className="error-text" role="alert">
+          <p className="text-danger" role="alert">
             {workTrayError}
           </p>
         )}
         {workTrayLoading ? (
           <p>{t("common.loading")}</p>
         ) : workTrayDocs.length === 0 ? (
-          <p className="empty-state">{t("handFolderOverview.workTrayEmpty")}</p>
+          <p className="italic opacity-70">{t("handFolderOverview.workTrayEmpty")}</p>
         ) : (
           <table className="data-table">
             <thead>

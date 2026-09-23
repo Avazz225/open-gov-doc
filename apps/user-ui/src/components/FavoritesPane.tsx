@@ -99,11 +99,11 @@ export function FavoritesPane({
 
   return (
     <section className="favorites-pane" aria-label={t("favorites.paneLabel")}>
-      <h2 className="pane-heading">{t("favorites.heading")}</h2>
-      <p className="hint">{t("favorites.hint")}</p>
+      <h2 className="m-0 mb-3 text-base">{t("favorites.heading")}</h2>
+      <p className="text-sm opacity-80">{t("favorites.hint")}</p>
 
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
@@ -111,7 +111,7 @@ export function FavoritesPane({
       {isLoading ? (
         <p>{t("common.loading")}</p>
       ) : entries.length === 0 ? (
-        <p className="empty-state">{t("favorites.empty")}</p>
+        <p className="italic opacity-70">{t("favorites.empty")}</p>
       ) : (
         <ul className="entry-list">
           {entries.map(({ favorite, document, folder, case: caseItem }) => {
@@ -131,7 +131,7 @@ export function FavoritesPane({
                 <span className="entry-name">
                   {typeLabel} {name}
                 </span>
-                <span className="actions">
+                <span className="flex gap-2">
                   {document && (
                     <button type="button" onClick={() => onOpenDocument(document)}>
                       {t("favorites.open")}

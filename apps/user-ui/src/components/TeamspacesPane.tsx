@@ -282,11 +282,11 @@ export function TeamspacesPane({
 
   return (
     <section className="teamspaces-pane" aria-label={t("teamspaces.paneLabel")}>
-      <h2 className="pane-heading">{t("teamspaces.heading")}</h2>
-      <p className="hint">{t("teamspaces.hint")}</p>
+      <h2 className="m-0 mb-3 text-base">{t("teamspaces.heading")}</h2>
+      <p className="text-sm opacity-80">{t("teamspaces.hint")}</p>
 
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
@@ -310,13 +310,13 @@ export function TeamspacesPane({
       {isLoading ? (
         <p>{t("common.loading")}</p>
       ) : teamspaces.length === 0 ? (
-        <p className="empty-state">{t("teamspaces.empty")}</p>
+        <p className="italic opacity-70">{t("teamspaces.empty")}</p>
       ) : (
         <ul className="entry-list">
           {teamspaces.map((teamspace) => (
             <li className="entry-row" key={teamspace.id}>
               <span className="entry-name">{teamspace.name}</span>
-              <span className="actions">
+              <span className="flex gap-2">
                 <button type="button" onClick={() => selectTeamspace(teamspace)}>
                   {t("teamspaces.open")}
                 </button>
@@ -328,9 +328,9 @@ export function TeamspacesPane({
 
       {selected && (
         <div className="teamspace-detail">
-          <div className="top-bar">
+          <div className="flex items-center justify-between border-b border-border px-6 py-3">
             <h3>{selected.name}</h3>
-            <span className="actions">
+            <span className="flex gap-2">
               <button type="button" onClick={() => onOpenFolder(selected.root_folder_id)}>
                 {t("teamspaces.openFolder")}
               </button>
@@ -358,7 +358,7 @@ export function TeamspacesPane({
                     : ""}
                 </span>
                 {canManage && member.principal_id !== currentPrincipalId && (
-                  <span className="actions">
+                  <span className="flex gap-2">
                     <button type="button" onClick={() => handleRemoveMember(member.principal_id)}>
                       {t("teamspaces.removeMember")}
                     </button>
@@ -381,14 +381,14 @@ export function TeamspacesPane({
 
           <h4>{t("teamspaces.adGroupsHeading")}</h4>
           {adGroupBindings.length === 0 ? (
-            <p className="empty-state">{t("teamspaces.adGroupsEmpty")}</p>
+            <p className="italic opacity-70">{t("teamspaces.adGroupsEmpty")}</p>
           ) : (
             <ul className="entry-list">
               {adGroupBindings.map((binding) => (
                 <li className="entry-row" key={binding.id}>
                   <span className="entry-name">{binding.ad_group_name}</span>
                   {canManage && (
-                    <span className="actions">
+                    <span className="flex gap-2">
                       <button
                         type="button"
                         onClick={() => handleUnbindAdGroup(binding.ad_group_name)}
@@ -404,7 +404,7 @@ export function TeamspacesPane({
           {canManage && (
             <div className="teamspaces-ad-group-form">
               {adGroupError && (
-                <p className="error-text" role="alert">
+                <p className="text-danger" role="alert">
                   {adGroupError}
                 </p>
               )}
@@ -423,7 +423,7 @@ export function TeamspacesPane({
               {adGroupPreview && (
                 <div className="ad-group-preview">
                   {adGroupPreview.length === 0 ? (
-                    <p className="empty-state">{t("teamspaces.adGroupPreviewEmpty")}</p>
+                    <p className="italic opacity-70">{t("teamspaces.adGroupPreviewEmpty")}</p>
                   ) : (
                     <ul className="entry-list">
                       {adGroupPreview.map((member) => (
@@ -450,7 +450,7 @@ export function TeamspacesPane({
                   {new Date(appointment.start_at).toLocaleString()} –{" "}
                   {new Date(appointment.end_at).toLocaleString()}
                 </span>
-                <span className="actions">
+                <span className="flex gap-2">
                   <button type="button" onClick={() => handleDeleteAppointment(appointment.id)}>
                     {t("common.delete")}
                   </button>
@@ -486,7 +486,7 @@ export function TeamspacesPane({
                   {contact.name}
                   {contact.email ? ` (${contact.email})` : ""}
                 </span>
-                <span className="actions">
+                <span className="flex gap-2">
                   <button type="button" onClick={() => handleDeleteContact(contact.id)}>
                     {t("common.delete")}
                   </button>

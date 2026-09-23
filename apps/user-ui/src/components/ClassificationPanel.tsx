@@ -62,7 +62,7 @@ export function ClassificationPanel({
 
   return (
     <section className="classification-panel" aria-label={t("classification.paneLabel")}>
-      <h2 className="pane-heading">{t("classification.heading")}</h2>
+      <h2 className="m-0 mb-3 text-base">{t("classification.heading")}</h2>
       {/* Accessibility pass (14.2, post-roadmap phase 31 session 8): the
           current level used to be bare, unlabeled text - a screen reader
           landing on it out of context (e.g. via heading/region navigation
@@ -98,7 +98,7 @@ export function ClassificationPanel({
       )}
 
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}

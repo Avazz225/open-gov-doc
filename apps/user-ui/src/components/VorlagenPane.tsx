@@ -111,8 +111,8 @@ export function VorlagenPane({ token, createdBy }: { token: string; createdBy: s
 
   return (
     <section className="vorlagen-pane" aria-label={t("vorlagen.paneLabel")}>
-      <h2 className="pane-heading">{t("vorlagen.heading")}</h2>
-      <p className="hint">{t("vorlagen.hint")}</p>
+      <h2 className="m-0 mb-3 text-base">{t("vorlagen.heading")}</h2>
+      <p className="text-sm opacity-80">{t("vorlagen.hint")}</p>
 
       <form onSubmit={handleCreate}>
         <label>
@@ -145,7 +145,7 @@ export function VorlagenPane({ token, createdBy }: { token: string; createdBy: s
       </form>
 
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
@@ -153,7 +153,7 @@ export function VorlagenPane({ token, createdBy }: { token: string; createdBy: s
       {isLoading ? (
         <p>{t("common.loading")}</p>
       ) : templates.length === 0 ? (
-        <p className="empty-state">{t("vorlagen.empty")}</p>
+        <p className="italic opacity-70">{t("vorlagen.empty")}</p>
       ) : (
         <ul className="entry-list">
           {templates.map((template) => (
@@ -162,7 +162,7 @@ export function VorlagenPane({ token, createdBy }: { token: string; createdBy: s
                 {template.name}
                 {template.description ? ` — ${template.description}` : ""}
               </span>
-              <span className="actions">
+              <span className="flex gap-2">
                 <button
                   type="button"
                   onClick={() => startApply(template)}
@@ -189,7 +189,7 @@ export function VorlagenPane({ token, createdBy }: { token: string; createdBy: s
                       placeholder={t("vorlagen.targetFolderPlaceholder")}
                     />
                   </label>
-                  <span className="actions">
+                  <span className="flex gap-2">
                     <button
                       type="button"
                       onClick={() => confirmApply(template)}

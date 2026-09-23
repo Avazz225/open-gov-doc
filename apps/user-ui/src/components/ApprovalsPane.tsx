@@ -86,11 +86,11 @@ export function ApprovalsPane({
 
   return (
     <section className="approvals-pane" aria-label={t("approvals.paneLabel")}>
-      <h2 className="pane-heading">{t("approvals.heading")}</h2>
-      <p className="hint">{t("approvals.hint")}</p>
+      <h2 className="m-0 mb-3 text-base">{t("approvals.heading")}</h2>
+      <p className="text-sm opacity-80">{t("approvals.hint")}</p>
 
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
@@ -98,7 +98,7 @@ export function ApprovalsPane({
       {isLoading ? (
         <p>{t("common.loading")}</p>
       ) : requests.length === 0 ? (
-        <p className="empty-state">{t("approvals.empty")}</p>
+        <p className="italic opacity-70">{t("approvals.empty")}</p>
       ) : (
         <ul className="entry-list">
           {requests.map((request) => {
@@ -111,7 +111,7 @@ export function ApprovalsPane({
                     : t("approvals.typeFolder")}{" "}
                   {objectId(request)} — {t("approvals.requestedBy", { name: request.initiated_by })}
                 </span>
-                <span className="actions">
+                <span className="flex gap-2">
                   <button
                     type="button"
                     onClick={() => handleApprove(request)}

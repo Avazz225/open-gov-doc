@@ -339,18 +339,22 @@ export function DocumentWorkspace() {
   }
 
   return (
-    <div className="workspace">
-      <div className="top-bar">
+    <div className="flex h-screen flex-col">
+      <div className="flex items-center justify-between border-b border-border px-6 py-3">
         <h1>{t("folderBrowser.title")}</h1>
         <div>
           {user && <span>{user.username} </span>}
-          <button type="button" onClick={logout}>
+          <button
+            type="button"
+            onClick={logout}
+            className="rounded-md border border-border bg-hover-bg px-3 py-1 text-fg transition-colors hover:bg-accent-bg"
+          >
             {t("common.logout")}
           </button>
         </div>
       </div>
 
-      <div className="workspace-body">
+      <div className="flex min-h-0 flex-1">
         <IconRail activeView={view} onSelectView={setView} />
         <DockableDocumentArea
           ref={dockableAreaRef}

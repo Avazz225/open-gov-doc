@@ -148,7 +148,7 @@ export function BulkEditModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-header">
-          <h2 className="pane-heading">{t("bulkEdit.heading", { count: items.length })}</h2>
+          <h2 className="m-0 text-base">{t("bulkEdit.heading", { count: items.length })}</h2>
           <button type="button" className="modal-close" aria-label={t("common.close")} onClick={onClose}>
             ×
           </button>
@@ -165,27 +165,27 @@ export function BulkEditModal({
                     </span>{" "}
                     {result.name}
                   </span>
-                  {result.message && <span className="hint">{result.message}</span>}
+                  {result.message && <span className="text-sm opacity-80">{result.message}</span>}
                 </li>
               ))}
             </ul>
-            <div className="actions">
+            <div className="flex gap-2">
               <button type="button" onClick={onClose}>
                 {t("common.close")}
               </button>
             </div>
           </>
         ) : !isHomogeneous ? (
-          <p className="error-text" role="alert">
+          <p className="text-danger" role="alert">
             {t("bulkEdit.notHomogeneous")}
           </p>
         ) : firstObjectTypeId === null ? (
-          <p className="empty-state">{t("bulkEdit.noObjectType")}</p>
+          <p className="italic opacity-70">{t("bulkEdit.noObjectType")}</p>
         ) : (
           <>
-            <p className="hint">{t("bulkEdit.hint")}</p>
+            <p className="text-sm opacity-80">{t("bulkEdit.hint")}</p>
             {loadError && (
-              <p className="error-text" role="alert">
+              <p className="text-danger" role="alert">
                 {loadError}
               </p>
             )}
@@ -210,7 +210,7 @@ export function BulkEditModal({
                 }}
               />
             )}
-            <div className="actions">
+            <div className="flex gap-2">
               <button type="button" onClick={handleSubmit} disabled={isSubmitting || !layout}>
                 {isSubmitting ? t("bulkEdit.submitting") : t("bulkEdit.submit")}
               </button>

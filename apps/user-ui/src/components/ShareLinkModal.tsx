@@ -100,7 +100,7 @@ export function ShareLinkModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-header">
-          <h2 className="pane-heading">{t("shareLinkModal.heading", { name: documentTitle })}</h2>
+          <h2 className="m-0 text-base">{t("shareLinkModal.heading", { name: documentTitle })}</h2>
           <button type="button" className="modal-close" aria-label={t("common.close")} onClick={onClose}>
             ×
           </button>
@@ -123,7 +123,7 @@ export function ShareLinkModal({
         {isLoading ? (
           <p>{t("common.loading")}</p>
         ) : links.length === 0 ? (
-          <p className="empty-state">{t("shareLinkModal.empty")}</p>
+          <p className="italic opacity-70">{t("shareLinkModal.empty")}</p>
         ) : (
           <ul className="entry-list">
             {links.map((link) => (
@@ -137,12 +137,12 @@ export function ShareLinkModal({
                       onFocus={(e) => e.target.select()}
                       aria-label={t("shareLinkModal.urlLabel")}
                     />
-                    <span className="hint">
+                    <span className="text-sm opacity-80">
                       {t("shareLinkModal.expiresAt", {
                         date: new Date(link.expires_at).toLocaleString(),
                       })}
                     </span>
-                    <span className="actions">
+                    <span className="flex gap-2">
                       <button
                         type="button"
                         onClick={() => handleRevoke(link)}
@@ -153,7 +153,7 @@ export function ShareLinkModal({
                     </span>
                   </>
                 ) : (
-                  <span className="hint">
+                  <span className="text-sm opacity-80">
                     {link.revoked_at
                       ? t("shareLinkModal.revokedState")
                       : t("shareLinkModal.expiredState")}
@@ -165,7 +165,7 @@ export function ShareLinkModal({
         )}
 
         {error && (
-          <p className="error-text" role="alert">
+          <p className="text-danger" role="alert">
             {error}
           </p>
         )}

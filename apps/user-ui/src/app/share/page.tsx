@@ -41,19 +41,19 @@ export default function SharePage() {
   }, [token, t]);
 
   return (
-    <main className="page share-page">
+    <main className="mx-auto max-w-[960px] p-6">
       <h1>{t("share.heading")}</h1>
 
       {isLoading ? (
         <p>{t("common.loading")}</p>
       ) : error ? (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       ) : link ? (
         <div className="share-card">
           <h2>{link.title}</h2>
-          <p className="hint">
+          <p className="text-sm opacity-80">
             {t("share.expiresAt", { date: new Date(link.expires_at).toLocaleString() })}
           </p>
           <a

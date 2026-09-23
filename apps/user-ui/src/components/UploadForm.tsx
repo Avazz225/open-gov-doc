@@ -144,12 +144,12 @@ export function UploadForm({
         onDrop={handleDrop}
       >
         <div className="modal-header">
-          <h2 className="pane-heading">{t("upload.formLabel")}</h2>
+          <h2 className="m-0 text-base">{t("upload.formLabel")}</h2>
           <button type="button" className="modal-close" aria-label={t("upload.close")} onClick={onClose}>
             ×
           </button>
         </div>
-        <p className="empty-state">{t("upload.dropHint")}</p>
+        <p className="italic opacity-70">{t("upload.dropHint")}</p>
 
         <form onSubmit={handleSubmit} aria-label={t("upload.formLabel")}>
           <input
@@ -185,7 +185,7 @@ export function UploadForm({
             />
             {t("upload.draftLabel")}
           </label>
-          {draft && <p className="empty-state">{t("upload.draftHint")}</p>}
+          {draft && <p className="italic opacity-70">{t("upload.draftHint")}</p>}
 
           {selectedObjectType && layout && (
             <LayoutFormFields
@@ -212,7 +212,7 @@ export function UploadForm({
             />
           )}
 
-          <div className="actions">
+          <div className="flex gap-2">
             <button type="submit" disabled={!file || submitting}>
               {submitting ? t("upload.submitting") : t("upload.submit")}
             </button>
@@ -221,7 +221,7 @@ export function UploadForm({
             </button>
           </div>
           {error && (
-            <p className="error-text" role="alert">
+            <p className="text-danger" role="alert">
               {error}
             </p>
           )}

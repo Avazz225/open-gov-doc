@@ -126,7 +126,7 @@ export function SearchPane({
           placeholder={t("search.placeholder")}
           aria-label={t("search.queryLabel")}
         />
-        <p className="hint search-syntax-hint">{t("search.syntaxHint")}</p>
+        <p className="text-sm opacity-80">{t("search.syntaxHint")}</p>
         <label className="search-object-type">
           {t("search.objectTypeLabel")}
           <select value={objectTypeId} onChange={(event) => handleObjectTypeChange(event.target.value)}>
@@ -200,10 +200,10 @@ export function SearchPane({
         <button type="submit">{t("search.submit")}</button>
       </form>
 
-      {error && <p className="error-text">{error}</p>}
-      {isLoading && <p className="empty-state">{t("search.loading")}</p>}
+      {error && <p className="text-danger">{error}</p>}
+      {isLoading && <p className="italic opacity-70">{t("search.loading")}</p>}
       {!isLoading && hasSearched && results.length === 0 && (
-        <p className="empty-state">{t("search.noResults")}</p>
+        <p className="italic opacity-70">{t("search.noResults")}</p>
       )}
 
       <ul className="search-results">

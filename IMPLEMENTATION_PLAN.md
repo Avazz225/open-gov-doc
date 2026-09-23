@@ -2021,9 +2021,21 @@ not a web app, and has no CSS of any kind to migrate.
   `.deletion-reason-catalog*`) all involve descendant/compound selectors (table cells, nested labels,
   modifier variants) and are kept as permanent shared component classes, not unfinished scope — see
   [ADR 0226](docs/adr/0226-admin-ui-card-conversion-shared-component-class-boundary.md) for the full
-  reasoning. Remaining: all of `user-ui` (similarly large, not yet started, needs its own structural
-  survey first, same lens as ADR 0225/0226), then Phase 75's own phase-close (full regression +
-  `graphify update .`).
+  reasoning.
+  **user-ui shell + shared classes done (P75-S10)**: structural survey found a genuinely different
+  shape than admin-ui (single-page dockview workspace, not ~30 thin routes) — converted the shell layer
+  (`DocumentWorkspace`/`IconRail`/`ContextMenu`/switchers/`RequireAuth`/`MaintenanceBanner`/login+share
+  pages) plus every single-element shared class (`.hint`/`.error-text`/`.empty-state`/`.actions`/
+  `.pane-heading`). Found and fixed 4 dead-CSS-class bugs (including `.maintenance-banner`, the same bug
+  independently present as in admin-ui) plus 2 real utility-conflict regressions caught before shipping
+  (6 modal headings with both `m-0`/`mb-3`; `IconRail`'s own active-state highlight silently broken by
+  `bg-transparent`/`bg-accent-bg` both present) — both found via computed-style probing against the real
+  rebuilt Docker image. New
+  [ADR 0227](docs/adr/0227-user-ui-tailwind-shell-and-shared-class-conversion.md). Remaining shared
+  classes (dockview theming, `.badge`+modifiers, redaction/OCR-specific, `.share-card`, etc.) kept as
+  permanent component classes, same reasoning as admin-ui. Remaining: Phase 75's own phase-close (full
+  regression across all touched apps + `graphify update .`, per this project's standing phase-end
+  cadence).
 
 **Definition of Done**: P75-S1 needs a real ADR (a genuine architecture decision: which token-integration
 mechanism, shared preset location); P75-S2 needs before/after screenshots in the same message/commit,

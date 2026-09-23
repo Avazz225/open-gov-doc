@@ -46,7 +46,7 @@ export function ContextMenu({
   return (
     <div
       ref={menuRef}
-      className="context-menu"
+      className="fixed z-[10001] min-w-[12rem] rounded-md border border-border bg-surface p-1 text-surface-fg shadow-sm"
       role="menu"
       style={{ top: y, left: x }}
     >
@@ -55,7 +55,7 @@ export function ContextMenu({
           key={item.label}
           type="button"
           role="menuitem"
-          className="context-menu-item"
+          className="block w-full cursor-pointer rounded-sm border-0 bg-transparent px-3 py-2 text-left text-inherit enabled:hover:bg-accent enabled:hover:text-accent-fg disabled:cursor-not-allowed disabled:opacity-50"
           disabled={item.disabled}
           onClick={() => {
             item.onSelect();

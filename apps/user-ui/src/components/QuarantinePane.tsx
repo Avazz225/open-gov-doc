@@ -85,11 +85,11 @@ export function QuarantinePane({ token }: { token: string }) {
 
   return (
     <section className="quarantine-pane" aria-label={t("quarantine.paneLabel")}>
-      <h2 className="pane-heading">{t("quarantine.heading")}</h2>
-      <p className="hint">{t("quarantine.hint")}</p>
+      <h2 className="m-0 mb-3 text-base">{t("quarantine.heading")}</h2>
+      <p className="text-sm opacity-80">{t("quarantine.hint")}</p>
 
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-danger" role="alert">
           {error}
         </p>
       )}
@@ -97,7 +97,7 @@ export function QuarantinePane({ token }: { token: string }) {
       {isLoading ? (
         <p>{t("common.loading")}</p>
       ) : scans.length === 0 ? (
-        <p className="empty-state">{t("quarantine.empty")}</p>
+        <p className="italic opacity-70">{t("quarantine.empty")}</p>
       ) : (
         <ul className="entry-list">
           {scans.map((scan) => (
@@ -106,7 +106,7 @@ export function QuarantinePane({ token }: { token: string }) {
                 {scan.filename}
                 {scan.threat_name ? ` — ${scan.threat_name}` : ""}
               </span>
-              <span className="actions">
+              <span className="flex gap-2">
                 <button
                   type="button"
                   onClick={() => startRelease(scan)}
@@ -141,7 +141,7 @@ export function QuarantinePane({ token }: { token: string }) {
                       placeholder={t("quarantine.releaseFolderPlaceholder")}
                     />
                   </label>
-                  <span className="actions">
+                  <span className="flex gap-2">
                     <button
                       type="button"
                       onClick={() => confirmRelease(scan)}
