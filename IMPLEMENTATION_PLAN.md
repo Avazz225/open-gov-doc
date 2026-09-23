@@ -1943,7 +1943,7 @@ not a web app, and has no CSS of any kind to migrate.
   replaces its hand-written CSS. All six apps build clean in real static-export mode (Docker build
   verified for `user-ui`), `tsc`/`eslint`/`vitest` all green (migration-console's one failure is
   pre-existing, confirmed via `git stash`). New [ADR 0218](docs/adr/0218-tailwind-css-v4-tooling-foundation.md).
-- **P75-S2 — Pilot: rebuild the login page in Tailwind, across all six apps.** Directly addresses the
+- ~~**P75-S2 — Pilot: rebuild the login page in Tailwind, across all six apps.** Directly addresses the
   user's own specifically-named pain point first, and the login page is small, self-contained, and
   already near-identical across every app — an ideal proof-of-concept for the new tooling before a much
   larger rollout, mirroring this project's own established "prove the pattern once on something small,
@@ -1951,7 +1951,16 @@ not a web app, and has no CSS of any kind to migrate.
   a **real visual redesign**, not a mechanical class-for-class port — a card/panel treatment, real
   spacing/hierarchy, an actually-2026-appropriate feel, not just the same layout with Tailwind class
   names swapped in for the old CSS classes. Real browser screenshots (light/dark/high-contrast) required
-  before/after, per this project's own non-negotiable UI-change convention.
+  before/after, per this project's own non-negotiable UI-change convention.~~ **Done.** Centered
+  card (`rounded-lg border bg-surface shadow-lg`) with labeled inputs, visible focus rings, and an
+  error alert, rolled out identically to all six apps (`office-addin` scaled down, consistent with its
+  reduced-theming exception). Two real bugs found and fixed live: a WCAG contrast failure on the accent
+  button in dark/high-contrast themes, fixed via a new permanent `--dms-accent-fg` token (not a
+  one-off); and an `office-addin`-only CSS cascade-layer bug (its pre-existing unlayered tag-selector
+  rules silently beat the new `@layer utilities` Tailwind classes), fixed by wrapping its existing CSS
+  in `@layer base`. Live-verified in all three themes, error/focus states, and against the real running
+  Docker containers for all six apps. New
+  [ADR 0219](docs/adr/0219-login-page-tailwind-redesign-accent-fg-token-cascade-fix.md).
 - **P75-S3 onward — rollout to the rest of each app**, sized and sequenced the same way Phase 49's own
   visual-modernization rollout already was: small apps grouped together first to prove the rollout
   mechanics cheaply (`office-addin`, `migration-console`, `process-designer`, `reviewer-ui`), then

@@ -2,10 +2,61 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P75-S1 (first session of Phase 75 — Tailwind CSS migration, reordered ahead of the
-ERP/mobile/AI bundle at the user's explicit request). Tooling foundation only, no visual redesign yet
-(that's P75-S2) — see [ADR 0218](docs/adr/0218-tailwind-css-v4-tooling-foundation.md) for the full
+**Last completed:** P75-S2 (second session of Phase 75 — Tailwind CSS migration pilot: the login page,
+across all six apps). The first real Tailwind visual redesign in this repo — see
+[ADR 0219](docs/adr/0219-login-page-tailwind-redesign-accent-fg-token-cascade-fix.md) for the full
 writeup.
+
+**Redesign**: `/login` rebuilt as a centered card (`rounded-lg border border-border bg-surface
+shadow-lg`) with labeled inputs, visible focus rings, and an error alert, replacing the old bare
+`<main>`/`<form>` layout — applied identically to `user-ui`, `admin-ui` (the app the user specifically
+named "clunky, dated"), `reviewer-ui`, `process-designer`, `migration-console`; `office-addin` gets a
+scaled-down variant (smaller padding/type, no `useBranding`), consistent with its already-established
+reduced-theming exception (Phase 48/49). `box-border` added explicitly everywhere `width`/`max-width`
+combines with `padding`/`border`, since preflight's `box-sizing: border-box` reset stays excluded
+(ADR 0218).
+
+**Two real bugs found and fixed live, not just anticipated**:
+1. **WCAG contrast failure**: a hardcoded `text-white` on the new `bg-accent` button was nearly
+   illegible in the high-contrast theme (white-on-`#ffff00`) and technically fails AA in the dark theme
+   (white-on-`#60a5fa`, ~2.5:1, under the 4.5:1 threshold) — found via screenshot, confirmed via actual
+   relative-luminance contrast computation. Fixed with a new permanent design-system token,
+   `--dms-accent-fg` (`libs/dms-ui/tokens.css`, mapped into `tailwind-preset.css` as `--color-accent-fg`;
+   light `#ffffff`, dark `#0b1220`, high-contrast `#000000`), not a one-off fix on this one button —
+   available to any future accent-colored control.
+2. **office-addin-only CSS cascade-layer bug**: this app's pre-existing `globals.css` has real global
+   `input[type="password"]`/`button` tag-selector rules, left unlayered when P75-S1 added Tailwind's
+   `@layer theme, base, components, utilities;` declaration. Per the CSS cascade, unlayered rules always
+   beat `@layer`-wrapped rules regardless of source order or specificity, so those old rules silently
+   overrode the new Tailwind classes — invisible to `tsc`/`eslint`/`vitest`, only found by inspecting
+   actual computed styles. Fixed by wrapping ALL of this app's pre-existing CSS in `@layer base { ... }`.
+   This is the only one of the six apps affected (the only one with pre-existing global tag-selector
+   rules predating Tailwind).
+
+**office-addin verification technique**: this app's Office.js host-gating (documented in
+`docs/services/office-addin.md`, P49-S1) crashes a plain-browser load before reaching `/login`, and the
+established `page.route()` office.js-blocking workaround only reaches `OfficeGate`'s error screen, not
+the gated login page behind it. Verified instead via a standalone static probe: served the static
+`out/` export via `python3 -m http.server`, created a temporary HTML file loading the real compiled CSS
+with bare elements carrying the exact same Tailwind classNames, and checked `getComputedStyle()`
+directly — proved both the redesign and the cascade fix without needing the app's JS runtime at all.
+Probe file deleted after verification.
+
+**Live-verified thoroughly**: all six apps pass production build, `tsc --noEmit`, `eslint`, and Vitest
+(`migration-console`'s one failure remains the same pre-existing, unrelated flaky `waitFor` assertion,
+re-confirmed via `git stash` this session). All six Docker images rebuilt and redeployed to the live dev
+stack; all six login pages screenshotted against the real running containers and confirmed correct.
+`docs/services/*.md` updated for all six apps, plus `libs/dms-ui/README.md` for the new token.
+
+**Next session:** P75-S3 onward — rollout to the rest of each app beyond the login page, grouped small
+apps first (`office-addin`, `migration-console`, `process-designer`, `reviewer-ui`), then `admin-ui`/
+`user-ui` each getting their own session, per the plan's own sizing/sequencing (mirroring Phase 49).
+
+---
+
+Immediately before P75-S2: **P75-S1** (first session of Phase 75 — Tailwind CSS migration, reordered
+ahead of the ERP/mobile/AI bundle at the user's explicit request). Tooling foundation only, no visual
+redesign yet — see [ADR 0218](docs/adr/0218-tailwind-css-v4-tooling-foundation.md) for the full writeup.
 
 **Decision**: Tailwind CSS v4 (`4.3.3`), CSS-first `@theme inline` configuration mapping Tailwind's
 utility namespaces directly onto the EXISTING `--dms-*` tokens (`libs/dms-ui/tokens.css`, ADR 0168) — no
@@ -39,11 +90,6 @@ redeployed `user-ui`'s real Docker image (a genuinely different build context th
 build`) and screenshotted its login page against the actual running dev stack — pixel-identical to
 baseline. `docs/services/*.md` updated for all six apps plus `libs/dms-ui/README.md` (also fixed a stale
 "not yet consumed by any app" note found while there — all six have imported `tokens.css` since Phase 49).
-
-**Next session:** P75-S2 — pilot: rebuild the login page in Tailwind, across all six apps. The first
-session where Tailwind utilities actually replace hand-written CSS (and where each touched app's
-`preflight` omission gets revisited) — a real visual redesign, before/after screenshots (light/dark/
-high-contrast) required per this project's own non-negotiable UI-change convention.
 
 ---
 

@@ -86,6 +86,20 @@
   --dms-accent: #2563eb;
   --dms-accent-bg: rgba(37, 99, 235, 0.15);
   --dms-accent-bg-strong: rgba(37, 99, 235, 0.5);
+  /* Text color for content placed ON TOP of a solid `--dms-accent` fill
+     (e.g. a primary button) - Post-Roadmap Phase 75 Session 2, found live
+     while building the redesigned login page's solid-accent submit
+     button: a single hardcoded `white` text color (the obvious default)
+     passes WCAG AA against light theme's accent (#2563eb, ~5.25:1) but
+     FAILS badly against high-contrast's accent (#ffff00 - white-on-yellow
+     is barely legible, confirmed via a real screenshot before this token
+     existed) and is materially weaker than it could be against dark
+     theme's lighter accent (#60a5fa, white text ~2.5:1, fails AA; a dark
+     foreground instead reaches ~8:1). This token exists specifically so
+     "text on a solid accent fill" has its own themed answer instead of
+     every future accent-filled component re-guessing a single global
+     text color per theme. */
+  --dms-accent-fg: #ffffff;
   --dms-danger: #b91c1c;
   --dms-danger-bg: #b91c1c33;
   --dms-success: #16a34a;
@@ -106,6 +120,10 @@
     --dms-accent: #60a5fa;
     --dms-accent-bg: rgba(96, 165, 250, 0.2);
     --dms-accent-bg-strong: rgba(96, 165, 250, 0.5);
+    /* Dark, not white - see the `:root` block's own comment on this
+       token: white-on-#60a5fa only reaches ~2.5:1 (fails WCAG AA),
+       while a dark foreground reaches ~8:1. */
+    --dms-accent-fg: #0b1220;
     --dms-danger: #f87171;
     --dms-danger-bg: #f8717133;
     --dms-success: #4ade80;
@@ -122,6 +140,7 @@
   --dms-accent: #2563eb;
   --dms-accent-bg: rgba(37, 99, 235, 0.15);
   --dms-accent-bg-strong: rgba(37, 99, 235, 0.5);
+  --dms-accent-fg: #ffffff;
   --dms-danger: #b91c1c;
   --dms-danger-bg: #b91c1c33;
   --dms-success: #16a34a;
@@ -139,6 +158,7 @@
   --dms-accent: #60a5fa;
   --dms-accent-bg: rgba(96, 165, 250, 0.2);
   --dms-accent-bg-strong: rgba(96, 165, 250, 0.5);
+  --dms-accent-fg: #0b1220;
   --dms-danger: #f87171;
   --dms-danger-bg: #f8717133;
   --dms-success: #4ade80;
@@ -164,6 +184,10 @@
   --dms-accent: #ffff00;
   --dms-accent-bg: #000000;
   --dms-accent-bg-strong: #ffff00;
+  /* Black, not white - see the `:root` block's own comment on this
+     token: this is the specific theme where the bug was actually found
+     (white-on-#ffff00 is barely legible; black reaches full contrast). */
+  --dms-accent-fg: #000000;
   --dms-danger: #ff6b6b;
   --dms-danger-bg: #000000;
   --dms-success: #6bff6b;

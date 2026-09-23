@@ -34,6 +34,7 @@
   --color-accent: var(--dms-accent);
   --color-accent-bg: var(--dms-accent-bg);
   --color-accent-bg-strong: var(--dms-accent-bg-strong);
+  --color-accent-fg: var(--dms-accent-fg);
   --color-danger: var(--dms-danger);
   --color-danger-bg: var(--dms-danger-bg);
   --color-success: var(--dms-success);

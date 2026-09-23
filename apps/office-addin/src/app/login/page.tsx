@@ -46,37 +46,53 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="page">
-      <form className="login-form" onSubmit={handleSubmit}>
-        <h1>{t("login.heading")}</h1>
-        <label htmlFor="username">{t("login.username")}</label>
-        <input
-          id="username"
-          name="username"
-          autoComplete="username"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          required
-        />
-        <label htmlFor="password">{t("login.password")}</label>
-        <input
-          id="password"
-          name="password"
-          type="password"
-          autoComplete="current-password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-        />
-        {error && (
-          <p className="error-text" role="alert">
-            {error}
-          </p>
-        )}
-        <button type="submit" disabled={submitting}>
-          {submitting ? t("login.submitting") : t("login.submit")}
-        </button>
-      </form>
+    <main className="page flex min-h-screen items-center justify-center">
+      <div className="box-border w-full rounded-lg border border-border bg-surface p-6 shadow-lg">
+        <h1 className="text-lg font-bold text-surface-fg">{t("login.heading")}</h1>
+        <form className="mt-4 flex flex-col gap-3" onSubmit={handleSubmit}>
+          <div className="flex flex-col gap-1">
+            <label htmlFor="username" className="text-sm font-medium text-surface-fg">
+              {t("login.username")}
+            </label>
+            <input
+              id="username"
+              name="username"
+              autoComplete="username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              required
+              className="box-border w-full rounded-md border border-border bg-bg px-3 py-2 text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg"
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label htmlFor="password" className="text-sm font-medium text-surface-fg">
+              {t("login.password")}
+            </label>
+            <input
+              id="password"
+              name="password"
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              className="box-border w-full rounded-md border border-border bg-bg px-3 py-2 text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg"
+            />
+          </div>
+          {error && (
+            <p className="rounded-md bg-danger-bg px-3 py-2 text-sm text-danger" role="alert">
+              {error}
+            </p>
+          )}
+          <button
+            type="submit"
+            disabled={submitting}
+            className="mt-1 box-border w-full rounded-md bg-accent px-4 py-2 font-medium text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {submitting ? t("login.submitting") : t("login.submit")}
+          </button>
+        </form>
+      </div>
     </main>
   );
 }

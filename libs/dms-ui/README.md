@@ -24,3 +24,7 @@ A second shared file, same plain-`@import`-no-npm-package convention as `tokens.
 ```
 
 Wired into all six apps' build pipelines (`tailwindcss`/`@tailwindcss/postcss`/`postcss` devDependencies, a `postcss.config.mjs`, `@source` scoped to that app's own `src/`) — but **no app has actually replaced any hand-written CSS with Tailwind utilities yet**, and each app's `globals.css` deliberately omits Tailwind's `preflight` base-reset layer for now (it visibly broke existing hand-written UI when tried, see ADR 0218) — that happens app-by-app starting with the P75-S2 login-page pilot, the same "prove tooling first, redesign after" split `tokens.css` itself already used across Phase 48→49.
+
+**`--dms-accent-fg`** (Post-Roadmap Phase 75 Session 2, [ADR 0219](../../docs/adr/0219-login-page-tailwind-redesign-accent-fg-token-cascade-fix.md)): added to `tokens.css` (light `#ffffff`, dark `#0b1220`, high-contrast `#000000`) and mapped here as `--color-accent-fg`, after a hardcoded `text-white` on an accent-colored button was found to fail WCAG AA contrast in the dark and high-contrast themes. Use this token, not a hardcoded text color, for any foreground content placed on a `bg-accent`/`accent` background.
+
+**Apps consuming Tailwind utilities for real UI (not just tooling)**: `user-ui`, `admin-ui`, `reviewer-ui`, `process-designer`, `migration-console`, `office-addin` — all six, since P75-S2's login-page redesign.
