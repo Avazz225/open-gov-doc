@@ -1523,6 +1523,9 @@ services:
       DMS_SELF_ADDRESS: http://teamspace-service:8000
       DMS_FOLDER_SERVICE_BASE_URL: http://folder-service:8000
       DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
+      # AD-group invitation (2.5, Post-Roadmap Phase 74 Session 3, ADR
+      # 0160/ADR 0217) - `AuthServiceClient.get_group_members`.
+      DMS_AUTH_SERVICE_BASE_URL: http://auth-service:8000
     ports:
       - "${TEAMSPACE_SERVICE_PORT:-8032}:8000"
     depends_on:
@@ -1533,6 +1536,8 @@ services:
       folder-service:
         condition: service_started
       permission-service:
+        condition: service_started
+      auth-service:
         condition: service_started
     networks:
       - dms-net

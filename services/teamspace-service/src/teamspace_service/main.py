@@ -1,7 +1,8 @@
+import asyncio
 import logging
 import time
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 import httpx
 from dms_common import configure_logging
@@ -19,9 +20,16 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from teamspace_service import consumer, repository
-from teamspace_service.clients import FolderServiceClient, PermissionServiceClient
-from teamspace_service.models import Base, TeamspaceMember
+from teamspace_service.clients import (
+    AuthServiceClient,
+    FolderServiceClient,
+    PermissionServiceClient,
+)
+from teamspace_service.models import Base, TeamspaceAdGroupBinding, TeamspaceMember
 from teamspace_service.schemas import (
+    AdGroupMemberPreview,
+    TeamspaceAdGroupBindingCreate,
+    TeamspaceAdGroupBindingOut,
     TeamspaceAdminOut,
     TeamspaceAppointmentCreate,
     TeamspaceAppointmentOut,
@@ -114,6 +122,115 @@ async def _ensure_teamspace_isolation_backfill(session_factory) -> None:
             logger.warning("teamspace_isolation_backfill_failed: root_folder_id=%s", root_folder_id)
 
 
+async def _reconcile_ad_group_binding(
+    session: AsyncSession, binding: TeamspaceAdGroupBinding
+) -> None:
+    """One binding's worth of reconciliation - factored out of
+    `_ad_group_reconciliation_poll_loop` so a single broken binding
+    (group deleted in Keycloak, a transient auth-service error) can't
+    abort the whole tick, same error-isolation shape as
+    `workflow-service`'s `_sla_poll_loop` iterating its own instances."""
+    teamspace = await repository.get_teamspace(session, binding.teamspace_id)
+    members = await app.state.auth_client.get_group_members(binding.ad_group_name)
+    if members is None:
+        logger.warning(
+            "ad_group_reconciliation_group_missing: teamspace_id=%s ad_group_name=%s",
+            binding.teamspace_id,
+            binding.ad_group_name,
+        )
+        return
+    actor = f"ad-group:{binding.ad_group_name}"
+
+    existing_from_this_group = await repository.list_members_by_source_group(
+        session, binding.teamspace_id, binding.ad_group_name
+    )
+    existing_principal_ids = {m.principal_id for m in existing_from_this_group}
+
+    for user in members:
+        if user["id"] in existing_principal_ids:
+            continue
+        try:
+            await repository.add_member(
+                session,
+                binding.teamspace_id,
+                principal_id=user["id"],
+                can_manage_members=False,
+                invited_by=actor,
+                source_ad_group_name=binding.ad_group_name,
+            )
+        except repository.DuplicateMemberError:
+            # Already a member via a manual invite (or another binding) -
+            # leave that row's attribution exactly as it is, see
+            # `TeamspaceMember.source_ad_group_name`'s own docstring.
+            continue
+        await app.state.permission_client.grant_resource_access(
+            principal_id=user["id"], resource_id=teamspace.root_folder_id
+        )
+        await publish_event(
+            "teamspace.member_invited",
+            subject=binding.teamspace_id,
+            payload={"principal_id": user["id"], "source_ad_group_name": binding.ad_group_name},
+            actor=actor,
+        )
+
+    for member in existing_from_this_group:
+        if member.principal_id in {m["id"] for m in members}:
+            continue
+        await repository.remove_member(session, binding.teamspace_id, member.principal_id)
+        await app.state.permission_client.revoke_resource_access(
+            principal_id=member.principal_id, resource_id=teamspace.root_folder_id
+        )
+        await app.state.permission_client.revoke_manager_access(
+            principal_id=member.principal_id, resource_id=teamspace.root_folder_id
+        )
+        await publish_event(
+            "teamspace.member_removed",
+            subject=binding.teamspace_id,
+            payload={
+                "principal_id": member.principal_id,
+                "source_ad_group_name": binding.ad_group_name,
+            },
+            actor=actor,
+        )
+
+
+async def _ad_group_reconciliation_poll_loop(session_factory) -> None:
+    """Keeps `permission-service` role assignments (via `teamspace_member`
+    rows) in sync with LIVE AD/Keycloak group membership for every bound
+    teamspace (2.5, Post-Roadmap Phase 74 Session 3, ADR 0160/ADR 0217) -
+    grants newly-added group members, revokes departed ones, per binding.
+    Deliberately live/poll-reconciled every tick, never a one-time
+    snapshot copy - see ADR 0160's own "Rationale" (extends ADR 0093's
+    "Keycloak/AD is sole source of truth" principle to this second
+    feature area). Same error-isolation/poll idiom as `workflow-service`'s
+    `_sla_poll_loop` - no maintenance-mode skip check (this service's
+    `PermissionServiceClient` predates the shared `dms_permission_client`
+    migration and has no `is_maintenance_active()` of its own, a known,
+    pre-existing, already-documented gap elsewhere in this project's own
+    maintenance-mode coverage, not attempted here)."""
+    while True:
+        try:
+            async with session_factory() as session:
+                bindings = await repository.list_all_ad_group_bindings(session)
+                for binding in bindings:
+                    try:
+                        await _reconcile_ad_group_binding(session, binding)
+                    except Exception:
+                        logger.exception(
+                            "ad_group_reconciliation_binding_failed: teamspace_id=%s "
+                            "ad_group_name=%s - wird beim nächsten Tick erneut versucht.",
+                            binding.teamspace_id,
+                            binding.ad_group_name,
+                        )
+                await session.commit()
+        except Exception:
+            logger.exception(
+                "AD-Gruppen-Reconciliation-Tick fehlgeschlagen - wird beim nächsten Tick "
+                "erneut versucht."
+            )
+        await asyncio.sleep(settings.ad_group_reconciliation_poll_interval_seconds)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     startup_start = time.time()
@@ -121,10 +238,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with engine.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS teamspace"))
         await conn.run_sync(Base.metadata.create_all)
+        # Ad-hoc schema extension (no Alembic in this early phase, see
+        # CONTRIBUTING.md): `create_all` creates missing TABLES (like the
+        # new `teamspace_ad_group_binding` above) but doesn't alter an
+        # already-existing one - `source_ad_group_name` is new in
+        # Post-Roadmap Phase 74 Session 3 (ADR 0160/ADR 0217). Idempotent
+        # thanks to IF NOT EXISTS.
+        await conn.execute(
+            text(
+                "ALTER TABLE teamspace.teamspace_member "
+                "ADD COLUMN IF NOT EXISTS source_ad_group_name VARCHAR(256)"
+            )
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
     app.state.folder_client = FolderServiceClient(settings.folder_service_base_url)
     app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
+    app.state.auth_client = AuthServiceClient(settings.auth_service_base_url)
     await _ensure_bootstrap_permissions()
     await _ensure_teamspace_isolation_backfill(app.state.session_factory)
 
@@ -161,12 +291,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         sensors=http_sensor_declarations(),
     )
 
+    ad_group_reconciliation_poll_task = asyncio.create_task(
+        _ad_group_reconciliation_poll_loop(app.state.session_factory)
+    )
+
     startup_end = time.time()
     millis = round((startup_end - startup_start) * 1000, 3)
     logger.info("Startup completed in %s ms.", millis, exc_info=True)
 
     yield
 
+    ad_group_reconciliation_poll_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await ad_group_reconciliation_poll_task
     sensor_config_proxy.unbind()
     await app.state.sensor_config_client.stop()
     if registration:
@@ -175,6 +312,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await consumer_bus.close()
     await app.state.folder_client.close()
     await app.state.permission_client.close()
+    await app.state.auth_client.close()
     await engine.dispose()
 
 
@@ -512,6 +650,131 @@ async def remove_member(
         "teamspace.member_removed",
         subject=teamspace_id,
         payload={"principal_id": principal_id},
+        actor=x_dms_principal,
+    )
+
+
+@app.get("/teamspaces/{teamspace_id}/ad-group-preview", response_model=list[AdGroupMemberPreview])
+async def preview_ad_group(
+    teamspace_id: str,
+    ad_group_name: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> list[dict]:
+    """Preview a group's current membership before binding it (2.5,
+    Post-Roadmap Phase 74 Session 3, ADR 0160/ADR 0217) - manager-only,
+    same gate as `invite_member`. Deliberately proxies `auth-service`'s
+    `GET /groups/{name}/members` rather than exposing that endpoint
+    directly to interactive callers: a full group roster is a wider
+    disclosure than `GET /users/lookup`'s single-name existence check
+    (ADR 0160's own flagged design fork), so it is only ever reachable
+    already narrowed to "a manager of a specific teamspace, previewing a
+    specific bind action" - never a general, installation-wide directory
+    capability."""
+    await _require_manager(session, teamspace_id, x_dms_principal)
+    members = await app.state.auth_client.get_group_members(ad_group_name)
+    if members is None:
+        raise HTTPException(status_code=404, detail=f"AD-Gruppe {ad_group_name!r} unbekannt")
+    return members
+
+
+@app.post(
+    "/teamspaces/{teamspace_id}/ad-group-bindings",
+    response_model=TeamspaceAdGroupBindingOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def bind_ad_group(
+    teamspace_id: str,
+    payload: TeamspaceAdGroupBindingCreate,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> TeamspaceAdGroupBindingOut:
+    """Binds a teamspace to an AD/Keycloak group for ongoing membership
+    synchronization (2.5, Post-Roadmap Phase 74 Session 3, ADR 0160/ADR
+    0217) - manager-only, same gate as `invite_member`. Validates the
+    group actually exists (`404` otherwise) via the same service-to-
+    service call `preview_ad_group` uses, then performs an immediate
+    initial sync (not waiting for the next `_ad_group_reconciliation_
+    poll_loop` tick) so a manager sees the effect of binding right away."""
+    try:
+        await repository.get_teamspace(session, teamspace_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await _require_manager(session, teamspace_id, x_dms_principal)
+    if await app.state.auth_client.get_group_members(payload.ad_group_name) is None:
+        raise HTTPException(
+            status_code=404, detail=f"AD-Gruppe {payload.ad_group_name!r} unbekannt"
+        )
+    try:
+        binding = await repository.create_ad_group_binding(
+            session, teamspace_id, ad_group_name=payload.ad_group_name, invited_by=x_dms_principal
+        )
+    except repository.DuplicateBindingError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await session.commit()
+    await publish_event(
+        "teamspace.ad_group_bound",
+        subject=teamspace_id,
+        payload={"ad_group_name": payload.ad_group_name},
+        actor=x_dms_principal,
+    )
+    await _reconcile_ad_group_binding(session, binding)
+    await session.commit()
+    return binding
+
+
+@app.get(
+    "/teamspaces/{teamspace_id}/ad-group-bindings", response_model=list[TeamspaceAdGroupBindingOut]
+)
+async def list_ad_group_bindings(
+    teamspace_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> list:
+    await _require_member(session, teamspace_id, x_dms_principal)
+    return await repository.list_ad_group_bindings(session, teamspace_id)
+
+
+@app.delete(
+    "/teamspaces/{teamspace_id}/ad-group-bindings/{ad_group_name}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def unbind_ad_group(
+    teamspace_id: str,
+    ad_group_name: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    """Unbinding immediately revokes every membership row this binding
+    itself created (`source_ad_group_name == ad_group_name`) rather than
+    waiting for the next poll tick to notice the binding is gone - a
+    manually-invited member (even one who happens to also be in this AD
+    group) is untouched, same attribution boundary as the poll loop's own
+    removal logic."""
+    try:
+        teamspace = await repository.get_teamspace(session, teamspace_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await _require_manager(session, teamspace_id, x_dms_principal)
+    try:
+        await repository.delete_ad_group_binding(session, teamspace_id, ad_group_name)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    for member in await repository.list_members_by_source_group(
+        session, teamspace_id, ad_group_name
+    ):
+        await repository.remove_member(session, teamspace_id, member.principal_id)
+        await app.state.permission_client.revoke_resource_access(
+            principal_id=member.principal_id, resource_id=teamspace.root_folder_id
+        )
+        await app.state.permission_client.revoke_manager_access(
+            principal_id=member.principal_id, resource_id=teamspace.root_folder_id
+        )
+    await session.commit()
+    await publish_event(
+        "teamspace.ad_group_unbound",
+        subject=teamspace_id,
+        payload={"ad_group_name": ad_group_name},
         actor=x_dms_principal,
     )
 

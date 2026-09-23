@@ -27,6 +27,7 @@
 | `GET` | `/sessions/count` | Internal call from `license-service` (9.1 "concurrent users" model, since P9-S1) — `KeycloakAdmin.get_client_sessions_stats()`, ungated |
 | `GET` | `/users/directory?q=` | Directory search (2.5/4.4, since P15-S4, Keycloak `search` parameter — prefix per field, no substring, see "Contacts" below) — no `admin.user_management` gate, but since P19-S3 (ADR 0068) checked via the "everyone" group from permission-service (`users.directory`) instead of merely requiring authentication |
 | `GET` | `/users/service-directory` | **New in Phase 50 Session 2**: service-to-service counterpart to `GET /users`, `X-DMS-Principal`-gated via the new, narrow `service.user_lookup` capability (seeded role `service-user-lookup`) instead of `admin.user_management` — for callers that need to scan the full directory (recipient existence by email/username, signer resolution by username) where neither `GET /users/lookup` (exact username only) nor `GET /users/directory` (prefix search only) can answer reliably. Returns `DirectoryEntryOut` (no `enabled`), same shape as `GET /users/directory`. Replaces `notification-service`/`signature-service`'s previous `users-admin` login for this exact purpose — see "Service-to-Service Directory Lookup" below |
+| `GET` | `/groups/{name}/members` | **New in Post-Roadmap Phase 74 Session 3** ([ADR 0160](../adr/0160-teamspace-group-invitation-scoping.md)/[ADR 0217](../adr/0217-teamspace-ad-group-invitation-build.md)): the specific missing piece teamspace AD-group invitation needed — thin wrapper around `python-keycloak`'s `get_group_by_path()`/`get_group_members()` (already-vendored, previously unused anywhere in this codebase). Service-to-service only, `X-DMS-Principal`-gated via the new, narrow `service.group_lookup` capability (seeded role `service-group-lookup`) — deliberately its own capability, not folded into `service.user_lookup`: a full group roster is a wider disclosure than an individual directory lookup. Returns `UserLookupOut[]` (`{id, username}`, reused directly), `404` if no group with this exact name exists. `teamspace-service` is the only intended caller — see "Group Membership Lookup" below |
 | `GET` | `/users/directory/federation-status` | Whether federated contact search is enabled on this installation (`{enabled, peer_installation_count}`) — ungated, controls the visibility of the corresponding frontend section |
 | `GET` | `/users/directory/federated?q=` | Federated search across all known peer installations that have opted in to contact search (2.5/7.4, since P15-S4) — `403` if not enabled on this installation |
 | `POST` | `/users/directory/federated-search-inbound` | Called by a peer installation (public route, no `X-DMS-Principal`) — authenticated via `X-Installation-Signature`/`X-Installation-Id`, see "Contacts" below |
@@ -107,6 +108,30 @@ principals is a one-time, per-installation operator step (`POST /role-assignment
 any running service's own startup code; each service's own test suite grants it to its own fixed
 identity via an autouse `conftest.py` fixture (mirroring `document-service/tests/conftest.py`'s
 `_grant_disposal_callback_permission`), exercising the exact real caller identity used in production.
+
+## Group Membership Lookup (Post-Roadmap Phase 74 Session 3, [ADR 0160](../adr/0160-teamspace-group-invitation-scoping.md)/[ADR 0217](../adr/0217-teamspace-ad-group-invitation-build.md))
+
+ADR 0160 (P43-S2) named the exact gap: AD-group→role mapping (ADR 0093/ADR 0153) resolves a Keycloak
+`groups` claim into `permission-service` roles live at `GET /me`, but never exposes the raw membership
+list itself — "who is currently in group X" — which teamspace AD-group invitation actually needs. `GET
+/groups/{name}/members` (see the API table above) closes exactly that gap, no more: a thin wrapper
+(`admin_users.find_group_members_by_name`) around `KeycloakAdmin.get_group_by_path()`/
+`get_group_members()`, both already-vendored `python-keycloak` capabilities that no other code in this
+service (or anywhere else in this codebase) had ever called before this session.
+
+Same "own capability, not a reuse" shape as `service.user_lookup` above (`_require_service_group_lookup`,
+seeded role `service-group-lookup`) rather than folding it into that existing one — a full group roster
+is a materially wider disclosure than confirming one already-known username exists, so it gets its own,
+independently-revocable permission. Same manual-grant convention too: the role is seeded automatically,
+but its assignment to the `teamspace-service` principal is a one-time operator step, exercised in tests
+via an autouse `conftest.py` fixture (`_grant_service_group_lookup_permission`, mirroring
+`_grant_service_user_lookup_permission` above).
+
+**Deliberately never exposed to interactive callers.** `teamspace-service` is the only caller, and it
+never re-exposes this endpoint directly either — its own `GET /teamspaces/{id}/ad-group-preview` proxies
+it, but only after that service's own `_require_manager` gate, so the real-world disclosure surface stays
+"a manager of a specific teamspace, previewing a specific bind action," never a general, installation-wide
+group directory.
 
 ## Superuser Break-Glass (4.6, since P6-S5, local instead of Keycloak since Phase 18 Session 2)
 
@@ -341,6 +366,12 @@ Both new cleanup calls run **after** the Keycloak deletion (the security-relevan
 No new ADR — a mechanical extension of an already-established cleanup-on-delete pattern, not a new architecture decision.
 
 ## Tests
+
+**Post-Roadmap Phase 74 Session 3**: new `test_group_members.py` (+6) for `GET /groups/{name}/members` —
+unauthenticated/unauthorized `403`, a broad `admin.user_management` bearer token alone still rejected
+(proving `service.group_lookup` isn't silently also accepted), unknown group `404`, a real Keycloak group
+created via the `keycloak_group`/`keycloak_admin` fixtures (mirroring `test_ad_group_mapping.py`'s own)
+returns its real member list in the minimal `{id, username}` shape, and an empty group returns `[]`.
 
 `uv run pytest services/auth-service/tests` (**149 tests since P55-S2** — +2:
 `test_delete_user_revokes_role_assignments`/`test_delete_user_removes_teamspace_memberships` in

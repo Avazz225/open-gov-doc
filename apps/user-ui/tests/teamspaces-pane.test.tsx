@@ -18,6 +18,10 @@ const createTeamspaceContactMock = vi.fn();
 const deleteTeamspaceContactMock = vi.fn();
 const lookupUserByUsernameMock = vi.fn();
 const lookupUserByIdMock = vi.fn();
+const listAdGroupBindingsMock = vi.fn();
+const previewAdGroupMembersMock = vi.fn();
+const bindAdGroupToTeamspaceMock = vi.fn();
+const unbindAdGroupFromTeamspaceMock = vi.fn();
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
@@ -37,6 +41,10 @@ vi.mock("@/lib/api", async () => {
     deleteTeamspaceContact: (...args: unknown[]) => deleteTeamspaceContactMock(...args),
     lookupUserByUsername: (...args: unknown[]) => lookupUserByUsernameMock(...args),
     lookupUserById: (...args: unknown[]) => lookupUserByIdMock(...args),
+    listAdGroupBindings: (...args: unknown[]) => listAdGroupBindingsMock(...args),
+    previewAdGroupMembers: (...args: unknown[]) => previewAdGroupMembersMock(...args),
+    bindAdGroupToTeamspace: (...args: unknown[]) => bindAdGroupToTeamspaceMock(...args),
+    unbindAdGroupFromTeamspace: (...args: unknown[]) => unbindAdGroupFromTeamspaceMock(...args),
   };
 });
 
@@ -57,6 +65,7 @@ const ALICE_MEMBER = {
   can_manage_members: true,
   invited_by: "alice-sub",
   invited_at: "2026-01-01T00:00:00Z",
+  source_ad_group_name: null,
 };
 
 function renderPane(onOpenFolder = vi.fn()) {
@@ -83,10 +92,15 @@ describe("TeamspacesPane", () => {
     deleteTeamspaceContactMock.mockReset();
     lookupUserByUsernameMock.mockReset();
     lookupUserByIdMock.mockReset();
+    listAdGroupBindingsMock.mockReset();
+    previewAdGroupMembersMock.mockReset();
+    bindAdGroupToTeamspaceMock.mockReset();
+    unbindAdGroupFromTeamspaceMock.mockReset();
 
     listTeamspaceMembersMock.mockResolvedValue([ALICE_MEMBER]);
     listTeamspaceAppointmentsMock.mockResolvedValue([]);
     listTeamspaceContactsMock.mockResolvedValue([]);
+    listAdGroupBindingsMock.mockResolvedValue([]);
     // Not resolvable by default (P19-S4) - `usePrincipalNames` falls back to
     // the raw principal_id in this case, keeping existing tests valid
     // unchanged; a dedicated test below verifies the
@@ -169,6 +183,7 @@ describe("TeamspacesPane", () => {
       can_manage_members: false,
       invited_by: "alice-sub",
       invited_at: "2026-01-02T00:00:00Z",
+      source_ad_group_name: null,
     });
 
     const user = userEvent.setup();
@@ -258,5 +273,118 @@ describe("TeamspacesPane", () => {
 
     expect(await screen.findByText("alice (Verwaltung)")).toBeInTheDocument();
     expect(screen.queryByText("alice-sub (Verwaltung)")).not.toBeInTheDocument();
+  });
+
+  it("shows bound AD groups and lets a manager unbind one (Post-Roadmap Phase 74 Session 3, ADR 0160/ADR 0217)", async () => {
+    listTeamspacesMock.mockResolvedValue([TEAMSPACE]);
+    listAdGroupBindingsMock
+      .mockResolvedValueOnce([{ id: 1, teamspace_id: "ts-1", ad_group_name: "Vertrieb", invited_by: "alice-sub", invited_at: "2026-01-01T00:00:00Z" }])
+      .mockResolvedValueOnce([]);
+    unbindAdGroupFromTeamspaceMock.mockResolvedValue(undefined);
+
+    const user = userEvent.setup();
+    renderPane();
+
+    await screen.findByText("Projekt X");
+    await user.click(screen.getByText("Öffnen"));
+
+    expect(await screen.findByText("Vertrieb")).toBeInTheDocument();
+    await user.click(screen.getByText("Bindung aufheben"));
+
+    await waitFor(() =>
+      expect(unbindAdGroupFromTeamspaceMock).toHaveBeenCalledWith("token-123", "ts-1", "Vertrieb")
+    );
+  });
+
+  it("previews an AD group's members before binding it", async () => {
+    listTeamspacesMock.mockResolvedValue([TEAMSPACE]);
+    previewAdGroupMembersMock.mockResolvedValue([{ id: "u-1", username: "carol" }]);
+
+    const user = userEvent.setup();
+    renderPane();
+
+    await screen.findByText("Projekt X");
+    await user.click(screen.getByText("Öffnen"));
+    await screen.findByPlaceholderText("AD-Gruppenname");
+    await user.type(screen.getByPlaceholderText("AD-Gruppenname"), "Vertrieb");
+    await user.click(screen.getByText("Vorschau"));
+
+    await waitFor(() =>
+      expect(previewAdGroupMembersMock).toHaveBeenCalledWith("token-123", "ts-1", "Vertrieb")
+    );
+    expect(await screen.findByText("carol")).toBeInTheDocument();
+    expect(screen.getByText("Gruppe binden")).toBeInTheDocument();
+  });
+
+  it("binds an AD group after previewing it and reloads the detail view", async () => {
+    listTeamspacesMock.mockResolvedValue([TEAMSPACE]);
+    previewAdGroupMembersMock.mockResolvedValue([{ id: "u-1", username: "carol" }]);
+    bindAdGroupToTeamspaceMock.mockResolvedValue({
+      id: 1,
+      teamspace_id: "ts-1",
+      ad_group_name: "Vertrieb",
+      invited_by: "alice-sub",
+      invited_at: "2026-01-01T00:00:00Z",
+    });
+
+    const user = userEvent.setup();
+    renderPane();
+
+    await screen.findByText("Projekt X");
+    await user.click(screen.getByText("Öffnen"));
+    await screen.findByPlaceholderText("AD-Gruppenname");
+    await user.type(screen.getByPlaceholderText("AD-Gruppenname"), "Vertrieb");
+    await user.click(screen.getByText("Vorschau"));
+    await screen.findByText("carol");
+    await user.click(screen.getByText("Gruppe binden"));
+
+    await waitFor(() =>
+      expect(bindAdGroupToTeamspaceMock).toHaveBeenCalledWith("token-123", "ts-1", "Vertrieb")
+    );
+    await waitFor(() => expect(listAdGroupBindingsMock).toHaveBeenCalledTimes(2));
+  });
+
+  it("shows the source AD group next to a group-invited member", async () => {
+    listTeamspacesMock.mockResolvedValue([TEAMSPACE]);
+    listTeamspaceMembersMock.mockResolvedValue([
+      ALICE_MEMBER,
+      {
+        id: 2,
+        teamspace_id: "ts-1",
+        principal_id: "carol-sub",
+        can_manage_members: false,
+        invited_by: "ad-group:Vertrieb",
+        invited_at: "2026-01-01T00:00:00Z",
+        source_ad_group_name: "Vertrieb",
+      },
+    ]);
+
+    const user = userEvent.setup();
+    renderPane();
+
+    await screen.findByText("Projekt X");
+    await user.click(screen.getByText("Öffnen"));
+
+    expect(await screen.findByText("carol-sub (über AD-Gruppe Vertrieb)")).toBeInTheDocument();
+  });
+
+  it("does not show the AD-group form for a non-manager member", async () => {
+    listTeamspacesMock.mockResolvedValue([TEAMSPACE]);
+    listTeamspaceMembersMock.mockResolvedValue([
+      { ...ALICE_MEMBER, principal_id: "bob-sub", can_manage_members: false },
+    ]);
+
+    const user = userEvent.setup();
+    render(
+      <I18nProvider>
+        <TeamspacesPane token="token-123" currentPrincipalId="bob-sub" onOpenFolder={vi.fn()} />
+      </I18nProvider>
+    );
+
+    await screen.findByText("Projekt X");
+    await user.click(screen.getByText("Öffnen"));
+    await screen.findByText("Ordner öffnen");
+
+    expect(screen.queryByPlaceholderText("AD-Gruppenname")).not.toBeInTheDocument();
   });
 });

@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from teamspace_service.models import (
     Teamspace,
+    TeamspaceAdGroupBinding,
     TeamspaceAppointment,
     TeamspaceContact,
     TeamspaceMember,
@@ -21,6 +22,10 @@ class NotFoundError(Exception):
 
 
 class DuplicateMemberError(Exception):
+    pass
+
+
+class DuplicateBindingError(Exception):
     pass
 
 
@@ -140,6 +145,21 @@ async def delete_teamspace(session: AsyncSession, teamspace_id: str) -> None:
     await session.execute(
         TeamspaceContact.__table__.delete().where(TeamspaceContact.teamspace_id == teamspace_id)
     )
+    # Post-Roadmap Phase 74 Session 3 (ADR 0160/ADR 0217) - found live
+    # (a real `IntegrityError`, not just inferred): a bound
+    # `TeamspaceAdGroupBinding` row otherwise blocks the `DELETE` below
+    # via its own FK, same "delete the dependents first" shape as the
+    # three tables above. Deliberately no `permission-service` revocation
+    # here for the members that binding created - `TeamspaceMember`'s own
+    # rows are already wiped unconditionally above, same as any other
+    # member's `revoke_resource_access` being skipped on teamspace
+    # deletion (this function's own docstring: only this service's
+    # metadata is cleaned up, not cross-service grants).
+    await session.execute(
+        TeamspaceAdGroupBinding.__table__.delete().where(
+            TeamspaceAdGroupBinding.teamspace_id == teamspace_id
+        )
+    )
     await session.delete(teamspace)
     await session.flush()
 
@@ -184,6 +204,7 @@ async def add_member(
     principal_id: str,
     can_manage_members: bool,
     invited_by: str,
+    source_ad_group_name: str | None = None,
 ) -> TeamspaceMember:
     existing = await get_member(session, teamspace_id, principal_id)
     if existing is not None:
@@ -196,10 +217,27 @@ async def add_member(
         can_manage_members=can_manage_members,
         invited_by=invited_by,
         invited_at=datetime.now(UTC),
+        source_ad_group_name=source_ad_group_name,
     )
     session.add(member)
     await session.flush()
     return member
+
+
+async def list_members_by_source_group(
+    session: AsyncSession, teamspace_id: str, ad_group_name: str
+) -> list[TeamspaceMember]:
+    """Members `_ad_group_reconciliation_poll_loop`/`delete_ad_group_
+    binding` may safely remove for this specific binding - only rows this
+    binding itself created (see `TeamspaceMember.source_ad_group_name`'s
+    own docstring), never a manually-invited member."""
+    result = await session.execute(
+        select(TeamspaceMember).where(
+            TeamspaceMember.teamspace_id == teamspace_id,
+            TeamspaceMember.source_ad_group_name == ad_group_name,
+        )
+    )
+    return list(result.scalars().all())
 
 
 async def update_member(
@@ -300,4 +338,66 @@ async def delete_contact(session: AsyncSession, teamspace_id: str, contact_id: i
     if contact is None or contact.teamspace_id != teamspace_id:
         raise NotFoundError(f"contact_id {contact_id!r} unbekannt")
     await session.delete(contact)
+    await session.flush()
+
+
+async def create_ad_group_binding(
+    session: AsyncSession, teamspace_id: str, *, ad_group_name: str, invited_by: str
+) -> TeamspaceAdGroupBinding:
+    existing = await get_ad_group_binding(session, teamspace_id, ad_group_name)
+    if existing is not None:
+        raise DuplicateBindingError(
+            f"Teamspace {teamspace_id!r} ist bereits an AD-Gruppe {ad_group_name!r} gebunden"
+        )
+    binding = TeamspaceAdGroupBinding(
+        teamspace_id=teamspace_id,
+        ad_group_name=ad_group_name,
+        invited_by=invited_by,
+        invited_at=datetime.now(UTC),
+    )
+    session.add(binding)
+    await session.flush()
+    return binding
+
+
+async def get_ad_group_binding(
+    session: AsyncSession, teamspace_id: str, ad_group_name: str
+) -> TeamspaceAdGroupBinding | None:
+    result = await session.execute(
+        select(TeamspaceAdGroupBinding).where(
+            TeamspaceAdGroupBinding.teamspace_id == teamspace_id,
+            TeamspaceAdGroupBinding.ad_group_name == ad_group_name,
+        )
+    )
+    return result.scalars().first()
+
+
+async def list_ad_group_bindings(
+    session: AsyncSession, teamspace_id: str
+) -> list[TeamspaceAdGroupBinding]:
+    result = await session.execute(
+        select(TeamspaceAdGroupBinding)
+        .where(TeamspaceAdGroupBinding.teamspace_id == teamspace_id)
+        .order_by(TeamspaceAdGroupBinding.ad_group_name)
+    )
+    return list(result.scalars().all())
+
+
+async def list_all_ad_group_bindings(session: AsyncSession) -> list[TeamspaceAdGroupBinding]:
+    """For `_ad_group_reconciliation_poll_loop` - every binding across
+    every teamspace, reconciled on every tick (same "iterate everything
+    live" idiom as `workflow-service`'s `_sla_poll_loop`)."""
+    result = await session.execute(select(TeamspaceAdGroupBinding))
+    return list(result.scalars().all())
+
+
+async def delete_ad_group_binding(
+    session: AsyncSession, teamspace_id: str, ad_group_name: str
+) -> None:
+    binding = await get_ad_group_binding(session, teamspace_id, ad_group_name)
+    if binding is None:
+        raise NotFoundError(
+            f"Teamspace {teamspace_id!r} ist nicht an AD-Gruppe {ad_group_name!r} gebunden"
+        )
+    await session.delete(binding)
     await session.flush()

@@ -370,6 +370,22 @@ DOMAIN_ADMIN_ROLES: list[tuple[str, str, list[str]]] = [
         "Nutzerverzeichnis-Abfrage (Service-zu-Service)",
         ["service.user_lookup"],
     ),
+    # Post-Roadmap Phase 74 Session 3 (ADR 0160/ADR 0217): the specific
+    # missing piece a teamspace AD-group invitation needs - "who is
+    # currently a member of AD group X," as a queryable list
+    # (`auth-service`'s new `GET /groups/{name}/members`). Same
+    # "dedicated seeded role for a machine-to-machine identity, not
+    # 'domain-admin-...'" shape as `service-user-lookup` immediately
+    # above - `teamspace-service` asserts its own fixed identity
+    # (`X-DMS-Principal: teamspace-service`, already used elsewhere in
+    # this service, see `clients.py`) rather than needing
+    # `admin.user_management`, the far broader capability a raw group
+    # roster otherwise has no narrower home under.
+    (
+        "service-group-lookup",
+        "Gruppenmitglieder-Abfrage (Service-zu-Service)",
+        ["service.group_lookup"],
+    ),
     # Phase 59 Session 5: `POST`/`DELETE /paired-installations` previously
     # had no permission check at all (only `license_gate`) - any licensed
     # caller could pair with an arbitrary, attacker-controlled installation.

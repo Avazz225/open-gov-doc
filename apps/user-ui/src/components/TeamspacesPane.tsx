@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "@/i18n";
 import {
   ApiError,
+  bindAdGroupToTeamspace,
   createTeamspace,
   createTeamspaceAppointment,
   createTeamspaceContact,
@@ -11,13 +12,18 @@ import {
   deleteTeamspaceAppointment,
   deleteTeamspaceContact,
   inviteTeamspaceMember,
+  listAdGroupBindings,
   listTeamspaceAppointments,
   listTeamspaceContacts,
   listTeamspaceMembers,
   listTeamspaces,
   lookupUserByUsername,
+  previewAdGroupMembers,
   removeTeamspaceMember,
+  unbindAdGroupFromTeamspace,
+  type AdGroupMemberPreview,
   type Teamspace,
+  type TeamspaceAdGroupBinding,
   type TeamspaceAppointment,
   type TeamspaceContact,
   type TeamspaceMember,
@@ -46,6 +52,7 @@ export function TeamspacesPane({
   const [members, setMembers] = useState<TeamspaceMember[]>([]);
   const [appointments, setAppointments] = useState<TeamspaceAppointment[]>([]);
   const [contacts, setContacts] = useState<TeamspaceContact[]>([]);
+  const [adGroupBindings, setAdGroupBindings] = useState<TeamspaceAdGroupBinding[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -57,6 +64,9 @@ export function TeamspacesPane({
   const [appointmentEnd, setAppointmentEnd] = useState("");
   const [contactName, setContactName] = useState("");
   const [contactEmail, setContactEmail] = useState("");
+  const [adGroupName, setAdGroupName] = useState("");
+  const [adGroupPreview, setAdGroupPreview] = useState<AdGroupMemberPreview[] | null>(null);
+  const [adGroupError, setAdGroupError] = useState<string | null>(null);
 
   const currentMember = members.find((m) => m.principal_id === currentPrincipalId) ?? null;
   const canManage = currentMember?.can_manage_members ?? false;
@@ -88,14 +98,16 @@ export function TeamspacesPane({
     async (teamspaceId: string) => {
       if (!token) return;
       try {
-        const [memberList, appointmentList, contactList] = await Promise.all([
+        const [memberList, appointmentList, contactList, bindingList] = await Promise.all([
           listTeamspaceMembers(token, teamspaceId),
           listTeamspaceAppointments(token, teamspaceId),
           listTeamspaceContacts(token, teamspaceId),
+          listAdGroupBindings(token, teamspaceId),
         ]);
         setMembers(memberList);
         setAppointments(appointmentList);
         setContacts(contactList);
+        setAdGroupBindings(bindingList);
       } catch {
         setError(t("teamspaces.loadError"));
       }
@@ -173,6 +185,42 @@ export function TeamspacesPane({
       await reloadDetail(selected.id);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("teamspaces.removeMemberError"));
+    }
+  }
+
+  async function handlePreviewAdGroup(event: React.FormEvent) {
+    event.preventDefault();
+    if (!selected || !adGroupName.trim()) return;
+    setAdGroupError(null);
+    setAdGroupPreview(null);
+    try {
+      setAdGroupPreview(await previewAdGroupMembers(token, selected.id, adGroupName.trim()));
+    } catch (err) {
+      setAdGroupError(err instanceof ApiError ? err.message : t("teamspaces.adGroupPreviewError"));
+    }
+  }
+
+  async function handleBindAdGroup() {
+    if (!selected || !adGroupName.trim()) return;
+    setAdGroupError(null);
+    try {
+      await bindAdGroupToTeamspace(token, selected.id, adGroupName.trim());
+      setAdGroupName("");
+      setAdGroupPreview(null);
+      await reloadDetail(selected.id);
+    } catch (err) {
+      setAdGroupError(err instanceof ApiError ? err.message : t("teamspaces.adGroupBindError"));
+    }
+  }
+
+  async function handleUnbindAdGroup(name: string) {
+    if (!selected) return;
+    setError(null);
+    try {
+      await unbindAdGroupFromTeamspace(token, selected.id, name);
+      await reloadDetail(selected.id);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t("teamspaces.adGroupUnbindError"));
     }
   }
 
@@ -305,6 +353,9 @@ export function TeamspacesPane({
                 <span className="entry-name">
                   {principalNames[member.principal_id] ?? member.principal_id}
                   {member.can_manage_members ? ` (${t("teamspaces.manager")})` : ""}
+                  {member.source_ad_group_name
+                    ? ` (${t("teamspaces.viaAdGroup", { name: member.source_ad_group_name })})`
+                    : ""}
                 </span>
                 {canManage && member.principal_id !== currentPrincipalId && (
                   <span className="actions">
@@ -326,6 +377,68 @@ export function TeamspacesPane({
               />
               <button type="submit">{t("teamspaces.inviteButton")}</button>
             </form>
+          )}
+
+          <h4>{t("teamspaces.adGroupsHeading")}</h4>
+          {adGroupBindings.length === 0 ? (
+            <p className="empty-state">{t("teamspaces.adGroupsEmpty")}</p>
+          ) : (
+            <ul className="entry-list">
+              {adGroupBindings.map((binding) => (
+                <li className="entry-row" key={binding.id}>
+                  <span className="entry-name">{binding.ad_group_name}</span>
+                  {canManage && (
+                    <span className="actions">
+                      <button
+                        type="button"
+                        onClick={() => handleUnbindAdGroup(binding.ad_group_name)}
+                      >
+                        {t("teamspaces.adGroupUnbind")}
+                      </button>
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+          {canManage && (
+            <div className="teamspaces-ad-group-form">
+              {adGroupError && (
+                <p className="error-text" role="alert">
+                  {adGroupError}
+                </p>
+              )}
+              <form onSubmit={handlePreviewAdGroup}>
+                <input
+                  type="text"
+                  placeholder={t("teamspaces.adGroupNamePlaceholder")}
+                  value={adGroupName}
+                  onChange={(e) => {
+                    setAdGroupName(e.target.value);
+                    setAdGroupPreview(null);
+                  }}
+                />
+                <button type="submit">{t("teamspaces.adGroupPreviewButton")}</button>
+              </form>
+              {adGroupPreview && (
+                <div className="ad-group-preview">
+                  {adGroupPreview.length === 0 ? (
+                    <p className="empty-state">{t("teamspaces.adGroupPreviewEmpty")}</p>
+                  ) : (
+                    <ul className="entry-list">
+                      {adGroupPreview.map((member) => (
+                        <li className="entry-row" key={member.id}>
+                          <span className="entry-name">{member.username}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <button type="button" onClick={handleBindAdGroup}>
+                    {t("teamspaces.adGroupBindButton")}
+                  </button>
+                </div>
+              )}
+            </div>
           )}
 
           <h4>{t("teamspaces.appointmentsHeading")}</h4>

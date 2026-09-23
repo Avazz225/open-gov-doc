@@ -1881,16 +1881,22 @@ build; docs and `PROGRESS.md` updated per session.
   per-claimant completion gate (ADR 0211), live-verified against a real activated break-glass superuser.
   (c) storage-service: investigated, found already closed by P66-S1/P67-S2 — stale premise, no code
   change. New [ADR 0216](docs/adr/0216-p74s2-rbac-completions-auth-service-four-eyes-workflow-superuser-bypass.md).
-- **P74-S3 — Teamspace group invitation: final decision, not another deferral** (ADR 0160, deferred six
+- ~~**P74-S3 — Teamspace group invitation: final decision, not another deferral** (ADR 0160, deferred six
   times since Phase 43). This session either builds the already-designed solution (narrow `auth-service`
   group-members endpoint, a binding table, a poll-loop reconciler — the design ADR 0160 itself already
   specifies) or makes an explicit, reasoned, PERMANENT decline — either outcome is acceptable, but
   "defer again with the same reasoning" is explicitly not, per this round's own finding that six silent
-  carry-forwards is enough.
+  carry-forwards is enough.~~ **Done — built.** User chose "build it now" when asked explicitly. New
+  `auth-service` `GET /groups/{name}/members` (service-to-service only), `teamspace-service`'s
+  `TeamspaceAdGroupBinding` table + `source_ad_group_name` attribution + reconciliation poll loop,
+  `user-ui`'s new "AD-Gruppen-Einladung" section. Live-verified via direct API calls and a real
+  headed-browser session; found and fixed a real `delete_teamspace` FK bug along the way. New
+  [ADR 0217](docs/adr/0217-teamspace-ad-group-invitation-build.md).
 
 **Definition of Done**: regression test per fix; new ADR for P74-S3 regardless of which way the decision
-goes (a genuine architectural commitment either way); P74-S1 needed no new ADR, P74-S2 got ADR 0216 after
-all (two real decisions — a new response envelope shape, a cross-service dependency addition); docs and
+goes (a genuine architectural commitment either way) — got ADR 0217; P74-S1 needed no new ADR, P74-S2 got
+ADR 0216 after all (two real decisions — a new response envelope shape, a cross-service dependency
+addition); docs and
 `PROGRESS.md` updated per session.
 
 ## Phase 75 — Beyond the Original Concept (a prioritization decision, not a scoping session)

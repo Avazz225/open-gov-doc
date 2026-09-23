@@ -56,6 +56,42 @@ class TeamspaceMember(Base):
     can_manage_members: Mapped[bool] = mapped_column(Boolean, default=False)
     invited_by: Mapped[str] = mapped_column(String(255))
     invited_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # AD-group invitation (2.5, Post-Roadmap Phase 74 Session 3, ADR
+    # 0160/ADR 0217) - `NULL` for a manually-invited member (the only kind
+    # that existed before this session, unaffected by any group
+    # reconciliation). Set to the owning `TeamspaceAdGroupBinding.
+    # ad_group_name` when `_ad_group_reconciliation_poll_loop` (or the
+    # binding's own initial sync) creates this row instead of a manager's
+    # own `POST .../members` call - the poll loop only ever adds/removes
+    # rows it itself attributed this way, never touching a manually-
+    # invited member even if that same person also happens to be in the
+    # bound AD group (see `main.py`'s reconciliation logic). A person can
+    # still only ever have ONE membership row per teamspace (the existing
+    # `UniqueConstraint` above), so a manual invite always wins if it
+    # already exists - the reconciler skips creating a duplicate.
+    source_ad_group_name: Mapped[str | None] = mapped_column(String(256), default=None)
+
+
+class TeamspaceAdGroupBinding(Base):
+    """Records that a teamspace is bound to a Keycloak/AD group for
+    ongoing membership synchronization (2.5, Post-Roadmap Phase 74
+    Session 3, ADR 0160/ADR 0217) - analogous in spirit to
+    `TeamspaceMember` but for the group binding itself, not a snapshot of
+    its members. Deliberately live/poll-reconciled, never a one-time
+    member-list copy (see `main.py._ad_group_reconciliation_poll_loop`) -
+    the same "Keycloak/AD remains the sole source of truth, never
+    mirrored" principle ADR 0093 already established for AD-group->role
+    mapping, extended here to a second feature area per ADR 0160's own
+    explicit recommendation."""
+
+    __tablename__ = "teamspace_ad_group_binding"
+    __table_args__ = (UniqueConstraint("teamspace_id", "ad_group_name"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    teamspace_id: Mapped[str] = mapped_column(ForeignKey("teamspace.teamspace.id"), index=True)
+    ad_group_name: Mapped[str] = mapped_column(String(256), index=True)
+    invited_by: Mapped[str] = mapped_column(String(255))
+    invited_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class TeamspaceAppointment(Base):

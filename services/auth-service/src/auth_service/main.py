@@ -797,6 +797,46 @@ async def _require_service_user_lookup(x_dms_principal: str) -> None:
         )
 
 
+async def _require_service_group_lookup(x_dms_principal: str) -> None:
+    """Post-Roadmap Phase 74 Session 3 (ADR 0160/ADR 0217) - same shape as
+    `_require_service_user_lookup` above, its own dedicated, narrower
+    capability (`service.group_lookup`, seeded role `service-group-lookup`)
+    rather than reusing `service.user_lookup`: a full group roster is a
+    genuinely wider disclosure than an individual directory lookup (ADR
+    0160's own "Rationale"), so it gets its own independently-revocable
+    permission instead of piggy-backing on an existing one."""
+    allowed = bool(x_dms_principal) and await app.state.permission_client.has_permission(
+        x_dms_principal, "service.group_lookup"
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Fehlende Berechtigung 'service.group_lookup'",
+        )
+
+
+@app.get("/groups/{name}/members", response_model=list[UserLookupOut])
+async def get_group_members(name: str, x_dms_principal: str = Header(default="")) -> list[dict]:
+    """Group-member listing (2.5, Post-Roadmap Phase 74 Session 3, ADR
+    0160/ADR 0217) - the specific missing piece a teamspace AD-group
+    invitation needs, closing ADR 0043's own "Group invitation remains
+    completely unbuilt" residual for real this time (see ADR 0160's
+    scoping). Service-to-service only (`teamspace-service` is the only
+    caller, both for its own bind-time preview and its reconciliation poll
+    loop, see `docs/services/teamspace-service.md`) - deliberately NOT
+    exposed to interactive callers directly, unlike `GET /users/lookup`:
+    a full group roster is a wider disclosure than a single name's
+    existence (ADR 0160's own flagged design fork), so `teamspace-service`
+    fronts it behind its own `_require_manager` gate instead of this
+    service exposing it broadly via an "everyone" permission. `404` if no
+    group with this exact name exists."""
+    await _require_service_group_lookup(x_dms_principal)
+    members = admin_users.find_group_members_by_name(app.state.keycloak_admin, name)
+    if members is None:
+        raise HTTPException(status_code=404, detail=f"Gruppe {name!r} unbekannt")
+    return members
+
+
 @app.get("/users/service-directory", response_model=list[DirectoryEntryOut])
 async def service_directory(x_dms_principal: str = Header(default="")) -> list[dict]:
     """Service-to-service counterpart to `GET /users` (Phase 50 Session 2):

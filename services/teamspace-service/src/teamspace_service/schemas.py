@@ -52,8 +52,35 @@ class TeamspaceMemberOut(BaseModel):
     can_manage_members: bool
     invited_by: str
     invited_at: datetime
+    # `None` for a manually-invited member (Post-Roadmap Phase 74 Session
+    # 3, ADR 0160/ADR 0217) - see `TeamspaceMember.source_ad_group_name`'s
+    # own docstring.
+    source_ad_group_name: str | None = None
 
     model_config = {"from_attributes": True}
+
+
+class TeamspaceAdGroupBindingCreate(BaseModel):
+    ad_group_name: str
+
+
+class TeamspaceAdGroupBindingOut(BaseModel):
+    id: int
+    teamspace_id: str
+    ad_group_name: str
+    invited_by: str
+    invited_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class AdGroupMemberPreview(BaseModel):
+    """Deliberately minimal, mirrors `auth-service`'s own `UserLookupOut`
+    shape - `GET /teamspaces/{id}/ad-group-preview` is a thin proxy for
+    it (Post-Roadmap Phase 74 Session 3, ADR 0160/ADR 0217)."""
+
+    id: str
+    username: str
 
 
 class TeamspaceAppointmentCreate(BaseModel):

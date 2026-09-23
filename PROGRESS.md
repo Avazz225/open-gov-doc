@@ -2,8 +2,52 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P74-S2 (second session of Phase 74). Small RBAC completions bundle, three items —
-see [ADR 0216](docs/adr/0216-p74s2-rbac-completions-auth-service-four-eyes-workflow-superuser-bypass.md)
+**Last completed:** P74-S3 (third and last session of Phase 74 — closes the phase). Teamspace AD-group
+invitation — the user chose **"build it now"** over permanent decline when explicitly asked (the one
+item in this phase that genuinely needed a real decision, deferred six times before this session). Full
+writeup in [ADR 0217](docs/adr/0217-teamspace-ad-group-invitation-build.md), building essentially as ADR
+0160 (P43-S2) had already scoped it.
+
+Three pieces: **(1)** `auth-service`'s new `GET /groups/{name}/members` — a thin, previously-unused
+`python-keycloak` wrapper, service-to-service only (new `service.group_lookup` capability, deliberately
+its own, not folded into `service.user_lookup` — a group roster is a wider disclosure than a single
+username lookup). **(2)** `teamspace-service`'s new `TeamspaceAdGroupBinding` table + `source_ad_group_name`
+on `TeamspaceMember`, four new manager-gated endpoints (preview/bind/list/unbind), and a new
+`_ad_group_reconciliation_poll_loop` (300s default) that live-syncs membership with real Keycloak group
+state — grants newly-added members, revokes departed ones, never touches a manually-invited member's
+attribution even if they're also in the bound group. **(3)** `user-ui`'s `TeamspacesPane.tsx` gained an
+"AD-Gruppen-Einladung" section (preview → bind, bound-groups list with unbind, `(über AD-Gruppe ...)`
+annotation on group-invited members).
+
+**Real bug found and fixed during this session's own live verification** (not just inferred): `DELETE
+/teamspaces/{id}` with an active AD-group binding raised a genuine Postgres `IntegrityError` — reproduced
+via a real browser session that bound a group then tried to delete the teamspace through the actual UI.
+`repository.delete_teamspace` was missing the same dependent-row cleanup the member/appointment/contact
+tables already had; fixed, with a new regression test.
+
+`teamspace-service` 70/70 tests passing (+15, new `test_ad_group_invitation.py`, real Keycloak
+groups/users via `python-keycloak` directly, no mocking), `auth-service` +6 (`test_group_members.py`).
+`user-ui`: 292/292 Vitest (+6 `teamspaces-pane.test.tsx` cases), `tsc`/`eslint`/`next build` clean.
+`ruff check`/`ruff format --check` clean for all three touched Python services.
+
+**Live-verified end-to-end, twice**: direct API calls against the rebuilt stack (real Keycloak group +
+real member → preview → bind → confirmed real `permission-service` grant → unbind → confirmed revocation,
+manually-invited member untouched), and a real headed-browser Playwright session driving the actual
+`user-ui` flow (screenshots: empty state, preview, bound state with both the member annotation and the
+unbind button). `docs/services/auth-service.md`, `docs/services/teamspace-service.md`,
+`docs/services/user-ui.md` updated; ADR 0160's own residual note in `docs/services/teamspace-service.md`
+closed (struck through, cross-referenced to ADR 0217, not superseded — ADR 0160 remains the scoping
+record).
+
+**Next session:** Phase 74 is closed. `IMPLEMENTATION_PLAN.md`'s Phase 75 ("Beyond the Original Concept")
+bundles three independent, not-yet-prioritized initiatives (P75-A ERP/line-of-business connector, P75-B
+native mobile client, P75-C AI features) — deliberately left unordered in the plan, a prioritization
+decision for the user, not something to resolve autonomously.
+
+---
+
+Immediately before P74-S3: **P74-S2** (second session of Phase 74). Small RBAC completions bundle, three
+items — see [ADR 0216](docs/adr/0216-p74s2-rbac-completions-auth-service-four-eyes-workflow-superuser-bypass.md)
 for the full writeup.
 
 **(a) auth-service four-eyes on `PUT /user-tracking-config/{principal_id}`** — closed ADR 0157's own
@@ -38,11 +82,6 @@ premise from research predating those sessions — no code change.
 `ruff check`/`ruff format --check` clean for `services/auth-service/` and `services/workflow-service/`
 specifically (the full-repo run also flags pre-existing, unrelated issues in `apps/libreoffice-addin`,
 `loadtest/notebook/analysis.ipynb`, and two other services' tests — none touched this session).
-
-**Next session:** P74-S3 — Teamspace group invitation (ADR 0160, deferred six times). This is the one
-item in the current queue that explicitly needs a real user decision, not something to resolve
-autonomously: either build the already-designed solution, or make an explicit, reasoned, PERMANENT
-decline — either outcome is acceptable, "defer again with the same reasoning" is not.
 
 ---
 

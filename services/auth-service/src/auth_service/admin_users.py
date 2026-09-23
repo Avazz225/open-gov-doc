@@ -77,6 +77,28 @@ def find_user_by_username(admin: KeycloakAdmin, username: str) -> dict | None:
     return _to_user_dict(matches[0])
 
 
+def find_group_members_by_name(admin: KeycloakAdmin, name: str) -> list[dict] | None:
+    """Group-member listing for `GET /groups/{name}/members` (2.5,
+    Post-Roadmap Phase 74 Session 3, ADR 0160/ADR 0217) - the specific
+    missing piece ADR 0043/0093 never built: a queryable member list for a
+    Keycloak group. Thin wrapper around `get_group_by_path`/
+    `get_group_members` (already-vendored `python-keycloak` capability,
+    unused anywhere else in this codebase until now, exactly as ADR 0160
+    anticipated). Returns `None` if no group with this exact name exists -
+    top-level only (`path=f"/{name}"`), this project has no nested-group
+    concept anywhere else either. Reuses `_to_user_dict`'s shape (same as
+    `find_user_by_username`/`find_user_by_id`) - the endpoint's own
+    response model trims it down to `id`/`username`, matching ADR 0160's
+    "deliberately minimal, not a general directory function" framing."""
+    try:
+        group = admin.get_group_by_path(f"/{name}")
+    except KeycloakGetError as exc:
+        if exc.response_code == 404:
+            return None
+        raise
+    return [_to_user_dict(member) for member in admin.get_group_members(group["id"])]
+
+
 def find_user_by_id(admin: KeycloakAdmin, user_id: str) -> dict | None:
     """Reverse identity resolution for `GET /users/{user_id}` (Post-Roadmap
     Phase 19 Session 4, ADR 0069) - the counterpart to `find_user_by_username`

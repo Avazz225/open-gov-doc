@@ -38,6 +38,42 @@ class FolderServiceClient:
         await self._client.aclose()
 
 
+class AuthServiceClient:
+    """Group-member lookup against `auth-service` (2.5, Post-Roadmap Phase
+    74 Session 3, ADR 0160/ADR 0217) - the specific missing piece a
+    teamspace AD-group invitation needs. Same fixed service-identity
+    pattern as `FolderServiceClient`/`PermissionServiceClient` above
+    (`X-DMS-Principal: teamspace-service`), gated on `auth-service`'s side
+    by the new, narrow `service.group_lookup` capability (seeded role
+    `service-group-lookup` in `permission-service`) - an operator must
+    grant this role to the `teamspace-service` principal once, same
+    manual-grant convention already established for `service-user-lookup`
+    (`notification-service`/`signature-service`, Phase 50 Session 2)."""
+
+    _PRINCIPAL_ID = "teamspace-service"
+
+    def __init__(self, base_url: str) -> None:
+        self._client = httpx.AsyncClient(
+            base_url=base_url, timeout=10.0, headers={"X-DMS-Principal": self._PRINCIPAL_ID}
+        )
+
+    async def get_group_members(self, name: str) -> list[dict] | None:
+        """`None` if no group with this exact name exists - the caller
+        (`main.py`) turns that into a `404` for the interactive preview/
+        bind endpoints, or simply skips that binding for a tick of the
+        reconciliation poll loop (a group deleted out from under an
+        existing binding is not itself an error condition worth crashing
+        the loop over, see `_ad_group_reconciliation_poll_loop`)."""
+        response = await self._client.get(f"/groups/{name}/members")
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        return response.json()
+
+    async def close(self) -> None:
+        await self._client.aclose()
+
+
 class PermissionServiceClient:
     """Additionally links a teamspace membership with a real, resource-
     scoped `permission-service` role assignment on the teamspace root

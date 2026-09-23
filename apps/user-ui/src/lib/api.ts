@@ -2149,6 +2149,27 @@ export interface TeamspaceMember {
   can_manage_members: boolean;
   invited_by: string;
   invited_at: string;
+  // `null` for a manually-invited member (Post-Roadmap Phase 74 Session
+  // 3, ADR 0160/ADR 0217) - set when the reconciliation poll loop (or a
+  // binding's own initial sync) added this row instead of a manager.
+  source_ad_group_name: string | null;
+}
+
+// AD-group invitation (2.5, Post-Roadmap Phase 74 Session 3, ADR
+// 0160/ADR 0217): binds a teamspace to a Keycloak/AD group, whose
+// current membership is then kept in sync on an ongoing basis (live
+// poll reconciliation, never a one-time snapshot copy).
+export interface TeamspaceAdGroupBinding {
+  id: number;
+  teamspace_id: string;
+  ad_group_name: string;
+  invited_by: string;
+  invited_at: string;
+}
+
+export interface AdGroupMemberPreview {
+  id: string;
+  username: string;
 }
 
 export interface TeamspaceAppointment {
@@ -2246,6 +2267,64 @@ export async function removeTeamspaceMember(
   await request(
     "teamspace-service",
     `teamspaces/${encodeURIComponent(teamspaceId)}/members/${encodeURIComponent(principalId)}`,
+    { method: "DELETE" },
+    token
+  );
+}
+
+export async function previewAdGroupMembers(
+  token: string,
+  teamspaceId: string,
+  adGroupName: string
+): Promise<AdGroupMemberPreview[]> {
+  const response = await request(
+    "teamspace-service",
+    `teamspaces/${encodeURIComponent(teamspaceId)}/ad-group-preview?ad_group_name=${encodeURIComponent(adGroupName)}`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function bindAdGroupToTeamspace(
+  token: string,
+  teamspaceId: string,
+  adGroupName: string
+): Promise<TeamspaceAdGroupBinding> {
+  const response = await request(
+    "teamspace-service",
+    `teamspaces/${encodeURIComponent(teamspaceId)}/ad-group-bindings`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ad_group_name: adGroupName }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export async function listAdGroupBindings(
+  token: string,
+  teamspaceId: string
+): Promise<TeamspaceAdGroupBinding[]> {
+  const response = await request(
+    "teamspace-service",
+    `teamspaces/${encodeURIComponent(teamspaceId)}/ad-group-bindings`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function unbindAdGroupFromTeamspace(
+  token: string,
+  teamspaceId: string,
+  adGroupName: string
+): Promise<void> {
+  await request(
+    "teamspace-service",
+    `teamspaces/${encodeURIComponent(teamspaceId)}/ad-group-bindings/${encodeURIComponent(adGroupName)}`,
     { method: "DELETE" },
     token
   );
