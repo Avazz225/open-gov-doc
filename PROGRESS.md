@@ -27,9 +27,45 @@ drain → `200`, deregister → `204`, using the exact same headers the fixed te
 to strike — the recurring-failure note had only ever lived in `PROGRESS.md`/other ADRs' Consequences
 sections, never in this service's own doc, itself part of why it went unfixed so long).
 
-**This closed the last queued session of Phase 73** — full unfiltered regression and `graphify update .`
-follow per the standing phase-end rule, then a report back to the user on how Phase 73 landed before
-autonomously continuing into Phase 74.
+**This closed the last queued session of Phase 73.** Full unfiltered `scripts/run-tests.sh` regression run
+afterward: 29 of 32 services fully green; `gateway-service` itself now 31/31 (proof of this session's own
+fix); the remaining 3 non-green services all confirmed pre-existing and unrelated to any Phase 73 change
+(diffed against this session's own commits to verify, not assumed) — `workflow-service` (1 failed,
+`test_xdomea_handoff.py`, the same intermittent federation/xdomea-dispatch flake already documented at
+ADR 0195/ADR 0211), `federation-hub-service` (1 failed in the full run only, confirmed a full-suite-only
+cross-test flake by re-running the service alone twice, both times 89/89 clean), `webdav-connector` (15
+failed, all `ReadTimeout`, matching ADR 0189's already-documented root-`PROPFIND`-timeout pattern against
+this long-lived dev stack's accumulated folder size exactly), and `auth-service` (6 failed + 8 errors, a
+real, reproducible-in-isolation `422` on its own federation self-registration against `federation-hub-service`
+— confirmed NOT caused by this session via `git show` on every P73-S3 diff touching that service's
+endpoint, but also not a previously-documented pattern with this exact shape; flagged here as a genuine
+finding for a future gap-analysis round, not investigated further — out of Phase 73's own defined scope).
+
+**`graphify update .` attempted, hit the shrink-guard, deliberately deferred at the user's explicit
+choice — the graph remains at its pre-Phase-73 state (17,472 nodes/31,920 edges) for now.** 241 files had
+changed since the graph's last update (162 code, 79 docs/ADRs, 1 gitignore-false-positive "deletion"
+— `CLAUDE.md`, the same known non-issue documented since P5-S1, deliberately not pruned). AST
+re-extraction (162 code files, free) completed fine. Semantic re-extraction of the 79 changed docs/ADRs
+was dispatched across 4 subagents (~20 files each, this skill's own default chunk size) — the result was
+systematically under-dense compared to the graph's existing per-file node counts (e.g.
+`docs/services/document-service.md` dropped from 39 nodes to 13, `PROGRESS.md` from 158 to 3), a ~900-node
+aggregate loss that correctly tripped graphify's own shrink-guard (`#479`) before anything was written.
+Root cause: this project's graph density was built up over 73+ phases of small, typically 1-5-file
+incremental updates, each getting full subagent attention per file — batching 79 backlogged files into 4
+large chunks in one catch-up pass gave each file proportionally far less attention than that. Given
+redoing this properly (smaller chunks, ~10 more subagent calls, another ~1M+ tokens on top of what this
+attempt already spent) was a real, consequential cost, the user chose to skip the update entirely this
+session rather than force the shrink or spend the extra budget. **Left in a clean, non-corrupted state for
+a future attempt**: `graph.json` itself was never written to (the shrink-guard blocks before any write,
+confirmed still 17,472 nodes on disk); `manifest.json` had already been advanced past these 79 files by
+the merge step before the shrink-guard caught it — restored from the same-day
+`graphify-out/2026-09-22/manifest.json` snapshot so a future `--update` correctly re-detects all 241 files
+as changed again, instead of silently skipping them forever; the 79 files' shallow semantic-cache entries
+(content-hash-keyed) were explicitly deleted so a future extraction can't accidentally reuse today's
+under-dense results either. **Next graphify attempt should use materially smaller chunks (~5-8 files per
+subagent instead of ~20-25) specifically when catching up a large multi-session backlog like this one**,
+not the skill's generic default sizing, which is tuned for typical corpora, not this project's unusually
+dense per-file documentation style.
 
 **Next session:** P74-S1 — Case-browsing UI in `reviewer-ui` (ADR 0141's own named gap, re-confirmed
 still open at P65-S1): `user-ui` has `CasesPane.tsx`/"Umlaufmappen", `reviewer-ui` has no equivalent — a
