@@ -46,7 +46,7 @@ export function RetimestampStatus() {
   }, [reload]);
 
   return (
-    <div className="card">
+    <div className="rounded-lg border border-border p-4 mb-6">
       <h2>{t("retimestampStatus.heading")}</h2>
       <p className="text-sm opacity-80">{t("retimestampStatus.hint")}</p>
 

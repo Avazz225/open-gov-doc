@@ -93,7 +93,7 @@ export function ForensicTraceView() {
     <div>
       <p className="text-sm opacity-80">{t("forensicTrace.hint")}</p>
 
-      <section className="card">
+      <section className="rounded-lg border border-border p-4 mb-6">
         <form className="explorer-toolbar" onSubmit={handleQuery}>
           <input
             placeholder={t("forensicTrace.filterActor")}

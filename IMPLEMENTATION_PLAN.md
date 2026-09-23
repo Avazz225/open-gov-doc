@@ -2013,9 +2013,17 @@ not a web app, and has no CSS of any kind to migrate.
   `.empty-state`/`.actions`) via bulk find-and-replace across 32/33/31/19 files, verified via
   `tsc`/`eslint`/Vitest (304/304)/build/computed-style probe against the real rebuilt image. New
   [ADR 0225](docs/adr/0225-admin-ui-shared-class-bulk-conversion-strategy.md).
-  Remaining: the more structurally complex shared classes (`.card`/`.data-table`/`.badge`/`.form-grid`/
-  `.attribute-row`/`.checkbox-group`/`.layout-row`/`.layout-field`/`.deletion-reason-catalog*`), then
-  all of `user-ui` (similarly large, not yet started, needs its own structural survey first).
+  **admin-ui rollout functionally complete (P75-S9)**: converted `.card` (57 occurrences/31 files) the
+  same way; found and fixed a real layout regression from P75-S8 (`.hint` conversion had silently broken
+  `.form-grid > .hint`'s full-width span for 7 elements across 6 files — fixed with `col-span-full`,
+  re-verified via computed-style probe). Deliberately stops here: the remaining shared classes
+  (`.data-table`/`.badge`/`.form-grid`/`.attribute-row`/`.checkbox-group`/`.layout-row`/`.layout-field`/
+  `.deletion-reason-catalog*`) all involve descendant/compound selectors (table cells, nested labels,
+  modifier variants) and are kept as permanent shared component classes, not unfinished scope — see
+  [ADR 0226](docs/adr/0226-admin-ui-card-conversion-shared-component-class-boundary.md) for the full
+  reasoning. Remaining: all of `user-ui` (similarly large, not yet started, needs its own structural
+  survey first, same lens as ADR 0225/0226), then Phase 75's own phase-close (full regression +
+  `graphify update .`).
 
 **Definition of Done**: P75-S1 needs a real ADR (a genuine architecture decision: which token-integration
 mechanism, shared preset location); P75-S2 needs before/after screenshots in the same message/commit,

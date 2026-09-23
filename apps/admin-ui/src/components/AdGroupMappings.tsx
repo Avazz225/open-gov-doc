@@ -184,7 +184,7 @@ export function AdGroupMappings() {
         </p>
       )}
 
-      <section className="card">
+      <section className="rounded-lg border border-border p-4 mb-6">
         <h2>{t("adGroupMappings.mappingsSectionTitle")}</h2>
         <p className="text-sm opacity-80">{t("adGroupMappings.mappingsHint")}</p>
         <form
@@ -246,7 +246,7 @@ export function AdGroupMappings() {
         {mappings.length === 0 && <p className="italic opacity-70">{t("adGroupMappings.mappingsEmpty")}</p>}
       </section>
 
-      <section className="card">
+      <section className="rounded-lg border border-border p-4 mb-6">
         <h2>{t("adGroupMappings.compositeRulesSectionTitle")}</h2>
         <p className="text-sm opacity-80">{t("adGroupMappings.compositeRulesHint")}</p>
         <form
@@ -315,7 +315,7 @@ export function AdGroupMappings() {
         )}
       </section>
 
-      <section className="card">
+      <section className="rounded-lg border border-border p-4 mb-6">
         <h2>{t("adGroupMappings.defaultRoleSectionTitle")}</h2>
         <p className="text-sm opacity-80">{t("adGroupMappings.defaultRoleHint")}</p>
         <form

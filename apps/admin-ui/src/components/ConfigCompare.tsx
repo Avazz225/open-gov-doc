@@ -71,7 +71,7 @@ function DeltaTable({ category, delta }: { category: string; delta: CategoryDelt
   const differingNames = Object.keys(delta.differing);
   const hasChanges = delta.only_in_compare.length > 0 || differingNames.length > 0;
   return (
-    <div className="card" key={category}>
+    <div className="rounded-lg border border-border p-4 mb-6" key={category}>
       <h3>{category}</h3>
       {!hasChanges && delta.only_in_base.length === 0 && (
         <p className="text-sm opacity-80">{t("configCompare.deltaNoChanges")}</p>
@@ -137,7 +137,7 @@ export function ConfigCompare() {
 
   return (
     <div>
-      <div className="card">
+      <div className="rounded-lg border border-border p-4 mb-6">
         <p className="text-sm opacity-80">{t("configCompare.hint")}</p>
         <p className="text-sm opacity-80">
           {t("configCompare.baseIsActive", { name: activeInstallation.name })}

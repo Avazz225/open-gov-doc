@@ -320,7 +320,7 @@ export function UserManagement() {
         </p>
       )}
 
-      <section className="card">
+      <section className="rounded-lg border border-border p-4 mb-6">
         <h2>{t("users.sectionTitle")}</h2>
         <form aria-label={t("users.formLabel")} className="form-grid" onSubmit={handleCreateUser}>
           <label>
@@ -395,7 +395,7 @@ export function UserManagement() {
         {users.length === 0 && <p className="italic opacity-70">{t("users.empty")}</p>}
       </section>
 
-      <section className="card">
+      <section className="rounded-lg border border-border p-4 mb-6">
         <h2>{t("roles.sectionTitle")}</h2>
         <form aria-label={t("roles.formLabel")} className="form-grid" onSubmit={handleCreateRole}>
           <label>
@@ -444,7 +444,7 @@ export function UserManagement() {
         {roles.length === 0 && <p className="italic opacity-70">{t("roles.empty")}</p>}
       </section>
 
-      <section className="card">
+      <section className="rounded-lg border border-border p-4 mb-6">
         <h2>{t("groups.sectionTitle")}</h2>
         <p className="text-sm opacity-80">{t("groups.hint")}</p>
         <form aria-label={t("groups.formLabel")} className="form-grid" onSubmit={handleCreateGroup}>
@@ -471,7 +471,7 @@ export function UserManagement() {
             />{" "}
             {t("groups.isOrgUnit")}
           </label>
-          <p className="text-sm opacity-80">{t("groups.isOrgUnitHint")}</p>
+          <p className="col-span-full text-sm opacity-80">{t("groups.isOrgUnitHint")}</p>
           <button type="submit">{t("common.create")}</button>
         </form>
 
@@ -559,7 +559,7 @@ export function UserManagement() {
         {groups.length === 0 && <p className="italic opacity-70">{t("groups.empty")}</p>}
       </section>
 
-      <section className="card">
+      <section className="rounded-lg border border-border p-4 mb-6">
         <h2>{t("orgHierarchy.sectionTitle")}</h2>
         <p className="text-sm opacity-80">{t("orgHierarchy.hint")}</p>
         <form
@@ -649,7 +649,7 @@ export function UserManagement() {
         )}
       </section>
 
-      <section className="card">
+      <section className="rounded-lg border border-border p-4 mb-6">
         <h2>{t("roleAssignments.sectionTitle")}</h2>
         <form
           aria-label={t("roleAssignments.formLabel")}

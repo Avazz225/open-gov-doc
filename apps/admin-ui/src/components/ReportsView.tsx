@@ -120,7 +120,7 @@ function DocumentVolumeSection({ token }: { token: string }) {
   }, [load]);
 
   return (
-    <section className="card">
+    <section className="rounded-lg border border-border p-4 mb-6">
       <h2 className="pane-heading">{t("reports.documentVolumeHeading")}</h2>
       <div className="explorer-toolbar">
         <label>
@@ -198,7 +198,7 @@ function OpenWorkflowTasksSection({ token }: { token: string }) {
   }, [load]);
 
   return (
-    <section className="card">
+    <section className="rounded-lg border border-border p-4 mb-6">
       <h2 className="pane-heading">{t("reports.openWorkflowTasksHeading")}</h2>
       <div className="explorer-toolbar">
         <button type="button" onClick={load}>
@@ -265,7 +265,7 @@ function StorageUsageSection({ token }: { token: string }) {
   }, [load]);
 
   return (
-    <section className="card">
+    <section className="rounded-lg border border-border p-4 mb-6">
       <h2 className="pane-heading">{t("reports.storageUsageHeading")}</h2>
       <div className="explorer-toolbar">
         <button type="button" onClick={load}>
@@ -331,7 +331,7 @@ function UserActivitySection({ token }: { token: string }) {
   }, [load]);
 
   return (
-    <section className="card">
+    <section className="rounded-lg border border-border p-4 mb-6">
       <h2 className="pane-heading">{t("reports.userActivityHeading")}</h2>
       <div className="explorer-toolbar">
         <input
@@ -426,7 +426,7 @@ function ReportScheduleSection({ token }: { token: string }) {
   }
 
   return (
-    <section className="card">
+    <section className="rounded-lg border border-border p-4 mb-6">
       <h2 className="pane-heading">{t("reports.schedulesHeading")}</h2>
       <p className="text-sm opacity-80">{t("reports.schedulesHint")}</p>
       <form className="inline-form" aria-label={t("reports.newScheduleFormLabel")} onSubmit={handleCreate}>

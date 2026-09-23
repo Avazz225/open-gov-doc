@@ -72,7 +72,7 @@ export function SignatureConfig() {
   if (unreachable) return <p className="italic opacity-70">{t("signatureConfig.unreachable")}</p>;
 
   return (
-    <div className="card">
+    <div className="rounded-lg border border-border p-4 mb-6">
       <p className="text-sm opacity-80">{t("signatureConfig.hint")}</p>
 
       {error && (

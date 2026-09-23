@@ -43,25 +43,39 @@
   }
 }
 
-/* Post-Roadmap Phase 75 Session 7: this app is large enough (~50
-   components, ~10800 lines) that its Tailwind rollout is split across
+/* Post-Roadmap Phase 75 (Tailwind rollout): this app is large enough
+   (~50 components, ~10800 lines) that its rollout is split across
    multiple sessions, unlike the small apps (ADR 0220-0223) which each
    converted in one pass. Session 7 converted the SHELL/chrome layer -
    `AdminShell.tsx`, `AdminSidebar.tsx`, `ThemeSwitcher.tsx`,
    `LocaleSwitcher.tsx`, `InstallationSwitcher.tsx`, `MaintenanceBanner.tsx`,
    `LicenseStatusBanner.tsx`, `RequireAuth.tsx`, `RequireCapability.tsx`,
-   `DashboardWidgets.tsx`, the home page, and the login page. Session 8
-   converted the four single-purpose classes shared across the whole app
-   (`.hint`/`.error-text`/`.empty-state`/`.actions`, each confirmed via
-   grep to be used ONLY standalone, never combined with another class -
-   safe for a mechanical bulk find-and-replace across every consumer at
-   once). `.entry-list`/`.entry-row`/`.login-form` were dead CSS (confirmed
-   via grep, never referenced anywhere in this app), dropped outright in
-   session 7. EVERYTHING ELSE below (`.card`/`.data-table`/`.badge`/
-   `.form-grid`/`.attribute-row`/`.checkbox-group`/`.layout-row`/
-   `.layout-field`/`.deletion-reason-catalog*`) is still used by 15-30+ of
-   this app's other feature components and stays deliberately untouched -
-   each their own future session's job, not this one's. */
+   `DashboardWidgets.tsx`, the home page, and the login page. Session 8/9
+   converted every single-element shared class with no descendant/compound
+   selector (`.hint`/`.error-text`/`.empty-state`/`.actions`/`.card`, each
+   confirmed via grep before conversion - the first four always standalone,
+   `.card` combined only once with `.dashboard-widget`, handled directly in
+   `DashboardWidgets.tsx` instead of keeping that override class). Found and
+   fixed a real layout regression along the way: converting `.hint` broke
+   `.form-grid > .hint`'s "span the full grid width" rule for 7 elements
+   across 6 files that relied on it - fixed each with an explicit
+   `col-span-full` before removing the now-dead CSS rule.
+   `.entry-list`/`.entry-row`/`.login-form` were dead CSS, dropped in
+   session 7. WHAT REMAINS BELOW (`.data-table`, `.badge`, `.form-grid`,
+   `.attribute-row`, `.checkbox-group`, `.layout-row`, `.layout-field`,
+   `.deletion-reason-catalog*`) is a DELIBERATE stopping point, not
+   leftover scope: every one of these involves a descendant or compound
+   selector (table th/td, labels nested inside a container, `.badge.ok`/
+   `.badge.down` modifier variants) targeting child elements, not a single
+   element's own classList. Converting these to literal Tailwind utility
+   strings repeated at every call site would mean editing every th/td and
+   nested label across dozens of files for zero visual or architectural
+   benefit - these are already built on the same `--dms-*` design tokens
+   the Tailwind utilities resolve to, so they are already visually
+   consistent with the rest of the redesigned app. Kept as real,
+   permanent, shared component classes - a legitimate CSS pattern Tailwind
+   itself documents for exactly this kind of widely-reused structure, not
+   a gap to eventually close. See ADR 0226 for the full reasoning. */
 @layer base {
   :root {
     font-family: var(--dms-font-family);
@@ -80,32 +94,6 @@
   }
 }
 
-.card {
-  border: 1px solid var(--dms-border);
-  border-radius: var(--dms-radius-lg);
-  padding: var(--dms-space-4);
-  margin-bottom: var(--dms-space-6);
-}
-
-/* Role-dependent dashboard widgets (Concept 8, P69-S2, ADR 0201) - one
-   `.card` per capability-visible nav group, `auto-fit` so the grid adapts
-   from a single domain-admin's one-widget view up to a superuser's full
-   grid without a fixed column count. */
-/* Post-Roadmap Phase 75 Session 7: `.dashboard-grid`/the h2/ul child rules
-   above are gone (converted to Tailwind utilities directly in
-   DashboardWidgets.tsx). This one small override rule stays as real CSS,
-   deliberately NOT converted to a Tailwind `mb-0` utility class: `.card`
-   stays unlayered shared CSS (30+ other components still depend on it,
-   out of this session's scope), and per the cascade-layer bug ADR 0219
-   found and fixed for office-addin, an unlayered rule always beats a
-   `@layer utilities` class regardless of source order - a `mb-0` utility
-   combined with `card` on the same element would silently lose to
-   `.card`'s own `margin-bottom`. Kept here instead, after `.card` in file
-   order, so it wins on the same unlayered footing. */
-.dashboard-widget {
-  margin-bottom: 0;
-}
-
 .form-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
@@ -118,14 +106,6 @@
   flex-direction: column;
   font-size: var(--dms-font-size-sm);
   gap: var(--dms-space-1);
-}
-
-/* A `.hint` placed directly inside a `.form-grid` (e.g. explaining a
-   checkbox field, Post-Roadmap Phase 35 Session 1) must span the full
-   width like `.deletion-reason-catalog` below, not become its own narrow
-   grid cell wherever the auto-fit layout happens to place it. */
-.form-grid > .hint {
-  grid-column: 1 / -1;
 }
 
 /* Deletion-reason catalog editor (post-roadmap phase 31 session 1, ADR

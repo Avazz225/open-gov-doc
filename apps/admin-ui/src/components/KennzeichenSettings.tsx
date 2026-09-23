@@ -68,7 +68,7 @@ export function KennzeichenSettings() {
   }
 
   return (
-    <div className="card">
+    <div className="rounded-lg border border-border p-4 mb-6">
       <p className="text-sm opacity-80">{t("kennzeichenSettings.hint")}</p>
 
       {isLoading ? (

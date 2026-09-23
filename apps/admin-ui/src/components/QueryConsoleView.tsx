@@ -90,7 +90,7 @@ function QueryEventsSection() {
     <div>
       <p className="text-sm opacity-80">{t("queryConsole.hint")}</p>
 
-      <section className="card">
+      <section className="rounded-lg border border-border p-4 mb-6">
         <form className="explorer-toolbar" onSubmit={handleQuery}>
           <input
             placeholder={t("queryConsole.filterActor")}
@@ -357,7 +357,7 @@ function ManipulationSection() {
       <h2>{t("queryConsole.manipulationTitle")}</h2>
       <p className="text-sm opacity-80">{t("queryConsole.manipulationHint")}</p>
 
-      <section className="card">
+      <section className="rounded-lg border border-border p-4 mb-6">
         <h3>{t("queryConsole.schutzschalterTitle")}</h3>
         {modeError && (
           <p className="text-danger" role="alert">
@@ -399,7 +399,7 @@ function ManipulationSection() {
         )}
       </section>
 
-      <section className="card">
+      <section className="rounded-lg border border-border p-4 mb-6">
         <h3>{t("queryConsole.manipulateActionTitle")}</h3>
         <form className="explorer-toolbar" onSubmit={handleDryRun}>
           <label>
@@ -522,7 +522,7 @@ function ManipulationSection() {
         )}
       </section>
 
-      <section className="card">
+      <section className="rounded-lg border border-border p-4 mb-6">
         <h3>{t("queryConsole.pendingApprovalsTitle")}</h3>
         {approvalsError && (
           <p className="text-danger" role="alert">

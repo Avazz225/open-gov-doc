@@ -104,7 +104,7 @@ function NotificationFailuresSection() {
 
   if (!hasPermission) {
     return (
-      <div className="card">
+      <div className="rounded-lg border border-border p-4 mb-6">
         <h2>{t("processingFailures.notificationHeading")}</h2>
         <p className="italic opacity-70">{t("processingFailures.notificationMissingPermission")}</p>
       </div>
@@ -116,7 +116,7 @@ function NotificationFailuresSection() {
   }
 
   return (
-    <div className="card">
+    <div className="rounded-lg border border-border p-4 mb-6">
       <h2>{t("processingFailures.notificationHeading")}</h2>
       <p className="text-sm opacity-80">{t("processingFailures.notificationHint")}</p>
       {error && (
@@ -215,7 +215,7 @@ function RenditionFailuresSection() {
   }
 
   return (
-    <div className="card">
+    <div className="rounded-lg border border-border p-4 mb-6">
       <h2>{t("processingFailures.renditionHeading")}</h2>
       <p className="text-sm opacity-80">{t("processingFailures.renditionHint")}</p>
       {error && (
@@ -316,7 +316,7 @@ function OcrResultFailuresSection() {
   }
 
   return (
-    <div className="card">
+    <div className="rounded-lg border border-border p-4 mb-6">
       <h2>{t("processingFailures.ocrHeading")}</h2>
       <p className="text-sm opacity-80">{t("processingFailures.ocrHint")}</p>
       {error && (
@@ -426,7 +426,7 @@ function HandoverFailuresSection() {
   }
 
   return (
-    <div className="card">
+    <div className="rounded-lg border border-border p-4 mb-6">
       <h2>{t("processingFailures.handoverHeading")}</h2>
       <p className="text-sm opacity-80">{t("processingFailures.handoverHint")}</p>
       <label>

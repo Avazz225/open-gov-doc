@@ -122,7 +122,7 @@ export function AuditTraceSettings() {
     <div>
       <p className="text-sm opacity-80">{t("auditTraceSettings.hint")}</p>
 
-      <section className="card">
+      <section className="rounded-lg border border-border p-4 mb-6">
         <h2 className="pane-heading">{t("auditTraceSettings.baseHeading")}</h2>
         {isLoading ? (
           <p>{t("common.loading")}</p>
@@ -158,7 +158,7 @@ export function AuditTraceSettings() {
         )}
       </section>
 
-      <section className="card">
+      <section className="rounded-lg border border-border p-4 mb-6">
         <h2 className="pane-heading">{t("auditTraceSettings.overridesHeading")}</h2>
         <p className="text-sm opacity-80">{t("auditTraceSettings.overridesHint")}</p>
         <form className="inline-form" aria-label={t("auditTraceSettings.addOverrideLabel")} onSubmit={handleAddOverride}>

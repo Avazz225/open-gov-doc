@@ -48,7 +48,7 @@ function DeltaTable({ category, delta }: DeltaTableProps) {
   const differingNames = Object.keys(delta.differing);
   const hasChanges = delta.only_in_compare.length > 0 || differingNames.length > 0;
   return (
-    <div className="card" key={category}>
+    <div className="rounded-lg border border-border p-4 mb-6" key={category}>
       <h3>{category}</h3>
       {!hasChanges && delta.only_in_base.length === 0 && (
         <p className="text-sm opacity-80">{t("configPackages.deltaNoChanges")}</p>
@@ -183,7 +183,7 @@ export function ConfigPackages() {
 
   return (
     <div>
-      <div className="card">
+      <div className="rounded-lg border border-border p-4 mb-6">
         <p className="text-sm opacity-80">{t("configPackages.hint")}</p>
         <div className="flex gap-2">
           <button type="button" onClick={handleExportCurrent} disabled={isExporting}>
@@ -197,7 +197,7 @@ export function ConfigPackages() {
         )}
       </div>
 
-      <div className="card">
+      <div className="rounded-lg border border-border p-4 mb-6">
         <label>
           {t("configPackages.selectFile")}
           <input
@@ -217,7 +217,7 @@ export function ConfigPackages() {
               {t("configPackages.loadedFile")}: {fileName}
             </p>
             {configDoc.manifest ? (
-              <div className="card">
+              <div className="rounded-lg border border-border p-4 mb-6">
                 <h3>{configDoc.manifest.name}</h3>
                 <p className="text-sm opacity-80">
                   {t("configPackages.manifestVersion")}: {configDoc.manifest.version} ·{" "}
@@ -281,7 +281,7 @@ export function ConfigPackages() {
         <p className="text-sm opacity-80">{t("configPackages.pendingApproval")}</p>
       )}
       {importResult && importResult.result && (
-        <div className="card">
+        <div className="rounded-lg border border-border p-4 mb-6">
           <h2>{t("configPackages.applyResultTitle")}</h2>
           <table className="data-table">
             <thead>

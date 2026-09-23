@@ -63,7 +63,7 @@ export function UploadSettings() {
   }
 
   return (
-    <div className="card">
+    <div className="rounded-lg border border-border p-4 mb-6">
       <p className="text-sm opacity-80">{t("uploadSettings.hint")}</p>
 
       {isLoading ? (
@@ -81,7 +81,7 @@ export function UploadSettings() {
               onChange={(event) => setAllowedContentTypesInput(event.target.value)}
             />
           </label>
-          <p className="text-sm opacity-80">{t("uploadSettings.allowedContentTypesHint")}</p>
+          <p className="col-span-full text-sm opacity-80">{t("uploadSettings.allowedContentTypesHint")}</p>
           <div className="flex gap-2">
             <button type="submit" disabled={isSaving}>
               {t("common.save")}

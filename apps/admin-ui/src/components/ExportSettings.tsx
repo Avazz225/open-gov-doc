@@ -91,7 +91,7 @@ export function ExportSettings() {
   }
 
   return (
-    <div className="card">
+    <div className="rounded-lg border border-border p-4 mb-6">
       <p className="text-sm opacity-80">{t("exportSettings.hint")}</p>
 
       {isLoading ? (
@@ -121,7 +121,7 @@ export function ExportSettings() {
             />
             {t("exportSettings.stampEnabled")}
           </label>
-          <p className="text-sm opacity-80">{t("exportSettings.stampEnabledHint")}</p>
+          <p className="col-span-full text-sm opacity-80">{t("exportSettings.stampEnabledHint")}</p>
 
           <label>
             {t("exportSettings.stampType")}
@@ -147,7 +147,7 @@ export function ExportSettings() {
               <option value="bottom-right">{t("exportSettings.stampPositionBottomRight")}</option>
             </select>
           </label>
-          <p className="text-sm opacity-80">{t("exportSettings.stampPositionHint")}</p>
+          <p className="col-span-full text-sm opacity-80">{t("exportSettings.stampPositionHint")}</p>
 
           <label>
             {t("exportSettings.stampValueTemplate")}
@@ -157,7 +157,7 @@ export function ExportSettings() {
               onChange={(event) => setStampValueTemplate(event.target.value)}
             />
           </label>
-          <p className="text-sm opacity-80">{t("exportSettings.stampValueTemplateHint")}</p>
+          <p className="col-span-full text-sm opacity-80">{t("exportSettings.stampValueTemplateHint")}</p>
 
           <div className="flex gap-2">
             <button type="submit" disabled={isSaving}>

@@ -54,11 +54,11 @@ vi.mock("@/lib/auth-context", async () => {
 });
 
 function documentsCard() {
-  return screen.getByText("Dokumente").closest(".card") as HTMLElement;
+  return screen.getByText("Dokumente").closest("div") as HTMLElement;
 }
 
 function foldersCard() {
-  return screen.getByText("Ordner").closest(".card") as HTMLElement;
+  return screen.getByText("Ordner").closest("div") as HTMLElement;
 }
 
 describe("RetentionSettings", () => {

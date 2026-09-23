@@ -125,7 +125,7 @@ export function EmailTemplates() {
   const selectedUseCase = useCases.find((entry) => entry.use_case === formUseCase);
 
   return (
-    <div className="card">
+    <div className="rounded-lg border border-border p-4 mb-6">
       <p className="text-sm opacity-80">{t("emailTemplates.hint")}</p>
 
       {isLoading ? (

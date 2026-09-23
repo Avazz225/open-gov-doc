@@ -148,7 +148,7 @@ export function UserTracking() {
       )}
 
       {canManage && (
-        <section className="card">
+        <section className="rounded-lg border border-border p-4 mb-6">
           <h2>{t("userTracking.configSectionTitle")}</h2>
           <p className="text-sm opacity-80">{t("userTracking.configHint")}</p>
           <form
@@ -190,14 +190,18 @@ export function UserTracking() {
                 />
                 {t("userTracking.enabled")}
               </label>
-              {configPending && <p className="text-sm opacity-80">{t("userTracking.configPendingApproval")}</p>}
+              {configPending && (
+                <p className="col-span-full text-sm opacity-80">
+                  {t("userTracking.configPendingApproval")}
+                </p>
+              )}
             </div>
           )}
         </section>
       )}
 
       {canView && (
-        <section className="card">
+        <section className="rounded-lg border border-border p-4 mb-6">
           <h2>{t("userTracking.sessionsSectionTitle")}</h2>
           <p className="text-sm opacity-80">{t("userTracking.sessionsHint")}</p>
           <form
@@ -249,7 +253,7 @@ export function UserTracking() {
       )}
 
       {canManage && (
-        <section className="card">
+        <section className="rounded-lg border border-border p-4 mb-6">
           <h2>{t("userTracking.retentionSectionTitle")}</h2>
           <p className="text-sm opacity-80">{t("userTracking.retentionHint")}</p>
           <form

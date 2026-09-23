@@ -186,7 +186,7 @@ export function LayoutDesigner() {
   }
 
   return (
-    <section className="card">
+    <section className="rounded-lg border border-border p-4 mb-6">
       <h2>{t("layoutDesigner.heading")}</h2>
       <p className="text-sm opacity-80">{t("layoutDesigner.hint")}</p>
       {error && (

@@ -46,7 +46,7 @@ export function InstallationManager() {
         </p>
       )}
 
-      <section className="card">
+      <section className="rounded-lg border border-border p-4 mb-6">
         <h2>{t("installations.newHeading")}</h2>
         <form aria-label={t("installations.formLabel")} onSubmit={handleSubmit}>
           <div className="form-grid">

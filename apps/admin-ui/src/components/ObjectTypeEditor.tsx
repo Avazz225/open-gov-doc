@@ -404,7 +404,7 @@ export function ObjectTypeEditor() {
         </p>
       )}
 
-      <section className="card">
+      <section className="rounded-lg border border-border p-4 mb-6">
         <h2>{editingId === null ? t("objectTypes.newHeading") : t("objectTypes.editHeading")}</h2>
         <form
           aria-label={editingId === null ? t("objectTypes.formLabel") : t("objectTypes.editFormLabel")}

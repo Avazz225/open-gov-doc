@@ -28,7 +28,7 @@ export function DashboardWidgets() {
   return (
     <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-4">
       {widgets.map(({ group, items }) => (
-        <div className="card dashboard-widget" key={group.id}>
+        <div className="rounded-lg border border-border p-4" key={group.id}>
           <h2 className="mt-0 text-lg">{t(group.labelKey)}</h2>
           <ul className="m-0 pl-4">
             {items.map((item) => (

@@ -78,7 +78,7 @@ export function OcrSettings() {
   }
 
   return (
-    <div className="card">
+    <div className="rounded-lg border border-border p-4 mb-6">
       <p className="text-sm opacity-80">{t("ocrSettings.enabledHint")}</p>
 
       {isLoading ? (
@@ -117,7 +117,7 @@ export function OcrSettings() {
               onChange={(event) => setAllowedContentTypesInput(event.target.value)}
             />
           </label>
-          <p className="text-sm opacity-80">{t("ocrSettings.allowedContentTypesHint")}</p>
+          <p className="col-span-full text-sm opacity-80">{t("ocrSettings.allowedContentTypesHint")}</p>
           <div className="flex gap-2">
             <button type="submit" disabled={isSaving}>
               {t("common.save")}

@@ -180,7 +180,7 @@ function DocumentArchivalSection() {
   if (unreachable) return <p className="italic opacity-70">{t("archivalTransfers.unreachable")}</p>;
 
   return (
-    <div className="card">
+    <div className="rounded-lg border border-border p-4 mb-6">
       <p className="text-sm opacity-80">{t("archivalTransfers.hint")}</p>
 
       <form
@@ -411,7 +411,7 @@ function CaseArchivalSection() {
   if (unreachable) return <p className="italic opacity-70">{t("archivalTransfers.caseUnreachable")}</p>;
 
   return (
-    <div className="card">
+    <div className="rounded-lg border border-border p-4 mb-6">
       <h2>{t("archivalTransfers.caseHeading")}</h2>
       <p className="text-sm opacity-80">{t("archivalTransfers.caseHint")}</p>
 

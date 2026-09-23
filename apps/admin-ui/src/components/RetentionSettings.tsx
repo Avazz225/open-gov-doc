@@ -133,7 +133,7 @@ function RetentionSection({
   }
 
   return (
-    <div className="card">
+    <div className="rounded-lg border border-border p-4 mb-6">
       <h3>{heading}</h3>
       {hint && <p className="text-sm opacity-80">{hint}</p>}
 

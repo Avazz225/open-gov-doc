@@ -2,8 +2,57 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P75-S8 (eighth session of Phase 75 — a strategy change plus the first shared-class
-conversion batch for admin-ui). See
+**Last completed:** P75-S9 (ninth session of Phase 75 — `.card` conversion, a real regression fix, and
+admin-ui's Tailwind rollout declared functionally complete). See
+[ADR 0226](docs/adr/0226-admin-ui-card-conversion-shared-component-class-boundary.md) for the full
+writeup.
+
+**`.card` converted**: 57 occurrences across 31 files as bare `className="card"`, bulk-replaced with
+`rounded-lg border border-border p-4 mb-6`. The one combined usage (`"card dashboard-widget"` in
+`DashboardWidgets.tsx`) was handled directly instead of preserved: `.dashboard-widget`'s only job was
+cancelling `.card`'s margin-bottom inside a CSS grid (a cascade-layer workaround from P75-S7) — with
+`.card` no longer a named class, that whole problem disappears; the one element just omits the margin
+utility. Both `.card` and `.dashboard-widget` deleted from `globals.css` together.
+
+**A real layout regression from P75-S8 found and fixed**: converting `.hint` had silently broken
+`.form-grid > .hint`'s "span the full grid width" rule (`grid-column: 1 / -1`) for every hint that was a
+*direct child* of a `.form-grid` — invisible to `tsc`/`eslint`/Vitest/build, only visible as an actual
+rendered layout. A structural, indentation-based scan across all 18 `.form-grid`-using files found
+**7 affected elements across 6 files** (`ExportSettings.tsx` ×3, `OcrSettings.tsx`, `UploadSettings.tsx`,
+`UserManagement.tsx`, `UserTracking.tsx`), each fixed with an explicit `col-span-full`, re-verified via a
+computed-style probe (`hint width == grid width`) against the real rebuilt Docker image. One
+similar-looking case in `RetentionSettings.tsx` was checked and confirmed unaffected (its hint is a
+grandchild of `.form-grid`, inside `.deletion-reason-catalog`, which has its own unrelated full-span
+rule). One test (`retention-settings.test.tsx`) relied on `closest(".card")` as an implementation-detail
+selector — fixed to `closest("div")`, a stable structural selector.
+
+**Deliberate stopping point declared for admin-ui's remaining shared classes**: `.data-table`, `.badge`,
+`.form-grid`, `.attribute-row`, `.checkbox-group`, `.layout-row`, `.layout-field`,
+`.deletion-reason-catalog*` all involve a descendant or compound selector targeting child elements
+(table th/td, nested labels, modifier variants), categorically different from what P75-S8/S9 converted.
+Converting these to literal Tailwind utility strings would mean editing every th/td and nested label
+across dozens of files for no visual or architectural benefit — they already resolve to the same
+`--dms-*` tokens the Tailwind utilities use, so they're already visually consistent with the redesigned
+app. Kept as permanent, shared component classes, a legitimate Tailwind-documented pattern for exactly
+this kind of widely-reused structure — admin-ui's Tailwind rollout is considered **functionally
+complete** as of this session.
+
+**Live-verified**: `tsc --noEmit`/`eslint` clean, full Vitest suite 304/304 (after fixing the one
+`.card`-selector-dependent test), production build succeeds across all 34 routes. Rebuilt and
+redeployed the real Docker image; computed-style probes confirmed both the `.card` conversion
+(`border: 1px`, `border-radius: 8px`, `padding: 16px`, `margin-bottom: 24px` — all matching the
+original CSS exactly) and the `col-span-full` fix (hint element width equals its grid container's
+width) against the real compiled CSS.
+
+**Next session:** all of `user-ui` — needs its own structural survey first (same lens as ADR 0225/0226:
+check whether it has admin-ui's "shell + shared component classes" shape, or a genuinely different one,
+before writing a rollout plan) — then Phase 75's own phase-close (full regression across all touched
+apps + `graphify update .`, per this project's standing phase-end cadence).
+
+---
+
+Immediately before P75-S9: **P75-S8** (eighth session of Phase 75 — a strategy change plus the first
+shared-class conversion batch for admin-ui). See
 [ADR 0225](docs/adr/0225-admin-ui-shared-class-bulk-conversion-strategy.md) for the full writeup.
 
 **Strategy change, found and applied within the same session**: the planned next session ("Installations"
