@@ -51,10 +51,13 @@ scale), `graph.html`/`GRAPH_REPORT.md` regenerated. New memory-worthy lesson for
 correct chunk sizing doesn't help when a single file in the corpus is itself larger than one subagent's
 read/output budget — that needs per-file pagination, a different fix from per-corpus chunk sizing.
 
-**Next session:** Phase 74 is closed. `IMPLEMENTATION_PLAN.md`'s Phase 75 ("Beyond the Original Concept")
-bundles three independent, not-yet-prioritized initiatives (P75-A ERP/line-of-business connector, P75-B
-native mobile client, P75-C AI features) — deliberately left unordered in the plan, a prioritization
-decision for the user, not something to resolve autonomously.
+**Next session:** Phase 74 is closed. Asked the user to prioritize among Phase 75/76's three initiatives
+(ERP connector, native mobile, AI features) — **the user instead asked to swap Phase 75 and Phase 76**:
+do the Tailwind CSS frontend rewrite first (now **Phase 75**, `P75-S1` onward — was Phase 76), then
+return to the ERP/mobile/AI bundle afterward (now **Phase 76**, `P76-A/B/C` — was Phase 75).
+`IMPLEMENTATION_PLAN.md` updated accordingly (both phase sections swapped, all `P75-*`/`P76-*` session
+IDs renumbered to match, the stale "not yet approved for execution" disclaimer struck through). Start
+next session at **P75-S1** (Tailwind tooling foundation/integration approach).
 
 ---
 

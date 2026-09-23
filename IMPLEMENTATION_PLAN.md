@@ -1899,25 +1899,70 @@ ADR 0216 after all (two real decisions — a new response envelope shape, a cros
 addition); docs and
 `PROGRESS.md` updated per session.
 
-## Phase 75 — Beyond the Original Concept (a prioritization decision, not a scoping session)
+## Phase 75 — Tailwind CSS Migration for a Modern Web UI (user-requested, added after this round's plan
+was first drafted; **moved ahead of the old Phase 75 "Beyond the Original Concept" bundle at the user's
+explicit request after Phase 74 closed** — finish this frontend rewrite first, then return to the
+ERP/mobile/AI candidates, now renumbered as Phase 76 below)
 
-Konzept 12.2's three remaining "candidates for later extension" are the only genuinely new-scope work
-left in this project — all three already have their exact attachment points verified against the real
-code in `docs/extension-points.md` (P14-S3): no further scoping-only session is needed for any of them.
-This phase is presented as **three independent, equally-viable build candidates**, not a recommended
-order — which one (if any) to build first is a product-prioritization call this round deliberately does
-not make on the user's behalf.
+**Why now, and why this isn't a continuation of Phase 48/49's own design-system work**: Phase 48/49
+already built a real, mature shared token system (`libs/dms-ui/tokens.css`, ADR 0168) — color, spacing,
+radius, shadow, and typography scales, all three themes (light/dark/high-contrast), consumed via a plain
+`@import` by all six web apps' own `globals.css`. That work fixed *consistency* (de-drifted six
+independently-copied token sets, fixed a real high-contrast bug as a side effect) but never introduced a
+utility-first CSS framework — every app still hand-writes its own component CSS classes against those
+tokens. Confirmed live before writing this phase: no app has `tailwindcss` as a dependency anywhere,
+and no `tailwind.config.*` exists in the repo — this is new tooling adoption, not a rollout of something
+partially started. The user's own complaint (the login page specifically, and a general "clunky, dated"
+feel) was checked directly against `admin-ui`'s real `login/page.tsx`: a bare `<main>`/`<form>` with two
+labeled inputs and a submit button, no card/panel treatment, no visual hierarchy beyond a plain
+`<h1>` — this confirms the complaint is accurate, not just a subjective impression.
 
-| Candidate | Shape | Effort signal |
-|---|---|---|
-| **P75-A — ERP/line-of-business connector** (e.g. DATEV, SAP) | New `services/<x>-connector/` service, reusing `libs/dms-connector-sdk`'s `DmsTreeClient` exactly like `cmis-connector`/`webdav-connector` already do — only the third-party protocol client is genuinely new work. | Smallest conceptual leap — a fourth instance of an already-proven pattern (two real precedents already exist). Needs a concrete target (DATEV vs. SAP vs. other) picked first — a market question, not a technical one. |
-| **P75-B — Native mobile client** (iOS/Android) | A new consumer of the already-existing gateway API, not a new backend service — needs a second, public Keycloak client (Authorization Code + PKCE, `auth-service` bootstrap addition) and a `"push"` notification channel (a small, closed-enum addition to `notification-service`). | Backend work is small and well-understood; the real effort is the native app itself, entirely outside this backend system's own session structure — would need its own separate project/repo treatment, not a normal DMS session. |
-| **P75-C — AI features** (document chat, summarization, process assistance) | New `services/ai-service/`, modeled directly on `signature-service`'s provider-plugin pattern (ADR 0025) — a `local`/`external_api` provider split, `local` a real runnable reference implementation, `external_api` deliberately reserved-but-unimplemented like `signature-service`'s own `qtsp` type. | Raises a genuinely new class of question this project has never had to answer: data-protection/governance for content leaving the installation to an external provider — `docs/extension-points.md` explicitly declines to solve this, correctly, since it's a business/legal question, not an implementation one. Whichever session picks this up should expect to spend real time on that question before writing code. |
+**Scope**: the six Next.js/React web apps (`user-ui`, `admin-ui`, `reviewer-ui`, `process-designer`,
+`migration-console`, `office-addin`) that already share `libs/dms-ui/tokens.css`. **`libreoffice-addin`
+is explicitly out of scope** — it is a Python/UNO native LibreOffice extension with hand-coded dialogs,
+not a web app, and has no CSS of any kind to migrate.
 
-**Definition of Done**: whichever candidate (if any) gets picked needs a real build-session ADR (this is
-new architecture, not a completion of existing scope) plus everything Phase 73/74's sessions also need
-(tests, docs, live verification); the other two stay scoped-not-scheduled exactly as
-`docs/extension-points.md` already leaves them, no further action needed until picked up.
+- **P75-S1 — Tooling foundation and integration approach (real decision needed, not mechanical)**:
+  decide how Tailwind consumes the EXISTING `--dms-*` tokens rather than introducing a second, parallel,
+  disconnected token system — Tailwind's CSS-first theme configuration (mapping utility classes directly
+  onto existing CSS custom properties, e.g. `--color-accent: var(--dms-accent)`) is the natural fit given
+  tokens already exist as real CSS variables, not something to verify from scratch, but the exact
+  mechanism and Tailwind version need picking deliberately, not assumed. Build a **shared Tailwind
+  config/preset** (hosted in `libs/dms-ui`, the same place `tokens.css` already lives) that every app
+  imports, so utility behavior (spacing steps, color names, radius scale) stays consistent across apps
+  rather than six independently-drifting configs — the same "one real shared source for this one layer"
+  precedent Phase 48 itself already established for the token file. Verify the whole pipeline against a
+  REAL `next build` in each app's actual `output: "export"` static-export mode before committing to the
+  approach (Tailwind is a build-time CSS generator with no runtime dependency, so static export should be
+  unaffected — confirm this live rather than assuming it).
+- **P75-S2 — Pilot: rebuild the login page in Tailwind, across all six apps.** Directly addresses the
+  user's own specifically-named pain point first, and the login page is small, self-contained, and
+  already near-identical across every app — an ideal proof-of-concept for the new tooling before a much
+  larger rollout, mirroring this project's own established "prove the pattern once on something small,
+  then propagate" precedent (Phase 47's i18n switcher, Phase 48→49's tokens-then-rollout split). This is
+  a **real visual redesign**, not a mechanical class-for-class port — a card/panel treatment, real
+  spacing/hierarchy, an actually-2026-appropriate feel, not just the same layout with Tailwind class
+  names swapped in for the old CSS classes. Real browser screenshots (light/dark/high-contrast) required
+  before/after, per this project's own non-negotiable UI-change convention.
+- **P75-S3 onward — rollout to the rest of each app**, sized and sequenced the same way Phase 49's own
+  visual-modernization rollout already was: small apps grouped together first to prove the rollout
+  mechanics cheaply (`office-addin`, `migration-console`, `process-designer`, `reviewer-ui`), then
+  `admin-ui`/`user-ui` each getting their own dedicated session given their size and component count.
+  Deliberately not pre-numbered into exact session boundaries here — Phase 49's own plan text made the
+  same choice for the same reason (the real per-app effort is only known once the pilot's actual cost is
+  known). Each session converts that app's remaining components/pages from hand-written CSS classes to
+  Tailwind utilities and **removes the superseded CSS rules as they're replaced**, not leaving two
+  parallel styling systems indefinitely — old `globals.css` rules for a component that also has its own
+  in this phase should net-negative that app's own CSS, not just add a second layer on top.
+
+**Definition of Done**: P75-S1 needs a real ADR (a genuine architecture decision: which token-integration
+mechanism, shared preset location); P75-S2 needs before/after screenshots in the same message/commit,
+both themes at minimum (high-contrast if feasible); every subsequent session needs the same real-browser
+screenshot verification `office-addin`'s own established "reduced theming, follows host app" exception
+(Phase 48/49) stays respected here too — this phase should not force-unify that app's deliberately
+different theming stance, only bring its OWN styling onto the new utility-class tooling. No new ADR
+expected for P75-S3 onward (execution of the already-approved P75-S1/S2 approach) unless a session hits a
+genuine per-app exception worth recording.
 
 ## Deliberately Not Included in Phase 73+
 
@@ -1949,68 +1994,27 @@ Re-confirmed this round via the staleness-reassessment agent, spot-checked again
   NOT build BPMN-lane enforcement (see P73-S1's "Done" note above), so this item remains exactly as
   blocked as before, not newly buildable) — none itemized into their own sessions this round either.
 
-## Phase 76 — Tailwind CSS Migration for a Modern Web UI (user-requested, added after this round's plan
-was first drafted)
+## Phase 76 — Beyond the Original Concept (a prioritization decision, not a scoping session; **renumbered
+from the original Phase 75 at the user's explicit request after Phase 74 closed, to run after the
+Tailwind frontend rewrite (now Phase 75) instead of before it**)
 
-**Why now, and why this isn't a continuation of Phase 48/49's own design-system work**: Phase 48/49
-already built a real, mature shared token system (`libs/dms-ui/tokens.css`, ADR 0168) — color, spacing,
-radius, shadow, and typography scales, all three themes (light/dark/high-contrast), consumed via a plain
-`@import` by all six web apps' own `globals.css`. That work fixed *consistency* (de-drifted six
-independently-copied token sets, fixed a real high-contrast bug as a side effect) but never introduced a
-utility-first CSS framework — every app still hand-writes its own component CSS classes against those
-tokens. Confirmed live before writing this phase: no app has `tailwindcss` as a dependency anywhere,
-and no `tailwind.config.*` exists in the repo — this is new tooling adoption, not a rollout of something
-partially started. The user's own complaint (the login page specifically, and a general "clunky, dated"
-feel) was checked directly against `admin-ui`'s real `login/page.tsx`: a bare `<main>`/`<form>` with two
-labeled inputs and a submit button, no card/panel treatment, no visual hierarchy beyond a plain
-`<h1>` — this confirms the complaint is accurate, not just a subjective impression.
+Konzept 12.2's three remaining "candidates for later extension" are the only genuinely new-scope work
+left in this project — all three already have their exact attachment points verified against the real
+code in `docs/extension-points.md` (P14-S3): no further scoping-only session is needed for any of them.
+This phase is presented as **three independent, equally-viable build candidates**, not a recommended
+order — which one (if any) to build first is a product-prioritization call this round deliberately does
+not make on the user's behalf.
 
-**Scope**: the six Next.js/React web apps (`user-ui`, `admin-ui`, `reviewer-ui`, `process-designer`,
-`migration-console`, `office-addin`) that already share `libs/dms-ui/tokens.css`. **`libreoffice-addin`
-is explicitly out of scope** — it is a Python/UNO native LibreOffice extension with hand-coded dialogs,
-not a web app, and has no CSS of any kind to migrate.
+| Candidate | Shape | Effort signal |
+|---|---|---|
+| **P76-A — ERP/line-of-business connector** (e.g. DATEV, SAP) | New `services/<x>-connector/` service, reusing `libs/dms-connector-sdk`'s `DmsTreeClient` exactly like `cmis-connector`/`webdav-connector` already do — only the third-party protocol client is genuinely new work. | Smallest conceptual leap — a fourth instance of an already-proven pattern (two real precedents already exist). Needs a concrete target (DATEV vs. SAP vs. other) picked first — a market question, not a technical one. |
+| **P76-B — Native mobile client** (iOS/Android) | A new consumer of the already-existing gateway API, not a new backend service — needs a second, public Keycloak client (Authorization Code + PKCE, `auth-service` bootstrap addition) and a `"push"` notification channel (a small, closed-enum addition to `notification-service`). | Backend work is small and well-understood; the real effort is the native app itself, entirely outside this backend system's own session structure — would need its own separate project/repo treatment, not a normal DMS session. |
+| **P76-C — AI features** (document chat, summarization, process assistance) | New `services/ai-service/`, modeled directly on `signature-service`'s provider-plugin pattern (ADR 0025) — a `local`/`external_api` provider split, `local` a real runnable reference implementation, `external_api` deliberately reserved-but-unimplemented like `signature-service`'s own `qtsp` type. | Raises a genuinely new class of question this project has never had to answer: data-protection/governance for content leaving the installation to an external provider — `docs/extension-points.md` explicitly declines to solve this, correctly, since it's a business/legal question, not an implementation one. Whichever session picks this up should expect to spend real time on that question before writing code. |
 
-- **P76-S1 — Tooling foundation and integration approach (real decision needed, not mechanical)**:
-  decide how Tailwind consumes the EXISTING `--dms-*` tokens rather than introducing a second, parallel,
-  disconnected token system — Tailwind's CSS-first theme configuration (mapping utility classes directly
-  onto existing CSS custom properties, e.g. `--color-accent: var(--dms-accent)`) is the natural fit given
-  tokens already exist as real CSS variables, not something to verify from scratch, but the exact
-  mechanism and Tailwind version need picking deliberately, not assumed. Build a **shared Tailwind
-  config/preset** (hosted in `libs/dms-ui`, the same place `tokens.css` already lives) that every app
-  imports, so utility behavior (spacing steps, color names, radius scale) stays consistent across apps
-  rather than six independently-drifting configs — the same "one real shared source for this one layer"
-  precedent Phase 48 itself already established for the token file. Verify the whole pipeline against a
-  REAL `next build` in each app's actual `output: "export"` static-export mode before committing to the
-  approach (Tailwind is a build-time CSS generator with no runtime dependency, so static export should be
-  unaffected — confirm this live rather than assuming it).
-- **P76-S2 — Pilot: rebuild the login page in Tailwind, across all six apps.** Directly addresses the
-  user's own specifically-named pain point first, and the login page is small, self-contained, and
-  already near-identical across every app — an ideal proof-of-concept for the new tooling before a much
-  larger rollout, mirroring this project's own established "prove the pattern once on something small,
-  then propagate" precedent (Phase 47's i18n switcher, Phase 48→49's tokens-then-rollout split). This is
-  a **real visual redesign**, not a mechanical class-for-class port — a card/panel treatment, real
-  spacing/hierarchy, an actually-2026-appropriate feel, not just the same layout with Tailwind class
-  names swapped in for the old CSS classes. Real browser screenshots (light/dark/high-contrast) required
-  before/after, per this project's own non-negotiable UI-change convention.
-- **P76-S3 onward — rollout to the rest of each app**, sized and sequenced the same way Phase 49's own
-  visual-modernization rollout already was: small apps grouped together first to prove the rollout
-  mechanics cheaply (`office-addin`, `migration-console`, `process-designer`, `reviewer-ui`), then
-  `admin-ui`/`user-ui` each getting their own dedicated session given their size and component count.
-  Deliberately not pre-numbered into exact session boundaries here — Phase 49's own plan text made the
-  same choice for the same reason (the real per-app effort is only known once the pilot's actual cost is
-  known). Each session converts that app's remaining components/pages from hand-written CSS classes to
-  Tailwind utilities and **removes the superseded CSS rules as they're replaced**, not leaving two
-  parallel styling systems indefinitely — old `globals.css` rules for a component that also has its own
-  in this phase should net-negative that app's own CSS, not just add a second layer on top.
-
-**Definition of Done**: P76-S1 needs a real ADR (a genuine architecture decision: which token-integration
-mechanism, shared preset location); P76-S2 needs before/after screenshots in the same message/commit,
-both themes at minimum (high-contrast if feasible); every subsequent session needs the same real-browser
-screenshot verification `office-addin`'s own established "reduced theming, follows host app" exception
-(Phase 48/49) stays respected here too — this phase should not force-unify that app's deliberately
-different theming stance, only bring its OWN styling onto the new utility-class tooling. No new ADR
-expected for P76-S3 onward (execution of the already-approved P76-S1/S2 approach) unless a session hits a
-genuine per-app exception worth recording.
+**Definition of Done**: whichever candidate (if any) gets picked needs a real build-session ADR (this is
+new architecture, not a completion of existing scope) plus everything Phase 73/74's sessions also need
+(tests, docs, live verification); the other two stay scoped-not-scheduled exactly as
+`docs/extension-points.md` already leaves them, no further action needed until picked up.
 
 ## Definition of Done for Phase 73–76 (unchanged, `CONTRIBUTING.md`)
 
@@ -2020,11 +2024,12 @@ non-trivial decisions (see per-phase notes above for which sessions need one), `
 (`scripts/run-tests.sh`, **never bare `uv run pytest` without `TEST_POSTGRES_DSN`** — see the incident
 recorded in `PROGRESS.md` at P71-S3) + frontend regression (`tsc`/`eslint`/`vitest`/`next build`) once
 per phase (not per session, per the user's own P71-S4 steer) before closing out a phase, real browser
-verification for every UI-visible change — non-negotiable for Phase 76 specifically, since its entire
+verification for every UI-visible change — non-negotiable for Phase 75 specifically, since its entire
 point is user-visible.
 
-**This plan is not yet approved for execution** — produced at the user's explicit request for a new
-gap-analysis round, with an equally explicit instruction to wait before starting any session from it.
+~~**This plan is not yet approved for execution**~~ — approved and underway: Phase 73/74 (this same
+round's Phases 73/74) closed 2026-09-23. Phase 75 (Tailwind, reordered ahead of Phase 76 at the user's
+explicit request) is next.
 
 ## PROGRESS.md — Resume Mechanism
 
