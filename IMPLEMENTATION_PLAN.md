@@ -1840,11 +1840,18 @@ round starts at **Phase 73** / **ADR 0211**.
   declines the audit-priority marker a fourth time — independent re-research, same verdict as ADR 0206.
   `folder-service` 173/173, `document-service` 424/424, live-verified via direct audit-trail SQL queries
   confirming distinct per-action actors, not a shared default.
-- **P73-S5 — Root-cause `gateway-service`'s 3 recurring pre-existing test failures**: flagged and
+- ~~**P73-S5 — Root-cause `gateway-service`'s 3 recurring pre-existing test failures**: flagged and
   deferred across at least six ADRs since Phase 60 without ever being diagnosed. Session scope: actually
   run them, read the real failure output (not just re-confirm they still fail), and either fix the root
   cause or, if the conclusion is "these are environment-specific and not fixable in this dev stack,"
-  document that conclusively enough that no seventh ADR re-flags the same three failures.
+  document that conclusively enough that no seventh ADR re-flags the same three failures.~~ **Done —
+  fixed, not merely documented.** [ADR 0215](docs/adr/0215-gateway-service-test-registration-header-root-cause.md):
+  root cause was two stale test helpers (`_register_instance`/`_drain_instance`) never updated for real
+  Phase 59 Session 4 `registry-service` security gates (`X-DMS-Principal` self-registration check,
+  operator-bearer-token drain gate) — nothing wrong in `gateway-service` itself.
+  `infra/docker-compose.yml` gained a fixed dev-only `DMS_REGISTRY_OPERATOR_KEY` default as a side
+  effect, making `/drain` reachable in this dev stack for the first time. 31/31 (was 28/31), live-verified
+  against the real running stack. **Phase 73 is now fully closed (5/5).**
 
 **Definition of Done**: regression test per fix; new ADR for P73-S1 (a real authorization-model
 decision) and P73-S3 (a real persistence-design decision); P73-S2/S4/S5 likely need no new ADR

@@ -250,6 +250,7 @@ None yet — to follow in Phase 11.
 
 ## Open Points
 
+- ~~**3 tests (`test_valid_token_routes_via_registry_to_real_instance`, `test_client_supplied_x_dms_principal_header_is_overridden_by_gateway`, `test_draining_instance_is_excluded_from_routing`) failed on every full regression run since at least Phase 60, re-noted across many sessions as "pre-existing, unrelated" without ever being root-caused** ([ADR 0200](../adr/0200-p66s2-business-key-validation-regression-correction.md) got closest: identified the `401` symptom, didn't trace further).~~ — **root-caused and fixed in Post-Roadmap Phase 73 Session 5** ([ADR 0215](../adr/0215-gateway-service-test-registration-header-root-cause.md)): the test suite's own `_register_instance()`/`_drain_instance()` helpers were calling `registry-service`'s real `POST /instances`/`.../drain` without the `X-DMS-Principal`/operator-bearer-token headers those endpoints have required since Phase 59 Session 4 — nothing wrong in `gateway-service` itself, a stale test helper predating a `registry-service` security fix. `infra/docker-compose.yml` also gained a fixed dev-only `DMS_REGISTRY_OPERATOR_KEY` default so `/drain` is reachable in this dev stack at all (previously unconfigured anywhere, permanently locked by design). 31/31 tests pass now.
 - **No BFF/aggregation layer, only a generic reverse proxy** (Konzept 3.5 named both in one breath,
   ADR 0005 built only the proxy half) — **examined and declined in P72-S4**
   ([ADR 0210](../adr/0210-p72s4-query-language-and-bff-concept-reconciliation.md)): confirmed this

@@ -313,6 +313,17 @@ services:
       # Branding config (7.3/8, P69-S2, ADR 0201) - registry-service's
       # first ever RBAC-gated endpoint (`PUT /installation/branding`).
       DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
+      # Drain/activate operator gate (Phase 59 Session 4) - deliberately
+      # unset (fully locked) by default, "a registry operator must
+      # deliberately enable drain/rollback" (main.py._require_operator_key's
+      # own docstring). Set here to a fixed, documented dev-only value so
+      # this bundled dev/test stack's own tests can exercise drain against
+      # the real running container (gateway-service's `test_api.py` reads
+      # the same value via `TEST_REGISTRY_OPERATOR_KEY`, Post-Roadmap Phase
+      # 73 Session 5) - a real installation overrides `REGISTRY_OPERATOR_KEY`
+      # in its own `.env` (or leaves it unset to keep drain permanently
+      # locked, same "operator must deliberately enable" default).
+      DMS_REGISTRY_OPERATOR_KEY: ${REGISTRY_OPERATOR_KEY:-registry_operator_dev_only}
     ports:
       - "${REGISTRY_SERVICE_PORT:-8001}:8000"
     depends_on:

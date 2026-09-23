@@ -10,6 +10,12 @@ from gateway_service.rate_limiter import RateLimiter
 from redis import asyncio as redis
 
 REGISTRY_URL = os.environ.get("TEST_REGISTRY_SERVICE_URL", "http://localhost:8001")
+# Drain/activate operator gate (Phase 59 Session 4) - deliberately unset
+# (fully locked) in `registry-service`'s own code default; the bundled dev
+# stack's `docker-compose.yml` sets a fixed dev-only value so this test can
+# exercise `/drain` against the real running container (Post-Roadmap Phase
+# 73 Session 5).
+REGISTRY_OPERATOR_KEY = os.environ.get("TEST_REGISTRY_OPERATOR_KEY", "registry_operator_dev_only")
 # Echter Redis (seit P25-S3, siehe test_rate_limiter.py) statt eines
 # in-process Dicts - dieselbe Instanz wie jeder andere Testlauf.
 REDIS_URL = os.environ.get("TEST_REDIS_URL", "redis://localhost:6379/0")
@@ -51,10 +57,19 @@ async def client(jwks, issuer, audience):
 async def _register_instance(
     service_type: str, *, address: str, health_endpoint: str = "/healthz"
 ) -> str:
+    """Post-Roadmap Phase 73 Session 5 (root-caused a 3-test failure that
+    had gone undiagnosed across at least six ADRs since Phase 60):
+    `registry-service`'s `POST /instances` has required a real
+    `X-DMS-Principal` matching `service_type` since Phase 59 Session 4
+    (self-registration only, closes a traffic-hijack vector) - this
+    hand-rolled test helper predates that gate and was never updated,
+    unlike `dms_registry_client.RegistryRegistration`, which every real
+    self-registering service already sends this header through."""
     instance_id = f"{service_type}-{uuid.uuid4().hex[:8]}"
     async with httpx.AsyncClient(base_url=REGISTRY_URL) as registry:
         response = await registry.post(
             "/instances",
+            headers={"X-DMS-Principal": service_type},
             json={
                 "instance_id": instance_id,
                 "service_type": service_type,
@@ -70,7 +85,9 @@ async def _register_instance(
 
 async def _deregister_instance(service_type: str, instance_id: str) -> None:
     async with httpx.AsyncClient(base_url=REGISTRY_URL) as registry:
-        await registry.delete(f"/instances/{instance_id}")
+        await registry.delete(
+            f"/instances/{instance_id}", headers={"X-DMS-Principal": service_type}
+        )
 
 
 def test_healthz(client):
@@ -242,7 +259,10 @@ async def test_client_supplied_x_dms_principal_header_is_overridden_by_gateway(c
 
 async def _drain_instance(instance_id: str) -> None:
     async with httpx.AsyncClient(base_url=REGISTRY_URL) as registry:
-        response = await registry.post(f"/instances/{instance_id}/drain")
+        response = await registry.post(
+            f"/instances/{instance_id}/drain",
+            headers={"Authorization": f"Bearer {REGISTRY_OPERATOR_KEY}"},
+        )
         response.raise_for_status()
 
 

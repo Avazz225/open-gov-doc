@@ -2,7 +2,43 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P73-S4 (fourth session of Phase 73). Audit-trail completeness bundle, two independent
+**Last completed:** P73-S5 (fifth and last session of Phase 73). Root-caused the 3 `gateway-service` test
+failures that had recurred on every full regression run since at least Phase 60, re-noted across many
+sessions as "pre-existing, unrelated" without ever being traced to a cause
+([ADR 0200](docs/adr/0200-p66s2-business-key-validation-regression-correction.md) got closest: identified
+the `401` symptom, explicitly stopped short of tracing it further). Actual cause, in both cases nothing
+wrong in `gateway-service` itself: the test suite's own hand-rolled `_register_instance()`/
+`_drain_instance()` helpers call the real, separately-running `registry-service` container's
+`POST /instances`/`.../drain` with none of the headers those endpoints have required since **Phase 59
+Session 4** (`X-DMS-Principal` matching `service_type` for registration — a real security fix closing a
+traffic-hijack vector; a bearer `registry_operator_key` for drain, deliberately unconfigured/fully-locked
+by default) — a stale test helper predating a security fix it was never updated for, not an environment
+limitation. New [ADR 0215](docs/adr/0215-gateway-service-test-registration-header-root-cause.md).
+
+Fixed, not merely documented, since the cause turned out tractable: both helpers now send the required
+headers; `infra/docker-compose.yml`'s `registry-service` block gains a fixed, documented dev-only
+`DMS_REGISTRY_OPERATOR_KEY` default (the code's own unset/fully-locked default is unchanged for any
+environment that doesn't source this specific dev-stack file) — a genuine side-effect bonus: `/drain` is
+now reachable in this dev stack at all, previously unconfigured anywhere. `gateway-service`: 31/31 passed
+(was 28/31), confirmed stable across two consecutive runs, `ruff` clean on this service's own files.
+Live-verified directly against the real running stack outside the test suite too: register → `201`,
+drain → `200`, deregister → `204`, using the exact same headers the fixed test helpers now send.
+`docs/services/gateway-service.md`'s Open Points gains a new closed bullet (nothing existed there before
+to strike — the recurring-failure note had only ever lived in `PROGRESS.md`/other ADRs' Consequences
+sections, never in this service's own doc, itself part of why it went unfixed so long).
+
+**This closed the last queued session of Phase 73** — full unfiltered regression and `graphify update .`
+follow per the standing phase-end rule, then a report back to the user on how Phase 73 landed before
+autonomously continuing into Phase 74.
+
+**Next session:** P74-S1 — Case-browsing UI in `reviewer-ui` (ADR 0141's own named gap, re-confirmed
+still open at P65-S1): `user-ui` has `CasesPane.tsx`/"Umlaufmappen", `reviewer-ui` has no equivalent — a
+reviewer handling a case-bound task today has no case-context view of their own, only the generic task
+list.
+
+---
+
+Immediately before P73-S5: **P73-S4** (fourth session of Phase 73). Audit-trail completeness bundle, two independent
 halves. **`actor` threaded through six previously-`None` event types**: `document.metadata.updated`,
 `document.restored` (both the direct `POST .../restore` and the `folder-service`-cascaded
 `POST /documents/cascade-restore` path), `document.retention.updated` (`document-service`, all three
@@ -42,12 +78,6 @@ folder-lifecycle steps) — not the generic `folder-service-tests`/`live-verify-
 up the fixtures, proving the actor is genuinely the specific caller of each specific action, not a
 default. Test artifacts trashed afterward via the real API. No `graphify update .` this session (phase-end
 only, Phase 73 not yet closed).
-
-**Next session:** P73-S5 — Root-cause `gateway-service`'s 3 recurring pre-existing test failures, flagged
-and deferred across at least six ADRs since Phase 60 without ever being diagnosed: actually run them, read
-the real failure output, and either fix the root cause or document conclusively why not fixable. This is
-the last queued session of Phase 73 — a full unfiltered `scripts/run-tests.sh` regression and
-`graphify update .` are due at its close, per the standing phase-end rule.
 
 ---
 
