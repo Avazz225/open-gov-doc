@@ -146,7 +146,10 @@ async def _execute_or_defer_forced_deletion(session: AsyncSession, folder: Folde
     # orphaned `ResourceNode` behind on every forced deletion (ADR 0154's
     # own documented, then-untracked finding).
     await publish_event(
-        "folder.resource.deleted", subject=folder_id, payload={"resource_id": folder_id}
+        "folder.resource.deleted",
+        subject=folder_id,
+        payload={"resource_id": folder_id},
+        actor="system:retention-poll",
     )
 
 
@@ -249,6 +252,7 @@ async def _retention_poll_loop(session_factory) -> None:
                         "folder.resource.deleted",
                         subject=folder_id,
                         payload={"resource_id": folder_id},
+                        actor="system:retention-poll",
                     )
         except Exception:
             logger.exception(
@@ -661,7 +665,10 @@ async def purge_folder(
     # Phase 44 Session 2/ADR 0163: see `_execute_or_defer_forced_deletion`'s
     # identical fix - same missing structure-tree event.
     await publish_event(
-        "folder.resource.deleted", subject=folder_id, payload={"resource_id": folder_id}
+        "folder.resource.deleted",
+        subject=folder_id,
+        payload={"resource_id": folder_id},
+        actor=x_dms_principal,
     )
 
 
@@ -768,13 +775,11 @@ async def update_folder(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     await session.commit()
     if moved:
-        # No actor known - FolderUpdate does not yet track who triggered the
-        # move/rename (P7-S2: only made already-existing data first-class,
-        # no new fields added).
         await publish_event(
             "folder.resource.moved",
             subject=folder.id,
             payload={"resource_id": folder.id, "new_parent_id": folder.parent_id},
+            actor=x_dms_principal,
         )
     return folder
 
@@ -815,9 +820,11 @@ async def delete_folder(
     except repository.FolderNotEmptyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     await session.commit()
-    # No actor known - the endpoint does not accept a deleted_by.
     await publish_event(
-        "folder.resource.deleted", subject=folder_id, payload={"resource_id": folder_id}
+        "folder.resource.deleted",
+        subject=folder_id,
+        payload={"resource_id": folder_id},
+        actor=x_dms_principal,
     )
 
 
@@ -901,7 +908,10 @@ async def restore_folder(
     await _reject_during_maintenance(x_dms_maintenance_active)
     try:
         folder = await repository.restore_folder(
-            session, folder_id, document_client=app.state.document_client
+            session,
+            folder_id,
+            document_client=app.state.document_client,
+            restored_by=x_dms_principal,
         )
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -910,8 +920,7 @@ async def restore_folder(
     except repository.RestorePeriodExpiredError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     await session.commit()
-    # No actor known - the endpoint does not accept a restored_by.
-    await publish_event("folder.restored", subject=folder_id, payload={})
+    await publish_event("folder.restored", subject=folder_id, payload={}, actor=x_dms_principal)
     return folder
 
 
@@ -1651,7 +1660,10 @@ async def reconcile_restore_deletion(
     # Phase 44 Session 2/ADR 0163: same missing structure-tree event as
     # every other real hard-delete call site in this module.
     await publish_event(
-        "folder.resource.deleted", subject=folder_id, payload={"resource_id": folder_id}
+        "folder.resource.deleted",
+        subject=folder_id,
+        payload={"resource_id": folder_id},
+        actor="system:restore-reconciliation",
     )
 
 

@@ -432,6 +432,7 @@ class CascadeTrashRequest(BaseModel):
 
 class CascadeRestoreRequest(BaseModel):
     via_folder_id: str
+    restored_by: str
 
 
 class CascadeResult(BaseModel):

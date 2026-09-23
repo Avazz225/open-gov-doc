@@ -26,9 +26,10 @@ class DocumentClient:
         response.raise_for_status()
         return response.json()["document_ids"]
 
-    async def cascade_restore(self, via_folder_id: str) -> list[str]:
+    async def cascade_restore(self, via_folder_id: str, *, restored_by: str) -> list[str]:
         response = await self._client.post(
-            "/documents/cascade-restore", json={"via_folder_id": via_folder_id}
+            "/documents/cascade-restore",
+            json={"via_folder_id": via_folder_id, "restored_by": restored_by},
         )
         response.raise_for_status()
         return response.json()["document_ids"]

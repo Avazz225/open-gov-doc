@@ -2,7 +2,56 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P73-S3 (third session of Phase 73). `federation-hub-service`'s two in-process
+**Last completed:** P73-S4 (fourth session of Phase 73). Audit-trail completeness bundle, two independent
+halves. **`actor` threaded through six previously-`None` event types**: `document.metadata.updated`,
+`document.restored` (both the direct `POST .../restore` and the `folder-service`-cascaded
+`POST /documents/cascade-restore` path), `document.retention.updated` (`document-service`, all three
+already had `X-DMS-Principal` available at the call site, just not passed to `publish_event`);
+`folder.resource.moved`, `folder.resource.deleted` (5 separate call sites — direct delete, manual purge,
+retention-poll-driven forced deletion, retention-poll-driven trash-expiry purge, restore-deletion
+reconciliation — each attributed to the real caller where one exists, `"system:retention-poll"`/
+`"system:restore-reconciliation"` for the two poll-loop-driven paths, matching each site's own sibling
+business event's existing actor), and `folder.restored` (`folder-service`) — the last one found and fixed
+alongside `document.restored` even though the plan's own bullet list didn't name it explicitly, since it's
+the literal sibling event in the same restore-folder code path and leaving it broken would have been an
+inconsistent half-fix. `document-service`'s internal `POST /documents/cascade-restore` (called only by
+`folder-service`) gained a new required `restored_by` field on `CascadeRestoreRequest`, threaded from
+`folder-service`'s own verified `x_dms_principal` through `repository.restore_folder`/
+`DocumentClient.cascade_restore` — mirrors `CascadeTrashRequest.deleted_by`'s existing precedent exactly.
+`docs/services/audit-service.md`'s Open Points bullet on this (the authoritative documented location)
+struck/closed.
+
+**`permission-service`'s emergency-shutdown audit-priority marker declined a fourth time.** New
+[ADR 0214](docs/adr/0214-permission-service-emergency-audit-priority-final-decline.md): this round's own
+independent research reached the same "no new trigger" verdict before cross-checking ADR 0206 — four
+examination rounds now (ADR 0023, ADR 0024, P63-S1, ADR 0206, this one), zero changes in verdict.
+No code change (a decision record, not a build) — names three concrete conditions that would warrant a
+fifth look, so a future round doesn't reopen this without first checking whether one actually occurred.
+`docs/services/permission-service.md`'s Open Points bullet extended with the fourth citation.
+
+`folder-service` 173/173, `document-service` 424/424 (both re-run twice after an unrelated host restart
+mid-session interrupted the first verification pass — one incidental `folder-service` flake
+(`test_create_folder_with_root_only_type_under_another_folder_is_rejected`) confirmed unrelated by
+re-running clean with no code change in between). `ruff` clean on both services' own files (repo-wide
+`ruff` FAIL remains the same 4 pre-existing, unrelated files noted throughout this phase). Both services
+rebuilt/redeployed after the restart; **live-verified against the real running stack**: all six event
+types confirmed in `audit-service`'s real hash-chained trail via direct SQL query, each with the correct,
+distinct `actor` for its own test call (`dora-mover-live`, `erik-editor-live`, `friedrich-restorer-live`,
+`gustav-retention-admin-live`, `helga-deleter-live`/`ida-restorer-live`/`karl-purger-live` for the three
+folder-lifecycle steps) — not the generic `folder-service-tests`/`live-verify-admin` principal used to set
+up the fixtures, proving the actor is genuinely the specific caller of each specific action, not a
+default. Test artifacts trashed afterward via the real API. No `graphify update .` this session (phase-end
+only, Phase 73 not yet closed).
+
+**Next session:** P73-S5 — Root-cause `gateway-service`'s 3 recurring pre-existing test failures, flagged
+and deferred across at least six ADRs since Phase 60 without ever being diagnosed: actually run them, read
+the real failure output, and either fix the root cause or document conclusively why not fixable. This is
+the last queued session of Phase 73 — a full unfiltered `scripts/run-tests.sh` regression and
+`graphify update .` are due at its close, per the standing phase-end rule.
+
+---
+
+Immediately before P73-S4: **P73-S3** (third session of Phase 73). `federation-hub-service`'s two in-process
 handover-retry-payload caches (`app.state.pending_handover_payloads`/`..._result_payloads`) moved into a
 new `federation.handover_retry_payload` table (composite PK `(handover_id, leg)`, `ON DELETE CASCADE`
 from `handover`, `payload JSON`) — a hub restart during an open retry window no longer loses the ability
@@ -37,11 +86,6 @@ confirmed the `ON DELETE CASCADE` removed the payload row too, live. `docs/servi
 updated (schema/endpoint/data-model/retry-backoff/sensors/tests/Open Points sections, restart-loss bullet
 struck, cross-references ADR 0147's "off-heap move" follow-up as also incidentally closed). No
 `graphify update .` this session (phase-end only, Phase 73 not yet closed).
-
-**Next session:** P73-S4 — Audit-trail completeness bundle: add `actor` to the currently-`None` event
-types (`document.metadata.updated`, `folder.resource.moved`/`.deleted`, `document.restored`/
-`.retention.updated`); bundle with `permission-service`'s elevated-audit-priority-for-emergency-events
-question, closed for good with a short ADR update (third decline, citing ADR 0023/0024/ADR 0206).
 
 ---
 

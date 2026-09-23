@@ -2197,11 +2197,10 @@ async def cascade_restore(
     only the documents that were cascade-deleted as a result."""
     document_ids = await repository.cascade_restore_by_via_folder_id(session, payload.via_folder_id)
     await session.commit()
-    # No actor known - CascadeRestoreRequest doesn't yet track who triggered
-    # the underlying folder restoration (P7-S2: only made already-existing
-    # data first-class, no new fields added).
     for document_id in document_ids:
-        await publish_event("document.restored", subject=document_id, payload={})
+        await publish_event(
+            "document.restored", subject=document_id, payload={}, actor=payload.restored_by
+        )
     return CascadeResult(document_ids=document_ids)
 
 
@@ -2350,10 +2349,11 @@ async def update_document(
         folder_id=payload.folder_id if is_move else None,
     )
     await session.commit()
-    # No actor known - DocumentUpdate doesn't yet track who changed the
-    # metadata (see cascade_restore comment above).
     await publish_event(
-        "document.metadata.updated", subject=document_id, payload={"title": updated.title}
+        "document.metadata.updated",
+        subject=document_id,
+        payload={"title": updated.title},
+        actor=x_dms_principal,
     )
     if is_move:
         # Re-parents the document's own `ResourceNode` (Post-Roadmap Phase
@@ -3268,9 +3268,7 @@ async def restore_document(
     except repository.RestorePeriodExpiredError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     await session.commit()
-    # No actor known - the endpoint doesn't yet accept a restored_by
-    # parameter (see cascade_restore comment above).
-    await publish_event("document.restored", subject=document_id, payload={})
+    await publish_event("document.restored", subject=document_id, payload={}, actor=x_dms_principal)
     return document
 
 
@@ -3343,8 +3341,6 @@ async def put_retention(
         retention_pseudonymize=payload.retention_pseudonymize,
     )
     await session.commit()
-    # No actor known - RetentionUpdate doesn't yet track who changed the
-    # deadline (see cascade_restore comment above).
     await publish_event(
         "document.retention.updated",
         subject=document_id,
@@ -3355,6 +3351,7 @@ async def put_retention(
             "full_deletion": payload.full_deletion,
             "retention_pseudonymize": payload.retention_pseudonymize,
         },
+        actor=x_dms_principal,
     )
     return updated
 

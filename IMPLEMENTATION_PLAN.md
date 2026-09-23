@@ -1825,14 +1825,21 @@ round starts at **Phase 73** / **ADR 0211**.
   Sensors switched from `len(dict)` to a real `COUNT(*)` query, incidentally resolving Phase 40 Session 4's
   own documented cache-vs-DB divergence concern. 89/89 tests, live-verified via a real
   `docker restart` proving payload survival plus a live cascade-delete check.
-- **P73-S4 — Audit-trail completeness bundle**: add `actor` to the currently-`None` event types
+- ~~**P73-S4 — Audit-trail completeness bundle**: add `actor` to the currently-`None` event types
   (`document.metadata.updated`, `folder.resource.moved`/`.deleted`, `document.restored`/
   `.retention.updated`) — each publisher already has `X-DMS-Principal` available at the call site, this
   is threading it through, not new plumbing. Bundle with `permission-service`'s elevated-audit-priority
   gap for emergency-shutdown events — reconfirmed still-undecided as of P71-S2/ADR 0206 after two prior
   explicit declines (ADR 0023, ADR 0024) — this round's own research found no new trigger either, so
   this bundle's job is a final, explicit "still declining, here's why one more time" ADR update closing
-  the question for good, not a build.
+  the question for good, not a build.~~ **Done.** All six event types now carry a real `actor`
+  (`folder.restored` closed too, alongside `document.restored`'s own cascade path, even though not
+  separately named — same code path, leaving it out would have been an inconsistent half-fix). New
+  required `restored_by` field on `document-service`'s internal `CascadeRestoreRequest`, mirroring
+  `CascadeTrashRequest.deleted_by`. [ADR 0214](docs/adr/0214-permission-service-emergency-audit-priority-final-decline.md)
+  declines the audit-priority marker a fourth time — independent re-research, same verdict as ADR 0206.
+  `folder-service` 173/173, `document-service` 424/424, live-verified via direct audit-trail SQL queries
+  confirming distinct per-action actors, not a shared default.
 - **P73-S5 — Root-cause `gateway-service`'s 3 recurring pre-existing test failures**: flagged and
   deferred across at least six ADRs since Phase 60 without ever being diagnosed. Session scope: actually
   run them, read the real failure output (not just re-confirm they still fail), and either fix the root

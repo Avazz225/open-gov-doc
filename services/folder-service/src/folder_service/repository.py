@@ -304,7 +304,7 @@ async def soft_delete_folder(
 
 
 async def restore_folder(
-    session: AsyncSession, folder_id: str, *, document_client: DocumentClient
+    session: AsyncSession, folder_id: str, *, document_client: DocumentClient, restored_by: str
 ) -> Folder:
     """Trash restore (5.2, since P7-S1b) - restores the folder itself as
     well as all subfolders/documents that were deleted via cascade through
@@ -332,7 +332,7 @@ async def restore_folder(
         cascaded.updated_at = now
     await session.flush()
 
-    await document_client.cascade_restore(folder_id)
+    await document_client.cascade_restore(folder_id, restored_by=restored_by)
     return folder
 
 

@@ -73,19 +73,28 @@ async def test_restore_folder_cascades_to_children_deleted_via_it(session):
         session, parent.id, deleted_by="alice", document_client=document_client
     )
 
-    restored = await repository.restore_folder(session, parent.id, document_client=document_client)
+    restored = await repository.restore_folder(
+        session, parent.id, document_client=document_client, restored_by="petra-restorer"
+    )
 
     assert restored.deleted_at is None
     reloaded_child = await session.get(Folder, child.id)
     assert reloaded_child.deleted_at is None
     assert reloaded_child.deleted_via_folder_id is None
-    document_client.cascade_restore.assert_awaited_once_with(parent.id)
+    document_client.cascade_restore.assert_awaited_once_with(
+        parent.id, restored_by="petra-restorer"
+    )
 
 
 async def test_restore_folder_not_deleted_raises(session):
     folder = await _make_folder(session)
     with pytest.raises(repository.NotDeletedError):
-        await repository.restore_folder(session, folder.id, document_client=_fake_document_client())
+        await repository.restore_folder(
+            session,
+            folder.id,
+            document_client=_fake_document_client(),
+            restored_by="petra-restorer",
+        )
 
 
 async def test_restore_folder_after_period_expired_raises(session):
@@ -99,7 +108,9 @@ async def test_restore_folder_after_period_expired_raises(session):
     await session.flush()
 
     with pytest.raises(repository.RestorePeriodExpiredError):
-        await repository.restore_folder(session, folder.id, document_client=document_client)
+        await repository.restore_folder(
+            session, folder.id, document_client=document_client, restored_by="petra-restorer"
+        )
 
 
 async def test_soft_delete_folder_persists_deleted_by(session):
@@ -120,7 +131,9 @@ async def test_restore_folder_clears_deleted_by(session):
     await repository.soft_delete_folder(
         session, folder.id, deleted_by="alice", document_client=document_client
     )
-    restored = await repository.restore_folder(session, folder.id, document_client=document_client)
+    restored = await repository.restore_folder(
+        session, folder.id, document_client=document_client, restored_by="petra-restorer"
+    )
     assert restored.deleted_by is None
 
 

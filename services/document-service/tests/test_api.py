@@ -2228,7 +2228,10 @@ def test_cascade_trash_and_restore_roundtrip(client):
     assert trash_response.json()["document_ids"] == [document_id]
     assert client.get(f"/documents/{document_id}").json()["deleted_at"] is not None
 
-    restore_response = client.post("/documents/cascade-restore", json={"via_folder_id": "root"})
+    restore_response = client.post(
+        "/documents/cascade-restore",
+        json={"via_folder_id": "root", "restored_by": "system:folder-cascade"},
+    )
     assert restore_response.status_code == 200
     assert restore_response.json()["document_ids"] == [document_id]
     assert client.get(f"/documents/{document_id}").json()["deleted_at"] is None

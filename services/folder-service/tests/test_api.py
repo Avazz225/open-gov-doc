@@ -267,7 +267,9 @@ def test_trash_and_restore_folder_calls_document_cascade(client):
     restore_response = client.post(f"/folders/{parent['id']}/restore")
     assert restore_response.status_code == 200
     assert restore_response.json()["deleted_at"] is None
-    app.state.document_client.cascade_restore.assert_awaited_once_with(parent["id"])
+    app.state.document_client.cascade_restore.assert_awaited_once_with(
+        parent["id"], restored_by="folder-service-tests"
+    )
 
 
 def test_trash_folder_rejected_during_maintenance_mode(client):
