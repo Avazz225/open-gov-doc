@@ -36,30 +36,43 @@ export function DocumentPicker({
   }
 
   return (
-    <section className="section" aria-label={t("documentPicker.heading")}>
-      <h2>{t("documentPicker.heading")}</h2>
-      <form onSubmit={handleSubmit}>
+    <section className="mt-4 border-t border-border pt-3" aria-label={t("documentPicker.heading")}>
+      <h2 className="m-0 mb-2 text-base">{t("documentPicker.heading")}</h2>
+      <form onSubmit={handleSubmit} className="flex flex-col gap-2">
         <input
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={t("documentPicker.placeholder")}
           aria-label={t("documentPicker.placeholder")}
+          className="box-border w-full rounded-md border border-border bg-bg px-2 py-1.5 text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg"
         />
-        <button type="submit" disabled={disabled || isLoading}>
+        <button
+          type="submit"
+          disabled={disabled || isLoading}
+          className="rounded-md border border-border bg-hover-bg px-3 py-1 text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50"
+        >
           {t("documentPicker.searchButton")}
         </button>
       </form>
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-sm text-danger" role="alert">
           {error}
         </p>
       )}
-      <ul className="entry-list">
+      <ul className="mt-2 mb-0 list-none p-0">
         {results.map((result) => (
-          <li className="entry-row" key={result.id}>
+          <li
+            className="flex items-center justify-between gap-2 border-b border-border py-1 last:border-b-0"
+            key={result.id}
+          >
             <span>{result.title}</span>
-            <button type="button" disabled={disabled} onClick={() => onOpen(result)}>
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() => onOpen(result)}
+              className="rounded-md border border-border bg-hover-bg px-3 py-1 text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50"
+            >
               {t("documentPicker.openButton")}
             </button>
           </li>

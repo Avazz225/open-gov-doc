@@ -61,18 +61,25 @@ export function MetadataForm({
   }
 
   return (
-    <form onSubmit={handleSubmit}>
-      <label htmlFor="ogdoc-title">{t("metadataForm.titleLabel")}</label>
-      <input
-        id="ogdoc-title"
-        type="text"
-        value={titleValue}
-        onChange={(e) => setTitleValue(e.target.value)}
-        required
-      />
+    <form onSubmit={handleSubmit} className="flex flex-col gap-2">
+      <div className="flex flex-col gap-1">
+        <label htmlFor="ogdoc-title" className="text-sm font-medium text-fg">
+          {t("metadataForm.titleLabel")}
+        </label>
+        <input
+          id="ogdoc-title"
+          type="text"
+          value={titleValue}
+          onChange={(e) => setTitleValue(e.target.value)}
+          required
+          className="box-border w-full rounded-md border border-border bg-bg px-2 py-1.5 text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg"
+        />
+      </div>
       {attributeSchema.map((attribute) => (
-        <div key={attribute.name}>
-          <label htmlFor={`ogdoc-attr-${attribute.name}`}>{attribute.name}</label>
+        <div key={attribute.name} className="flex flex-col gap-1">
+          <label htmlFor={`ogdoc-attr-${attribute.name}`} className="text-sm font-medium text-fg">
+            {attribute.name}
+          </label>
           <input
             id={`ogdoc-attr-${attribute.name}`}
             type="text"
@@ -80,15 +87,20 @@ export function MetadataForm({
             onChange={(e) =>
               setAttrValues((prev) => ({ ...prev, [attribute.name]: e.target.value }))
             }
+            className="box-border w-full rounded-md border border-border bg-bg px-2 py-1.5 text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg"
           />
         </div>
       ))}
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-sm text-danger" role="alert">
           {error}
         </p>
       )}
-      <button type="submit" className="primary" disabled={isSaving}>
+      <button
+        type="submit"
+        disabled={isSaving}
+        className="rounded-md border-0 bg-accent px-3 py-1 text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+      >
         {isSaving ? t("metadataForm.saving") : submitLabel}
       </button>
     </form>

@@ -225,9 +225,9 @@ export function TaskPane() {
   if (pendingTemplate) {
     return (
       <div>
-        <h2>{t("taskPane.newFromTemplateHeading")}</h2>
+        <h2 className="m-0 mb-2 text-base">{t("taskPane.newFromTemplateHeading")}</h2>
         {error && (
-          <p className="error-text" role="alert">
+          <p className="text-sm text-danger" role="alert">
             {error}
           </p>
         )}
@@ -247,12 +247,12 @@ export function TaskPane() {
     const canManage = lockOwner !== null;
     return (
       <div>
-        <section className="section">
-          <h2>{document.title}</h2>
-          {!canManage && <p className="hint">{t("taskPane.readOnlyHint")}</p>}
-          {notice && <p className="hint">{notice}</p>}
+        <section className="mt-4 border-t border-border pt-3">
+          <h2 className="m-0 mb-2 text-base">{document.title}</h2>
+          {!canManage && <p className="text-xs opacity-75">{t("taskPane.readOnlyHint")}</p>}
+          {notice && <p className="text-xs opacity-75">{notice}</p>}
           {error && (
-            <p className="error-text" role="alert">
+            <p className="text-sm text-danger" role="alert">
               {error}
             </p>
           )}
@@ -264,16 +264,21 @@ export function TaskPane() {
             submitLabel={t("metadataForm.saveButton")}
             onSubmit={handleSaveMetadata}
           />
-          <div className="actions">
+          <div className="mt-2 flex flex-wrap gap-2">
             <button
               type="button"
-              className="primary"
               disabled={isBusy || !canManage}
               onClick={handleSaveVersion}
+              className="rounded-md border-0 bg-accent px-3 py-1 text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {t("taskPane.saveVersionButton")}
             </button>
-            <button type="button" disabled={isBusy} onClick={handleUnlink}>
+            <button
+              type="button"
+              disabled={isBusy}
+              onClick={handleUnlink}
+              className="rounded-md border border-border bg-hover-bg px-3 py-1 text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50"
+            >
               {t("taskPane.unlinkButton")}
             </button>
           </div>
@@ -286,7 +291,7 @@ export function TaskPane() {
   return (
     <div>
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-sm text-danger" role="alert">
           {error}
         </p>
       )}

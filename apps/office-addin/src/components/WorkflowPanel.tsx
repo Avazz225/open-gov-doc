@@ -94,32 +94,39 @@ export function WorkflowPanel({
   }
 
   return (
-    <section className="section" aria-label={t("workflowPanel.heading")}>
-      <h2>{t("workflowPanel.heading")}</h2>
+    <section className="mt-4 border-t border-border pt-3" aria-label={t("workflowPanel.heading")}>
+      <h2 className="m-0 mb-2 text-base">{t("workflowPanel.heading")}</h2>
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-sm text-danger" role="alert">
           {error}
         </p>
       )}
       {instances === null ? (
-        <p className="empty-state">{t("common.loading")}</p>
+        <p className="text-sm italic opacity-70">{t("common.loading")}</p>
       ) : instances.length === 0 ? (
-        <p className="empty-state">{t("workflowPanel.empty")}</p>
+        <p className="text-sm italic opacity-70">{t("workflowPanel.empty")}</p>
       ) : (
-        <ul className="entry-list">
+        <ul className="mt-2 mb-0 list-none p-0">
           {instances.map((instance) =>
             instance.tasks.length === 0 ? (
-              <li className="entry-row" key={instance.id}>
+              <li
+                className="flex items-center justify-between gap-2 border-b border-border py-1 last:border-b-0"
+                key={instance.id}
+              >
                 <span>{t("workflowPanel.runningNoTask", { id: instance.id.slice(0, 8) })}</span>
               </li>
             ) : (
               instance.tasks.map((task) => (
-                <li className="entry-row" key={task.id}>
+                <li
+                  className="flex items-center justify-between gap-2 border-b border-border py-1 last:border-b-0"
+                  key={task.id}
+                >
                   <span>{task.name}</span>
                   <button
                     type="button"
                     disabled={isBusy}
                     onClick={() => handleComplete(instance.id, task.id)}
+                    className="rounded-md border border-border bg-hover-bg px-3 py-1 text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {t("workflowPanel.completeButton")}
                   </button>
@@ -130,12 +137,15 @@ export function WorkflowPanel({
         </ul>
       )}
       {definitions.length > 0 && (
-        <form onSubmit={handleStart}>
-          <label htmlFor="ogdoc-process-definition">{t("workflowPanel.startLabel")}</label>
+        <form onSubmit={handleStart} className="mt-2 flex flex-col gap-2">
+          <label htmlFor="ogdoc-process-definition" className="text-sm font-medium text-fg">
+            {t("workflowPanel.startLabel")}
+          </label>
           <select
             id="ogdoc-process-definition"
             value={selectedDefinitionId}
             onChange={(e) => setSelectedDefinitionId(e.target.value)}
+            className="box-border w-full rounded-md border border-border bg-bg px-2 py-1.5 text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg"
           >
             <option value="">{t("workflowPanel.selectPlaceholder")}</option>
             {definitions.map((def) => (
@@ -144,7 +154,11 @@ export function WorkflowPanel({
               </option>
             ))}
           </select>
-          <button type="submit" disabled={isBusy || !selectedDefinitionId}>
+          <button
+            type="submit"
+            disabled={isBusy || !selectedDefinitionId}
+            className="rounded-md border border-border bg-hover-bg px-3 py-1 text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50"
+          >
             {t("workflowPanel.startButton")}
           </button>
         </form>

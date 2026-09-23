@@ -2,8 +2,44 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P75-S2 (second session of Phase 75 — Tailwind CSS migration pilot: the login page,
-across all six apps). The first real Tailwind visual redesign in this repo — see
+**Last completed:** P75-S3 (third session of Phase 75 — first of the small-apps Tailwind rollout group:
+`office-addin`, fully converted beyond just the login page). See
+[ADR 0220](docs/adr/0220-office-addin-tailwind-rollout-primary-button-border-fix.md) for the full
+writeup.
+
+**office-addin full conversion**: every remaining hand-written CSS class (`.page`/`.top-bar`/
+`.top-bar-actions`/`.app-title`/`.section`/`h2,h3`/`.hint`/`.actions`/`.login-form`/`.error-text`/
+`.empty-state`/`.entry-list`/`.entry-row`, plus the `input`/`select`/`button`/`form` tag-selector
+rules) converted to Tailwind utilities directly on `Shell.tsx`, `DocumentPicker.tsx`,
+`TemplatePicker.tsx`, `MetadataForm.tsx`, `WorkflowPanel.tsx`, `TaskPane.tsx`, `OfficeGate.tsx`,
+`RequireAuth.tsx`. `globals.css` now holds only a genuine minimal reset (font/box-sizing/body
+background/form-element font inheritance) — no component-specific classes remain, consistent with the
+phase's own "remove the superseded CSS as it's replaced" requirement.
+
+**A real defect found via computed-style probing, not just screenshot review**: every `bg-accent`
+primary button — office-addin's new task-pane buttons AND, it turned out, **all five other apps'
+already-shipped P75-S2 login submit buttons** — was silently relying on the browser's unstyled default
+`<button>` border (`2px outset`, computing to `rgb(0, 0, 0)`), invisible enough in a full-page
+screenshot to pass P75-S2 unnoticed, since preflight's `button { border: 0 }` reset stays excluded
+(ADR 0218) and no component had ever set an explicit border on these buttons. Caught only because this
+session's verification used `getComputedStyle()` directly rather than trusting a screenshot alone.
+Fixed with an explicit `border-0` added to every `bg-accent`-filled button across all six apps —
+re-verified via the static probe for office-addin and via live `getComputedStyle()` checks against the
+five other apps' real running Docker containers (`borderTopWidth: "0px"` confirmed on all five).
+
+**Live-verified**: office-addin passes production build, `tsc --noEmit`, `eslint`, Vitest (21/21).
+All six apps' Docker images rebuilt and redeployed (the border fix touched five other apps' login
+pages too); border fix confirmed live via computed styles on all five, plus a fresh screenshot
+(admin-ui) confirming no visual regression. `docs/services/office-addin.md` updated for the full
+rollout; the other five apps' docs each got a short correction note for the border fix.
+
+**Next session:** P75-S3 continues — `migration-console`, `process-designer`, `reviewer-ui` (the
+remaining small apps in this rollout group), then `admin-ui`/`user-ui` each getting their own session.
+
+---
+
+Immediately before P75-S3: **P75-S2** (second session of Phase 75 — Tailwind CSS migration pilot: the
+login page, across all six apps). The first real Tailwind visual redesign in this repo — see
 [ADR 0219](docs/adr/0219-login-page-tailwind-redesign-accent-fg-token-cascade-fix.md) for the full
 writeup.
 

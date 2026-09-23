@@ -34,13 +34,13 @@ export function OfficeGate({ children }: { children: ReactNode }) {
 
   if (error) {
     return (
-      <p className="page error-text" role="alert">
+      <p className="p-3 text-sm text-danger" role="alert">
         {error}
       </p>
     );
   }
   if (!ready) {
-    return <p className="page">{t("officeGate.loading")}</p>;
+    return <p className="p-3">{t("officeGate.loading")}</p>;
   }
   return <>{children}</>;
 }

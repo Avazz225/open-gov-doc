@@ -33,24 +33,19 @@
    Variante (keine `data-theme`-Blöcke) bleibt unverändert, siehe ADR 0168
    "Rationale". `font-size: 14px` ist eine bewusste, App-spezifische
    Basisgröße (schmaler Taskpane), unabhängig vom geteilten Typografie-Token. */
-/* Post-Roadmap Phase 75 Session 2 (ADR 0218's own follow-up finding):
-   everything below is wrapped in `@layer base` - found live while
-   redesigning the login page with Tailwind utility classes, this app's
-   own pre-existing hand-written CSS (unlike the other five apps, this
-   one has real global `input[type=...]`/`button` tag-selector rules, not
-   just class-based ones - see `docs/services/office-addin.md`) was
-   PLAIN, UNLAYERED CSS. Per the CSS cascade, unlayered rules always beat
-   `@layer`-wrapped rules regardless of source order or selector
-   specificity - the new Tailwind utility classes on the login page's
-   inputs/buttons (in `@layer utilities`, see the `@layer` order
-   declared at the top of this file) were silently losing to this file's
-   own `input[type="password"]`/`button` rules. Wrapping this whole block
-   in `@layer base` (declared before `utilities` in that same order) is
-   Tailwind's own documented pattern for integrating utilities into an
-   existing hand-written stylesheet - fixes this globally rather than
-   patching just the login page, so the same bug doesn't resurface the
-   next time a component here adopts Tailwind classes on an element this
-   file already has a tag-selector rule for. */
+/* Post-Roadmap Phase 75 Session 3: this app's remaining hand-written CSS
+   classes (`.page`/`.top-bar`/`.section`/`.entry-row`/`button.primary`/etc.)
+   have been replaced by Tailwind utility classes directly on each
+   component (see Shell.tsx, DocumentPicker.tsx, TemplatePicker.tsx,
+   MetadataForm.tsx, WorkflowPanel.tsx, TaskPane.tsx, OfficeGate.tsx,
+   RequireAuth.tsx) and removed from here. What remains below is a
+   genuine minimal global reset (font/box-sizing/body background/form
+   element font inheritance) - the same handful of rules `preflight`
+   would otherwise provide, kept in `@layer base` (declared before
+   `utilities` in the `@layer` order above) so future Tailwind utility
+   classes on `<button>`/`<input>` etc. keep winning per the cascade-layer
+   bug documented in ADR 0219 - this is exactly the trap that fix closes,
+   not something to reintroduce by moving these rules back to unlayered. */
 @layer base {
   :root {
     font-family: var(--dms-font-family);
@@ -68,140 +63,10 @@
     color: var(--dms-fg);
   }
 
-  .page {
-    padding: var(--dms-space-3);
-  }
-
-  .top-bar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding-bottom: var(--dms-space-2);
-    margin-bottom: var(--dms-space-3);
-    border-bottom: 1px solid var(--dms-border);
-    font-size: var(--dms-font-size-sm);
-  }
-
-  .top-bar-actions {
-    display: flex;
-    align-items: center;
-    gap: var(--dms-space-2);
-  }
-
-  .app-title {
-    font-weight: 600;
-  }
-
-  section + section,
-  .section {
-    margin-top: var(--dms-space-4);
-    padding-top: var(--dms-space-3);
-    border-top: 1px solid var(--dms-border);
-  }
-
-  h2,
-  h3 {
-    font-size: var(--dms-font-size-base);
-    margin: 0 0 var(--dms-space-2) 0;
-  }
-
-  .hint {
-    opacity: 0.75;
-    font-size: var(--dms-font-size-xs);
-  }
-
-  .actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--dms-space-2);
-    margin-top: var(--dms-space-2);
-  }
-
-  .login-form {
-    max-width: 260px;
-    margin: 2rem auto;
-    display: flex;
-    flex-direction: column;
-    gap: var(--dms-space-2);
-  }
-
-  .error-text {
-    color: var(--dms-danger);
-    font-size: var(--dms-font-size-sm);
-  }
-
-  .empty-state {
-    opacity: 0.7;
-    font-style: italic;
-    font-size: var(--dms-font-size-sm);
-  }
-
-  .entry-list {
-    list-style: none;
-    padding: 0;
-    margin: var(--dms-space-2) 0 0 0;
-  }
-
-  .entry-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--dms-space-2);
-    padding: var(--dms-space-1) 0;
-    border-bottom: 1px solid var(--dms-border);
-  }
-
-  .entry-row:last-child {
-    border-bottom: none;
-  }
-
   input,
   select,
   button,
   textarea {
     font: inherit;
-  }
-
-  input[type="text"],
-  input[type="password"],
-  input[type="search"],
-  select,
-  textarea {
-    padding: var(--dms-space-1);
-    border: 1px solid var(--dms-border);
-    border-radius: var(--dms-radius-sm);
-    background: var(--dms-bg);
-    color: var(--dms-fg);
-    width: 100%;
-  }
-
-  form {
-    display: flex;
-    flex-direction: column;
-    gap: var(--dms-space-2);
-  }
-
-  button {
-    padding: var(--dms-space-1) var(--dms-space-3);
-    border: 1px solid var(--dms-border);
-    border-radius: var(--dms-radius-sm);
-    background: var(--dms-hover-bg);
-    color: var(--dms-fg);
-    cursor: pointer;
-  }
-
-  button:hover {
-    background: var(--dms-accent-bg);
-  }
-
-  button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  button.primary {
-    background: var(--dms-accent);
-    color: #ffffff;
-    border-color: var(--dms-accent);
   }
 }

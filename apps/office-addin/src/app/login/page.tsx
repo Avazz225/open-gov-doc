@@ -46,7 +46,7 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="page flex min-h-screen items-center justify-center">
+    <main className="flex min-h-screen items-center justify-center p-3">
       <div className="box-border w-full rounded-lg border border-border bg-surface p-6 shadow-lg">
         <h1 className="text-lg font-bold text-surface-fg">{t("login.heading")}</h1>
         <form className="mt-4 flex flex-col gap-3" onSubmit={handleSubmit}>
@@ -87,7 +87,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={submitting}
-            className="mt-1 box-border w-full rounded-md bg-accent px-4 py-2 font-medium text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            className="mt-1 box-border w-full rounded-md border-0 bg-accent px-4 py-2 font-medium text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {submitting ? t("login.submitting") : t("login.submit")}
           </button>

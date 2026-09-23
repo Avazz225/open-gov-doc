@@ -49,24 +49,34 @@ export function TemplatePicker({
   }, [token, t]);
 
   return (
-    <section className="section" aria-label={t("templatePicker.heading")}>
-      <h2>{t("templatePicker.heading")}</h2>
-      <p className="hint">{t("templatePicker.hint", { folder: TEMPLATE_LIBRARY_FOLDER_NAME })}</p>
+    <section className="mt-4 border-t border-border pt-3" aria-label={t("templatePicker.heading")}>
+      <h2 className="m-0 mb-2 text-base">{t("templatePicker.heading")}</h2>
+      <p className="text-xs opacity-75">
+        {t("templatePicker.hint", { folder: TEMPLATE_LIBRARY_FOLDER_NAME })}
+      </p>
       {error && (
-        <p className="error-text" role="alert">
+        <p className="text-sm text-danger" role="alert">
           {error}
         </p>
       )}
       {templates === null ? (
-        <p className="empty-state">{t("common.loading")}</p>
+        <p className="text-sm italic opacity-70">{t("common.loading")}</p>
       ) : templates.length === 0 ? (
-        <p className="empty-state">{t("templatePicker.empty")}</p>
+        <p className="text-sm italic opacity-70">{t("templatePicker.empty")}</p>
       ) : (
-        <ul className="entry-list">
+        <ul className="mt-2 mb-0 list-none p-0">
           {templates.map((template) => (
-            <li className="entry-row" key={template.id}>
+            <li
+              className="flex items-center justify-between gap-2 border-b border-border py-1 last:border-b-0"
+              key={template.id}
+            >
               <span>{template.title}</span>
-              <button type="button" disabled={disabled} onClick={() => onUseTemplate(template)}>
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() => onUseTemplate(template)}
+                className="rounded-md border border-border bg-hover-bg px-3 py-1 text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50"
+              >
                 {t("templatePicker.useButton")}
               </button>
             </li>

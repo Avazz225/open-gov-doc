@@ -112,6 +112,8 @@ Identical copy of the providers from user-ui/admin-ui (`ThemeProvider`, `I18nPro
 
 **Since Post-Roadmap Phase 75 Session 2** ([ADR 0219](../adr/0219-login-page-tailwind-redesign-accent-fg-token-cascade-fix.md)): `/login` rebuilt as a centered card (`rounded-lg border bg-surface shadow-lg`) with labeled inputs, visible focus rings, and an error alert, replacing the old bare `<main>`/`<form>` layout. Uses the new `--dms-accent-fg`/`--color-accent-fg` token (added this session, see the ADR) on the primary button instead of a hardcoded `text-white`, after a WCAG contrast failure was found live in the dark and high-contrast themes. Live-verified in all three themes plus the error/focus states, and against the real running Docker container.
 
+**Correction (Post-Roadmap Phase 75 Session 3, [ADR 0220](../adr/0220-office-addin-tailwind-rollout-primary-button-border-fix.md))**: the login submit button was silently relying on the browser's default unstyled `<button>` border (invisible in a screenshot, found via `getComputedStyle()` while verifying `office-addin`'s rollout) — fixed with an explicit `border-0`.
+
 ## Build & Deployment
 
 Two-stage Docker image (`apps/process-designer/Dockerfile`, `node:22-alpine` build stage → `nginx:alpine` runtime), `NEXT_PUBLIC_GATEWAY_BASE_URL` as a build arg, overridable via `PROCESS_DESIGNER_GATEWAY_BASE_URL` in `infra/.env`. `infra/docker-compose.yml`: port `${PROCESS_DESIGNER_PORT:-3002}:80`.

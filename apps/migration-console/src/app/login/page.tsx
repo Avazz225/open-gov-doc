@@ -89,7 +89,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={submitting}
-            className="mt-2 box-border w-full rounded-md bg-accent px-4 py-2.5 font-medium text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            className="mt-2 box-border w-full rounded-md border-0 bg-accent px-4 py-2.5 font-medium text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {submitting ? t("login.submitting") : t("login.submit")}
           </button>

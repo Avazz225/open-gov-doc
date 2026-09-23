@@ -1961,7 +1961,7 @@ not a web app, and has no CSS of any kind to migrate.
   in `@layer base`. Live-verified in all three themes, error/focus states, and against the real running
   Docker containers for all six apps. New
   [ADR 0219](docs/adr/0219-login-page-tailwind-redesign-accent-fg-token-cascade-fix.md).
-- **P75-S3 onward — rollout to the rest of each app**, sized and sequenced the same way Phase 49's own
+- ~~**P75-S3 onward — rollout to the rest of each app**, sized and sequenced the same way Phase 49's own
   visual-modernization rollout already was: small apps grouped together first to prove the rollout
   mechanics cheaply (`office-addin`, `migration-console`, `process-designer`, `reviewer-ui`), then
   `admin-ui`/`user-ui` each getting their own dedicated session given their size and component count.
@@ -1970,7 +1970,15 @@ not a web app, and has no CSS of any kind to migrate.
   known). Each session converts that app's remaining components/pages from hand-written CSS classes to
   Tailwind utilities and **removes the superseded CSS rules as they're replaced**, not leaving two
   parallel styling systems indefinitely — old `globals.css` rules for a component that also has its own
-  in this phase should net-negative that app's own CSS, not just add a second layer on top.
+  in this phase should net-negative that app's own CSS, not just add a second layer on top.~~
+  **P75-S3 done** (first of the small-apps group: `office-addin`, fully converted — all 8 remaining
+  components, `globals.css` down to a minimal reset). Found and fixed a real defect via computed-style
+  probing (not just screenshot review): every `bg-accent` primary button across **all six apps**
+  (P75-S2's five login-page buttons plus this session's office-addin buttons) was silently relying on
+  the browser's unstyled default `<button>` border — fixed with an explicit `border-0`, re-verified via
+  `getComputedStyle()` against the real running Docker containers. New
+  [ADR 0220](docs/adr/0220-office-addin-tailwind-rollout-primary-button-border-fix.md). Remaining small
+  apps (`migration-console`, `process-designer`, `reviewer-ui`) still queued, then `admin-ui`/`user-ui`.
 
 **Definition of Done**: P75-S1 needs a real ADR (a genuine architecture decision: which token-integration
 mechanism, shared preset location); P75-S2 needs before/after screenshots in the same message/commit,

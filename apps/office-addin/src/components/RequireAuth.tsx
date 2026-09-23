@@ -27,7 +27,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   }, [isLoading, user, router]);
 
   if (isLoading) {
-    return <p className="page">{t("common.loading")}</p>;
+    return <p className="p-3">{t("common.loading")}</p>;
   }
   if (!user) {
     return null;

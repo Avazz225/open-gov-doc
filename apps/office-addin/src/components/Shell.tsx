@@ -15,12 +15,16 @@ export function Shell({ children }: { children: ReactNode }) {
   const { t } = useI18n();
 
   return (
-    <div className="page">
-      <div className="top-bar">
-        <span className="app-title">{t("meta.title")}</span>
-        <div className="top-bar-actions">
+    <div className="p-3">
+      <div className="mb-3 flex items-center justify-between border-b border-border pb-2 text-sm">
+        <span className="font-semibold">{t("meta.title")}</span>
+        <div className="flex items-center gap-2">
           {user && <span>{user.username}</span>}
-          <button type="button" onClick={logout}>
+          <button
+            type="button"
+            onClick={logout}
+            className="rounded-md border border-border bg-hover-bg px-3 py-1 text-fg transition-colors hover:bg-accent-bg"
+          >
             {t("common.logout")}
           </button>
         </div>
