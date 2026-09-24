@@ -286,8 +286,21 @@ async def _is_active_superuser(principal_id: str) -> bool:
     at all, meaning an activated break-glass superuser (4.6) could not
     actually manage roles/scope locks/delegations unless they ALSO held an
     explicit `admin.user_management` role assignment - defeating the
-    point of "emergency access without needing prior provisioning"."""
-    active, superuser_principal_id = await app.state.auth_client.get_active_superuser()
+    point of "emergency access without needing prior provisioning".
+
+    Fails safe (treats an unreachable auth-service the same as "no active
+    superuser") since this session found this call previously unguarded -
+    a transient auth-service outage/restart turned every single caller of
+    `_require_role_management` (`POST`/`PUT /roles`, `POST
+    /role-assignments`, `PUT /approval-config/*`) into an unhandled 500,
+    cascading into every OTHER service's test/admin-ui setup that grants
+    itself a role through one of those endpoints - far worse than the
+    superuser bypass simply being unavailable for that one moment."""
+    try:
+        active, superuser_principal_id = await app.state.auth_client.get_active_superuser()
+    except Exception:
+        logger.warning("superuser_status_check_failed - auth-service nicht erreichbar?", exc_info=True)
+        return False
     return active and bool(principal_id) and superuser_principal_id == principal_id
 
 

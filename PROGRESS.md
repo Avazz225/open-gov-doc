@@ -2,8 +2,67 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P75-S10 (tenth session of Phase 75 — user-ui's shell + shared-class conversion,
-first session of user-ui's own rollout). See
+**Last completed:** Phase 75 close (full regression + graphify update outcome, after P75-S10 closed the
+phase). See [ADR 0228](docs/adr/0228-phase75-close-regression-hardening-bundle.md) for the full writeup.
+Standard phase-end cadence per `CONTRIBUTING.md`: one unfiltered `scripts/run-tests.sh --build` run
+across all ~31 backend services, `graphify update .` — Phase 75 itself was frontend-only (Tailwind CSS),
+so no frontend regression re-run was needed beyond what each P75 session already did live.
+
+**Backend regression took a full session to get to green**, not because of anything Phase 75 touched
+(zero backend files changed across P75-S1 through S10) but because the phase-end regression gate is the
+first time this project's Postgres volume had been fully, deliberately wiped (`docker compose down -v`)
+in a very long time — done partway through to rule out test-state pollution after an initial run hung for
+1h39m. That wipe exposed several real, previously-masked backend bugs that a long-lived, warm dev DB had
+been silently grandfathering around for months. **Seven real bugs found and fixed, none related to Phase
+75** — full writeup in ADR 0228: (1) a background-task-cancellation DB-connection leak in
+`signature-service`/`migration-service` (the actual cause of the 1h39m hang); (2) `auth-service`/
+`workflow-service` crashing outright on a first-time Federation Hub registration failure instead of
+degrading gracefully like their own re-registration path already did; (3) `auth-service`'s domain-admin
+role-assignment bootstrap having no retry against a `permission-service` that
+`docker-compose.yml`'s own `depends_on: condition: service_started` (not `service_healthy`) doesn't
+actually guarantee is ready yet; (4) an unhandled unique-constraint race on `permission-service`'s
+`POST /role-assignments`, hit by every service's own idempotent test-grant fixture; (5) seven services
+(`license-service`/`monitoring-service`/`permission-service`/`plugin-orchestration-service`/
+`query-service`/`reporting-service`/`workflow-service`) sharing one unguarded `_is_active_superuser()`
+helper whose call to `auth-service` had no error handling, turning any transient `auth-service`
+unavailability into a 500 cascade across nearly every permission-changing endpoint in the system; (6)/(7)
+a genuinely flaky (confirmed non-deterministic via `--setup-show` across multiple runs) pytest
+fixture-ordering bug in `notification-service`/`reporting-service`'s own test suites, fixed by declaring
+an explicit fixture dependency instead of relying on pytest's unspecified same-scope ordering.
+
+**Two findings documented, not fixed** (ADR 0228 has the full reasoning): Federation self-registration
+(`auth-service`/`workflow-service` against the bundled `federation-hub-service`) is permanently blocked in
+this local docker-compose environment by the Phase 60 SSRF guard rejecting any Docker-internal callback
+address — invisible for months only because pre-guard `FederationIdentity` rows had survived on the
+never-wiped dev volume; today's wipe exposed it honestly. Asked the user how to proceed (relax the guard
+for local dev / disable local federation registration / document only) — **user chose document only**;
+~10 federation-dependent tests in `auth-service`/`workflow-service` remain a known, non-blocking, expected
+condition for any future fresh install of this bundled dev stack, not a regression. Separately,
+`webdav-connector`'s root `PROPFIND` O(N)-degrades-with-volume issue (already named as an open item since
+Phase 50, first reproduced live at Phase 74 close) reproduced again under this session's own
+test-data volume — unrelated to anything touched here, not re-fixed.
+
+**Final green run** (warm DB, all seven fixes rebuilt in): 29 of 31 backend services pass cleanly
+(archival/audit/case/cmis-connector/config/document/favorite/federation-hub/fleet-management/folder/
+gateway/license/mail-connector/migration/monitoring/notification/object-type/ocr/permission/
+plugin-orchestration/query/registry/rendering/reporting/search/signature/storage/teamspace/virus-scan/
+webdav-connector all `OK`); only `auth-service` (4 failed, all federation-registration-dependent) and
+`workflow-service` (6 failed, same) remain, both the documented-not-fixed SSRF-guard finding above, not
+new failures. `ruff check`/`ruff format --check`: only pre-existing, unrelated findings
+(`apps/libreoffice-addin`, `loadtest/notebook/analysis.ipynb`,
+`services/archival-service/tests/test_xdomea.py`, `services/signature-service/tests/test_api.py`) — same
+four files Phase 74 close already found, nothing in any file touched this session.
+
+**`graphify update .`**: ran once mid-phase (after P75-S10, before this regression-hardening detour
+began) covering the Tailwind CSS migration's docs/code changes — 18,402 nodes / 31,056 edges / 1,788
+communities, 85 affected communities relabeled. Re-run again at the very end of this close session to
+also cover the seven bug-fix commits' code changes (AST-only, no new docs) — see graphify's own commit
+for details.
+
+---
+
+Immediately before Phase 75 close: **P75-S10** (tenth session of Phase 75 — user-ui's shell +
+shared-class conversion, first session of user-ui's own rollout). See
 [ADR 0227](docs/adr/0227-user-ui-tailwind-shell-and-shared-class-conversion.md) for the full writeup.
 
 **Structural survey found a genuinely different shape than admin-ui**: not ~30 thin routes over a

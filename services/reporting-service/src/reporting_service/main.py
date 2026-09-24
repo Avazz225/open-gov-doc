@@ -527,8 +527,16 @@ async def _is_active_superuser(x_dms_principal: str) -> bool:
     service`. The activated superuser (4.6) is exempt from the row-level
     filter below (same concept-6.1 exception query-service's own structured
     queries already grant), not from `_require_reporting_permission`'s
-    outer capability gate, which is unaffected."""
-    active, superuser_principal_id = await app.state.auth_client.get_active_superuser()
+    outer capability gate, which is unaffected. Fails safe on an
+    unreachable auth-service (same fix as `permission-service`'s own
+    `_is_active_superuser` this session) - previously unguarded, an
+    auth-service outage would 500 every caller instead of just losing
+    the (optional) superuser bypass."""
+    try:
+        active, superuser_principal_id = await app.state.auth_client.get_active_superuser()
+    except Exception:
+        logger.warning("superuser_status_check_failed - auth-service nicht erreichbar?", exc_info=True)
+        return False
     return active and bool(x_dms_principal) and superuser_principal_id == x_dms_principal
 
 

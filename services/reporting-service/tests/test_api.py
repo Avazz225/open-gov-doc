@@ -56,14 +56,22 @@ FAKE_DOCUMENT_IDS = ["doc-1", "doc-2", "doc-3"]
 
 
 @pytest.fixture(scope="session", autouse=True)
-async def _grant_document_read_permission():
+async def _grant_document_read_permission(_grant_role_admin_permission):
     """Row-level RBAC filtering for the forensic trace (Post-Roadmap Phase
     36 Session 3) - `document.read` is NOT part of the default "everyone"
     grant set (unlike `reporting.*`), so `REPORTING_TEST_PRINCIPAL_ID` needs
     an explicit grant on `root` for the existing forensic-trace tests (whose
     fake events use `FAKE_DOCUMENT_IDS`, registered below as real resource
     nodes under `root`) to keep seeing their expected entries. Idempotent
-    via a fixed role name (not the usual random-uuid throwaway pattern
+    via a fixed role name (not the usual random-uuid throwaway pattern.
+    Explicitly depends on `_grant_role_admin_permission` (used below via its
+    `X-DMS-Principal` header) - same fix as notification-service's own
+    `_grant_notification_write_permission` this session: two same-scope
+    autouse fixtures with no declared relationship resolve in an
+    UNSPECIFIED order (confirmed live: flaky, not deterministic - this
+    exact test run failed while an earlier one passed), and the wrong
+    order leaves `ROLE_ADMIN_PRINCIPAL_ID` without its `domain-admin-users`
+    role yet, turning `POST /roles` below into an unconditional 403.
     elsewhere in this project), since this fixture is session-scoped and
     must survive repeated runs against the same permission-service without
     accumulating duplicate roles. Since Post-Roadmap Phase 39 Session 4

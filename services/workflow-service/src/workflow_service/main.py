@@ -315,28 +315,41 @@ async def _ensure_federation_identity(
         config = await _get_or_seed_federation_config(session)
         identity = await session.get(FederationIdentity, _FEDERATION_IDENTITY_ID)
         if identity is None:
-            private_pem, public_pem = federation_crypto.generate_keypair()
-            hub_public_key_pem = await client.get_hub_public_key()
-            installation_id = str(uuid.uuid4())
-            await client.register(
-                installation_id=installation_id,
-                private_key_pem=private_pem,
-                display_name=settings.installation_display_name,
-                callback_base_url=callback_base_url,
-                public_key_pem=public_pem.decode("utf-8"),
-                version=config.version,
-                min_compatible_peer_version=config.min_compatible_peer_version,
-            )
-            identity = FederationIdentity(
-                id=_FEDERATION_IDENTITY_ID,
-                installation_id=installation_id,
-                private_key_pem=private_pem,
-                public_key_pem=public_pem,
-                hub_public_key_pem=hub_public_key_pem.encode("utf-8"),
-                created_at=datetime.now(UTC),
-            )
-            session.add(identity)
-            await session.commit()
+            # Same "not a hard dependency" guarantee as the re-registration
+            # branch below - a Hub-side rejection/outage on this
+            # installation's very FIRST registration attempt must not
+            # crash startup either (previously did: an uncaught
+            # `httpx.HTTPError` here aborted `lifespan()` entirely, so any
+            # genuinely fresh installation whose callback_base_url the Hub
+            # rejects - e.g. the private-address SSRF guard, Phase 60 - or
+            # any environment without the Hub reachable yet, could never
+            # start at all). Left unregistered, retried on next restart.
+            try:
+                private_pem, public_pem = federation_crypto.generate_keypair()
+                hub_public_key_pem = await client.get_hub_public_key()
+                installation_id = str(uuid.uuid4())
+                await client.register(
+                    installation_id=installation_id,
+                    private_key_pem=private_pem,
+                    display_name=settings.installation_display_name,
+                    callback_base_url=callback_base_url,
+                    public_key_pem=public_pem.decode("utf-8"),
+                    version=config.version,
+                    min_compatible_peer_version=config.min_compatible_peer_version,
+                )
+            except httpx.HTTPError:
+                logger.warning("federation_hub_initial_registration_failed")
+            else:
+                identity = FederationIdentity(
+                    id=_FEDERATION_IDENTITY_ID,
+                    installation_id=installation_id,
+                    private_key_pem=private_pem,
+                    public_key_pem=public_pem,
+                    hub_public_key_pem=hub_public_key_pem.encode("utf-8"),
+                    created_at=datetime.now(UTC),
+                )
+                session.add(identity)
+                await session.commit()
         else:
             # Re-registration on every start (upsert like with the internal
             # registry) - keeps e.g. `callback_base_url`/`version` current
@@ -826,8 +839,16 @@ async def _is_active_superuser(x_dms_principal: str) -> bool:
     `_is_active_superuser`: the caller must actually BE the currently
     active superuser (actor-matching, not "is some superuser active
     anywhere"), same reasoning as `permission-service`'s own
-    `lift_maintenance_mode`."""
-    active, superuser_principal_id = await app.state.auth_client.get_active_superuser()
+    `lift_maintenance_mode`. Fails safe on an unreachable auth-service
+    (same fix as `permission-service`'s own `_is_active_superuser` this
+    session) - previously unguarded, an auth-service outage would 500
+    every caller instead of just losing the (optional) superuser
+    bypass."""
+    try:
+        active, superuser_principal_id = await app.state.auth_client.get_active_superuser()
+    except Exception:
+        logger.warning("superuser_status_check_failed - auth-service nicht erreichbar?", exc_info=True)
+        return False
     return active and bool(x_dms_principal) and superuser_principal_id == x_dms_principal
 
 

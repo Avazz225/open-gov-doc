@@ -167,27 +167,44 @@ async def _ensure_federation_identity(
     async with session_factory() as session:
         identity = await session.get(FederationIdentity, _FEDERATION_IDENTITY_ID)
         if identity is None:
-            private_pem, public_pem = federation_crypto.generate_keypair()
-            installation_id = str(uuid.uuid4())
-            await client.register(
-                installation_id=installation_id,
-                private_key_pem=private_pem,
-                display_name=f"{settings.installation_display_name} (Kontakte)",
-                callback_base_url=callback_base_url,
-                public_key_pem=public_pem.decode("utf-8"),
-                version="1.0",
-                min_compatible_peer_version="1.0",
-                supported_process_types=[CONTACT_DIRECTORY_CAPABILITY],
-            )
-            identity = FederationIdentity(
-                id=_FEDERATION_IDENTITY_ID,
-                installation_id=installation_id,
-                private_key_pem=private_pem,
-                public_key_pem=public_pem,
-                created_at=datetime.now(UTC),
-            )
-            session.add(identity)
-            await session.commit()
+            # Same "kein Hard-Dependency" guarantee as the re-registration
+            # branch below - a Hub-side rejection/outage on this
+            # installation's very FIRST registration attempt must not
+            # crash startup either (previously did: an uncaught exception
+            # here aborted `lifespan()` entirely, so any genuinely fresh
+            # installation whose callback_base_url the Hub rejects - e.g.
+            # the private-address SSRF guard, Phase 60 - or any
+            # environment without the Hub reachable yet, could never start
+            # at all). Left unregistered, retried on next restart.
+            try:
+                private_pem, public_pem = federation_crypto.generate_keypair()
+                installation_id = str(uuid.uuid4())
+                await client.register(
+                    installation_id=installation_id,
+                    private_key_pem=private_pem,
+                    display_name=f"{settings.installation_display_name} (Kontakte)",
+                    callback_base_url=callback_base_url,
+                    public_key_pem=public_pem.decode("utf-8"),
+                    version="1.0",
+                    min_compatible_peer_version="1.0",
+                    supported_process_types=[CONTACT_DIRECTORY_CAPABILITY],
+                )
+            except Exception:
+                logger.warning(
+                    "federation_hub_initial_registration_failed - Kontaktsuche bleibt "
+                    "deaktiviert, kein Hard-Dependency dieser Installation.",
+                    exc_info=True,
+                )
+            else:
+                identity = FederationIdentity(
+                    id=_FEDERATION_IDENTITY_ID,
+                    installation_id=installation_id,
+                    private_key_pem=private_pem,
+                    public_key_pem=public_pem,
+                    created_at=datetime.now(UTC),
+                )
+                session.add(identity)
+                await session.commit()
         else:
             try:
                 await client.register(
@@ -265,27 +282,45 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             app.state.session_factory, username=username, role_name=role_name
         )
 
-    # Best-effort (P6-S5, for two domains instead of one since P6-S6): the
-    # Permission Service might not yet be reachable at its own startup - no
-    # retry loop, self-heals on the next restart (same principle as
-    # SubjectNotFoundError in structure_consumer.py).
+    # Bounded startup retry (previously a single best-effort attempt with
+    # "no retry loop, self-heals on the next restart" - found to actually
+    # bite on a fresh multi-container boot: `docker-compose.yml`'s
+    # `depends_on: permission-service` uses `condition: service_started`,
+    # not `service_healthy` (unlike keycloak), so this container can easily
+    # start before permission-service's own HTTP server is accepting
+    # requests yet. Without a retry, domain-admin accounts silently never
+    # get their `admin.user_management`/etc. capability until an operator
+    # happens to restart this service - these accounts are core
+    # functionality (4.6), not an opt-in bonus feature like the Federation
+    # Hub registration above, so a short bounded retry here (not a crash,
+    # not a silent one-shot skip) is the right middle ground.
     for username, role_name in DOMAIN_ADMIN_ACCOUNTS:
-        try:
-            account_id = await domain_admins.get_technical_account_id(
-                app.state.session_factory, username
-            )
-            if account_id is None:
-                raise RuntimeError(f"Technisches Konto {username!r} wurde nicht angelegt")
-            await app.state.permission_client.ensure_role_assignment(
-                principal_id=account_id, role_name=role_name
-            )
-        except Exception:
+        account_id = await domain_admins.get_technical_account_id(
+            app.state.session_factory, username
+        )
+        if account_id is None:
             logger.warning(
-                "Rollenzuweisung für %r konnte nicht sichergestellt werden - Permission "
-                "Service noch nicht erreichbar? Wird beim nächsten Neustart erneut versucht.",
+                "Technisches Konto %r wurde nicht angelegt - Rollenzuweisung übersprungen.",
                 username,
-                exc_info=True,
             )
+            continue
+        for attempt in range(5):
+            try:
+                await app.state.permission_client.ensure_role_assignment(
+                    principal_id=account_id, role_name=role_name
+                )
+                break
+            except Exception:
+                if attempt == 4:
+                    logger.warning(
+                        "Rollenzuweisung für %r konnte nicht sichergestellt werden - Permission "
+                        "Service auch nach mehreren Versuchen nicht erreichbar? Wird beim "
+                        "nächsten Neustart erneut versucht.",
+                        username,
+                        exc_info=True,
+                    )
+                else:
+                    await asyncio.sleep(1.0)
 
     event_bus = NatsEventBusClient(settings.nats_url, stream="auth")
     await event_bus.connect()

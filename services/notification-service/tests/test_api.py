@@ -94,13 +94,20 @@ async def _grant_notification_read_permission():
 
 
 @pytest.fixture(scope="session", autouse=True)
-async def _grant_notification_write_permission():
+async def _grant_notification_write_permission(_grant_role_admin_permission):
     """`notification.write` is deliberately NOT part of the "everyone"
     group (Post-Roadmap Phase 38 Session 2, see `main.py`
     `_require_notification_permission`) - unlike audit.read/virus_scan.*,
     this permission needs an explicit, idempotent, fixed-name throwaway
     role grant for the test principal, same pattern as reporting-service's
-    `_grant_document_read_permission`."""
+    `_grant_document_read_permission`. Explicitly depends on
+    `_grant_role_admin_permission` (below `X-DMS-Principal` header) -
+    without this, both are same-scope autouse fixtures with no declared
+    relationship, and pytest's resolution order between them is an
+    unspecified implementation detail; this session found live that it
+    can resolve in EITHER order, and the wrong one leaves
+    `ROLE_ADMIN_PRINCIPAL_ID` without its `domain-admin-users` role yet,
+    turning the `POST /roles` below into an unconditional 403."""
     role_name = "notification-service-test-write"
     async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL) as pc:
         roles = (await pc.get("/roles")).json()

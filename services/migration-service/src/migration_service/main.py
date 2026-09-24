@@ -5,7 +5,7 @@ import os
 import socket
 import uuid
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from urllib.parse import urlparse
 
 import httpx
@@ -365,6 +365,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     sensor_config_proxy.unbind()
     await app.state.sensor_config_client.stop()
     consumer_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await consumer_task
     if registration:
         await registration.stop()
     await event_bus.close()

@@ -2,7 +2,7 @@ import asyncio
 import logging
 import time
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime, timedelta
 
 from dms_common import configure_logging
@@ -171,6 +171,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
 
     app.state.retimestamp_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await app.state.retimestamp_task
     sensor_config_proxy.unbind()
     await app.state.sensor_config_client.stop()
     if registration:

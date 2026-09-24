@@ -813,6 +813,18 @@ async def _org_unit_group_ids_for_principal(session: AsyncSession, principal_id:
 async def create_role_assignment(
     session: AsyncSession, *, principal_type: str, principal_id: str, role_id: int, resource_id: str
 ) -> RoleAssignment:
+    """Concurrency-safe on the exact same `uq_assignment` collision this
+    session found live in the regression suite: two concurrent callers
+    both listing "does this assignment already exist?" as empty, then both
+    attempting to create it, is a real TOCTOU race every caller of this
+    endpoint hits (every test fixture and admin-ui flow in this project
+    grants roles this same "list first, create if missing" way, with no
+    coordination between callers) - previously an unhandled
+    `IntegrityError` (500) for whichever request lost the race. Same
+    `INSERT ... ON CONFLICT DO NOTHING` + re-read pattern already
+    established for `get_effective_permissions`'s cache-population race
+    above (P31-S4/ADR 0115) - "someone else already created the identical
+    assignment" is a fine outcome to just read back, not an error."""
     resource = await session.get(ResourceNode, resource_id)
     if resource is None:
         raise NotFoundError(f"resource_id {resource_id!r} unbekannt")
@@ -820,14 +832,29 @@ async def create_role_assignment(
     if role is None:
         raise NotFoundError(f"role_id {role_id!r} unbekannt")
 
-    assignment = RoleAssignment(
-        principal_type=principal_type,
-        principal_id=principal_id,
-        role_id=role_id,
-        resource_id=resource_id,
+    insert_stmt = (
+        pg_insert(RoleAssignment)
+        .values(
+            principal_type=principal_type,
+            principal_id=principal_id,
+            role_id=role_id,
+            resource_id=resource_id,
+        )
+        .on_conflict_do_nothing(
+            index_elements=["principal_type", "principal_id", "role_id", "resource_id"]
+        )
     )
-    session.add(assignment)
+    await session.execute(insert_stmt)
     await session.flush()
+    assignment = await session.scalar(
+        select(RoleAssignment).where(
+            RoleAssignment.principal_type == principal_type,
+            RoleAssignment.principal_id == principal_id,
+            RoleAssignment.role_id == role_id,
+            RoleAssignment.resource_id == resource_id,
+        )
+    )
+    assert assignment is not None
     await invalidate_cache(session)
     return assignment
 

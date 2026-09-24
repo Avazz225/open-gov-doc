@@ -2033,9 +2033,13 @@ not a web app, and has no CSS of any kind to migrate.
   rebuilt Docker image. New
   [ADR 0227](docs/adr/0227-user-ui-tailwind-shell-and-shared-class-conversion.md). Remaining shared
   classes (dockview theming, `.badge`+modifiers, redaction/OCR-specific, `.share-card`, etc.) kept as
-  permanent component classes, same reasoning as admin-ui. Remaining: Phase 75's own phase-close (full
-  regression across all touched apps + `graphify update .`, per this project's standing phase-end
-  cadence).
+  permanent component classes, same reasoning as admin-ui.
+  ~~Remaining: Phase 75's own phase-close (full regression across all touched apps +
+  `graphify update .`, per this project's standing phase-end cadence).~~ **Done.** Backend regression
+  (zero Phase 75 backend changes, but the phase-close gate itself found and fixed seven real, unrelated
+  pre-existing backend bugs exposed by a full DB wipe — see
+  [ADR 0228](docs/adr/0228-phase75-close-regression-hardening-bundle.md)) and `graphify update .` both
+  complete; full writeup in `PROGRESS.md`. **Phase 75 is now complete.**
 
 **Definition of Done**: P75-S1 needs a real ADR (a genuine architecture decision: which token-integration
 mechanism, shared preset location); P75-S2 needs before/after screenshots in the same message/commit,
