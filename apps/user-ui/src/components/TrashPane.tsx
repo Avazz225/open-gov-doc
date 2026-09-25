@@ -141,6 +141,9 @@ export function TrashPane({ token }: { token: string }) {
   const canPurge = scope !== "personal";
   const isEmpty = documents.length === 0 && folders.length === 0;
 
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+
   return (
     <section className="trash-pane" aria-label={t("trash.paneLabel")}>
       <h2 className="m-0 mb-3 text-base">{t("trash.heading")}</h2>
@@ -197,6 +200,7 @@ export function TrashPane({ token }: { token: string }) {
               <span className="flex gap-2">
                 <button
                   type="button"
+                  className={secondaryBtn}
                   onClick={() => handleRestoreFolder(folder)}
                   disabled={busyId === folder.id}
                 >
@@ -205,6 +209,7 @@ export function TrashPane({ token }: { token: string }) {
                 {canPurge && (
                   <button
                     type="button"
+                    className={secondaryBtn}
                     onClick={() => handlePurgeFolder(folder)}
                     disabled={busyId === folder.id}
                   >
@@ -222,6 +227,7 @@ export function TrashPane({ token }: { token: string }) {
               <span className="flex gap-2">
                 <button
                   type="button"
+                  className={secondaryBtn}
                   onClick={() => handleRestoreDocument(document)}
                   disabled={busyId === document.id}
                 >
@@ -230,6 +236,7 @@ export function TrashPane({ token }: { token: string }) {
                 {canPurge && (
                   <button
                     type="button"
+                    className={secondaryBtn}
                     onClick={() => handlePurgeDocument(document)}
                     disabled={busyId === document.id}
                   >

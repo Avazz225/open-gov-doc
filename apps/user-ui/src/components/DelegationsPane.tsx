@@ -149,6 +149,13 @@ export function DelegationsPane({
     }
   }
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+
   return (
     <section className="delegations-pane" aria-label={t("delegations.paneLabel")}>
       <h2 className="m-0 mb-3 text-base">{t("delegations.heading")}</h2>
@@ -164,6 +171,7 @@ export function DelegationsPane({
       <form className="inline-form" onSubmit={handleCreate}>
         <input
           type="text"
+          className={fieldInput}
           placeholder={t("delegations.deputyUsernamePlaceholder")}
           value={deputyUsername}
           onChange={(e) => setDeputyUsername(e.target.value)}
@@ -172,18 +180,25 @@ export function DelegationsPane({
           {t("delegations.startsAtLabel")}
           <input
             type="datetime-local"
+            className={fieldInput}
             value={startsAt}
             onChange={(e) => setStartsAt(e.target.value)}
           />
         </label>
         <label>
           {t("delegations.endsAtLabel")}
-          <input type="datetime-local" value={endsAt} onChange={(e) => setEndsAt(e.target.value)} />
+          <input
+            type="datetime-local"
+            className={fieldInput}
+            value={endsAt}
+            onChange={(e) => setEndsAt(e.target.value)}
+          />
         </label>
         <label>
           {t("delegations.scopeObjectTypesLabel")}
           <select
             multiple
+            className={fieldInput}
             value={scopeObjectTypeIds.map(String)}
             onChange={(e) =>
               setScopeObjectTypeIds(
@@ -203,6 +218,7 @@ export function DelegationsPane({
           {t("delegations.scopeFolderResourceIdsLabel")}
           <input
             type="text"
+            className={fieldInput}
             value={scopeFolderResourceIdsText}
             onChange={(e) => setScopeFolderResourceIdsText(e.target.value)}
           />
@@ -212,12 +228,13 @@ export function DelegationsPane({
           {t("delegations.scopeCaseResourceIdsLabel")}
           <input
             type="text"
+            className={fieldInput}
             value={scopeCaseResourceIdsText}
             onChange={(e) => setScopeCaseResourceIdsText(e.target.value)}
           />
         </label>
         <p className="text-sm opacity-80">{t("delegations.scopeCaseResourceIdsHint")}</p>
-        <button type="submit" disabled={isCreating}>
+        <button type="submit" className={primaryBtn} disabled={isCreating}>
           {t("delegations.createButton")}
         </button>
       </form>
@@ -243,7 +260,7 @@ export function DelegationsPane({
               </span>
               {isActive(delegation) && (
                 <span className="flex gap-2">
-                  <button type="button" onClick={() => handleRevoke(delegation)}>
+                  <button type="button" className={secondaryBtn} onClick={() => handleRevoke(delegation)}>
                     {t("delegations.revokeButton")}
                   </button>
                 </span>

@@ -116,11 +116,17 @@ export function SearchPane({
     }
   }
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+
   return (
     <section className="search-pane" aria-label={t("search.paneLabel")}>
       <form onSubmit={handleSubmit} className="search-form">
         <input
           type="text"
+          className={fieldInput}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder={t("search.placeholder")}
@@ -129,7 +135,11 @@ export function SearchPane({
         <p className="text-sm opacity-80">{t("search.syntaxHint")}</p>
         <label className="search-object-type">
           {t("search.objectTypeLabel")}
-          <select value={objectTypeId} onChange={(event) => handleObjectTypeChange(event.target.value)}>
+          <select
+            className={fieldInput}
+            value={objectTypeId}
+            onChange={(event) => handleObjectTypeChange(event.target.value)}
+          >
             <option value="">{t("search.allObjectTypes")}</option>
             {facets?.object_types.map((ot) => (
               <option key={ot.id} value={ot.id}>
@@ -150,6 +160,7 @@ export function SearchPane({
                   <legend>{field.label}</legend>
                   <input
                     type="text"
+                    className={fieldInput}
                     aria-label={`${field.label} ${t("search.rangeFrom")}`}
                     placeholder={t("search.rangeFrom")}
                     value={attrRangeValues[field.attribute]?.gte ?? ""}
@@ -166,6 +177,7 @@ export function SearchPane({
                   />
                   <input
                     type="text"
+                    className={fieldInput}
                     aria-label={`${field.label} ${t("search.rangeTo")}`}
                     placeholder={t("search.rangeTo")}
                     value={attrRangeValues[field.attribute]?.lte ?? ""}
@@ -186,6 +198,7 @@ export function SearchPane({
                   {field.label}
                   <input
                     type="text"
+                    className={fieldInput}
                     value={attrValues[field.attribute] ?? ""}
                     onChange={(event) =>
                       setAttrValues((prev) => ({ ...prev, [field.attribute]: event.target.value }))
@@ -197,7 +210,9 @@ export function SearchPane({
           />
         )}
 
-        <button type="submit">{t("search.submit")}</button>
+        <button type="submit" className={primaryBtn}>
+          {t("search.submit")}
+        </button>
       </form>
 
       {error && <p className="text-danger">{error}</p>}

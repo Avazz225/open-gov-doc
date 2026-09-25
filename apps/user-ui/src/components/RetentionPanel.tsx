@@ -149,6 +149,14 @@ export function RetentionPanel({ document: activeDocument }: { document: Documen
     }
   }
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+  const checkbox = "h-4 w-4 rounded border-border accent-accent";
+
   return (
     <section className="retention-panel" aria-label={t("retention.heading")}>
       <h2 className="m-0 mb-3 text-base">{t("retention.heading")}</h2>
@@ -161,6 +169,7 @@ export function RetentionPanel({ document: activeDocument }: { document: Documen
           </p>
           <button
             type="button"
+            className={secondaryBtn}
             onClick={handleReleaseHold}
             disabled={isHoldBusy || !canManageLegalHold}
             title={canManageLegalHold ? undefined : t("retention.legalHoldPermissionHint")}
@@ -173,6 +182,7 @@ export function RetentionPanel({ document: activeDocument }: { document: Documen
           <label>
             {t("retention.legalHoldReasonLabel")}
             <input
+              className={fieldInput}
               value={holdReason}
               onChange={(e) => setHoldReason(e.target.value)}
               disabled={!canManageLegalHold}
@@ -180,6 +190,7 @@ export function RetentionPanel({ document: activeDocument }: { document: Documen
           </label>
           <button
             type="button"
+            className={primaryBtn}
             onClick={handleSetHold}
             disabled={isHoldBusy || !canManageLegalHold}
             title={canManageLegalHold ? undefined : t("retention.legalHoldPermissionHint")}
@@ -193,6 +204,7 @@ export function RetentionPanel({ document: activeDocument }: { document: Documen
         {t("retention.retentionUntilLabel")}
         <input
           type="date"
+          className={fieldInput}
           value={retentionUntil}
           onChange={(e) => setRetentionUntil(e.target.value)}
           disabled={!canManageRetention}
@@ -201,6 +213,7 @@ export function RetentionPanel({ document: activeDocument }: { document: Documen
       <label className="checkbox-label">
         <input
           type="checkbox"
+          className={checkbox}
           checked={fullDeletion}
           onChange={(e) => setFullDeletion(e.target.checked)}
           disabled={!canManageRetention}
@@ -211,6 +224,7 @@ export function RetentionPanel({ document: activeDocument }: { document: Documen
         <label>
           {t("retention.reasonLabel")}
           <select
+            className={fieldInput}
             value={reasonMode === "catalog" ? reason : OTHER_REASON}
             onChange={(e) => {
               if (e.target.value === OTHER_REASON) {
@@ -244,6 +258,7 @@ export function RetentionPanel({ document: activeDocument }: { document: Documen
               ? t("retention.reasonOtherLabel")
               : t("retention.reasonLabel")}
             <input
+              className={fieldInput}
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               disabled={!canManageRetention}
@@ -252,6 +267,7 @@ export function RetentionPanel({ document: activeDocument }: { document: Documen
         )}
       <button
         type="button"
+        className={primaryBtn}
         onClick={handleSubmit}
         disabled={isSaving || !canManageRetention}
         title={canManageRetention ? undefined : t("retention.retentionPermissionHint")}

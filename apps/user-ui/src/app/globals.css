@@ -182,7 +182,9 @@ body {
 .search-pane,
 .cases-pane,
 .poststelle-pane,
-.teamspaces-pane {
+.teamspaces-pane,
+.delegations-pane,
+.trash-pane {
   /* dockview mountet diese Panes über eine reine Block-Elternkette
      (`.dv-content-container` → `div.dv-react-part`, kein Flex/Grid) - ohne
      eine explizite Höhe bleibt `height` hier `auto` (sizing-to-content), wodurch
@@ -213,7 +215,9 @@ body {
 .search-pane::-webkit-scrollbar,
 .cases-pane::-webkit-scrollbar,
 .poststelle-pane::-webkit-scrollbar,
-.teamspaces-pane::-webkit-scrollbar {
+.teamspaces-pane::-webkit-scrollbar,
+.delegations-pane::-webkit-scrollbar,
+.trash-pane::-webkit-scrollbar {
   width: 10px;
 }
 
@@ -223,7 +227,9 @@ body {
 .search-pane::-webkit-scrollbar-thumb,
 .cases-pane::-webkit-scrollbar-thumb,
 .poststelle-pane::-webkit-scrollbar-thumb,
-.teamspaces-pane::-webkit-scrollbar-thumb {
+.teamspaces-pane::-webkit-scrollbar-thumb,
+.delegations-pane::-webkit-scrollbar-thumb,
+.trash-pane::-webkit-scrollbar-thumb {
   background-color: var(--dms-border);
   border-radius: 5px;
 }

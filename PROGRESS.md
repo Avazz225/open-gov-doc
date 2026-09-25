@@ -2,7 +2,26 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P77-S9 (ninth session of Phase 77 — `user-ui`'s `CasesPane.tsx`/`PoststellePane.tsx`/
+**Last completed:** P77-S10 (tenth session of Phase 77 — `user-ui`'s `FolderTree.tsx`/`DelegationsPane.tsx`/
+`RetentionPanel.tsx`/`TrashPane.tsx`/`SearchPane.tsx`). Same styling formula. `FolderTree.tsx` needed no
+changes (already fully styled). `RetentionPanel.tsx` reused the `.retention-panel`/`.checkbox-label`/
+`.legal-hold-*` CSS already fixed in P77-S7. **Found two more dead pane-root classes** —
+`.delegations-pane`/`.trash-pane` — missing from the same shared dockview-pane rule found incomplete at
+P77-S9 (now 9 panes join that rule); fixed by extending it and its `::-webkit-scrollbar`/
+`::-webkit-scrollbar-thumb` companions the same way. No new ADR. `tsc`/`eslint` clean, 292/292 Vitest,
+real `next build` succeeds.
+
+**Live-verified all four changed panes** against the real rebuilt/redeployed Docker image —
+`DelegationsPane`/`SearchPane`/`TrashPane` via the icon rail, `RetentionPanel` via a real uploaded test
+document's metadata panel. Pane-level `overflow-y`/padding and every input/button className confirmed
+correct via `getComputedStyle`, screenshots taken, test data cleaned up afterward.
+
+**Next session:** P77-S11 — `user-ui`'s `VorlagenPane.tsx`, `HandFolderOverviewPane.tsx`,
+`SignaturesPanel.tsx`, `FavoritesPane.tsx`, `QuarantinePane.tsx`, `AussonderungPane.tsx`.
+
+---
+
+Immediately before: P77-S9 (ninth session of Phase 77 — `user-ui`'s `CasesPane.tsx`/`PoststellePane.tsx`/
 `TeamspacesPane.tsx`). Same styling formula, applied via a subagent. **Found the phase's largest
 dead-CSS-class bug yet**: 17 distinct classes across the three files were never defined in `globals.css`.
 Most significantly, `.cases-pane`/`.poststelle-pane`/`.teamspaces-pane` (the three pane roots) were
