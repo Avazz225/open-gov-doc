@@ -2,7 +2,43 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** Phase 77 planning session (UI modernization assessment). User flagged the
+**Last completed:** P77-S1 (first session of Phase 77 — document-attribute auto-layout, the user's own
+concrete example, done first). Applied the login-page's established Tailwind idiom
+(`rounded-md border border-border bg-bg px-2/3 py-1.5/2 ... focus:border-accent focus:ring-2
+focus:ring-accent-bg` for inputs/selects, matching `primaryBtn`/`secondaryBtn` variants, plus a new small
+`iconBtn` variant for the row/field reorder controls) to `admin-ui`'s `LayoutDesigner.tsx` (16 previously
+bare controls) and `user-ui`'s `MetadataPanel.tsx` (the title field, Kennzeichen field, promote-to-folder
+form, and every attribute field rendered through `LayoutFormFields`'s `renderField` callback).
+`LayoutFormFields.tsx` itself needed no change — it's a pure structural row/column wrapper with no
+interactive controls of its own; the fix landed entirely in its two consumers. Kept `.form-grid`/
+`.layout-row`/`.layout-field` as the container classes (ADR 0226 already settled these provide real
+spacing/border/radius with no Tailwind-utility benefit as descendant-selector classes — no contradiction,
+this session only touched the controls *inside* them). Replaced the ◀/▶ text-glyph reorder buttons with
+cleaner ↑/↓/←/→ icon buttons at a consistent size, addressing the "visually noisy" note from the
+assessment.
+
+**Live-verified against the real running stack** (both apps rebuilt/redeployed as real Docker images):
+logged in as the real `config-admin` technical account (has `admin.object_config`, needed to reach
+`/object-types/` — `users-admin` alone doesn't), opened the real Formular-Layout-Designer, confirmed via
+`getComputedStyle()` that every select/input/button now has `border-radius: 6px` plus the correct
+border/background (the `Speichern` button resolves to the real accent blue,
+`rgb(37, 99, 235)`); screenshotted before/after. For `user-ui`, created a real test document via the API,
+opened its Metadaten panel live, confirmed the same computed-style correctness on the title field and
+save button, screenshotted, then soft-deleted the test document again afterward. `admin-ui`: `tsc`/
+`eslint` clean, 304/304 Vitest. `user-ui`: `tsc`/`eslint` clean (2 pre-existing, unrelated `<img>`
+warnings), 292/292 Vitest. Both real `next build`s succeed. No new ADR (execution of the already-approved
+login-page formula, per Phase 77's own DoD).
+
+**Aside, found mid-session**: the whole Docker stack had exited again (17 hours idle since the previous
+session) — same recurring real-world-time-gap pattern as earlier this week. Brought back up cleanly with
+`docker compose up -d` (no wipe needed, warm volumes).
+
+**Next session:** P77-S2 — `admin-ui`'s `UserManagement.tsx` (728 lines, 32 controls) and
+`ObjectTypeEditor.tsx` (736 lines, 29 controls), the two largest, most-used admin components.
+
+---
+
+Immediately before: Phase 77 planning session (UI modernization assessment). User flagged the
 document-attribute auto-layout as "still pretty clunky" and asked for the whole UI to be assessed and
 brought to the same modern standard as `user-ui`'s login page (Phase 75/ADR 0219's one real visual
 redesign, vs. the rest of that phase's deliberately mechanical class-conversion scope). Asked whether to

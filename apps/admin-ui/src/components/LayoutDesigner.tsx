@@ -185,6 +185,16 @@ export function LayoutDesigner() {
     }
   }
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+  const iconBtn =
+    "flex h-7 w-7 items-center justify-center rounded-md border border-border bg-hover-bg text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-40";
+  const fieldInput =
+    "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+  const checkbox = "h-4 w-4 rounded border-border accent-accent";
+
   return (
     <section className="rounded-lg border border-border p-4 mb-6">
       <h2>{t("layoutDesigner.heading")}</h2>
@@ -206,6 +216,7 @@ export function LayoutDesigner() {
               <select
                 value={objectTypeId ?? ""}
                 onChange={(e) => setObjectTypeId(Number(e.target.value))}
+                className={fieldInput}
               >
                 {objectTypes.map((ot) => (
                   <option key={ot.id} value={ot.id}>
@@ -216,7 +227,11 @@ export function LayoutDesigner() {
             </label>
             <label>
               {t("layoutDesigner.purposeLabel")}
-              <select value={purpose} onChange={(e) => setPurpose(e.target.value as LayoutPurpose)}>
+              <select
+                value={purpose}
+                onChange={(e) => setPurpose(e.target.value as LayoutPurpose)}
+                className={fieldInput}
+              >
                 {PURPOSES.map((p) => (
                   <option key={p} value={p}>
                     {t(purposeLabelKey(p))}
@@ -230,6 +245,7 @@ export function LayoutDesigner() {
                 type="number"
                 value={layout?.responsive_breakpoint_px ?? 600}
                 onChange={(e) => updateBreakpoint(Number(e.target.value))}
+                className={fieldInput}
               />
             </label>
           </div>
@@ -250,30 +266,45 @@ export function LayoutDesigner() {
 
               {layout.rows.map((row, rowIndex) => (
                 <div className="layout-row" key={rowIndex}>
-                  <div className="flex gap-2">
-                    <strong>{t("layoutDesigner.rowHeading", { n: rowIndex + 1 })}</strong>
-                    <button type="button" onClick={() => moveRow(rowIndex, -1)} disabled={rowIndex === 0}>
-                      {t("layoutDesigner.moveUp")}
+                  <div className="flex items-center gap-2">
+                    <strong className="mr-1">{t("layoutDesigner.rowHeading", { n: rowIndex + 1 })}</strong>
+                    <button
+                      type="button"
+                      onClick={() => moveRow(rowIndex, -1)}
+                      disabled={rowIndex === 0}
+                      className={iconBtn}
+                      aria-label={t("layoutDesigner.moveUp")}
+                      title={t("layoutDesigner.moveUp")}
+                    >
+                      ↑
                     </button>
                     <button
                       type="button"
                       onClick={() => moveRow(rowIndex, 1)}
                       disabled={rowIndex === layout.rows.length - 1}
+                      className={iconBtn}
+                      aria-label={t("layoutDesigner.moveDown")}
+                      title={t("layoutDesigner.moveDown")}
                     >
-                      {t("layoutDesigner.moveDown")}
+                      ↓
                     </button>
-                    <button type="button" onClick={() => removeRow(rowIndex)}>
+                    <button
+                      type="button"
+                      onClick={() => removeRow(rowIndex)}
+                      className={`${secondaryBtn} ml-auto`}
+                    >
                       {t("layoutDesigner.removeRow")}
                     </button>
                   </div>
                   {row.columns.map((field, colIndex) => (
                     <div className="layout-field" key={field.attribute}>
-                      <code>{field.attribute}</code>
+                      <code className="rounded bg-hover-bg px-1.5 py-0.5 text-xs">{field.attribute}</code>
                       <label>
                         {t("layoutDesigner.fieldLabel")}
                         <input
                           value={field.label}
                           onChange={(e) => updateFieldLabel(rowIndex, colIndex, e.target.value)}
+                          className={fieldInput}
                         />
                       </label>
                       <label className="checkbox-label">
@@ -281,6 +312,7 @@ export function LayoutDesigner() {
                           type="checkbox"
                           checked={field.required}
                           onChange={(e) => updateFieldRequired(rowIndex, colIndex, e.target.checked)}
+                          className={checkbox}
                         />
                         {t("layoutDesigner.fieldRequired")}
                       </label>
@@ -289,18 +321,26 @@ export function LayoutDesigner() {
                         onClick={() => moveFieldWithinRow(rowIndex, colIndex, -1)}
                         disabled={colIndex === 0}
                         aria-label={t("layoutDesigner.moveFieldLeft")}
+                        title={t("layoutDesigner.moveFieldLeft")}
+                        className={iconBtn}
                       >
-                        ◀
+                        ←
                       </button>
                       <button
                         type="button"
                         onClick={() => moveFieldWithinRow(rowIndex, colIndex, 1)}
                         disabled={colIndex === row.columns.length - 1}
                         aria-label={t("layoutDesigner.moveFieldRight")}
+                        title={t("layoutDesigner.moveFieldRight")}
+                        className={iconBtn}
                       >
-                        ▶
+                        →
                       </button>
-                      <button type="button" onClick={() => removeField(rowIndex, colIndex)}>
+                      <button
+                        type="button"
+                        onClick={() => removeField(rowIndex, colIndex)}
+                        className={`${secondaryBtn} ml-auto`}
+                      >
                         {t("layoutDesigner.removeField")}
                       </button>
                     </div>
@@ -312,6 +352,7 @@ export function LayoutDesigner() {
                         onChange={(e) =>
                           setAddAttributeByRow((prev) => ({ ...prev, [rowIndex]: e.target.value }))
                         }
+                        className={fieldInput}
                       >
                         <option value="">{t("layoutDesigner.addFieldPlaceholder")}</option>
                         {availableAttributes.map((a) => (
@@ -320,7 +361,7 @@ export function LayoutDesigner() {
                           </option>
                         ))}
                       </select>
-                      <button type="button" onClick={() => addFieldToRow(rowIndex)}>
+                      <button type="button" onClick={() => addFieldToRow(rowIndex)} className={primaryBtn}>
                         {t("layoutDesigner.addFieldButton")}
                       </button>
                     </div>
@@ -328,15 +369,15 @@ export function LayoutDesigner() {
                 </div>
               ))}
 
-              <button type="button" onClick={addRow}>
+              <button type="button" onClick={addRow} className={secondaryBtn}>
                 {t("layoutDesigner.addRow")}
               </button>
 
-              <div className="flex gap-2">
-                <button type="button" onClick={handleSave}>
+              <div className="mt-4 flex gap-2 border-t border-border pt-4">
+                <button type="button" onClick={handleSave} className={primaryBtn}>
                   {t("layoutDesigner.save")}
                 </button>
-                <button type="button" onClick={handleReset}>
+                <button type="button" onClick={handleReset} className={secondaryBtn}>
                   {t("layoutDesigner.reset")}
                 </button>
               </div>

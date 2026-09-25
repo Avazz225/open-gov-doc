@@ -165,6 +165,13 @@ export function MetadataPanel({
     }
   }
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border w-full rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg disabled:cursor-not-allowed disabled:opacity-60";
+
   return (
     <section className="metadata-panel" aria-label={t("metadata.paneLabel")}>
       <h2 className="m-0 mb-3 text-base">{t("metadata.heading")}</h2>
@@ -173,19 +180,30 @@ export function MetadataPanel({
         <div className="draft-banner">
           <span className="badge draft">{t("metadata.draftBadge")}</span>
           <p className="text-sm opacity-80">{t("metadata.draftHint")}</p>
-          <button type="button" onClick={handleRegister} disabled={isRegistering}>
+          <button
+            type="button"
+            onClick={handleRegister}
+            disabled={isRegistering}
+            className={primaryBtn}
+          >
             {isRegistering ? t("metadata.registering") : t("metadata.registerAction")}
           </button>
 
-          <label>
+          <label className="w-full">
             {t("metadata.promoteTargetFolderLabel")}
             <input
               value={promoteTargetFolderId}
               onChange={(e) => setPromoteTargetFolderId(e.target.value)}
               placeholder={t("metadata.promoteTargetFolderPlaceholder")}
+              className={fieldInput}
             />
           </label>
-          <button type="button" onClick={handlePromote} disabled={isPromoting}>
+          <button
+            type="button"
+            onClick={handlePromote}
+            disabled={isPromoting}
+            className={secondaryBtn}
+          >
             {isPromoting ? t("metadata.promoting") : t("metadata.promoteAction")}
           </button>
         </div>
@@ -194,7 +212,12 @@ export function MetadataPanel({
       <form aria-label={t("metadata.formLabel")} onSubmit={handleSubmit}>
         <label>
           {t("metadata.titleLabel")}
-          <input value={title} onChange={(e) => setTitle(e.target.value)} required />
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            required
+            className={fieldInput}
+          />
         </label>
 
         {KENNZEICHEN_ATTRIBUTE in activeDocument.attributes && (
@@ -207,6 +230,7 @@ export function MetadataPanel({
               onChange={(e) =>
                 setValues((prev) => ({ ...prev, [KENNZEICHEN_ATTRIBUTE]: e.target.value }))
               }
+              className={fieldInput}
             />
           </label>
         )}
@@ -230,6 +254,7 @@ export function MetadataPanel({
                     onChange={(e) =>
                       setValues((prev) => ({ ...prev, [field.attribute]: e.target.value }))
                     }
+                    className={fieldInput}
                   />
                 </label>
               );
@@ -245,7 +270,7 @@ export function MetadataPanel({
           </p>
         )}
 
-        <button type="submit" disabled={isSaving}>
+        <button type="submit" disabled={isSaving} className={primaryBtn}>
           {isSaving ? t("metadata.saving") : t("common.save")}
         </button>
       </form>
