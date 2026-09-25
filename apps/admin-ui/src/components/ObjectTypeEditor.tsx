@@ -396,6 +396,14 @@ export function ObjectTypeEditor() {
     }
   }
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg disabled:cursor-not-allowed disabled:opacity-60";
+  const checkbox = "h-4 w-4 rounded border-border accent-accent";
+
   return (
     <>
       {error && (
@@ -418,6 +426,7 @@ export function ObjectTypeEditor() {
                 onChange={(e) => setName(e.target.value)}
                 disabled={editingId !== null}
                 required
+                className={fieldInput}
               />
             </label>
             <label>
@@ -426,6 +435,7 @@ export function ObjectTypeEditor() {
                 value={appliesTo}
                 onChange={(e) => setAppliesTo(e.target.value as "document" | "folder")}
                 disabled={editingId !== null}
+                className={fieldInput}
               >
                 <option value="document">{t("objectTypes.appliesToDocument")}</option>
                 <option value="folder">{t("objectTypes.appliesToFolder")}</option>
@@ -434,7 +444,7 @@ export function ObjectTypeEditor() {
             {appliesTo === "folder" && (
               <label>
                 {t("objectTypes.iconLabel")}
-                <select value={icon} onChange={(e) => setIcon(e.target.value)}>
+                <select value={icon} onChange={(e) => setIcon(e.target.value)} className={fieldInput}>
                   <option value="">{t("objectTypes.iconNone")}</option>
                   {ICON_OPTIONS.map((value) => (
                     <option key={value} value={value}>
@@ -452,6 +462,7 @@ export function ObjectTypeEditor() {
                     value={kennzeichenFormat}
                     onChange={(e) => setKennzeichenFormat(e.target.value)}
                     placeholder="{YYYY}-{Laufende_Nummer}"
+                    className={fieldInput}
                   />
                 </label>
                 <label>
@@ -461,6 +472,7 @@ export function ObjectTypeEditor() {
                     onChange={(e) =>
                       setKennzeichenDisplayOverride(e.target.value as "default" | "true" | "false")
                     }
+                    className={fieldInput}
                   >
                     <option value="default">{t("objectTypes.kennzeichenDisplayOverrideDefault")}</option>
                     <option value="true">{t("objectTypes.kennzeichenDisplayOverrideShow")}</option>
@@ -474,6 +486,7 @@ export function ObjectTypeEditor() {
                     onChange={(e) =>
                       setRequiredSignatureLevel(e.target.value as "none" | "ses" | "aes" | "qes")
                     }
+                    className={fieldInput}
                   >
                     <option value="none">{t("objectTypes.requiredSignatureLevelNone")}</option>
                     <option value="ses">{t("objectTypes.requiredSignatureLevelSes")}</option>
@@ -497,6 +510,7 @@ export function ObjectTypeEditor() {
                 value={defaultRetentionDays}
                 onChange={(e) => setDefaultRetentionDays(e.target.value)}
                 placeholder={t("objectTypes.defaultRetentionDaysPlaceholder")}
+                className={fieldInput}
               />
             </label>
             <label>
@@ -506,6 +520,7 @@ export function ObjectTypeEditor() {
                 onChange={(e) =>
                   setDeletionReasonRequiredOverride(e.target.value as "default" | "true" | "false")
                 }
+                className={fieldInput}
               >
                 <option value="default">{t("objectTypes.deletionReasonRequiredOverrideDefault")}</option>
                 <option value="true">{t("objectTypes.deletionReasonRequiredOverrideRequired")}</option>
@@ -520,6 +535,7 @@ export function ObjectTypeEditor() {
                 value={defaultArchiveAfterDays}
                 onChange={(e) => setDefaultArchiveAfterDays(e.target.value)}
                 placeholder={t("objectTypes.defaultArchiveAfterDaysPlaceholder")}
+                className={fieldInput}
               />
             </label>
             <label className="checkbox-label">
@@ -527,6 +543,7 @@ export function ObjectTypeEditor() {
                 type="checkbox"
                 checked={archiveEncryptionEnabled}
                 onChange={(e) => setArchiveEncryptionEnabled(e.target.checked)}
+                className={checkbox}
               />
               {t("objectTypes.archiveEncryptionEnabledLabel")}
             </label>
@@ -538,6 +555,7 @@ export function ObjectTypeEditor() {
                   onChange={(e) =>
                     setClassificationLevel(e.target.value as ClassificationLevel | "")
                   }
+                  className={fieldInput}
                 >
                   <option value="">{t("objectTypes.classificationLevelNone")}</option>
                   {CLASSIFICATION_LEVELS.map((level) => (
@@ -564,6 +582,7 @@ export function ObjectTypeEditor() {
                     value={attribute.name}
                     onChange={(e) => updateAttribute(index, { name: e.target.value })}
                     required
+                    className={fieldInput}
                   />
                 </label>
                 {editingId === null && (
@@ -573,6 +592,7 @@ export function ObjectTypeEditor() {
                       value={attribute.label}
                       onChange={(e) => updateAttribute(index, { label: e.target.value })}
                       placeholder={attribute.name}
+                      className={fieldInput}
                     />
                   </label>
                 )}
@@ -581,6 +601,7 @@ export function ObjectTypeEditor() {
                   <select
                     value={attribute.type}
                     onChange={(e) => updateAttribute(index, { type: e.target.value as AttributeType })}
+                    className={fieldInput}
                   >
                     {ATTRIBUTE_TYPES.map((type) => (
                       <option key={type} value={type}>
@@ -594,6 +615,7 @@ export function ObjectTypeEditor() {
                     type="checkbox"
                     checked={attribute.required}
                     onChange={(e) => updateAttribute(index, { required: e.target.checked })}
+                    className={checkbox}
                   />
                   {t("objectTypes.attributeRequired")}
                 </label>
@@ -602,6 +624,7 @@ export function ObjectTypeEditor() {
                     type="checkbox"
                     checked={attribute.personalData}
                     onChange={(e) => updateAttribute(index, { personalData: e.target.checked })}
+                    className={checkbox}
                   />
                   {t("objectTypes.attributePersonalData")}
                 </label>
@@ -611,6 +634,7 @@ export function ObjectTypeEditor() {
                     <input
                       value={attribute.pattern}
                       onChange={(e) => updateAttribute(index, { pattern: e.target.value })}
+                      className={fieldInput}
                     />
                   </label>
                 )}
@@ -622,6 +646,7 @@ export function ObjectTypeEditor() {
                         type="number"
                         value={attribute.min}
                         onChange={(e) => updateAttribute(index, { min: e.target.value })}
+                        className={fieldInput}
                       />
                     </label>
                     <label>
@@ -630,6 +655,7 @@ export function ObjectTypeEditor() {
                         type="number"
                         value={attribute.max}
                         onChange={(e) => updateAttribute(index, { max: e.target.value })}
+                        className={fieldInput}
                       />
                     </label>
                   </>
@@ -644,6 +670,7 @@ export function ObjectTypeEditor() {
                           referenceTarget: e.target.value as AttributeDraft["referenceTarget"],
                         })
                       }
+                      className={fieldInput}
                     >
                       <option value="">{t("objectTypes.attributeReferenceTargetUnset")}</option>
                       <option value="document">
@@ -656,12 +683,16 @@ export function ObjectTypeEditor() {
                   </label>
                 )}
               </div>
-              <button type="button" onClick={() => removeAttribute(index)}>
+              <button
+                type="button"
+                onClick={() => removeAttribute(index)}
+                className={`${secondaryBtn} mt-2`}
+              >
                 {t("objectTypes.removeAttribute")}
               </button>
             </div>
           ))}
-          <button type="button" onClick={addAttribute}>
+          <button type="button" onClick={addAttribute} className={secondaryBtn}>
             {t("objectTypes.addAttribute")}
           </button>
 
@@ -673,6 +704,7 @@ export function ObjectTypeEditor() {
                 type="checkbox"
                 checked={allowedParentTypes.has(ROOT_PARENT_TYPE)}
                 onChange={() => toggleAllowedParentType(ROOT_PARENT_TYPE)}
+                className={checkbox}
               />
               {t("objectTypes.allowedParentTypesRootOption")}
             </label>
@@ -682,18 +714,19 @@ export function ObjectTypeEditor() {
                   type="checkbox"
                   checked={allowedParentTypes.has(typeName)}
                   onChange={() => toggleAllowedParentType(typeName)}
+                  className={checkbox}
                 />
                 {typeName}
               </label>
             ))}
           </div>
 
-          <div className="flex gap-2">
-            <button type="submit">
+          <div className="flex gap-2 mt-4 border-t border-border pt-4">
+            <button type="submit" className={primaryBtn}>
               {editingId === null ? t("common.create") : t("objectTypes.save")}
             </button>
             {editingId !== null && (
-              <button type="button" onClick={resetForm}>
+              <button type="button" onClick={resetForm} className={secondaryBtn}>
                 {t("objectTypes.cancelEdit")}
               </button>
             )}
@@ -719,10 +752,10 @@ export function ObjectTypeEditor() {
               <td>{ot.attributes.length}</td>
               <td>{ot.icon ? iconLabel(t, ot.icon) : "—"}</td>
               <td className="flex gap-2">
-                <button type="button" onClick={() => startEdit(ot)}>
+                <button type="button" onClick={() => startEdit(ot)} className={secondaryBtn}>
                   {t("objectTypes.edit")}
                 </button>
-                <button type="button" onClick={() => handleDelete(ot.id)}>
+                <button type="button" onClick={() => handleDelete(ot.id)} className={secondaryBtn}>
                   {t("common.delete")}
                 </button>
               </td>

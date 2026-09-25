@@ -312,6 +312,14 @@ export function UserManagement() {
     }
   }
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+  const checkbox = "h-4 w-4 rounded border-border accent-accent";
+
   return (
     <>
       {error && (
@@ -329,6 +337,7 @@ export function UserManagement() {
               value={newUser.username}
               onChange={(e) => setNewUser({ ...newUser, username: e.target.value })}
               required
+              className={fieldInput}
             />
           </label>
           <label>
@@ -338,6 +347,7 @@ export function UserManagement() {
               value={newUser.email}
               onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
               required
+              className={fieldInput}
             />
           </label>
           <label>
@@ -347,6 +357,7 @@ export function UserManagement() {
               value={newUser.password}
               onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
               required
+              className={fieldInput}
             />
           </label>
           <label>
@@ -355,6 +366,7 @@ export function UserManagement() {
               value={newUser.firstName}
               onChange={(e) => setNewUser({ ...newUser, firstName: e.target.value })}
               required
+              className={fieldInput}
             />
           </label>
           <label>
@@ -363,9 +375,12 @@ export function UserManagement() {
               value={newUser.lastName}
               onChange={(e) => setNewUser({ ...newUser, lastName: e.target.value })}
               required
+              className={fieldInput}
             />
           </label>
-          <button type="submit">{t("common.create")}</button>
+          <button type="submit" className={primaryBtn}>
+            {t("common.create")}
+          </button>
         </form>
 
         <table className="data-table">
@@ -384,7 +399,7 @@ export function UserManagement() {
                 <td>{u.email}</td>
                 <td>{u.enabled ? t("users.enabledYes") : t("users.enabledNo")}</td>
                 <td>
-                  <button type="button" onClick={() => handleDeleteUser(u.id)}>
+                  <button type="button" onClick={() => handleDeleteUser(u.id)} className={secondaryBtn}>
                     {t("common.delete")}
                   </button>
                 </td>
@@ -404,6 +419,7 @@ export function UserManagement() {
               value={newRole.name}
               onChange={(e) => setNewRole({ ...newRole, name: e.target.value })}
               required
+              className={fieldInput}
             />
           </label>
           <label>
@@ -411,6 +427,7 @@ export function UserManagement() {
             <input
               value={newRole.description}
               onChange={(e) => setNewRole({ ...newRole, description: e.target.value })}
+              className={fieldInput}
             />
           </label>
           <label>
@@ -419,9 +436,12 @@ export function UserManagement() {
               value={newRole.permissions}
               onChange={(e) => setNewRole({ ...newRole, permissions: e.target.value })}
               placeholder={t("roles.permissionsPlaceholder")}
+              className={fieldInput}
             />
           </label>
-          <button type="submit">{t("common.create")}</button>
+          <button type="submit" className={primaryBtn}>
+            {t("common.create")}
+          </button>
         </form>
         {rolePending && <p className="text-sm opacity-80">{t("roles.pendingApproval")}</p>}
 
@@ -454,6 +474,7 @@ export function UserManagement() {
               value={newGroup.name}
               onChange={(e) => setNewGroup({ ...newGroup, name: e.target.value })}
               required
+              className={fieldInput}
             />
           </label>
           <label>
@@ -461,18 +482,22 @@ export function UserManagement() {
             <input
               value={newGroup.description}
               onChange={(e) => setNewGroup({ ...newGroup, description: e.target.value })}
+              className={fieldInput}
             />
           </label>
-          <label>
+          <label className="checkbox-label">
             <input
               type="checkbox"
               checked={newGroup.isOrgUnit}
               onChange={(e) => setNewGroup({ ...newGroup, isOrgUnit: e.target.checked })}
+              className={checkbox}
             />{" "}
             {t("groups.isOrgUnit")}
           </label>
           <p className="col-span-full text-sm opacity-80">{t("groups.isOrgUnitHint")}</p>
-          <button type="submit">{t("common.create")}</button>
+          <button type="submit" className={primaryBtn}>
+            {t("common.create")}
+          </button>
         </form>
 
         <table className="data-table">
@@ -496,6 +521,7 @@ export function UserManagement() {
                       onClick={() => handleToggleOrgUnit(g)}
                       disabled={orgUnitTogglingId !== null}
                       aria-pressed={g.is_org_unit}
+                      className={secondaryBtn}
                     >
                       {orgUnitTogglingId === g.id ? (
                         t("common.loading")
@@ -507,12 +533,12 @@ export function UserManagement() {
                     </button>
                   </td>
                   <td>
-                    <button type="button" onClick={() => toggleGroupExpand(g.id)}>
+                    <button type="button" onClick={() => toggleGroupExpand(g.id)} className={secondaryBtn}>
                       {expandedGroupId === g.id
                         ? t("groups.membersToggleHide")
                         : t("groups.membersToggleShow")}
                     </button>{" "}
-                    <button type="button" onClick={() => handleDeleteGroup(g.id)}>
+                    <button type="button" onClick={() => handleDeleteGroup(g.id)} className={secondaryBtn}>
                       {t("common.delete")}
                     </button>
                   </td>
@@ -531,9 +557,12 @@ export function UserManagement() {
                             value={newMemberPrincipalId}
                             onChange={(e) => setNewMemberPrincipalId(e.target.value)}
                             required
+                            className={fieldInput}
                           />
                         </label>
-                        <button type="submit">{t("groups.addMember")}</button>
+                        <button type="submit" className={primaryBtn}>
+                          {t("groups.addMember")}
+                        </button>
                       </form>
                       {(membersByGroup[g.id]?.length ?? 0) === 0 ? (
                         <p className="italic opacity-70">{t("groups.membersEmpty")}</p>
@@ -542,7 +571,11 @@ export function UserManagement() {
                           {membersByGroup[g.id]!.map((m) => (
                             <li key={m.id}>
                               {m.principal_id}{" "}
-                              <button type="button" onClick={() => handleRemoveMember(g.id, m.principal_id)}>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveMember(g.id, m.principal_id)}
+                                className={secondaryBtn}
+                              >
                                 {t("groups.removeMember")}
                               </button>
                             </li>
@@ -578,6 +611,7 @@ export function UserManagement() {
                 })
               }
               required
+              className={fieldInput}
             />
           </label>
           <label>
@@ -591,9 +625,12 @@ export function UserManagement() {
                 })
               }
               required
+              className={fieldInput}
             />
           </label>
-          <button type="submit">{t("common.create")}</button>
+          <button type="submit" className={primaryBtn}>
+            {t("common.create")}
+          </button>
         </form>
 
         <table className="data-table">
@@ -610,7 +647,11 @@ export function UserManagement() {
                 <td>{a.principal_id}</td>
                 <td>{a.supervisor_principal_id}</td>
                 <td>
-                  <button type="button" onClick={() => handleDeleteSupervisorAssignment(a.id)}>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteSupervisorAssignment(a.id)}
+                    className={secondaryBtn}
+                  >
                     {t("common.delete")}
                   </button>
                 </td>
@@ -633,9 +674,12 @@ export function UserManagement() {
               value={chainLookupPrincipalId}
               onChange={(e) => setChainLookupPrincipalId(e.target.value)}
               required
+              className={fieldInput}
             />
           </label>
-          <button type="submit">{t("orgHierarchy.chainLookupSubmit")}</button>
+          <button type="submit" className={secondaryBtn}>
+            {t("orgHierarchy.chainLookupSubmit")}
+          </button>
         </form>
         {chainLookupResult && (
           <p>
@@ -664,6 +708,7 @@ export function UserManagement() {
                 setNewAssignment({ ...newAssignment, principalId: e.target.value })
               }
               required
+              className={fieldInput}
             />
           </label>
           <label>
@@ -672,6 +717,7 @@ export function UserManagement() {
               value={newAssignment.roleId}
               onChange={(e) => setNewAssignment({ ...newAssignment, roleId: e.target.value })}
               required
+              className={fieldInput}
             >
               <option value="" disabled>
                 {t("roleAssignments.rolePlaceholder")}
@@ -691,9 +737,12 @@ export function UserManagement() {
                 setNewAssignment({ ...newAssignment, resourceId: e.target.value })
               }
               required
+              className={fieldInput}
             />
           </label>
-          <button type="submit">{t("roleAssignments.submit")}</button>
+          <button type="submit" className={primaryBtn}>
+            {t("roleAssignments.submit")}
+          </button>
         </form>
         {assignmentPending && <p className="text-sm opacity-80">{t("roleAssignments.pendingApproval")}</p>}
 
@@ -713,7 +762,7 @@ export function UserManagement() {
                 <td>{roleName(a.role_id)}</td>
                 <td>{a.resource_id}</td>
                 <td>
-                  <button type="button" onClick={() => handleDeleteAssignment(a.id)}>
+                  <button type="button" onClick={() => handleDeleteAssignment(a.id)} className={secondaryBtn}>
                     {t("roleAssignments.remove")}
                   </button>
                 </td>
