@@ -60,6 +60,11 @@ export function LicenseStatusView() {
     }
   }
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+
   return (
     <div className="rounded-lg border border-border p-4 mb-6">
       <p className="text-sm opacity-80">{t("license.hint")}</p>
@@ -128,6 +133,7 @@ export function LicenseStatusView() {
         <label htmlFor="license-token">{t("license.uploadLabel")}</label>
         <textarea
           id="license-token"
+          className={fieldInput}
           rows={4}
           style={{ width: "100%" }}
           value={licenseToken}
@@ -135,7 +141,7 @@ export function LicenseStatusView() {
           placeholder={t("license.uploadPlaceholder")}
         />
         <div className="flex gap-2">
-          <button type="submit" disabled={isUploading || !licenseToken.trim()}>
+          <button type="submit" className={primaryBtn} disabled={isUploading || !licenseToken.trim()}>
             {isUploading ? t("common.loading") : t("license.uploadButton")}
           </button>
         </div>

@@ -2,7 +2,34 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P77-S5 (fifth session of Phase 77 — `admin-ui`'s `AuditTraceSettings.tsx`,
+**Last completed:** P77-S6 (sixth session of Phase 77 — `admin-ui`'s remaining smaller components, 18
+files in scope). Same styling formula as P77-S1 through S5. 11 files needed real edits
+(`ExportSettings.tsx`, `DelegationsAdmin.tsx`, `StorageOperationalConfig.tsx`, `OcrSettings.tsx`,
+`LicenseStatusView.tsx`, `ShareLinkSettings.tsx`, `SignatureConfig.tsx`, `InstallationManager.tsx`,
+`KennzeichenSettings.tsx`, `UploadSettings.tsx`, `RegistryOverview.tsx`); 7 needed none — 4 are read-only
+views with no interactive controls by design (`DeletionRegister.tsx`/`RetimestampStatus.tsx`/
+`TeamspacesAdmin.tsx`/`DashboardWidgets.tsx`), and `AdminSidebar.tsx`'s group-header button plus both
+banner components already carried correct styling from earlier work. No dead-CSS-class instances found
+this session. No new ADR. `tsc`/`eslint` clean, 304/304 Vitest, real `next build` succeeds. Applied via
+three parallel general-purpose subagents (mechanical, already-proven-formula work), then verified/built/
+deployed/live-checked by the orchestrating session itself.
+
+**Live-verified all 11 changed pages** against the real rebuilt/redeployed Docker image, logged in as
+`users-admin` with four temporary grants (`domain-admin-storage`/`domain-admin-license`/
+`domain-admin-signature`/`domain-admin-document-config`/`domain-admin-config`, keyed by the numeric
+`sub="2"` from the start). One native-checkbox `border-radius` computed-style quirk noted (className
+correctly applied, but `appearance: auto` checkboxes don't reflect `border-radius` in computed style) —
+confirmed consistent with the same already-accepted pattern from P77-S5's verification, not a regression.
+All temporary grants cleaned up afterward. **This closes `admin-ui` entirely** — Phase 77 now moves to
+`user-ui`.
+
+**Next session:** P77-S7 — `user-ui`'s 8 "mixed" modals (`BulkEditModal.tsx`, `FolderRetentionModal.tsx`,
+`RedactionModal.tsx`, `UploadForm.tsx`, `HandFolderReferencesModal.tsx`, `ShareLinkModal.tsx`) plus
+`share/page.tsx`.
+
+---
+
+Immediately before: P77-S5 (fifth session of Phase 77 — `admin-ui`'s `AuditTraceSettings.tsx`,
 `EmailTemplates.tsx`, `ForensicTraceView.tsx`, `ConfigCompare.tsx`, `ApprovalSettings.tsx`,
 `SuperuserBreakGlass.tsx`). Same styling formula as P77-S1 through S4 applied throughout. **Found the
 recurring dead-CSS bug a third time**: `AuditTraceSettings.tsx` and `ForensicTraceView.tsx` used

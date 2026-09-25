@@ -67,6 +67,10 @@ export function KennzeichenSettings() {
     }
   }
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const checkbox = "h-4 w-4 rounded border-border accent-accent";
+
   return (
     <div className="rounded-lg border border-border p-4 mb-6">
       <p className="text-sm opacity-80">{t("kennzeichenSettings.hint")}</p>
@@ -80,13 +84,14 @@ export function KennzeichenSettings() {
           <label className="checkbox-label">
             <input
               type="checkbox"
+              className={checkbox}
               checked={showBeforeFilename}
               onChange={(event) => setShowBeforeFilename(event.target.checked)}
             />
             {t("kennzeichenSettings.showBeforeFilename")}
           </label>
           <div className="flex gap-2">
-            <button type="submit" disabled={isSaving}>
+            <button type="submit" className={primaryBtn} disabled={isSaving}>
               {t("common.save")}
             </button>
           </div>

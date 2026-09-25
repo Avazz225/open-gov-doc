@@ -90,6 +90,12 @@ export function ExportSettings() {
     }
   }
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+  const checkbox = "h-4 w-4 rounded border-border accent-accent";
+
   return (
     <div className="rounded-lg border border-border p-4 mb-6">
       <p className="text-sm opacity-80">{t("exportSettings.hint")}</p>
@@ -107,6 +113,7 @@ export function ExportSettings() {
               onChange={(event) =>
                 setHistoryPosition(event.target.value as ExportHistoryPosition)
               }
+              className={fieldInput}
             >
               <option value="before">{t("exportSettings.historyPositionBefore")}</option>
               <option value="after">{t("exportSettings.historyPositionAfter")}</option>
@@ -118,6 +125,7 @@ export function ExportSettings() {
               type="checkbox"
               checked={stampEnabled}
               onChange={(event) => setStampEnabled(event.target.checked)}
+              className={checkbox}
             />
             {t("exportSettings.stampEnabled")}
           </label>
@@ -128,6 +136,7 @@ export function ExportSettings() {
             <select
               value={stampType}
               onChange={(event) => setStampType(event.target.value as ExportStampType)}
+              className={fieldInput}
             >
               <option value="text">{t("exportSettings.stampTypeText")}</option>
               <option value="qr">{t("exportSettings.stampTypeQr")}</option>
@@ -139,6 +148,7 @@ export function ExportSettings() {
             <select
               value={stampPosition}
               onChange={(event) => setStampPosition(event.target.value as ExportStampPosition)}
+              className={fieldInput}
             >
               <option value="diagonal-center">{t("exportSettings.stampPositionDiagonal")}</option>
               <option value="top-left">{t("exportSettings.stampPositionTopLeft")}</option>
@@ -155,12 +165,13 @@ export function ExportSettings() {
               type="text"
               value={stampValueTemplate}
               onChange={(event) => setStampValueTemplate(event.target.value)}
+              className={fieldInput}
             />
           </label>
           <p className="col-span-full text-sm opacity-80">{t("exportSettings.stampValueTemplateHint")}</p>
 
           <div className="flex gap-2">
-            <button type="submit" disabled={isSaving}>
+            <button type="submit" disabled={isSaving} className={primaryBtn}>
               {t("common.save")}
             </button>
           </div>

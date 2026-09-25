@@ -28,10 +28,13 @@ export function RegistryOverview() {
     reload();
   }, [reload]);
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+
   return (
     <>
       <div className="flex gap-2" style={{ marginBottom: "1rem" }}>
-        <button type="button" onClick={reload}>
+        <button type="button" className={primaryBtn} onClick={reload}>
           {t("common.refresh")}
         </button>
       </div>

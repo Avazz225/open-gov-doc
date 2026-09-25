@@ -71,6 +71,11 @@ export function StorageOperationalConfig() {
     }
   }
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+
   return (
     <div className="rounded-lg border border-border p-4 mb-6">
       <p className="text-sm opacity-80">{t("storageOperationalConfig.hint")}</p>
@@ -84,6 +89,7 @@ export function StorageOperationalConfig() {
           <label>
             {t("storageOperationalConfig.writeStrategy")}
             <select
+              className={fieldInput}
               value={writeStrategy}
               onChange={(event) => setWriteStrategy(event.target.value as "quorum" | "primary_async")}
             >
@@ -95,6 +101,7 @@ export function StorageOperationalConfig() {
             {t("storageOperationalConfig.quorumCount")}
             <input
               type="number"
+              className={fieldInput}
               min={1}
               required
               value={quorumCount}
@@ -105,6 +112,7 @@ export function StorageOperationalConfig() {
             {t("storageOperationalConfig.maxReplicationAttempts")}
             <input
               type="number"
+              className={fieldInput}
               min={1}
               required
               value={maxReplicationAttempts}
@@ -112,7 +120,7 @@ export function StorageOperationalConfig() {
             />
           </label>
           <div className="flex gap-2">
-            <button type="submit" disabled={isSaving}>
+            <button type="submit" className={primaryBtn} disabled={isSaving}>
               {t("common.save")}
             </button>
           </div>

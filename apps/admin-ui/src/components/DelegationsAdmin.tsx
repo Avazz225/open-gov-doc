@@ -98,6 +98,10 @@ export function DelegationsAdmin() {
     ? delegations.filter((d) => d.grant_kind !== null)
     : delegations;
 
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+  const checkbox = "h-4 w-4 rounded border-border accent-accent";
+
   return (
     <div className="rounded-lg border border-border p-4 mb-6">
       <p className="text-sm opacity-80">{t("delegationsAdmin.hint")}</p>
@@ -111,6 +115,7 @@ export function DelegationsAdmin() {
       <label>
         <input
           type="checkbox"
+          className={checkbox}
           checked={orgHierarchyOnly}
           onChange={(e) => setOrgHierarchyOnly(e.target.checked)}
         />{" "}
@@ -151,6 +156,7 @@ export function DelegationsAdmin() {
                   {isActive(delegation) && (
                     <button
                       type="button"
+                      className={secondaryBtn}
                       onClick={() => handleRevoke(delegation)}
                       disabled={revokingId !== null}
                     >

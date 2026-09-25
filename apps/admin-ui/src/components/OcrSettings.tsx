@@ -77,6 +77,11 @@ export function OcrSettings() {
     }
   }
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+
   return (
     <div className="rounded-lg border border-border p-4 mb-6">
       <p className="text-sm opacity-80">{t("ocrSettings.enabledHint")}</p>
@@ -91,6 +96,7 @@ export function OcrSettings() {
             {t("ocrSettings.maxWordCount")}
             <input
               type="number"
+              className={fieldInput}
               min={1}
               placeholder={t("ocrSettings.maxWordCountPlaceholder")}
               value={maxWordCountInput}
@@ -101,6 +107,7 @@ export function OcrSettings() {
             {t("ocrSettings.batchSize")}
             <input
               type="number"
+              className={fieldInput}
               min={1}
               max={64}
               required
@@ -112,6 +119,7 @@ export function OcrSettings() {
             {t("ocrSettings.allowedContentTypes")}
             <input
               type="text"
+              className={fieldInput}
               placeholder="application/pdf, image/png"
               value={allowedContentTypesInput}
               onChange={(event) => setAllowedContentTypesInput(event.target.value)}
@@ -119,7 +127,7 @@ export function OcrSettings() {
           </label>
           <p className="col-span-full text-sm opacity-80">{t("ocrSettings.allowedContentTypesHint")}</p>
           <div className="flex gap-2">
-            <button type="submit" disabled={isSaving}>
+            <button type="submit" className={primaryBtn} disabled={isSaving}>
               {t("common.save")}
             </button>
           </div>

@@ -71,6 +71,8 @@ export function SignatureConfig() {
   if (isLoading) return <p>{t("common.loading")}</p>;
   if (unreachable) return <p className="italic opacity-70">{t("signatureConfig.unreachable")}</p>;
 
+  const checkbox = "h-4 w-4 rounded border-border accent-accent";
+
   return (
     <div className="rounded-lg border border-border p-4 mb-6">
       <p className="text-sm opacity-80">{t("signatureConfig.hint")}</p>
@@ -102,6 +104,7 @@ export function SignatureConfig() {
                     <label key={level} className="checkbox-label">
                       <input
                         type="checkbox"
+                        className={checkbox}
                         checked={provider.levels.includes(level)}
                         disabled={savingId !== null}
                         onChange={() => handleToggleLevel(provider, level)}
