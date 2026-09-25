@@ -179,7 +179,10 @@ body {
 .explorer-pane,
 .metadata-panel,
 .preview-pane,
-.search-pane {
+.search-pane,
+.cases-pane,
+.poststelle-pane,
+.teamspaces-pane {
   /* dockview mountet diese Panes über eine reine Block-Elternkette
      (`.dv-content-container` → `div.dv-react-part`, kein Flex/Grid) - ohne
      eine explizite Höhe bleibt `height` hier `auto` (sizing-to-content), wodurch
@@ -207,14 +210,20 @@ body {
 .explorer-pane::-webkit-scrollbar,
 .metadata-panel::-webkit-scrollbar,
 .preview-pane::-webkit-scrollbar,
-.search-pane::-webkit-scrollbar {
+.search-pane::-webkit-scrollbar,
+.cases-pane::-webkit-scrollbar,
+.poststelle-pane::-webkit-scrollbar,
+.teamspaces-pane::-webkit-scrollbar {
   width: 10px;
 }
 
 .explorer-pane::-webkit-scrollbar-thumb,
 .metadata-panel::-webkit-scrollbar-thumb,
 .preview-pane::-webkit-scrollbar-thumb,
-.search-pane::-webkit-scrollbar-thumb {
+.search-pane::-webkit-scrollbar-thumb,
+.cases-pane::-webkit-scrollbar-thumb,
+.poststelle-pane::-webkit-scrollbar-thumb,
+.teamspaces-pane::-webkit-scrollbar-thumb {
   background-color: var(--dms-border);
   border-radius: 5px;
 }
@@ -353,7 +362,8 @@ body {
 }
 
 .version-select,
-.page-select {
+.page-select,
+.poststelle-mailbox-filter {
   display: block;
   margin-bottom: var(--dms-space-2);
   font-size: var(--dms-font-size-sm);
@@ -646,7 +656,19 @@ body {
   width: 100%;
 }
 
-.inline-form {
+/* Phase 77 Session 9 - `.poststelle-postbuch-search`/`.poststelle-action-form`/
+   `.teamspaces-create-form`/`.teamspaces-invite-form`/`.teamspaces-appointment-form`/
+   `.teamspaces-contact-form` are all the same shape as `.inline-form` itself
+   (a row of labeled fields plus a submit button) but were referenced in
+   `PoststellePane.tsx`/`TeamspacesPane.tsx` without ever being defined here -
+   joined into this rule rather than duplicated. */
+.inline-form,
+.poststelle-postbuch-search,
+.poststelle-action-form,
+.teamspaces-create-form,
+.teamspaces-invite-form,
+.teamspaces-appointment-form,
+.teamspaces-contact-form {
   display: flex;
   gap: var(--dms-space-2);
   margin-bottom: var(--dms-space-3);
@@ -715,6 +737,25 @@ body {
   font: inherit;
   text-align: left;
   padding: 0;
+}
+
+/* Phase 77 Session 9 - secondary status/meta text next to `.entry-name`
+   (`CasesPane.tsx`/`PoststellePane.tsx`), referenced but never defined. */
+.entry-meta {
+  font-size: var(--dms-font-size-sm);
+  opacity: 0.8;
+}
+
+/* Nested detail lists inside a Poststelle inbox row (attachments, routing
+   history) - same list-reset as `.entry-list`, smaller/muted since they're
+   secondary detail, not the row's own primary content. */
+.poststelle-attachments,
+.poststelle-routing-log {
+  list-style: none;
+  margin: var(--dms-space-1) 0 0;
+  padding: 0;
+  font-size: var(--dms-font-size-sm);
+  opacity: 0.8;
 }
 
 .heading-with-favorite {
@@ -854,4 +895,33 @@ body {
   font-size: var(--dms-font-size-sm);
   opacity: 0.8;
   margin: var(--dms-space-1) 0;
+}
+
+/* Teamspace-Detailansicht (`TeamspacesPane.tsx`, Phase 77 Session 9) -
+   referenced but never defined; separates the detail section (header,
+   member list, invite/AD-group/appointment/contact forms) from the
+   teamspace list above it and stacks its own children with consistent
+   spacing. */
+.teamspace-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dms-space-3);
+  margin-top: var(--dms-space-4);
+  border-top: 1px solid var(--dms-border);
+  padding-top: var(--dms-space-4);
+}
+
+.teamspaces-ad-group-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dms-space-2);
+}
+
+.ad-group-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dms-space-2);
+  border: 1px solid var(--dms-border);
+  border-radius: var(--dms-radius-md);
+  padding: var(--dms-space-2);
 }

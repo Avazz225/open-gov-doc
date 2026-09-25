@@ -212,6 +212,13 @@ export function PoststellePane({ token }: { token: string }) {
     }
   }
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+
   return (
     <section className="poststelle-pane" aria-label={t("poststelle.paneLabel")}>
       <h2 className="m-0 mb-3 text-base">{t("poststelle.heading")}</h2>
@@ -249,7 +256,11 @@ export function PoststellePane({ token }: { token: string }) {
       {tab === "inbox" && mailboxes.length > 1 && (
         <label className="poststelle-mailbox-filter">
           {t("poststelle.mailboxFilterLabel")}
-          <select value={mailboxFilter} onChange={(e) => setMailboxFilter(e.target.value)}>
+          <select
+            className={fieldInput}
+            value={mailboxFilter}
+            onChange={(e) => setMailboxFilter(e.target.value)}
+          >
             <option value="">{t("poststelle.mailboxFilterAll")}</option>
             {mailboxes.map((m) => (
               <option key={m.id} value={m.id}>
@@ -265,6 +276,7 @@ export function PoststellePane({ token }: { token: string }) {
           <label>
             {t("poststelle.postbuchMailboxLabel")}
             <select
+              className={fieldInput}
               value={postbuchMailboxFilter}
               onChange={(e) => setPostbuchMailboxFilter(e.target.value)}
             >
@@ -280,12 +292,13 @@ export function PoststellePane({ token }: { token: string }) {
             {t("poststelle.postbuchSearchLabel")}
             <input
               type="text"
+              className={fieldInput}
               value={postbuchQuery}
               onChange={(e) => setPostbuchQuery(e.target.value)}
               placeholder={t("poststelle.postbuchSearchPlaceholder")}
             />
           </label>
-          <button type="submit" disabled={isLoading}>
+          <button type="submit" className={primaryBtn} disabled={isLoading}>
             {t("poststelle.postbuchSearchSubmit")}
           </button>
         </form>
@@ -315,6 +328,7 @@ export function PoststellePane({ token }: { token: string }) {
                   <span className="flex gap-2">
                     <button
                       type="button"
+                      className={primaryBtn}
                       onClick={() => startAction(message)}
                       disabled={busyId === message.id}
                     >
@@ -325,6 +339,7 @@ export function PoststellePane({ token }: { token: string }) {
                     {mailboxes.length > 1 && (
                       <button
                         type="button"
+                        className={secondaryBtn}
                         onClick={() => startRouting(message)}
                         disabled={busyId === message.id}
                       >
@@ -333,6 +348,7 @@ export function PoststellePane({ token }: { token: string }) {
                     )}
                     <button
                       type="button"
+                      className={secondaryBtn}
                       onClick={() => reject(message)}
                       disabled={busyId === message.id}
                     >
@@ -345,6 +361,7 @@ export function PoststellePane({ token }: { token: string }) {
                     <label>
                       {t("poststelle.routeTargetLabel")}
                       <select
+                        className={fieldInput}
                         value={routeTargetMailboxId}
                         onChange={(e) => setRouteTargetMailboxId(e.target.value)}
                       >
@@ -362,6 +379,7 @@ export function PoststellePane({ token }: { token: string }) {
                       {t("poststelle.routeReasonLabel")}
                       <input
                         type="text"
+                        className={fieldInput}
                         value={routeReason}
                         onChange={(e) => setRouteReason(e.target.value)}
                       />
@@ -369,12 +387,13 @@ export function PoststellePane({ token }: { token: string }) {
                     <span className="flex gap-2">
                       <button
                         type="button"
+                        className={primaryBtn}
                         disabled={busyId === message.id || !routeTargetMailboxId}
                         onClick={() => routeMessage(message)}
                       >
                         {t("poststelle.routeSubmit")}
                       </button>
-                      <button type="button" onClick={() => setRoutingId(null)}>
+                      <button type="button" className={secondaryBtn} onClick={() => setRoutingId(null)}>
                         {t("poststelle.actionCancel")}
                       </button>
                     </span>
@@ -384,7 +403,12 @@ export function PoststellePane({ token }: { token: string }) {
                   <div className="poststelle-action-form">
                     <label>
                       {t("poststelle.titleLabel")}
-                      <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} />
+                      <input
+                        type="text"
+                        className={fieldInput}
+                        value={title}
+                        onChange={(e) => setTitle(e.target.value)}
+                      />
                     </label>
                     <label>
                       {message.status === "proposed_match"
@@ -392,6 +416,7 @@ export function PoststellePane({ token }: { token: string }) {
                         : t("poststelle.folderLabel")}
                       <input
                         type="text"
+                        className={fieldInput}
                         value={folderId}
                         onChange={(e) => setFolderId(e.target.value)}
                       />
@@ -401,6 +426,7 @@ export function PoststellePane({ token }: { token: string }) {
                         {t("poststelle.caseLabel")}
                         <input
                           type="text"
+                          className={fieldInput}
                           value={caseId}
                           onChange={(e) => setCaseId(e.target.value)}
                         />
@@ -409,6 +435,7 @@ export function PoststellePane({ token }: { token: string }) {
                     <span className="flex gap-2">
                       <button
                         type="button"
+                        className={primaryBtn}
                         disabled={
                           busyId === message.id ||
                           title.trim() === "" ||
@@ -422,7 +449,7 @@ export function PoststellePane({ token }: { token: string }) {
                       >
                         {t("poststelle.actionConfirm")}
                       </button>
-                      <button type="button" onClick={() => setActionId(null)}>
+                      <button type="button" className={secondaryBtn} onClick={() => setActionId(null)}>
                         {t("poststelle.actionCancel")}
                       </button>
                     </span>
@@ -459,7 +486,7 @@ export function PoststellePane({ token }: { token: string }) {
         )
       ) : tab === "outbox" ? (
         <>
-          <button type="button" onClick={() => setComposeOpen((prev) => !prev)}>
+          <button type="button" className={primaryBtn} onClick={() => setComposeOpen((prev) => !prev)}>
             {t("poststelle.compose")}
           </button>
           {composeOpen && (
@@ -468,6 +495,7 @@ export function PoststellePane({ token }: { token: string }) {
                 {t("poststelle.toLabel")}
                 <input
                   type="text"
+                  className={fieldInput}
                   value={composeTo}
                   onChange={(e) => setComposeTo(e.target.value)}
                 />
@@ -476,16 +504,22 @@ export function PoststellePane({ token }: { token: string }) {
                 {t("poststelle.subjectLabel")}
                 <input
                   type="text"
+                  className={fieldInput}
                   value={composeSubject}
                   onChange={(e) => setComposeSubject(e.target.value)}
                 />
               </label>
               <label>
                 {t("poststelle.bodyLabel")}
-                <textarea value={composeBody} onChange={(e) => setComposeBody(e.target.value)} />
+                <textarea
+                  className={fieldInput}
+                  value={composeBody}
+                  onChange={(e) => setComposeBody(e.target.value)}
+                />
               </label>
               <button
                 type="button"
+                className={primaryBtn}
                 disabled={!composeTo.trim() || !composeSubject.trim() || !composeBody.trim()}
                 onClick={sendCompose}
               >

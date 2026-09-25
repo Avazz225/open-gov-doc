@@ -280,6 +280,13 @@ export function TeamspacesPane({
     }
   }
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+
   return (
     <section className="teamspaces-pane" aria-label={t("teamspaces.paneLabel")}>
       <h2 className="m-0 mb-3 text-base">{t("teamspaces.heading")}</h2>
@@ -294,17 +301,21 @@ export function TeamspacesPane({
       <form className="teamspaces-create-form" onSubmit={handleCreate}>
         <input
           type="text"
+          className={fieldInput}
           placeholder={t("teamspaces.namePlaceholder")}
           value={newName}
           onChange={(e) => setNewName(e.target.value)}
         />
         <input
           type="text"
+          className={fieldInput}
           placeholder={t("teamspaces.descriptionPlaceholder")}
           value={newDescription}
           onChange={(e) => setNewDescription(e.target.value)}
         />
-        <button type="submit">{t("teamspaces.createButton")}</button>
+        <button type="submit" className={primaryBtn}>
+          {t("teamspaces.createButton")}
+        </button>
       </form>
 
       {isLoading ? (
@@ -317,7 +328,7 @@ export function TeamspacesPane({
             <li className="entry-row" key={teamspace.id}>
               <span className="entry-name">{teamspace.name}</span>
               <span className="flex gap-2">
-                <button type="button" onClick={() => selectTeamspace(teamspace)}>
+                <button type="button" className={secondaryBtn} onClick={() => selectTeamspace(teamspace)}>
                   {t("teamspaces.open")}
                 </button>
               </span>
@@ -331,14 +342,14 @@ export function TeamspacesPane({
           <div className="flex items-center justify-between border-b border-border px-6 py-3">
             <h3>{selected.name}</h3>
             <span className="flex gap-2">
-              <button type="button" onClick={() => onOpenFolder(selected.root_folder_id)}>
+              <button type="button" className={secondaryBtn} onClick={() => onOpenFolder(selected.root_folder_id)}>
                 {t("teamspaces.openFolder")}
               </button>
-              <button type="button" onClick={handleLeave}>
+              <button type="button" className={secondaryBtn} onClick={handleLeave}>
                 {t("teamspaces.leave")}
               </button>
               {canManage && (
-                <button type="button" onClick={handleDeleteTeamspace}>
+                <button type="button" className={secondaryBtn} onClick={handleDeleteTeamspace}>
                   {t("teamspaces.deleteTeamspace")}
                 </button>
               )}
@@ -359,7 +370,7 @@ export function TeamspacesPane({
                 </span>
                 {canManage && member.principal_id !== currentPrincipalId && (
                   <span className="flex gap-2">
-                    <button type="button" onClick={() => handleRemoveMember(member.principal_id)}>
+                    <button type="button" className={secondaryBtn} onClick={() => handleRemoveMember(member.principal_id)}>
                       {t("teamspaces.removeMember")}
                     </button>
                   </span>
@@ -371,11 +382,14 @@ export function TeamspacesPane({
             <form className="teamspaces-invite-form" onSubmit={handleInvite}>
               <input
                 type="text"
+                className={fieldInput}
                 placeholder={t("teamspaces.inviteUsernamePlaceholder")}
                 value={inviteUsername}
                 onChange={(e) => setInviteUsername(e.target.value)}
               />
-              <button type="submit">{t("teamspaces.inviteButton")}</button>
+              <button type="submit" className={primaryBtn}>
+                {t("teamspaces.inviteButton")}
+              </button>
             </form>
           )}
 
@@ -391,6 +405,7 @@ export function TeamspacesPane({
                     <span className="flex gap-2">
                       <button
                         type="button"
+                        className={secondaryBtn}
                         onClick={() => handleUnbindAdGroup(binding.ad_group_name)}
                       >
                         {t("teamspaces.adGroupUnbind")}
@@ -411,6 +426,7 @@ export function TeamspacesPane({
               <form onSubmit={handlePreviewAdGroup}>
                 <input
                   type="text"
+                  className={fieldInput}
                   placeholder={t("teamspaces.adGroupNamePlaceholder")}
                   value={adGroupName}
                   onChange={(e) => {
@@ -418,7 +434,9 @@ export function TeamspacesPane({
                     setAdGroupPreview(null);
                   }}
                 />
-                <button type="submit">{t("teamspaces.adGroupPreviewButton")}</button>
+                <button type="submit" className={primaryBtn}>
+                  {t("teamspaces.adGroupPreviewButton")}
+                </button>
               </form>
               {adGroupPreview && (
                 <div className="ad-group-preview">
@@ -433,7 +451,7 @@ export function TeamspacesPane({
                       ))}
                     </ul>
                   )}
-                  <button type="button" onClick={handleBindAdGroup}>
+                  <button type="button" className={primaryBtn} onClick={handleBindAdGroup}>
                     {t("teamspaces.adGroupBindButton")}
                   </button>
                 </div>
@@ -451,7 +469,7 @@ export function TeamspacesPane({
                   {new Date(appointment.end_at).toLocaleString()}
                 </span>
                 <span className="flex gap-2">
-                  <button type="button" onClick={() => handleDeleteAppointment(appointment.id)}>
+                  <button type="button" className={secondaryBtn} onClick={() => handleDeleteAppointment(appointment.id)}>
                     {t("common.delete")}
                   </button>
                 </span>
@@ -461,21 +479,26 @@ export function TeamspacesPane({
           <form className="teamspaces-appointment-form" onSubmit={handleCreateAppointment}>
             <input
               type="text"
+              className={fieldInput}
               placeholder={t("teamspaces.appointmentTitlePlaceholder")}
               value={appointmentTitle}
               onChange={(e) => setAppointmentTitle(e.target.value)}
             />
             <input
               type="datetime-local"
+              className={fieldInput}
               value={appointmentStart}
               onChange={(e) => setAppointmentStart(e.target.value)}
             />
             <input
               type="datetime-local"
+              className={fieldInput}
               value={appointmentEnd}
               onChange={(e) => setAppointmentEnd(e.target.value)}
             />
-            <button type="submit">{t("teamspaces.addAppointmentButton")}</button>
+            <button type="submit" className={primaryBtn}>
+              {t("teamspaces.addAppointmentButton")}
+            </button>
           </form>
 
           <h4>{t("teamspaces.contactsHeading")}</h4>
@@ -487,7 +510,7 @@ export function TeamspacesPane({
                   {contact.email ? ` (${contact.email})` : ""}
                 </span>
                 <span className="flex gap-2">
-                  <button type="button" onClick={() => handleDeleteContact(contact.id)}>
+                  <button type="button" className={secondaryBtn} onClick={() => handleDeleteContact(contact.id)}>
                     {t("common.delete")}
                   </button>
                 </span>
@@ -497,17 +520,21 @@ export function TeamspacesPane({
           <form className="teamspaces-contact-form" onSubmit={handleCreateContact}>
             <input
               type="text"
+              className={fieldInput}
               placeholder={t("teamspaces.contactNamePlaceholder")}
               value={contactName}
               onChange={(e) => setContactName(e.target.value)}
             />
             <input
               type="email"
+              className={fieldInput}
               placeholder={t("teamspaces.contactEmailPlaceholder")}
               value={contactEmail}
               onChange={(e) => setContactEmail(e.target.value)}
             />
-            <button type="submit">{t("teamspaces.addContactButton")}</button>
+            <button type="submit" className={primaryBtn}>
+              {t("teamspaces.addContactButton")}
+            </button>
           </form>
         </div>
       )}

@@ -2,7 +2,36 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P77-S8 (eighth session of Phase 77 — `user-ui`'s `PreviewPane.tsx`/`ExplorerPane.tsx`,
+**Last completed:** P77-S9 (ninth session of Phase 77 — `user-ui`'s `CasesPane.tsx`/`PoststellePane.tsx`/
+`TeamspacesPane.tsx`). Same styling formula, applied via a subagent. **Found the phase's largest
+dead-CSS-class bug yet**: 17 distinct classes across the three files were never defined in `globals.css`.
+Most significantly, `.cases-pane`/`.poststelle-pane`/`.teamspaces-pane` (the three pane roots) were
+missing from the shared dockview-pane rule that gives every dockview-mounted pane its `height: 100%`/
+`overflow-y: auto`/padding — these three panes silently carried the exact "P16-S1-regression"
+sizing-to-content bug that rule exists to prevent, undetected until now. Fixed by joining them into that
+shared selector group. The other 14 were form/list/detail wrappers, fixed by joining several into the
+existing `.inline-form`/`.version-select` rules (same shape) and adding a few new flex-column rules for
+`.teamspace-detail`/`.teamspaces-ad-group-form`/`.ad-group-preview`/`.poststelle-attachments`/
+`.poststelle-routing-log`/`.entry-meta`. `.poststelle-postbuch-list` needed no fix (`.entry-list` already
+covers it). No new ADR (same minimal-fix precedent as every prior dead-class find this phase). `tsc`/
+`eslint` clean, 292/292 Vitest, real `next build` succeeds.
+
+**Live-verified `TeamspacesPane`/`CasesPane`** against the real rebuilt/redeployed Docker image —
+pane-level `overflow-y`/padding confirmed via `getComputedStyle`, a real teamspace created/opened/deleted
+through its full detail view (invite/AD-group/appointment/contact forms all confirmed correctly styled,
+screenshots show a dramatic improvement over the prior unstyled state). `PoststellePane` could not be
+reached live in this dev stack — gated by the Keycloak realm role `dms-poststelle`, which only real human
+accounts can hold (not the local technical accounts used for verification here, confirmed via
+`kcadm.sh` reporting "User not found"), the same documented limitation as P15-S2/S3's sessions for this
+exact component; verified instead via the passing Vitest suite plus manual review of every changed
+element against its new CSS rule.
+
+**Next session:** P77-S10 — `user-ui`'s `FolderTree.tsx`, `DelegationsPane.tsx`, `RetentionPanel.tsx`,
+`TrashPane.tsx`, `SearchPane.tsx`.
+
+---
+
+Immediately before: P77-S8 (eighth session of Phase 77 — `user-ui`'s `PreviewPane.tsx`/`ExplorerPane.tsx`,
 the two largest, most-used panes). Same styling formula, applied via two parallel subagents (one per
 file). `ExplorerPane.tsx` used the icon-button variant (`iconBtn`, from P77-S1) for its three
 emoji-only per-folder-row action buttons, and correctly left the breadcrumb-trail buttons untouched (a

@@ -151,6 +151,9 @@ export function CasesPane({
     );
   }
 
+  const fieldInput =
+    "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+
   return (
     <section className="cases-pane" aria-label={t("cases.paneLabel")}>
       <h2 className="m-0 mb-3 text-base">{t("cases.heading")}</h2>
@@ -164,7 +167,11 @@ export function CasesPane({
 
       <label>
         {t("cases.statusFilterLabel")}
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+        <select
+          className={fieldInput}
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+        >
           <option value="">{t("cases.statusAll")}</option>
           <option value="open">{t("cases.statusOpen")}</option>
           <option value="closed">{t("cases.statusClosed")}</option>
@@ -316,12 +323,19 @@ function NewCaseImportSection({
     }
   }
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+
   return (
     <>
       <h3>{t("cases.newCaseImportHeading")}</h3>
       <p className="text-sm opacity-80">{t("cases.newCaseImportHint")}</p>
 
-      <button type="button" onClick={() => setXdomeaOpen((prev) => !prev)}>
+      <button type="button" className={primaryBtn} onClick={() => setXdomeaOpen((prev) => !prev)}>
         {t("cases.xdomeaImport")}
       </button>
       {xdomeaOpen && (
@@ -334,6 +348,7 @@ function NewCaseImportSection({
             {t("cases.importFolderLabel")}
             <input
               type="text"
+              className={fieldInput}
               value={xdomeaFolderId}
               onChange={(e) => setXdomeaFolderId(e.target.value)}
             />
@@ -342,6 +357,7 @@ function NewCaseImportSection({
             {t("cases.newCaseProcessDefinitionLabel")}
             <select
               id="new-case-xdomea-process-definition"
+              className={fieldInput}
               value={xdomeaDefinitionId}
               onChange={(e) => setXdomeaDefinitionId(e.target.value)}
             >
@@ -356,6 +372,7 @@ function NewCaseImportSection({
           <span className="flex gap-2">
             <button
               type="button"
+              className={primaryBtn}
               disabled={
                 xdomeaImporting || !xdomeaFile || !xdomeaFolderId.trim() || !xdomeaDefinitionId
               }
@@ -363,7 +380,7 @@ function NewCaseImportSection({
             >
               {xdomeaImporting ? t("cases.importing") : t("cases.importSubmit")}
             </button>
-            <button type="button" onClick={() => setXdomeaOpen(false)}>
+            <button type="button" className={secondaryBtn} onClick={() => setXdomeaOpen(false)}>
               {t("common.cancel")}
             </button>
           </span>
@@ -375,7 +392,7 @@ function NewCaseImportSection({
         </p>
       )}
 
-      <button type="button" onClick={() => setXjustizOpen((prev) => !prev)}>
+      <button type="button" className={primaryBtn} onClick={() => setXjustizOpen((prev) => !prev)}>
         {t("cases.xjustizImport")}
       </button>
       {xjustizOpen && (
@@ -388,6 +405,7 @@ function NewCaseImportSection({
             {t("cases.importFolderLabel")}
             <input
               type="text"
+              className={fieldInput}
               value={xjustizFolderId}
               onChange={(e) => setXjustizFolderId(e.target.value)}
             />
@@ -396,6 +414,7 @@ function NewCaseImportSection({
             {t("cases.newCaseProcessDefinitionLabel")}
             <select
               id="new-case-xjustiz-process-definition"
+              className={fieldInput}
               value={xjustizDefinitionId}
               onChange={(e) => setXjustizDefinitionId(e.target.value)}
             >
@@ -410,6 +429,7 @@ function NewCaseImportSection({
           <span className="flex gap-2">
             <button
               type="button"
+              className={primaryBtn}
               disabled={
                 xjustizImporting || !xjustizFile || !xjustizFolderId.trim() || !xjustizDefinitionId
               }
@@ -417,7 +437,7 @@ function NewCaseImportSection({
             >
               {xjustizImporting ? t("cases.importing") : t("cases.importSubmit")}
             </button>
-            <button type="button" onClick={() => setXjustizOpen(false)}>
+            <button type="button" className={secondaryBtn} onClick={() => setXjustizOpen(false)}>
               {t("common.cancel")}
             </button>
           </span>
@@ -612,10 +632,17 @@ function CaseDetail({
     }
   }
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+
   if (!activeCase) {
     return (
       <section className="cases-pane" aria-label={t("cases.paneLabel")}>
-        <button type="button" onClick={onBack}>
+        <button type="button" className={secondaryBtn} onClick={onBack}>
           {t("cases.backToList")}
         </button>
         {error ? (
@@ -631,7 +658,7 @@ function CaseDetail({
 
   return (
     <section className="cases-pane" aria-label={t("cases.paneLabel")}>
-      <button type="button" onClick={onBack}>
+      <button type="button" className={secondaryBtn} onClick={onBack}>
         {t("cases.backToList")}
       </button>
       <span className="heading-with-favorite">
@@ -704,7 +731,11 @@ function CaseDetail({
           <h3>{t("cases.exportHeading")}</h3>
           {/* Case-level XDOMEA export (ADR 0126) - same inline-form shape
               as PreviewPane.tsx's document-level export button. */}
-          <button type="button" onClick={() => setXdomeaExportOpen((prev) => !prev)}>
+          <button
+            type="button"
+            className={primaryBtn}
+            onClick={() => setXdomeaExportOpen((prev) => !prev)}
+          >
             {t("cases.xdomeaExport")}
           </button>
           {xdomeaExportOpen && (
@@ -713,6 +744,7 @@ function CaseDetail({
                 {t("cases.xdomeaExportLeserLabel")}
                 <input
                   type="text"
+                  className={fieldInput}
                   value={xdomeaLeserName}
                   onChange={(e) => setXdomeaLeserName(e.target.value)}
                   placeholder={t("cases.xdomeaExportLeserPlaceholder")}
@@ -721,12 +753,13 @@ function CaseDetail({
               <span className="flex gap-2">
                 <button
                   type="button"
+                  className={primaryBtn}
                   disabled={xdomeaExporting || !xdomeaLeserName.trim()}
                   onClick={handleXdomeaExport}
                 >
                   {xdomeaExporting ? t("cases.exporting") : t("cases.exportSubmit")}
                 </button>
-                <button type="button" onClick={() => setXdomeaExportOpen(false)}>
+                <button type="button" className={secondaryBtn} onClick={() => setXdomeaExportOpen(false)}>
                   {t("common.cancel")}
                 </button>
               </span>
@@ -739,7 +772,11 @@ function CaseDetail({
           )}
 
           {/* Case-level XJustiz export (ADR 0129) */}
-          <button type="button" onClick={() => setXjustizExportOpen((prev) => !prev)}>
+          <button
+            type="button"
+            className={primaryBtn}
+            onClick={() => setXjustizExportOpen((prev) => !prev)}
+          >
             {t("cases.xjustizExport")}
           </button>
           {xjustizExportOpen && (
@@ -748,6 +785,7 @@ function CaseDetail({
                 {t("cases.xjustizExportEmpfaengerLabel")}
                 <input
                   type="text"
+                  className={fieldInput}
                   value={xjustizEmpfaengerName}
                   onChange={(e) => setXjustizEmpfaengerName(e.target.value)}
                   placeholder={t("cases.xjustizExportEmpfaengerPlaceholder")}
@@ -756,12 +794,13 @@ function CaseDetail({
               <span className="flex gap-2">
                 <button
                   type="button"
+                  className={primaryBtn}
                   disabled={xjustizExporting || !xjustizEmpfaengerName.trim()}
                   onClick={handleXjustizExport}
                 >
                   {xjustizExporting ? t("cases.exporting") : t("cases.xjustizExportSubmit")}
                 </button>
-                <button type="button" onClick={() => setXjustizExportOpen(false)}>
+                <button type="button" className={secondaryBtn} onClick={() => setXjustizExportOpen(false)}>
                   {t("common.cancel")}
                 </button>
               </span>
@@ -780,7 +819,11 @@ function CaseDetail({
               the "create a new case from an import" path lives instead on
               the case LIST view (`NewCaseImportSection`, Post-Roadmap Phase
               42 Session 1), which has no existing case to attach to. */}
-          <button type="button" onClick={() => setXdomeaImportOpen((prev) => !prev)}>
+          <button
+            type="button"
+            className={primaryBtn}
+            onClick={() => setXdomeaImportOpen((prev) => !prev)}
+          >
             {t("cases.xdomeaImport")}
           </button>
           {xdomeaImportOpen && (
@@ -796,6 +839,7 @@ function CaseDetail({
                 {t("cases.importFolderLabel")}
                 <input
                   type="text"
+                  className={fieldInput}
                   value={xdomeaImportFolderId}
                   onChange={(e) => setXdomeaImportFolderId(e.target.value)}
                 />
@@ -803,12 +847,13 @@ function CaseDetail({
               <span className="flex gap-2">
                 <button
                   type="button"
+                  className={primaryBtn}
                   disabled={xdomeaImporting || !xdomeaImportFile || !xdomeaImportFolderId.trim()}
                   onClick={handleXdomeaImport}
                 >
                   {xdomeaImporting ? t("cases.importing") : t("cases.importSubmit")}
                 </button>
-                <button type="button" onClick={() => setXdomeaImportOpen(false)}>
+                <button type="button" className={secondaryBtn} onClick={() => setXdomeaImportOpen(false)}>
                   {t("common.cancel")}
                 </button>
               </span>
@@ -826,7 +871,11 @@ function CaseDetail({
           )}
 
           {/* Case-level XJustiz import (ADR 0139) */}
-          <button type="button" onClick={() => setXjustizImportOpen((prev) => !prev)}>
+          <button
+            type="button"
+            className={primaryBtn}
+            onClick={() => setXjustizImportOpen((prev) => !prev)}
+          >
             {t("cases.xjustizImport")}
           </button>
           {xjustizImportOpen && (
@@ -842,6 +891,7 @@ function CaseDetail({
                 {t("cases.importFolderLabel")}
                 <input
                   type="text"
+                  className={fieldInput}
                   value={xjustizImportFolderId}
                   onChange={(e) => setXjustizImportFolderId(e.target.value)}
                 />
@@ -849,6 +899,7 @@ function CaseDetail({
               <span className="flex gap-2">
                 <button
                   type="button"
+                  className={primaryBtn}
                   disabled={
                     xjustizImporting || !xjustizImportFile || !xjustizImportFolderId.trim()
                   }
@@ -856,7 +907,7 @@ function CaseDetail({
                 >
                   {xjustizImporting ? t("cases.importing") : t("cases.importSubmit")}
                 </button>
-                <button type="button" onClick={() => setXjustizImportOpen(false)}>
+                <button type="button" className={secondaryBtn} onClick={() => setXjustizImportOpen(false)}>
                   {t("common.cancel")}
                 </button>
               </span>
