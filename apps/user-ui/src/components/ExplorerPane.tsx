@@ -529,6 +529,16 @@ export function ExplorerPane({
     });
   }
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+  const iconBtn =
+    "flex h-7 w-7 items-center justify-center rounded-md border border-border bg-hover-bg text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-40";
+  const fieldInput =
+    "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+  const checkbox = "h-4 w-4 rounded border-border accent-accent";
+
   return (
     <section className="explorer-pane" aria-label={t("explorer.paneLabel")}>
       {viewMode === "list" && (
@@ -545,10 +555,10 @@ export function ExplorerPane({
       )}
 
       <div className="explorer-toolbar">
-        <button type="button" onClick={() => setIsCreatingFolder((v) => !v)}>
+        <button type="button" className={primaryBtn} onClick={() => setIsCreatingFolder((v) => !v)}>
           {t("explorer.newFolder")}
         </button>
-        <button type="button" onClick={() => setShowUpload((v) => !v)}>
+        <button type="button" className={primaryBtn} onClick={() => setShowUpload((v) => !v)}>
           {t("explorer.toggleUpload")}
         </button>
         <button
@@ -586,6 +596,7 @@ export function ExplorerPane({
           onSubmit={handleCreateSubmit}
         >
           <input
+            className={fieldInput}
             value={newFolderName}
             onChange={(e) => setNewFolderName(e.target.value)}
             placeholder={t("explorer.newFolderPlaceholder")}
@@ -593,6 +604,7 @@ export function ExplorerPane({
           />
           {folderObjectTypes.length > 0 && (
             <select
+              className={fieldInput}
               aria-label={t("explorer.newFolderObjectTypeLabel")}
               value={newFolderObjectTypeId}
               onChange={(e) => setNewFolderObjectTypeId(e.target.value)}
@@ -605,8 +617,10 @@ export function ExplorerPane({
               ))}
             </select>
           )}
-          <button type="submit">{t("common.create")}</button>
-          <button type="button" onClick={() => setIsCreatingFolder(false)}>
+          <button type="submit" className={primaryBtn}>
+            {t("common.create")}
+          </button>
+          <button type="button" className={secondaryBtn} onClick={() => setIsCreatingFolder(false)}>
             {t("common.cancel")}
           </button>
         </form>
@@ -646,10 +660,10 @@ export function ExplorerPane({
       {selectedKeys.size > 0 && (
         <div className="explorer-toolbar">
           <span className="text-sm opacity-80">{t("bulkEdit.selectedCount", { count: selectedKeys.size })}</span>
-          <button type="button" onClick={() => setShowBulkEdit(true)}>
+          <button type="button" className={primaryBtn} onClick={() => setShowBulkEdit(true)}>
             {t("bulkEdit.openButton")}
           </button>
-          <button type="button" onClick={() => setSelectedKeys(new Set())}>
+          <button type="button" className={secondaryBtn} onClick={() => setSelectedKeys(new Set())}>
             {t("bulkEdit.clearSelection")}
           </button>
         </div>
@@ -683,7 +697,7 @@ export function ExplorerPane({
                     {folder.name}
                   </span>
                   <span className="flex gap-2">
-                    <button type="button" onClick={() => handleRestoreFolder(folder)}>
+                    <button type="button" className={secondaryBtn} onClick={() => handleRestoreFolder(folder)}>
                       {t("explorer.restoreFolder")}
                     </button>
                   </span>
@@ -695,7 +709,7 @@ export function ExplorerPane({
                     📄 {formatDocumentTitle(doc, documentTypeById, kennzeichenShowByDefault)}
                   </span>
                   <span className="flex gap-2">
-                    <button type="button" onClick={() => handleRestore(doc)}>
+                    <button type="button" className={secondaryBtn} onClick={() => handleRestore(doc)}>
                       {t("explorer.restoreDocument")}
                     </button>
                   </span>
@@ -742,6 +756,7 @@ export function ExplorerPane({
               >
                 <input
                   type="checkbox"
+                  className={checkbox}
                   aria-label={t("bulkEdit.selectItem", { name: folder.name })}
                   checked={selectedKeys.has(`folder:${folder.id}`)}
                   onChange={() => toggleSelected("folder", folder.id)}
@@ -753,12 +768,15 @@ export function ExplorerPane({
                     onSubmit={(e) => handleRenameSubmit(e, folder.id)}
                   >
                     <input
+                      className={fieldInput}
                       value={renameValue}
                       onChange={(e) => setRenameValue(e.target.value)}
                       autoFocus
                     />
-                    <button type="submit">{t("common.save")}</button>
-                    <button type="button" onClick={() => setRenamingFolderId(null)}>
+                    <button type="submit" className={primaryBtn}>
+                      {t("common.save")}
+                    </button>
+                    <button type="button" className={secondaryBtn} onClick={() => setRenamingFolderId(null)}>
                       {t("common.cancel")}
                     </button>
                   </form>
@@ -778,6 +796,7 @@ export function ExplorerPane({
                     <span className="flex gap-2">
                       <button
                         type="button"
+                        className={iconBtn}
                         aria-label={t("explorer.renameFolder", { name: folder.name })}
                         onClick={() => startRename(folder)}
                       >
@@ -785,6 +804,7 @@ export function ExplorerPane({
                       </button>
                       <button
                         type="button"
+                        className={iconBtn}
                         aria-label={t("explorer.folderRetention", { name: folder.name })}
                         onClick={() => setRetentionModalFolder(folder)}
                       >
@@ -792,6 +812,7 @@ export function ExplorerPane({
                       </button>
                       <button
                         type="button"
+                        className={iconBtn}
                         aria-label={t("explorer.handFolderReferences", { name: folder.name })}
                         onClick={() => setHandFolderModalFolder(folder)}
                       >
@@ -810,6 +831,7 @@ export function ExplorerPane({
               >
                 <input
                   type="checkbox"
+                  className={checkbox}
                   aria-label={t("bulkEdit.selectItem", {
                     name: formatDocumentTitle(doc, documentTypeById, kennzeichenShowByDefault),
                   })}

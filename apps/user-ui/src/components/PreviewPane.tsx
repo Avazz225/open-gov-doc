@@ -641,6 +641,13 @@ export function PreviewPane({
   // blanket `aria-label="Vorschau"` would no longer be unique for
   // screen-reader users. The title of the respective document makes each
   // instance distinguishable.
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+
   return (
     <section
       className="preview-pane"
@@ -653,6 +660,7 @@ export function PreviewPane({
           <label className="version-select">
             {t("preview.versionSelectLabel")}
             <select
+              className={fieldInput}
               value={selectedVersion ?? activeDocument.current_version_number}
               onChange={(event) => setSelectedVersion(Number(event.target.value))}
             >
@@ -700,6 +708,7 @@ export function PreviewPane({
         <label className="page-select">
           {t("preview.pageSelectLabel")}
           <select
+            className={fieldInput}
             value={selectedPage}
             onChange={(event) => setSelectedPage(Number(event.target.value))}
           >
@@ -793,10 +802,10 @@ export function PreviewPane({
         </p>
       )}
 
-      <button type="button" onClick={handleDownload}>
+      <button type="button" className={primaryBtn} onClick={handleDownload}>
         {t("folderBrowser.download")}
       </button>
-      <button type="button" onClick={handleExport} disabled={exporting}>
+      <button type="button" className={primaryBtn} onClick={handleExport} disabled={exporting}>
         {exporting ? t("preview.exporting") : t("preview.export")}
       </button>
       {exportError && (
@@ -824,7 +833,7 @@ export function PreviewPane({
           package (ZIP), unlike the plain-PDF Export button above. Needs the
           receiving authority's name, hence an inline form rather than a
           one-click action. */}
-      <button type="button" onClick={() => setXdomeaExportOpen((prev) => !prev)}>
+      <button type="button" className={primaryBtn} onClick={() => setXdomeaExportOpen((prev) => !prev)}>
         {t("preview.xdomeaExport")}
       </button>
       {xdomeaExportOpen && (
@@ -833,6 +842,7 @@ export function PreviewPane({
             {t("preview.xdomeaExportLeserLabel")}
             <input
               type="text"
+              className={fieldInput}
               value={xdomeaLeserName}
               onChange={(e) => setXdomeaLeserName(e.target.value)}
               placeholder={t("preview.xdomeaExportLeserPlaceholder")}
@@ -841,12 +851,13 @@ export function PreviewPane({
           <span className="flex gap-2">
             <button
               type="button"
+              className={primaryBtn}
               disabled={xdomeaExporting || !xdomeaLeserName.trim()}
               onClick={handleXdomeaExport}
             >
               {xdomeaExporting ? t("preview.exporting") : t("preview.xdomeaExportSubmit")}
             </button>
-            <button type="button" onClick={() => setXdomeaExportOpen(false)}>
+            <button type="button" className={secondaryBtn} onClick={() => setXdomeaExportOpen(false)}>
               {t("common.cancel")}
             </button>
           </span>
@@ -864,7 +875,7 @@ export function PreviewPane({
           labeled ("Justizübergabe"/"Justizbehörde" vs. "Behördenübergabe"/
           "Behörde" above) so the two buttons aren't ambiguous next to each
           other. */}
-      <button type="button" onClick={() => setXjustizExportOpen((prev) => !prev)}>
+      <button type="button" className={primaryBtn} onClick={() => setXjustizExportOpen((prev) => !prev)}>
         {t("preview.xjustizExport")}
       </button>
       {xjustizExportOpen && (
@@ -873,6 +884,7 @@ export function PreviewPane({
             {t("preview.xjustizExportEmpfaengerLabel")}
             <input
               type="text"
+              className={fieldInput}
               value={xjustizEmpfaengerName}
               onChange={(e) => setXjustizEmpfaengerName(e.target.value)}
               placeholder={t("preview.xjustizExportEmpfaengerPlaceholder")}
@@ -881,12 +893,13 @@ export function PreviewPane({
           <span className="flex gap-2">
             <button
               type="button"
+              className={primaryBtn}
               disabled={xjustizExporting || !xjustizEmpfaengerName.trim()}
               onClick={handleXjustizExport}
             >
               {xjustizExporting ? t("preview.exporting") : t("preview.xjustizExportSubmit")}
             </button>
-            <button type="button" onClick={() => setXjustizExportOpen(false)}>
+            <button type="button" className={secondaryBtn} onClick={() => setXjustizExportOpen(false)}>
               {t("common.cancel")}
             </button>
           </span>
@@ -897,17 +910,17 @@ export function PreviewPane({
           {xjustizExportError}
         </p>
       )}
-      <button type="button" onClick={handleCopyLink}>
+      <button type="button" className={primaryBtn} onClick={handleCopyLink}>
         {t("preview.copyLink")}
       </button>
       {linkCopyMessage && <span className="text-sm opacity-80">{linkCopyMessage}</span>}
       {officeLaunchInfo(currentContentType) && (
-        <button type="button" onClick={handleOfficeLaunch}>
+        <button type="button" className={primaryBtn} onClick={handleOfficeLaunch}>
           {t("preview.openInOffice", { app: officeLaunchInfo(currentContentType)!.label })}
         </button>
       )}
       {currentContentType === "application/pdf" && (
-        <button type="button" onClick={() => setShowRedactionModal(true)}>
+        <button type="button" className={primaryBtn} onClick={() => setShowRedactionModal(true)}>
           {t("redaction.openAction")}
         </button>
       )}

@@ -352,7 +352,8 @@ body {
   user-select: text;
 }
 
-.version-select {
+.version-select,
+.page-select {
   display: block;
   margin-bottom: var(--dms-space-2);
   font-size: var(--dms-font-size-sm);
@@ -491,7 +492,8 @@ body {
   border-radius: var(--dms-radius-md);
 }
 
-.version-conflict-badge {
+.version-conflict-badge,
+.version-classification-badge {
   display: inline-block;
   margin-bottom: var(--dms-space-2);
 }
