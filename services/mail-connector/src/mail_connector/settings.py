@@ -112,7 +112,7 @@ class Settings(BaseServiceSettings):
             pop3_host="localhost",
             pop3_port=1110,
             pop3_username="mailconnector",
-            pop3_password="mailconnector",
+            pop3_password="mailconnector_dev_only",
             pop3_use_tls=False,
         )
     ]

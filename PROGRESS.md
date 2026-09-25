@@ -2,7 +2,39 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P77-S13 (thirteenth and final session of Phase 77 — `migration-console`+
+**Last completed:** Ad-hoc security hardening — GitHub's automatic secret scanning flagged a checked-in
+plaintext password (user-reported, not a session in the numbered plan). Investigated first (a subagent
+searched the whole tree for `password=`/`secret=`/`token=`/cloud-credential patterns): everything else
+matching "password" was either this project's own documented `password=username` technical-account
+convention (`services/auth-service/src/auth_service/domain_admins.py`, only the hash is ever stored) or
+the established `*_dev_only` placeholder convention in `infra/.env.example` — no real external secret
+anywhere. The one genuine hit: `mail-connector`'s default POP3 dev credential (`mailconnector`/
+`mailconnector`) for the bundled local Mailpit self-loopback source — a real plaintext password sitting
+in three places (`services/mail-connector/src/mail_connector/settings.py`'s Python default,
+`infra/docker-compose.yml`'s `DMS_MAILBOXES` default JSON, and the matching bcrypt hash in
+`infra/mailpit-pop3-auth`), authenticating only that local dev container but still a literal secret
+string a scanner correctly flags. **Fix**: renamed the password (not username, which isn't sensitive)
+to `mailconnector_dev_only` in all three places, matching this project's own well-established `_dev_only`
+suffix convention used everywhere else — considered but explicitly rejected nesting a
+`${MAIL_CONNECTOR_POP3_PASSWORD:-...}` override inside `DMS_MAILBOXES`'s compose interpolation (verified
+it actually works on the current Compose v5.0.1 despite `docs/adr/0123-multi-inbox-model-env-var-config-no-department-rbac-yet.md`
+documenting an earlier attempt as "tried and reverted" for being non-nesting-aware — but relying on a
+Compose-version-dependent behavior that this project's own ADR already once burned itself on, for a
+`k8s`/Helm-deployed service with no parity guarantee, wasn't worth it over the simpler rename). Generated
+a fresh bcrypt hash (`.venv`'s `bcrypt`, cost factor 12 matching the original) and replaced
+`infra/mailpit-pop3-auth`. No new ADR (a rename, not an architecture decision). `mail-connector` 80/80
+pytest, `ruff` clean for this service (project-wide `ruff` still fails only on the pre-existing, unrelated
+`libreoffice-addin` issue). Rebuilt/redeployed real `mailpit`+`mail-connector` containers; live-verified
+via a real raw POP3 login with `python3 poplib`: the new password authenticates successfully, the old
+password is now correctly rejected (`-ERR invalid password`) — confirmed as a genuine rotation, not an
+additive change.
+
+**Next session:** whatever the user asks for next — this was a standalone, user-triggered fix, not a
+step in a planned session sequence.
+
+---
+
+Immediately before: P77-S13 (thirteenth and final session of Phase 77 — `migration-console`+
 `office-addin` card-container polish on `TransferConsole.tsx`/`PairedInstallationList.tsx`/
 `TaskPane.tsx`/`WorkflowPanel.tsx`). A full read-through of all four files plus a repo-wide grep for bare
 native controls in either app confirmed both are already fully styled from earlier work — zero bare

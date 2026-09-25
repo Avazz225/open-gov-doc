@@ -1360,14 +1360,14 @@ services:
       # mailbox:
       #   MAIL_CONNECTOR_MAILBOXES='[{"id":"central","name":"Zentrale Poststelle",
       #     "kind":"central","inbound_protocol":"pop3","pop3_host":"mailpit","pop3_port":1110,
-      #     "pop3_username":"mailconnector","pop3_password":"mailconnector","pop3_use_tls":false},
+      #     "pop3_username":"mailconnector","pop3_password":"mailconnector_dev_only","pop3_use_tls":false},
       #     {"id":"finanzen","name":"Poststelle Finanzen","kind":"departmental",
       #      "owning_group_id":"<permission-service Group.id>","inbound_protocol":"imap",
       #      "imap_host":"...","imap_username":"...","imap_password":"..."}]'
       DMS_MAILBOXES: >-
         ${MAIL_CONNECTOR_MAILBOXES:-[{"id":"central","name":"Zentrale Poststelle","kind":"central",
         "inbound_protocol":"pop3","pop3_host":"mailpit","pop3_port":1110,
-        "pop3_username":"mailconnector","pop3_password":"mailconnector","pop3_use_tls":false}]}
+        "pop3_username":"mailconnector","pop3_password":"mailconnector_dev_only","pop3_use_tls":false}]}
       DMS_SMTP_HOST: mailpit
       DMS_SMTP_PORT: "1025"
       DMS_POSTSTELLE_ROLE: ${MAIL_CONNECTOR_POSTSTELLE_ROLE:-dms-poststelle}
