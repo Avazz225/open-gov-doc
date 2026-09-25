@@ -132,7 +132,6 @@ describe("TransferConsole", () => {
       expect(createTransferMock).toHaveBeenCalledWith("token-123", {
         sourceFolderId: "folder-1",
         targetInstallationId: "install-1",
-        createdBy: "alice",
         dryRun: false,
         retentionDays: undefined,
       })

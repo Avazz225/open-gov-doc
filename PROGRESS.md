@@ -2,7 +2,34 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P77-S12 (twelfth session of Phase 77 — `user-ui`'s remaining smaller panes:
+**Last completed:** P77-S13 (thirteenth and final session of Phase 77 — `migration-console`+
+`office-addin` card-container polish on `TransferConsole.tsx`/`PairedInstallationList.tsx`/
+`TaskPane.tsx`/`WorkflowPanel.tsx`). A full read-through of all four files plus a repo-wide grep for bare
+native controls in either app confirmed both are already fully styled from earlier work — zero bare
+controls found. The only real issue was the named `rounded-sm`/`rounded-md` inconsistency, which turned
+out to exist in BOTH `PairedInstallationList.tsx` AND `TransferConsole.tsx` (identical copy-pasted
+create-form pattern) — fixed in both. `office-addin`'s two files needed no changes at all. **Also found
+and fixed one small, unrelated, pre-existing test bug** while running the verification cycle:
+`transfer-console.test.tsx` asserted a `createdBy` field the component correctly never sends —
+`migration-service`'s `schemas.py` documents `created_by` as deliberately excluded (Phase 59 Session 5,
+derived server-side from `X-DMS-Username`) — a stale test expectation predating that decision, confirmed
+failing identically on the pre-session code via `git stash`, not a regression from this session. Fixed
+the test to match the actual, correct, deliberate behavior. No new ADR. `tsc`/`eslint` clean for both
+apps, migration-console 20/20 Vitest (was 19/20 before the stale-test fix), office-addin 21/21 Vitest
+(unaffected), both real `next build`s succeed.
+
+**Rebuilt/redeployed the real `migration-console` Docker image** (`office-addin` untouched, no rebuild
+needed); live-verified the fixed form's `border-radius` via `getComputedStyle` (now `6px`, matching every
+other rounded element in the app) and a screenshot. **This closes Phase 77 entirely.**
+
+**Next session:** Phase 77's own closing DoD — `graphify update .` and the full unfiltered backend
+regression suite (`scripts/run-tests.sh --build`), both deferred to phase-end per standing project
+convention — then Phase 78 planning (whatever the next initiative is; check `IMPLEMENTATION_PLAN.md` for
+whether a further phase has already been scoped).
+
+---
+
+Immediately before: P77-S12 (twelfth session of Phase 77 — `user-ui`'s remaining smaller panes:
 `RecordsQuarantinePanel.tsx`/`RecordsQuarantineOverviewPane.tsx`/`ApprovalsPane.tsx`/`KontaktePane.tsx`/
 `ClassificationPanel.tsx`/`DerivedDocumentsPanel.tsx`). Same styling formula. `DerivedDocumentsPanel.tsx`
 needed no className additions. **Found 8 more dead classes**: `.records-quarantine-overview-pane`/

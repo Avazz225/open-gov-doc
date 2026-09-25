@@ -104,7 +104,7 @@ export function PairedInstallationList() {
 
       {showForm && (
         <form
-          className="mt-2 flex max-w-[420px] flex-col gap-2 rounded-sm border border-border p-3"
+          className="mt-2 flex max-w-[420px] flex-col gap-2 rounded-md border border-border p-3"
           onSubmit={handleCreate}
         >
           <label htmlFor="display-name" className={fieldLabel}>
