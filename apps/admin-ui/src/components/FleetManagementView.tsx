@@ -115,24 +115,39 @@ export function FleetManagementView() {
     }
   }
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+
   return (
     <div className="rounded-lg border border-border p-4 mb-6">
       <h2>{t("fleetManagement.heading")}</h2>
       <p className="text-sm opacity-80">{t("fleetManagement.hint")}</p>
 
-      <label>
-        {t("fleetManagement.operatorKey")}
-        <input
-          type="password"
-          value={operatorKey}
-          onChange={(e) => setOperatorKey(e.target.value)}
-          placeholder={t("fleetManagement.operatorKeyPlaceholder")}
-          autoComplete="off"
-        />
-      </label>
-      <button type="button" onClick={load} disabled={isLoading || operatorKey.length === 0}>
-        {isLoading ? t("common.loading") : t("fleetManagement.load")}
-      </button>
+      <div className="flex items-end gap-2">
+        <label>
+          {t("fleetManagement.operatorKey")}
+          <input
+            type="password"
+            value={operatorKey}
+            onChange={(e) => setOperatorKey(e.target.value)}
+            placeholder={t("fleetManagement.operatorKeyPlaceholder")}
+            autoComplete="off"
+            className={fieldInput}
+          />
+        </label>
+        <button
+          type="button"
+          onClick={load}
+          disabled={isLoading || operatorKey.length === 0}
+          className={secondaryBtn}
+        >
+          {isLoading ? t("common.loading") : t("fleetManagement.load")}
+        </button>
+      </div>
 
       {error && (
         <p className="text-danger" role="alert">
@@ -143,8 +158,12 @@ export function FleetManagementView() {
       {newlyCreatedKey && (
         <div className="text-sm opacity-80" role="alert">
           <p>{t("fleetManagement.newKeyWarning")}</p>
-          <code>{newlyCreatedKey.key}</code>
-          <button type="button" onClick={() => setNewlyCreatedKey(null)}>
+          <code className="rounded bg-hover-bg px-1.5 py-0.5 text-xs">{newlyCreatedKey.key}</code>
+          <button
+            type="button"
+            onClick={() => setNewlyCreatedKey(null)}
+            className={`${secondaryBtn} ml-2`}
+          >
             {t("fleetManagement.dismiss")}
           </button>
         </div>
@@ -152,14 +171,15 @@ export function FleetManagementView() {
 
       {installations !== null && (
         <>
-          <form onSubmit={handleRegister}>
-            <h3>{t("fleetManagement.registerHeading")}</h3>
+          <form className="form-grid" onSubmit={handleRegister}>
+            <h3 className="col-span-full">{t("fleetManagement.registerHeading")}</h3>
             <label>
               {t("fleetManagement.displayName")}
               <input
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
                 required
+                className={fieldInput}
               />
             </label>
             <label>
@@ -169,14 +189,20 @@ export function FleetManagementView() {
                 value={gatewayBaseUrl}
                 onChange={(e) => setGatewayBaseUrl(e.target.value)}
                 required
+                className={fieldInput}
               />
             </label>
-            <button type="submit" disabled={isRegistering}>
+            <button type="submit" disabled={isRegistering} className={primaryBtn}>
               {isRegistering ? t("common.loading") : t("fleetManagement.register")}
             </button>
           </form>
 
-          <button type="button" onClick={handleCheckStatus} disabled={isLoading}>
+          <button
+            type="button"
+            onClick={handleCheckStatus}
+            disabled={isLoading}
+            className={`${secondaryBtn} mt-2`}
+          >
             {t("fleetManagement.checkStatus")}
           </button>
 
@@ -208,29 +234,34 @@ export function FleetManagementView() {
                           : t("fleetManagement.statusUnknown")}
                       </td>
                       <td>
-                        <input
-                          value={licenseTokenById[inst.id] ?? ""}
-                          onChange={(e) =>
-                            setLicenseTokenById((prev) => ({
-                              ...prev,
-                              [inst.id]: e.target.value,
-                            }))
-                          }
-                          placeholder={t("fleetManagement.licenseTokenPlaceholder")}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => handlePushLicense(inst.id)}
-                          disabled={busyId !== null || !licenseTokenById[inst.id]}
-                        >
-                          {t("fleetManagement.pushLicense")}
-                        </button>
+                        <div className="flex gap-2">
+                          <input
+                            value={licenseTokenById[inst.id] ?? ""}
+                            onChange={(e) =>
+                              setLicenseTokenById((prev) => ({
+                                ...prev,
+                                [inst.id]: e.target.value,
+                              }))
+                            }
+                            placeholder={t("fleetManagement.licenseTokenPlaceholder")}
+                            className={fieldInput}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handlePushLicense(inst.id)}
+                            disabled={busyId !== null || !licenseTokenById[inst.id]}
+                            className={secondaryBtn}
+                          >
+                            {t("fleetManagement.pushLicense")}
+                          </button>
+                        </div>
                       </td>
                       <td>
                         <button
                           type="button"
                           onClick={() => handleDelete(inst.id)}
                           disabled={busyId !== null}
+                          className={secondaryBtn}
                         >
                           {busyId === inst.id ? t("common.loading") : t("fleetManagement.delete")}
                         </button>

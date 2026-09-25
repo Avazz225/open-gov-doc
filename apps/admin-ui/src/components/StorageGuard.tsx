@@ -155,6 +155,12 @@ export function StorageGuard() {
     }
   }
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+  const checkbox = "h-4 w-4 rounded border-border accent-accent";
+
   return (
     <div className="rounded-lg border border-border p-4 mb-6">
       <p className="text-sm opacity-80">{t("storageGuard.hint")}</p>
@@ -198,6 +204,7 @@ export function StorageGuard() {
                         checked={entry.object_lock_mode === "governance"}
                         disabled={updatingTarget !== null}
                         onChange={() => handleToggleObjectLockMode(entry)}
+                        className={checkbox}
                       />
                       {t("storageGuard.objectLockModeGovernance")}
                     </label>
@@ -209,6 +216,7 @@ export function StorageGuard() {
                         checked={entry.role === "archive"}
                         disabled={updatingTarget !== null}
                         onChange={() => handleToggleArchiveRole(entry)}
+                        className={checkbox}
                       />
                       {t("storageGuard.archiveRoleLabel")}
                     </label>
@@ -220,6 +228,7 @@ export function StorageGuard() {
                         checked={entry.decommissioned}
                         disabled={updatingTarget !== null}
                         onChange={() => handleToggleDecommissioned(entry)}
+                        className={checkbox}
                       />
                       {t("storageGuard.decommissionedLabel")}
                     </label>
@@ -229,6 +238,7 @@ export function StorageGuard() {
                       type="button"
                       onClick={() => handleReidentify(entry.target_id)}
                       disabled={reidentifyingTarget !== null}
+                      className={secondaryBtn}
                     >
                       {reidentifyingTarget === entry.target_id
                         ? t("common.loading")
@@ -247,11 +257,12 @@ export function StorageGuard() {
                 type="checkbox"
                 checked={allowDegradedStart}
                 onChange={(event) => setAllowDegradedStart(event.target.checked)}
+                className={checkbox}
               />
               {t("storageGuard.allowDegradedStart")}
             </label>
             <div className="flex gap-2">
-              <button type="submit" disabled={isSaving}>
+              <button type="submit" disabled={isSaving} className={primaryBtn}>
                 {t("common.save")}
               </button>
             </div>

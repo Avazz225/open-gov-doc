@@ -73,6 +73,11 @@ function DeltaTable({ category, delta }: DeltaTableProps) {
   );
 }
 
+const primaryBtn =
+  "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+const secondaryBtn =
+  "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+
 export function ConfigPackages() {
   const { accessToken } = useAuth();
   const { t } = useI18n();
@@ -186,7 +191,12 @@ export function ConfigPackages() {
       <div className="rounded-lg border border-border p-4 mb-6">
         <p className="text-sm opacity-80">{t("configPackages.hint")}</p>
         <div className="flex gap-2">
-          <button type="button" onClick={handleExportCurrent} disabled={isExporting}>
+          <button
+            type="button"
+            onClick={handleExportCurrent}
+            disabled={isExporting}
+            className={secondaryBtn}
+          >
             {t("configPackages.exportCurrent")}
           </button>
         </div>
@@ -204,6 +214,7 @@ export function ConfigPackages() {
             type="file"
             accept="application/json"
             onChange={(event) => handleFileChange(event.target.files)}
+            className="text-sm file:mr-2 file:rounded-md file:border file:border-border file:bg-hover-bg file:px-3 file:py-1.5 file:text-sm file:text-fg file:transition-colors hover:file:bg-accent-bg"
           />
         </label>
         {parseError && (
@@ -247,10 +258,15 @@ export function ConfigPackages() {
               ))}
             </ul>
             <div className="flex gap-2">
-              <button type="button" onClick={handlePreview} disabled={isComparing}>
+              <button
+                type="button"
+                onClick={handlePreview}
+                disabled={isComparing}
+                className={secondaryBtn}
+              >
                 {t("configPackages.preview")}
               </button>
-              <button type="button" onClick={handleApply} disabled={isImporting}>
+              <button type="button" onClick={handleApply} disabled={isImporting} className={primaryBtn}>
                 {t("configPackages.apply")}
               </button>
             </div>

@@ -132,6 +132,14 @@ function RetentionSection({
     }
   }
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+  const checkbox = "h-4 w-4 rounded border-border accent-accent";
+
   return (
     <div className="rounded-lg border border-border p-4 mb-6">
       <h3>{heading}</h3>
@@ -150,6 +158,7 @@ function RetentionSection({
               onChange={(e) =>
                 setState((prev) => ({ ...prev, deletionReasonRequired: e.target.checked }))
               }
+              className={checkbox}
             />
             {t("retentionSettings.deletionReasonRequired")}
           </label>
@@ -173,6 +182,7 @@ function RetentionSection({
                           ),
                         }))
                       }
+                      className={secondaryBtn}
                     >
                       {t("common.delete")}
                     </button>
@@ -185,6 +195,7 @@ function RetentionSection({
                 value={state.newReasonInput}
                 onChange={(e) => setState((prev) => ({ ...prev, newReasonInput: e.target.value }))}
                 placeholder={t("retentionSettings.deletionReasonCatalogAddPlaceholder")}
+                className={fieldInput}
               />
               <button
                 type="button"
@@ -199,6 +210,7 @@ function RetentionSection({
                     newReasonInput: "",
                   }))
                 }
+                className={secondaryBtn}
               >
                 {t("retentionSettings.deletionReasonCatalogAdd")}
               </button>
@@ -215,6 +227,7 @@ function RetentionSection({
                 setState((prev) => ({ ...prev, reminderLeadDaysInput: e.target.value }))
               }
               placeholder={t("retentionSettings.reminderLeadDaysPlaceholder")}
+              className={fieldInput}
             />
           </label>
           <label>
@@ -227,10 +240,11 @@ function RetentionSection({
               onChange={(e) =>
                 setState((prev) => ({ ...prev, restorePeriodDaysInput: e.target.value }))
               }
+              className={fieldInput}
             />
           </label>
           <div className="flex gap-2">
-            <button type="submit" disabled={state.isSaving}>
+            <button type="submit" disabled={state.isSaving} className={primaryBtn}>
               {t("common.save")}
             </button>
           </div>

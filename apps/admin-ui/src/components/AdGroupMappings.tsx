@@ -176,6 +176,13 @@ export function AdGroupMappings() {
     }
   }
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+
   return (
     <>
       {error && (
@@ -198,6 +205,7 @@ export function AdGroupMappings() {
               value={newMapping.adGroupName}
               onChange={(e) => setNewMapping({ ...newMapping, adGroupName: e.target.value })}
               required
+              className={fieldInput}
             />
           </label>
           <label>
@@ -206,6 +214,7 @@ export function AdGroupMappings() {
               value={newMapping.roleName}
               onChange={(e) => setNewMapping({ ...newMapping, roleName: e.target.value })}
               required
+              className={fieldInput}
             >
               <option value="" disabled>
                 {t("adGroupMappings.rolePlaceholder")}
@@ -217,7 +226,9 @@ export function AdGroupMappings() {
               ))}
             </select>
           </label>
-          <button type="submit">{t("common.create")}</button>
+          <button type="submit" className={primaryBtn}>
+            {t("common.create")}
+          </button>
         </form>
         {mappingPending && <p className="text-sm opacity-80">{t("adGroupMappings.pendingApproval")}</p>}
 
@@ -235,7 +246,7 @@ export function AdGroupMappings() {
                 <td>{m.ad_group_name}</td>
                 <td>{m.role_name}</td>
                 <td>
-                  <button type="button" onClick={() => handleDeleteMapping(m.id)}>
+                  <button type="button" onClick={() => handleDeleteMapping(m.id)} className={secondaryBtn}>
                     {t("common.delete")}
                   </button>
                 </td>
@@ -263,6 +274,7 @@ export function AdGroupMappings() {
               }
               placeholder={t("adGroupMappings.adGroupNamesPlaceholder")}
               required
+              className={fieldInput}
             />
           </label>
           <label>
@@ -273,6 +285,7 @@ export function AdGroupMappings() {
                 setNewCompositeRule({ ...newCompositeRule, roleName: e.target.value })
               }
               required
+              className={fieldInput}
             >
               <option value="" disabled>
                 {t("adGroupMappings.rolePlaceholder")}
@@ -284,7 +297,9 @@ export function AdGroupMappings() {
               ))}
             </select>
           </label>
-          <button type="submit">{t("common.create")}</button>
+          <button type="submit" className={primaryBtn}>
+            {t("common.create")}
+          </button>
         </form>
         {compositeRulePending && <p className="text-sm opacity-80">{t("adGroupMappings.pendingApproval")}</p>}
 
@@ -302,7 +317,11 @@ export function AdGroupMappings() {
                 <td>{rule.ad_group_names.join(", ")}</td>
                 <td>{rule.role_name}</td>
                 <td>
-                  <button type="button" onClick={() => handleDeleteCompositeRule(rule.id)}>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteCompositeRule(rule.id)}
+                    className={secondaryBtn}
+                  >
                     {t("common.delete")}
                   </button>
                 </td>
@@ -328,6 +347,7 @@ export function AdGroupMappings() {
             <select
               value={defaultRoleSelection}
               onChange={(e) => setDefaultRoleSelection(e.target.value)}
+              className={fieldInput}
             >
               <option value="">{t("adGroupMappings.defaultRoleNone")}</option>
               {roles.map((r) => (
@@ -337,7 +357,7 @@ export function AdGroupMappings() {
               ))}
             </select>
           </label>
-          <button type="submit" disabled={defaultRoleSaving}>
+          <button type="submit" disabled={defaultRoleSaving} className={primaryBtn}>
             {t("common.save")}
           </button>
         </form>

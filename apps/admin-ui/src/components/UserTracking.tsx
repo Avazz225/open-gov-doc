@@ -139,6 +139,14 @@ export function UserTracking() {
     }
   }
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+  const checkbox = "h-4 w-4 rounded border-border accent-accent";
+
   return (
     <>
       {error && (
@@ -162,9 +170,12 @@ export function UserTracking() {
                 value={lookupPrincipalId}
                 onChange={(e) => setLookupPrincipalId(e.target.value)}
                 required
+                className={fieldInput}
               />
             </label>
-            <button type="submit">{t("userTracking.lookup")}</button>
+            <button type="submit" className={secondaryBtn}>
+              {t("userTracking.lookup")}
+            </button>
           </form>
 
           {config && (
@@ -181,12 +192,13 @@ export function UserTracking() {
                   </>
                 )}
               </p>
-              <label>
+              <label className="checkbox-label">
                 <input
                   type="checkbox"
                   checked={config.enabled}
                   disabled={configSaving}
                   onChange={(e) => handleSaveConfig(e.target.checked)}
+                  className={checkbox}
                 />
                 {t("userTracking.enabled")}
               </label>
@@ -215,9 +227,12 @@ export function UserTracking() {
                 value={sessionsFilter}
                 onChange={(e) => setSessionsFilter(e.target.value)}
                 placeholder={t("userTracking.sessionsFilterPlaceholder")}
+                className={fieldInput}
               />
             </label>
-            <button type="submit">{t("userTracking.filter")}</button>
+            <button type="submit" className={secondaryBtn}>
+              {t("userTracking.filter")}
+            </button>
           </form>
 
           <table className="data-table">
@@ -269,9 +284,10 @@ export function UserTracking() {
                 value={retentionDaysInput}
                 onChange={(e) => setRetentionDaysInput(e.target.value)}
                 required
+                className={fieldInput}
               />
             </label>
-            <button type="submit" disabled={retentionSaving}>
+            <button type="submit" disabled={retentionSaving} className={primaryBtn}>
               {t("common.save")}
             </button>
           </form>
