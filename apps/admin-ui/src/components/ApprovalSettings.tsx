@@ -94,6 +94,12 @@ export function ApprovalSettings() {
     }
   }
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+  const checkbox = "h-4 w-4 rounded border-border accent-accent";
+
   return (
     <div className="rounded-lg border border-border p-4 mb-6">
       <p className="text-sm opacity-80">{t("approvalSettings.hint")}</p>
@@ -127,6 +133,7 @@ export function ApprovalSettings() {
                           checked={config.requires_approval}
                           disabled={togglingActionType !== null}
                           onChange={() => handleToggle(config)}
+                          className={checkbox}
                         />
                         {config.requires_approval
                           ? t("approvalSettings.active")
@@ -162,6 +169,7 @@ export function ApprovalSettings() {
             onChange={(e) => setNewActionType(e.target.value)}
             placeholder={t("approvalSettings.actionTypePlaceholder")}
             required
+            className={fieldInput}
           />
         </label>
         <label className="checkbox-label">
@@ -169,6 +177,7 @@ export function ApprovalSettings() {
             type="checkbox"
             checked={newRequiresApproval}
             onChange={(e) => setNewRequiresApproval(e.target.checked)}
+            className={checkbox}
           />
           {t("approvalSettings.requiresApproval")}
         </label>
@@ -178,9 +187,10 @@ export function ApprovalSettings() {
             value={newRequiredPermission}
             onChange={(e) => setNewRequiredPermission(e.target.value)}
             placeholder={t("approvalSettings.requiredPermissionPlaceholder")}
+            className={fieldInput}
           />
         </label>
-        <button type="submit" disabled={isCreating}>
+        <button type="submit" disabled={isCreating} className={primaryBtn}>
           {t("common.save")}
         </button>
       </form>

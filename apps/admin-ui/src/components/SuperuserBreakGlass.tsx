@@ -112,6 +112,11 @@ export function SuperuserBreakGlass() {
   if (isLoading) return <p>{t("common.loading")}</p>;
   if (unreachable) return <p className="text-danger">{t("superuser.unreachable")}</p>;
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+
   return (
     <div className="superuser-breakglass">
       <p className="text-sm opacity-80">{t("superuser.hint")}</p>
@@ -131,7 +136,7 @@ export function SuperuserBreakGlass() {
 
       <section>
         <h2>{t("superuser.requestTitle")}</h2>
-        <button type="button" onClick={handleRequestActivation}>
+        <button type="button" onClick={handleRequestActivation} className={primaryBtn}>
           {t("superuser.requestButton")}
         </button>
         {requestedId && <p>{t("superuser.requestSent", { id: requestedId })}</p>}
@@ -144,9 +149,15 @@ export function SuperuserBreakGlass() {
           <input
             value={approveRequestId}
             onChange={(e) => setApproveRequestId(e.target.value)}
+            className={fieldInput}
           />
         </label>
-        <button type="button" onClick={handleApprove} disabled={!approveRequestId}>
+        <button
+          type="button"
+          onClick={handleApprove}
+          disabled={!approveRequestId}
+          className={primaryBtn}
+        >
           {t("superuser.approveButton")}
         </button>
       </section>
@@ -168,16 +179,17 @@ export function SuperuserBreakGlass() {
               <input
                 value={shutdownReason}
                 onChange={(e) => setShutdownReason(e.target.value)}
+                className={fieldInput}
               />
             </label>
-            <button type="button" onClick={handleTriggerShutdown}>
+            <button type="button" onClick={handleTriggerShutdown} className={primaryBtn}>
               {t("notShutdown.triggerButton")}
             </button>
             {shutdownResult && <p>{t(`notShutdown.result.${shutdownResult}`)}</p>}
           </div>
         )}
         {maintenance?.active && status?.active && status.principal_id === user?.sub && (
-          <button type="button" onClick={handleLiftShutdown}>
+          <button type="button" onClick={handleLiftShutdown} className={primaryBtn}>
             {t("notShutdown.liftButton")}
           </button>
         )}

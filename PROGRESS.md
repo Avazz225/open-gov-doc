@@ -2,7 +2,33 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P77-S4 (fourth session of Phase 77 — `admin-ui`'s `AdGroupMappings.tsx`,
+**Last completed:** P77-S5 (fifth session of Phase 77 — `admin-ui`'s `AuditTraceSettings.tsx`,
+`EmailTemplates.tsx`, `ForensicTraceView.tsx`, `ConfigCompare.tsx`, `ApprovalSettings.tsx`,
+`SuperuserBreakGlass.tsx`). Same styling formula as P77-S1 through S4 applied throughout. **Found the
+recurring dead-CSS bug a third time**: `AuditTraceSettings.tsx` and `ForensicTraceView.tsx` used
+`.pane-heading`/`.inline-form`/`.explorer-toolbar` — none defined in `admin-ui`'s own `globals.css` (only
+in `user-ui`'s), fixed identically to P77-S3 (`.form-grid`/flex+gap, `.pane-heading` removed from
+`<h2>`s). `SuperuserBreakGlass.tsx` had no prior styling at all (plain native controls) — applied
+`primaryBtn`/`fieldInput`. No new ADR. `tsc`/`eslint` clean, 304/304 Vitest, real `next build` succeeds.
+
+**Live-verified all six pages** against the real rebuilt/redeployed Docker image. `users-admin` already
+had `admin.user_management` (`ApprovalSettings`) and `reporting.forensic_trace` is granted to every
+authenticated principal (`ForensicTraceView`) — no grant needed for either. Three temporary
+`domain-admin-document-config`/`domain-admin-notification`/`breakglass-approver` grants (keyed by the
+numeric `sub="2"` from the start) covered `AuditTraceSettings`/`EmailTemplates`/`SuperuserBreakGlass`.
+`config-admin` (already `admin.object_config`) covered `ConfigCompare`. All temporary grants cleaned up
+afterward.
+
+**Next session:** P77-S6 — `admin-ui`'s remaining smaller components: `ExportSettings.tsx`,
+`DelegationsAdmin.tsx`, `DeletionRegister.tsx`, `StorageOperationalConfig.tsx`, `OcrSettings.tsx`,
+`LicenseStatusView.tsx`, `ShareLinkSettings.tsx`, `SignatureConfig.tsx`, `InstallationManager.tsx`,
+`KennzeichenSettings.tsx`, `UploadSettings.tsx`, `RetimestampStatus.tsx`, `TeamspacesAdmin.tsx`,
+`RegistryOverview.tsx`, `DashboardWidgets.tsx`, the two banner components, plus `AdminSidebar.tsx`'s one
+unstyled group-header button. Closes `admin-ui`.
+
+---
+
+Immediately before: P77-S4 (fourth session of Phase 77 — `admin-ui`'s `AdGroupMappings.tsx`,
 `RetentionSettings.tsx`, `ConfigPackages.tsx`, `UserTracking.tsx`, `StorageGuard.tsx`,
 `FleetManagementView.tsx`). Same styling formula as P77-S1 through S3 applied throughout.
 `ConfigPackages.tsx`'s `<input type="file">` needed a new pattern (Tailwind's `file:` pseudo-element

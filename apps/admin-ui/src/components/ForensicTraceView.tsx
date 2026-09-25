@@ -89,26 +89,36 @@ export function ForensicTraceView() {
 
   if (!accessToken) return null;
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+
   return (
     <div>
       <p className="text-sm opacity-80">{t("forensicTrace.hint")}</p>
 
       <section className="rounded-lg border border-border p-4 mb-6">
-        <form className="explorer-toolbar" onSubmit={handleQuery}>
+        <form className="flex flex-wrap items-end gap-2" onSubmit={handleQuery}>
           <input
             placeholder={t("forensicTrace.filterActor")}
             value={actor}
             onChange={(e) => setActor(e.target.value)}
+            className={fieldInput}
           />
           <input
             placeholder={t("forensicTrace.filterSubject")}
             value={subject}
             onChange={(e) => setSubject(e.target.value)}
+            className={fieldInput}
           />
           <select
             value={category}
             onChange={(e) => setCategory(e.target.value as ForensicTraceCategory | "")}
             aria-label={t("forensicTrace.filterCategory")}
+            className={fieldInput}
           >
             <option value="">{t("forensicTrace.categoryAll")}</option>
             <option value="view">{t("forensicTrace.categoryView")}</option>
@@ -118,20 +128,30 @@ export function ForensicTraceView() {
           </select>
           <label>
             {t("forensicTrace.since")}
-            <input type="datetime-local" value={since} onChange={(e) => setSince(e.target.value)} />
+            <input
+              type="datetime-local"
+              value={since}
+              onChange={(e) => setSince(e.target.value)}
+              className={fieldInput}
+            />
           </label>
           <label>
             {t("forensicTrace.until")}
-            <input type="datetime-local" value={until} onChange={(e) => setUntil(e.target.value)} />
+            <input
+              type="datetime-local"
+              value={until}
+              onChange={(e) => setUntil(e.target.value)}
+              className={fieldInput}
+            />
           </label>
-          <button type="submit" disabled={isLoading}>
+          <button type="submit" disabled={isLoading} className={primaryBtn}>
             {t("forensicTrace.query")}
           </button>
           <span className="flex gap-2">
-            <button type="button" onClick={() => handleExport("csv")}>
+            <button type="button" onClick={() => handleExport("csv")} className={secondaryBtn}>
               {t("forensicTrace.exportCsv")}
             </button>
-            <button type="button" onClick={() => handleExport("pdf")}>
+            <button type="button" onClick={() => handleExport("pdf")} className={secondaryBtn}>
               {t("forensicTrace.exportPdf")}
             </button>
           </span>

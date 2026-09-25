@@ -116,6 +116,11 @@ export function ConfigCompare() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<CompareResult | null>(null);
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+
   async function handleCompare(event: FormEvent) {
     event.preventDefault();
     if (!accessToken) return;
@@ -157,6 +162,7 @@ export function ConfigCompare() {
                 value={compareInstallationId}
                 onChange={(e) => setCompareInstallationId(e.target.value)}
                 required
+                className={fieldInput}
               >
                 {otherInstallations.map((i) => (
                   <option key={i.id} value={i.id}>
@@ -167,7 +173,12 @@ export function ConfigCompare() {
             </label>
             <label>
               {t("configCompare.username")}
-              <input value={username} onChange={(e) => setUsername(e.target.value)} required />
+              <input
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                required
+                className={fieldInput}
+              />
             </label>
             <label>
               {t("configCompare.password")}
@@ -176,6 +187,7 @@ export function ConfigCompare() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
+                className={fieldInput}
               />
             </label>
             <label>
@@ -184,10 +196,11 @@ export function ConfigCompare() {
                 value={ignoreRegex}
                 onChange={(e) => setIgnoreRegex(e.target.value)}
                 placeholder={t("configCompare.ignoreRegexPlaceholder")}
+                className={fieldInput}
               />
             </label>
             <p className="text-sm opacity-80">{t("configCompare.ignoreRegexHint")}</p>
-            <button type="submit" disabled={isComparing}>
+            <button type="submit" disabled={isComparing} className={primaryBtn}>
               {t("configCompare.compare")}
             </button>
           </form>

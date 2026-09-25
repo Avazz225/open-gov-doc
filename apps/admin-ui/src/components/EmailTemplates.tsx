@@ -124,6 +124,13 @@ export function EmailTemplates() {
 
   const selectedUseCase = useCases.find((entry) => entry.use_case === formUseCase);
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border w-full rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg disabled:cursor-not-allowed disabled:opacity-60";
+
   return (
     <div className="rounded-lg border border-border p-4 mb-6">
       <p className="text-sm opacity-80">{t("emailTemplates.hint")}</p>
@@ -154,14 +161,15 @@ export function EmailTemplates() {
                     <td>{template.recipient_domain_pattern ?? t("emailTemplates.domainCatchall")}</td>
                     <td>{template.subject_template}</td>
                     <td>{new Date(template.updated_at).toLocaleString()}</td>
-                    <td>
-                      <button type="button" onClick={() => handleEdit(template)}>
+                    <td className="flex gap-2">
+                      <button type="button" onClick={() => handleEdit(template)} className={secondaryBtn}>
                         {t("emailTemplates.edit")}
                       </button>
                       <button
                         type="button"
                         disabled={deletingId !== null}
                         onClick={() => handleDelete(template)}
+                        className={secondaryBtn}
                       >
                         {t("common.delete")}
                       </button>
@@ -193,6 +201,7 @@ export function EmailTemplates() {
             onChange={(e) => setFormUseCase(e.target.value)}
             disabled={editingId !== null}
             required
+            className={fieldInput}
           >
             {useCases.map((entry) => (
               <option key={entry.use_case} value={entry.use_case}>
@@ -214,6 +223,7 @@ export function EmailTemplates() {
             onChange={(e) => setFormDomain(e.target.value)}
             placeholder={t("emailTemplates.domainPlaceholder")}
             disabled={editingId !== null}
+            className={fieldInput}
           />
         </label>
         <label>
@@ -223,9 +233,10 @@ export function EmailTemplates() {
             onChange={(e) => setFormSubject(e.target.value)}
             placeholder={t("emailTemplates.subjectPlaceholder")}
             required
+            className={fieldInput}
           />
         </label>
-        <label>
+        <label className="col-span-full">
           {t("emailTemplates.body")}
           <textarea
             value={formBody}
@@ -233,14 +244,15 @@ export function EmailTemplates() {
             placeholder={t("emailTemplates.bodyPlaceholder")}
             rows={5}
             required
+            className={fieldInput}
           />
         </label>
-        <div>
-          <button type="submit" disabled={isSaving}>
+        <div className="col-span-full flex gap-2">
+          <button type="submit" disabled={isSaving} className={primaryBtn}>
             {t("common.save")}
           </button>
           {editingId !== null && (
-            <button type="button" onClick={resetForm}>
+            <button type="button" onClick={resetForm} className={secondaryBtn}>
               {t("emailTemplates.cancelEdit")}
             </button>
           )}
