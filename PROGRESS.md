@@ -55,9 +55,16 @@ four files Phase 74 close already found, nothing in any file touched this sessio
 
 **`graphify update .`**: ran once mid-phase (after P75-S10, before this regression-hardening detour
 began) covering the Tailwind CSS migration's docs/code changes — 18,402 nodes / 31,056 edges / 1,788
-communities, 85 affected communities relabeled. Re-run again at the very end of this close session to
-also cover the seven bug-fix commits' code changes (AST-only, no new docs) — see graphify's own commit
-for details.
+communities, 85 affected communities relabeled. Re-run again at the very end of this close session
+(AST-only `graphify update .`, no LLM needed for a code-only change) to also cover the seven bug-fix
+commits — 19,417 nodes / 32,788 edges / 3,454 communities.
+
+**Next session:** Phase 76 is explicitly a **user prioritization decision, not an autonomous scoping
+session** — `IMPLEMENTATION_PLAN.md`'s own Phase 76 section presents three independent, equally-viable
+build candidates (P76-A ERP/line-of-business connector, P76-B native mobile client, P76-C AI features)
+and states plainly that picking one "is a product-prioritization call this round deliberately does not
+make on the user's behalf." Asked the user which (if any) to pursue next; awaiting their answer before
+starting any Phase 76 work.
 
 ---
 
