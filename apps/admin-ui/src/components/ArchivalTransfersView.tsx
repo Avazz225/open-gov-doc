@@ -18,6 +18,14 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
+const primaryBtn =
+  "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+const secondaryBtn =
+  "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+const fieldInput =
+  "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+const checkbox = "h-4 w-4 rounded border-border accent-accent";
+
 function triggerBrowserDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -199,10 +207,15 @@ function DocumentArchivalSection() {
               setRequestError(null);
             }}
             placeholder={t("archivalTransfers.requestArchivePlaceholder")}
+            className={fieldInput}
           />
         </label>
         <div className="flex gap-2">
-          <button type="submit" disabled={isRequestingArchive || !requestDocumentId.trim()}>
+          <button
+            type="submit"
+            disabled={isRequestingArchive || !requestDocumentId.trim()}
+            className={primaryBtn}
+          >
             {isRequestingArchive ? t("common.loading") : t("archivalTransfers.requestArchiveButton")}
           </button>
         </div>
@@ -218,7 +231,11 @@ function DocumentArchivalSection() {
 
       <label>
         {t("archivalTransfers.filterStatus")}
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          className={fieldInput}
+        >
           <option value="">{t("archivalTransfers.statusAll")}</option>
           {STATUS_OPTIONS.map((status) => (
             <option key={status} value={status}>
@@ -278,6 +295,7 @@ function DocumentArchivalSection() {
                       type="button"
                       onClick={() => handleRetrieve(transfer)}
                       disabled={retrievingId !== null}
+                      className={secondaryBtn}
                     >
                       {retrievingId === transfer.id
                         ? t("common.loading")
@@ -289,6 +307,7 @@ function DocumentArchivalSection() {
                       type="button"
                       onClick={() => handleRetry(transfer)}
                       disabled={retryingId !== null}
+                      className={secondaryBtn}
                     >
                       {retryingId === transfer.id ? t("common.loading") : t("archivalTransfers.retry")}
                     </button>
@@ -425,6 +444,7 @@ function CaseArchivalSection() {
               value={defaultDays}
               onChange={(e) => setDefaultDays(e.target.value)}
               placeholder={t("archivalTransfers.caseDefaultDaysPlaceholder")}
+              className={fieldInput}
             />
           </label>
           <label className="checkbox-label">
@@ -432,12 +452,13 @@ function CaseArchivalSection() {
               type="checkbox"
               checked={encryptionEnabled}
               onChange={(e) => setEncryptionEnabled(e.target.checked)}
+              className={checkbox}
             />
             {t("archivalTransfers.caseEncryptionEnabledLabel")}
           </label>
         </div>
         <div className="flex gap-2">
-          <button type="submit" disabled={isSaving}>
+          <button type="submit" disabled={isSaving} className={primaryBtn}>
             {t("common.save")}
           </button>
         </div>
@@ -451,7 +472,11 @@ function CaseArchivalSection() {
 
       <label>
         {t("archivalTransfers.filterStatus")}
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          className={fieldInput}
+        >
           <option value="">{t("archivalTransfers.statusAll")}</option>
           {CASE_STATUS_OPTIONS.map((status) => (
             <option key={status} value={status}>
@@ -505,6 +530,7 @@ function CaseArchivalSection() {
                       type="button"
                       onClick={() => handleDownload(transfer)}
                       disabled={downloadingId !== null}
+                      className={secondaryBtn}
                     >
                       {downloadingId === transfer.id
                         ? t("common.loading")
@@ -516,6 +542,7 @@ function CaseArchivalSection() {
                       type="button"
                       onClick={() => handleRetry(transfer)}
                       disabled={retryingId !== null}
+                      className={secondaryBtn}
                     >
                       {retryingId === transfer.id ? t("common.loading") : t("archivalTransfers.retry")}
                     </button>

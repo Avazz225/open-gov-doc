@@ -23,6 +23,13 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
+const primaryBtn =
+  "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+const secondaryBtn =
+  "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+const fieldInput =
+  "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+
 function triggerBrowserDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -77,10 +84,10 @@ function ExportButtons({
 
   return (
     <span className="flex gap-2">
-      <button type="button" onClick={() => handleExport("csv")}>
+      <button type="button" onClick={() => handleExport("csv")} className={secondaryBtn}>
         {t("reports.exportCsv")}
       </button>
-      <button type="button" onClick={() => handleExport("pdf")}>
+      <button type="button" onClick={() => handleExport("pdf")} className={secondaryBtn}>
         {t("reports.exportPdf")}
       </button>
       {error && (
@@ -121,11 +128,15 @@ function DocumentVolumeSection({ token }: { token: string }) {
 
   return (
     <section className="rounded-lg border border-border p-4 mb-6">
-      <h2 className="pane-heading">{t("reports.documentVolumeHeading")}</h2>
-      <div className="explorer-toolbar">
+      <h2>{t("reports.documentVolumeHeading")}</h2>
+      <div className="flex flex-wrap items-end gap-2">
         <label>
-          {t("reports.groupBy")}{" "}
-          <select value={groupBy} onChange={(e) => setGroupBy(e.target.value as typeof groupBy)}>
+          {t("reports.groupBy")}
+          <select
+            value={groupBy}
+            onChange={(e) => setGroupBy(e.target.value as typeof groupBy)}
+            className={fieldInput}
+          >
             <option value="day">{t("reports.groupByDay")}</option>
             <option value="week">{t("reports.groupByWeek")}</option>
             <option value="month">{t("reports.groupByMonth")}</option>
@@ -135,8 +146,9 @@ function DocumentVolumeSection({ token }: { token: string }) {
           placeholder={t("reports.filterFolderId")}
           value={folderId}
           onChange={(e) => setFolderId(e.target.value)}
+          className={fieldInput}
         />
-        <button type="button" onClick={load}>
+        <button type="button" onClick={load} className={secondaryBtn}>
           {t("reports.reload")}
         </button>
         <ExportButtons token={token} reportType="document_volume" extraParams={{ group_by: groupBy, folder_id: folderId || undefined }} />
@@ -199,9 +211,9 @@ function OpenWorkflowTasksSection({ token }: { token: string }) {
 
   return (
     <section className="rounded-lg border border-border p-4 mb-6">
-      <h2 className="pane-heading">{t("reports.openWorkflowTasksHeading")}</h2>
-      <div className="explorer-toolbar">
-        <button type="button" onClick={load}>
+      <h2>{t("reports.openWorkflowTasksHeading")}</h2>
+      <div className="flex items-end gap-2">
+        <button type="button" onClick={load} className={secondaryBtn}>
           {t("reports.reload")}
         </button>
         <ExportButtons token={token} reportType="open_workflow_tasks" />
@@ -266,9 +278,9 @@ function StorageUsageSection({ token }: { token: string }) {
 
   return (
     <section className="rounded-lg border border-border p-4 mb-6">
-      <h2 className="pane-heading">{t("reports.storageUsageHeading")}</h2>
-      <div className="explorer-toolbar">
-        <button type="button" onClick={load}>
+      <h2>{t("reports.storageUsageHeading")}</h2>
+      <div className="flex items-end gap-2">
+        <button type="button" onClick={load} className={secondaryBtn}>
           {t("reports.reload")}
         </button>
         <ExportButtons token={token} reportType="storage_usage" />
@@ -332,14 +344,15 @@ function UserActivitySection({ token }: { token: string }) {
 
   return (
     <section className="rounded-lg border border-border p-4 mb-6">
-      <h2 className="pane-heading">{t("reports.userActivityHeading")}</h2>
-      <div className="explorer-toolbar">
+      <h2>{t("reports.userActivityHeading")}</h2>
+      <div className="flex items-end gap-2">
         <input
           placeholder={t("reports.filterActor")}
           value={actor}
           onChange={(e) => setActor(e.target.value)}
+          className={fieldInput}
         />
-        <button type="button" onClick={load}>
+        <button type="button" onClick={load} className={secondaryBtn}>
           {t("reports.reload")}
         </button>
         <ExportButtons token={token} reportType="user_activity" extraParams={{ actor: actor || undefined }} />
@@ -427,20 +440,36 @@ function ReportScheduleSection({ token }: { token: string }) {
 
   return (
     <section className="rounded-lg border border-border p-4 mb-6">
-      <h2 className="pane-heading">{t("reports.schedulesHeading")}</h2>
+      <h2>{t("reports.schedulesHeading")}</h2>
       <p className="text-sm opacity-80">{t("reports.schedulesHint")}</p>
-      <form className="inline-form" aria-label={t("reports.newScheduleFormLabel")} onSubmit={handleCreate}>
-        <select value={reportType} onChange={(e) => setReportType(e.target.value as ReportType)}>
+      <form
+        className="flex flex-wrap items-end gap-2"
+        aria-label={t("reports.newScheduleFormLabel")}
+        onSubmit={handleCreate}
+      >
+        <select
+          value={reportType}
+          onChange={(e) => setReportType(e.target.value as ReportType)}
+          className={fieldInput}
+        >
           <option value="document_volume">{t("reports.documentVolumeHeading")}</option>
           <option value="open_workflow_tasks">{t("reports.openWorkflowTasksHeading")}</option>
           <option value="storage_usage">{t("reports.storageUsageHeading")}</option>
           <option value="user_activity">{t("reports.userActivityHeading")}</option>
         </select>
-        <select value={format} onChange={(e) => setFormat(e.target.value as ReportFormat)}>
+        <select
+          value={format}
+          onChange={(e) => setFormat(e.target.value as ReportFormat)}
+          className={fieldInput}
+        >
           <option value="csv">CSV</option>
           <option value="pdf">PDF</option>
         </select>
-        <select value={frequency} onChange={(e) => setFrequency(e.target.value as ReportFrequency)}>
+        <select
+          value={frequency}
+          onChange={(e) => setFrequency(e.target.value as ReportFrequency)}
+          className={fieldInput}
+        >
           <option value="daily">{t("reports.frequencyDaily")}</option>
           <option value="weekly">{t("reports.frequencyWeekly")}</option>
           <option value="monthly">{t("reports.frequencyMonthly")}</option>
@@ -451,8 +480,11 @@ function ReportScheduleSection({ token }: { token: string }) {
           value={recipientEmail}
           onChange={(e) => setRecipientEmail(e.target.value)}
           required
+          className={fieldInput}
         />
-        <button type="submit">{t("reports.createSchedule")}</button>
+        <button type="submit" className={primaryBtn}>
+          {t("reports.createSchedule")}
+        </button>
       </form>
       {error && (
         <p className="text-danger" role="alert">
@@ -496,7 +528,11 @@ function ReportScheduleSection({ token }: { token: string }) {
                   )}
                 </td>
                 <td>
-                  <button type="button" onClick={() => handleDelete(schedule.id)}>
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(schedule.id)}
+                    className={secondaryBtn}
+                  >
                     {t("reports.deleteSchedule")}
                   </button>
                 </td>

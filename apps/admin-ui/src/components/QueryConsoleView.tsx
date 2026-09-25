@@ -23,6 +23,13 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
+const primaryBtn =
+  "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+const secondaryBtn =
+  "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+const fieldInput =
+  "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+
 // Query- & Trace-Konsole (6.1, seit P8-S1/P8-S2/P8-S2b) - strukturierte,
 // RBAC-gefilterte Lesezugriffe auf audit-service's Ereignisliste ueber
 // query-service (Lesezugriff, siehe QueryEventsSection) sowie seit P8-S2 die
@@ -91,31 +98,53 @@ function QueryEventsSection() {
       <p className="text-sm opacity-80">{t("queryConsole.hint")}</p>
 
       <section className="rounded-lg border border-border p-4 mb-6">
-        <form className="explorer-toolbar" onSubmit={handleQuery}>
-          <input
-            placeholder={t("queryConsole.filterActor")}
-            value={actor}
-            onChange={(e) => setActor(e.target.value)}
-          />
-          <input
-            placeholder={t("queryConsole.filterSubject")}
-            value={subject}
-            onChange={(e) => setSubject(e.target.value)}
-          />
-          <input
-            placeholder={t("queryConsole.filterEventType")}
-            value={eventType}
-            onChange={(e) => setEventType(e.target.value)}
-          />
+        <form className="form-grid" onSubmit={handleQuery}>
+          <label>
+            {t("queryConsole.filterActor")}
+            <input
+              placeholder={t("queryConsole.filterActor")}
+              value={actor}
+              onChange={(e) => setActor(e.target.value)}
+              className={fieldInput}
+            />
+          </label>
+          <label>
+            {t("queryConsole.filterSubject")}
+            <input
+              placeholder={t("queryConsole.filterSubject")}
+              value={subject}
+              onChange={(e) => setSubject(e.target.value)}
+              className={fieldInput}
+            />
+          </label>
+          <label>
+            {t("queryConsole.filterEventType")}
+            <input
+              placeholder={t("queryConsole.filterEventType")}
+              value={eventType}
+              onChange={(e) => setEventType(e.target.value)}
+              className={fieldInput}
+            />
+          </label>
           <label>
             {t("queryConsole.since")}
-            <input type="datetime-local" value={since} onChange={(e) => setSince(e.target.value)} />
+            <input
+              type="datetime-local"
+              value={since}
+              onChange={(e) => setSince(e.target.value)}
+              className={fieldInput}
+            />
           </label>
           <label>
             {t("queryConsole.until")}
-            <input type="datetime-local" value={until} onChange={(e) => setUntil(e.target.value)} />
+            <input
+              type="datetime-local"
+              value={until}
+              onChange={(e) => setUntil(e.target.value)}
+              className={fieldInput}
+            />
           </label>
-          <button type="submit" disabled={isLoading}>
+          <button type="submit" disabled={isLoading} className={primaryBtn}>
             {t("queryConsole.query")}
           </button>
         </form>
@@ -378,7 +407,7 @@ function ManipulationSection() {
           )}
         </p>
         {!modeStatus?.active ? (
-          <div className="explorer-toolbar">
+          <div className="flex items-end gap-2">
             <label>
               {t("queryConsole.schutzschalterDurationLabel")}
               <input
@@ -386,14 +415,15 @@ function ManipulationSection() {
                 min={1}
                 value={durationMinutes}
                 onChange={(e) => setDurationMinutes(e.target.value)}
+                className={fieldInput}
               />
             </label>
-            <button type="button" onClick={handleActivate}>
+            <button type="button" onClick={handleActivate} className={primaryBtn}>
               {t("queryConsole.schutzschalterActivate")}
             </button>
           </div>
         ) : (
-          <button type="button" onClick={handleDeactivate}>
+          <button type="button" onClick={handleDeactivate} className={secondaryBtn}>
             {t("queryConsole.schutzschalterDeactivate")}
           </button>
         )}
@@ -401,7 +431,7 @@ function ManipulationSection() {
 
       <section className="rounded-lg border border-border p-4 mb-6">
         <h3>{t("queryConsole.manipulateActionTitle")}</h3>
-        <form className="explorer-toolbar" onSubmit={handleDryRun}>
+        <form className="form-grid" onSubmit={handleDryRun}>
           <label>
             {t("queryConsole.actionTypeLabel")}
             <select
@@ -410,6 +440,7 @@ function ManipulationSection() {
                 setActionType(e.target.value as ManipulationActionType);
                 resetDryRun();
               }}
+              className={fieldInput}
             >
               <option value="document.attribute_reset">
                 {t("queryConsole.actionDocumentAttributeReset")}
@@ -423,72 +454,99 @@ function ManipulationSection() {
 
           {actionType === "document.attribute_reset" && (
             <>
-              <input
-                placeholder={t("queryConsole.documentIdLabel")}
-                value={documentId}
-                onChange={(e) => {
-                  setDocumentId(e.target.value);
-                  resetDryRun();
-                }}
-              />
-              <input
-                placeholder={t("queryConsole.attributeKeyLabel")}
-                value={attributeKey}
-                onChange={(e) => {
-                  setAttributeKey(e.target.value);
-                  resetDryRun();
-                }}
-              />
+              <label>
+                {t("queryConsole.documentIdLabel")}
+                <input
+                  placeholder={t("queryConsole.documentIdLabel")}
+                  value={documentId}
+                  onChange={(e) => {
+                    setDocumentId(e.target.value);
+                    resetDryRun();
+                  }}
+                  className={fieldInput}
+                />
+              </label>
+              <label>
+                {t("queryConsole.attributeKeyLabel")}
+                <input
+                  placeholder={t("queryConsole.attributeKeyLabel")}
+                  value={attributeKey}
+                  onChange={(e) => {
+                    setAttributeKey(e.target.value);
+                    resetDryRun();
+                  }}
+                  className={fieldInput}
+                />
+              </label>
             </>
           )}
 
           {actionType === "permission.role_assignment.delete" && (
-            <input
-              type="number"
-              placeholder={t("queryConsole.roleAssignmentIdLabel")}
-              value={roleAssignmentId}
-              onChange={(e) => {
-                setRoleAssignmentId(e.target.value);
-                resetDryRun();
-              }}
-            />
+            <label>
+              {t("queryConsole.roleAssignmentIdLabel")}
+              <input
+                type="number"
+                placeholder={t("queryConsole.roleAssignmentIdLabel")}
+                value={roleAssignmentId}
+                onChange={(e) => {
+                  setRoleAssignmentId(e.target.value);
+                  resetDryRun();
+                }}
+                className={fieldInput}
+              />
+            </label>
           )}
 
           {actionType === "object_type.update" && (
             <>
-              <input
-                type="number"
-                placeholder={t("queryConsole.objectTypeIdLabel")}
-                value={objectTypeId}
-                onChange={(e) => {
-                  setObjectTypeId(e.target.value);
-                  resetDryRun();
-                }}
-              />
-              <select
-                value={objectTypeField}
-                onChange={(e) => {
-                  setObjectTypeField(e.target.value as "naming_constraints" | "conditions");
-                  resetDryRun();
-                }}
-              >
-                <option value="naming_constraints">
-                  {t("queryConsole.fieldNamingConstraints")}
-                </option>
-                <option value="conditions">{t("queryConsole.fieldConditions")}</option>
-              </select>
-              <textarea
-                placeholder={t("queryConsole.valueJsonLabel")}
-                value={objectTypeValue}
-                onChange={(e) => {
-                  setObjectTypeValue(e.target.value);
-                  resetDryRun();
-                }}
-              />
+              <label>
+                {t("queryConsole.objectTypeIdLabel")}
+                <input
+                  type="number"
+                  placeholder={t("queryConsole.objectTypeIdLabel")}
+                  value={objectTypeId}
+                  onChange={(e) => {
+                    setObjectTypeId(e.target.value);
+                    resetDryRun();
+                  }}
+                  className={fieldInput}
+                />
+              </label>
+              <label>
+                {t("queryConsole.fieldNamingConstraints")}
+                <select
+                  value={objectTypeField}
+                  onChange={(e) => {
+                    setObjectTypeField(e.target.value as "naming_constraints" | "conditions");
+                    resetDryRun();
+                  }}
+                  className={fieldInput}
+                >
+                  <option value="naming_constraints">
+                    {t("queryConsole.fieldNamingConstraints")}
+                  </option>
+                  <option value="conditions">{t("queryConsole.fieldConditions")}</option>
+                </select>
+              </label>
+              <label className="col-span-full">
+                {t("queryConsole.valueJsonLabel")}
+                <textarea
+                  placeholder={t("queryConsole.valueJsonLabel")}
+                  value={objectTypeValue}
+                  onChange={(e) => {
+                    setObjectTypeValue(e.target.value);
+                    resetDryRun();
+                  }}
+                  className={`${fieldInput} w-full`}
+                  rows={3}
+                />
+              </label>
             </>
           )}
 
-          <button type="submit">{t("queryConsole.dryRunButton")}</button>
+          <button type="submit" className={primaryBtn}>
+            {t("queryConsole.dryRunButton")}
+          </button>
         </form>
 
         {dryRunError && (
@@ -503,7 +561,7 @@ function ManipulationSection() {
             {dryRun.is_critical && (
               <p className="text-danger">{t("queryConsole.criticalBadge")}</p>
             )}
-            <button type="button" onClick={handleExecute}>
+            <button type="button" onClick={handleExecute} className={primaryBtn}>
               {t("queryConsole.executeButton")}
             </button>
           </div>
@@ -553,10 +611,18 @@ function ManipulationSection() {
                     <td>
                       {rejectingId !== approval.id && (
                         <div className="flex gap-2">
-                          <button type="button" onClick={() => handleApprove(approval.id)}>
+                          <button
+                            type="button"
+                            onClick={() => handleApprove(approval.id)}
+                            className={primaryBtn}
+                          >
                             {t("queryConsole.approveButton")}
                           </button>
-                          <button type="button" onClick={() => handleStartReject(approval.id)}>
+                          <button
+                            type="button"
+                            onClick={() => handleStartReject(approval.id)}
+                            className={secondaryBtn}
+                          >
                             {t("queryConsole.rejectButton")}
                           </button>
                         </div>
@@ -564,7 +630,7 @@ function ManipulationSection() {
                     </td>
                   </tr>
                   {rejectingId === approval.id && (
-                    <tr className="detail-row">
+                    <tr>
                       <td colSpan={5}>
                         <form
                           aria-label={t("queryConsole.rejectFormLabel")}
@@ -577,11 +643,14 @@ function ManipulationSection() {
                               value={rejectReason}
                               onChange={(e) => setRejectReason(e.target.value)}
                               placeholder={t("queryConsole.rejectReasonPlaceholder")}
+                              className={fieldInput}
                             />
                           </label>
                           <div className="flex gap-2">
-                            <button type="submit">{t("queryConsole.rejectConfirm")}</button>
-                            <button type="button" onClick={handleCancelReject}>
+                            <button type="submit" className={primaryBtn}>
+                              {t("queryConsole.rejectConfirm")}
+                            </button>
+                            <button type="button" onClick={handleCancelReject} className={secondaryBtn}>
                               {t("queryConsole.rejectCancel")}
                             </button>
                           </div>

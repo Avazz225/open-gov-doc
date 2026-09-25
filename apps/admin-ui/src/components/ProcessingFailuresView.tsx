@@ -21,6 +21,11 @@ import { useAuth } from "@/lib/auth-context";
 
 const FAILED_PERMANENT = "failed_permanent";
 
+const secondaryBtn =
+  "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+const fieldInput =
+  "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+
 // Processing failure visibility (Post-Roadmap Phase 20 Session 7) - pure
 // visibility into `failed_permanent` records from three independent
 // services + manual restart, analogous to `ArchivalTransfersView`'s
@@ -149,6 +154,7 @@ function NotificationFailuresSection() {
                     type="button"
                     onClick={() => handleRetry(item)}
                     disabled={retryingId !== null}
+                    className={secondaryBtn}
                   >
                     {retryingId === item.id
                       ? t("common.loading")
@@ -250,6 +256,7 @@ function RenditionFailuresSection() {
                     type="button"
                     onClick={() => handleRetry(item)}
                     disabled={retryingId !== null}
+                    className={secondaryBtn}
                   >
                     {retryingId === item.id
                       ? t("common.loading")
@@ -349,6 +356,7 @@ function OcrResultFailuresSection() {
                     type="button"
                     onClick={() => handleRetry(item)}
                     disabled={retryingId !== null}
+                    className={secondaryBtn}
                   >
                     {retryingId === item.id
                       ? t("common.loading")
@@ -437,6 +445,7 @@ function HandoverFailuresSection() {
           onChange={(e) => setOperatorKey(e.target.value)}
           placeholder={t("processingFailures.handoverOperatorKeyPlaceholder")}
           autoComplete="off"
+          className={fieldInput}
         />
       </label>
       {error && (
@@ -477,6 +486,7 @@ function HandoverFailuresSection() {
                       type="button"
                       onClick={() => handleRetry(item)}
                       disabled={retryingId !== null || operatorKey.length === 0}
+                      className={secondaryBtn}
                     >
                       {retryingId === item.id
                         ? t("common.loading")
