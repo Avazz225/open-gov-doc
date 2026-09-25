@@ -130,6 +130,14 @@ export function FolderRetentionModal({ folder, onClose }: { folder: Folder; onCl
     }
   }
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+  const checkbox = "h-4 w-4 rounded border-border accent-accent";
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div
@@ -154,6 +162,7 @@ export function FolderRetentionModal({ folder, onClose }: { folder: Folder; onCl
             </p>
             <button
               type="button"
+              className={secondaryBtn}
               onClick={handleReleaseHold}
               disabled={isHoldBusy || !canManageLegalHold}
               title={canManageLegalHold ? undefined : t("retention.legalHoldPermissionHint")}
@@ -169,10 +178,12 @@ export function FolderRetentionModal({ folder, onClose }: { folder: Folder; onCl
                 value={holdReason}
                 onChange={(e) => setHoldReason(e.target.value)}
                 disabled={!canManageLegalHold}
+                className={fieldInput}
               />
             </label>
             <button
               type="button"
+              className={primaryBtn}
               onClick={handleSetHold}
               disabled={isHoldBusy || !canManageLegalHold}
               title={canManageLegalHold ? undefined : t("retention.legalHoldPermissionHint")}
@@ -189,6 +200,7 @@ export function FolderRetentionModal({ folder, onClose }: { folder: Folder; onCl
             value={retentionUntil}
             onChange={(e) => setRetentionUntil(e.target.value)}
             disabled={!canManageRetention}
+            className={fieldInput}
           />
         </label>
         <label className="checkbox-label">
@@ -197,6 +209,7 @@ export function FolderRetentionModal({ folder, onClose }: { folder: Folder; onCl
             checked={fullDeletion}
             onChange={(e) => setFullDeletion(e.target.checked)}
             disabled={!canManageRetention}
+            className={checkbox}
           />
           {t("retention.fullDeletionLabel")}
         </label>
@@ -215,6 +228,7 @@ export function FolderRetentionModal({ folder, onClose }: { folder: Folder; onCl
                 }
               }}
               disabled={!canManageRetention}
+              className={fieldInput}
             >
               <option value="" disabled>
                 {t("retention.reasonSelectPlaceholder")}
@@ -240,11 +254,13 @@ export function FolderRetentionModal({ folder, onClose }: { folder: Folder; onCl
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
                 disabled={!canManageRetention}
+                className={fieldInput}
               />
             </label>
           )}
         <button
           type="button"
+          className={primaryBtn}
           onClick={handleSubmit}
           disabled={isSaving || !canManageRetention}
           title={canManageRetention ? undefined : t("retention.retentionPermissionHint")}

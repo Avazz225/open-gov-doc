@@ -129,6 +129,16 @@ export function UploadForm({
     if (dropped) setFile(dropped);
   }
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+  const checkbox = "h-4 w-4 rounded border-border accent-accent";
+  const fileInput =
+    "text-sm file:mr-2 file:rounded-md file:border file:border-border file:bg-hover-bg file:px-3 file:py-1.5 file:text-sm file:text-fg file:transition-colors hover:file:bg-accent-bg";
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div
@@ -154,6 +164,7 @@ export function UploadForm({
         <form onSubmit={handleSubmit} aria-label={t("upload.formLabel")}>
           <input
             type="file"
+            className={fileInput}
             aria-label={t("upload.fileLabel")}
             onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             required
@@ -161,13 +172,18 @@ export function UploadForm({
           {file && <p className="upload-selected-file">{file.name}</p>}
           <input
             type="text"
+            className={fieldInput}
             placeholder={t("upload.titlePlaceholder")}
             value={title}
             onChange={(e) => setTitle(e.target.value)}
           />
           <label>
             {t("upload.objectTypeLabel")}
-            <select value={objectTypeId} onChange={(e) => handleObjectTypeChange(e.target.value)}>
+            <select
+              className={fieldInput}
+              value={objectTypeId}
+              onChange={(e) => handleObjectTypeChange(e.target.value)}
+            >
               <option value="">{t("upload.noObjectType")}</option>
               {objectTypes.map((ot) => (
                 <option key={ot.id} value={ot.id}>
@@ -180,6 +196,7 @@ export function UploadForm({
           <label className="upload-draft-toggle">
             <input
               type="checkbox"
+              className={checkbox}
               checked={draft}
               onChange={(e) => setDraft(e.target.checked)}
             />
@@ -200,6 +217,7 @@ export function UploadForm({
                     {field.required ? " *" : ""}
                     <input
                       type={attributeInputType(attribute?.type)}
+                      className={fieldInput}
                       value={values[field.attribute] ?? ""}
                       required={field.required}
                       onChange={(e) =>
@@ -213,10 +231,10 @@ export function UploadForm({
           )}
 
           <div className="flex gap-2">
-            <button type="submit" disabled={!file || submitting}>
+            <button type="submit" className={primaryBtn} disabled={!file || submitting}>
               {submitting ? t("upload.submitting") : t("upload.submit")}
             </button>
-            <button type="button" onClick={onClose}>
+            <button type="button" className={secondaryBtn} onClick={onClose}>
               {t("common.cancel")}
             </button>
           </div>

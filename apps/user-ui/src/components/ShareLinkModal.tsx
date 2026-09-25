@@ -90,6 +90,13 @@ export function ShareLinkModal({
     return link.revoked_at === null && new Date(link.expires_at).getTime() > Date.now();
   }
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div
@@ -111,11 +118,17 @@ export function ShareLinkModal({
             {t("shareLinkModal.expiresAtLabel")}
             <input
               type="date"
+              className={fieldInput}
               value={expiresAtInput}
               onChange={(e) => setExpiresAtInput(e.target.value)}
             />
           </label>
-          <button type="button" onClick={handleCreate} disabled={isCreating || !expiresAtInput}>
+          <button
+            type="button"
+            className={primaryBtn}
+            onClick={handleCreate}
+            disabled={isCreating || !expiresAtInput}
+          >
             {isCreating ? t("shareLinkModal.creating") : t("shareLinkModal.create")}
           </button>
         </div>
@@ -145,6 +158,7 @@ export function ShareLinkModal({
                     <span className="flex gap-2">
                       <button
                         type="button"
+                        className={secondaryBtn}
                         onClick={() => handleRevoke(link)}
                         disabled={busyToken === link.token}
                       >

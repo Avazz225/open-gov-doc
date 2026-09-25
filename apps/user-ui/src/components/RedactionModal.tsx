@@ -131,6 +131,11 @@ export function RedactionModal({
         }
       : null;
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div
@@ -157,6 +162,7 @@ export function RedactionModal({
           <div className="redaction-page-nav">
             <button
               type="button"
+              className={secondaryBtn}
               onClick={() => setPageNumber((p) => Math.max(1, p - 1))}
               disabled={pageNumber <= 1}
             >
@@ -165,6 +171,7 @@ export function RedactionModal({
             <span>{t("redaction.pageIndicator", { current: pageNumber, total: pageCount })}</span>
             <button
               type="button"
+              className={secondaryBtn}
               onClick={() => setPageNumber((p) => Math.min(pageCount, p + 1))}
               disabled={pageNumber >= pageCount}
             >
@@ -217,7 +224,7 @@ export function RedactionModal({
             {regions.map((region, index) => (
               <li key={index}>
                 {t("redaction.regionEntry", { page: region.page_number })}
-                <button type="button" onClick={() => removeRegion(index)}>
+                <button type="button" className={secondaryBtn} onClick={() => removeRegion(index)}>
                   {t("common.delete")}
                 </button>
               </li>
@@ -232,10 +239,15 @@ export function RedactionModal({
         )}
 
         <div className="flex gap-2">
-          <button type="button" onClick={handleSubmit} disabled={regions.length === 0 || isSubmitting}>
+          <button
+            type="button"
+            className={primaryBtn}
+            onClick={handleSubmit}
+            disabled={regions.length === 0 || isSubmitting}
+          >
             {isSubmitting ? t("redaction.submitting") : t("redaction.submitAction")}
           </button>
-          <button type="button" onClick={onClose}>
+          <button type="button" className={secondaryBtn} onClick={onClose}>
             {t("common.cancel")}
           </button>
         </div>

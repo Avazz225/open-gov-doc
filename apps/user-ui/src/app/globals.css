@@ -793,6 +793,33 @@ body {
   overflow-y: auto;
 }
 
+/* Ordner-Rechtssperre (4.4b, `FolderRetentionModal.tsx`/`RetentionPanel.tsx`,
+   Phase 77 Session 7) - these four classes were referenced by both
+   components but never defined here (only `.checkbox-label` existed, and
+   only in admin-ui's globals.css - the inverse of the copy-paste bug found
+   several times in admin-ui itself during this phase), leaving every label/
+   section in both components with zero layout, stacked with browser-default
+   block spacing. */
+.retention-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dms-space-2);
+}
+
+.legal-hold-active,
+.legal-hold-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dms-space-2);
+  margin-bottom: var(--dms-space-3);
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: var(--dms-space-1);
+}
+
 .modal-header {
   display: flex;
   align-items: center;

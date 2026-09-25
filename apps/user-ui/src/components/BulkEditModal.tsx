@@ -138,6 +138,13 @@ export function BulkEditModal({
     onDone();
   }
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div
@@ -170,7 +177,7 @@ export function BulkEditModal({
               ))}
             </ul>
             <div className="flex gap-2">
-              <button type="button" onClick={onClose}>
+              <button type="button" className={secondaryBtn} onClick={onClose}>
                 {t("common.close")}
               </button>
             </div>
@@ -204,6 +211,7 @@ export function BulkEditModal({
                         onChange={(e) =>
                           setValues((prev) => ({ ...prev, [field.attribute]: e.target.value }))
                         }
+                        className={fieldInput}
                       />
                     </label>
                   );
@@ -211,10 +219,15 @@ export function BulkEditModal({
               />
             )}
             <div className="flex gap-2">
-              <button type="button" onClick={handleSubmit} disabled={isSubmitting || !layout}>
+              <button
+                type="button"
+                className={primaryBtn}
+                onClick={handleSubmit}
+                disabled={isSubmitting || !layout}
+              >
                 {isSubmitting ? t("bulkEdit.submitting") : t("bulkEdit.submit")}
               </button>
-              <button type="button" onClick={onClose}>
+              <button type="button" className={secondaryBtn} onClick={onClose}>
                 {t("common.cancel")}
               </button>
             </div>

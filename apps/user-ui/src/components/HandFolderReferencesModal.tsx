@@ -112,6 +112,13 @@ export function HandFolderReferencesModal({
 
   const active = entries.filter(({ reference }) => reference.removed_at === null);
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div
@@ -132,9 +139,18 @@ export function HandFolderReferencesModal({
         <div className="inline-form">
           <label>
             {t("handFolder.documentIdLabel")}
-            <input value={newDocumentId} onChange={(e) => setNewDocumentId(e.target.value)} />
+            <input
+              className={fieldInput}
+              value={newDocumentId}
+              onChange={(e) => setNewDocumentId(e.target.value)}
+            />
           </label>
-          <button type="button" onClick={handleAdd} disabled={isAdding || !newDocumentId.trim()}>
+          <button
+            type="button"
+            className={primaryBtn}
+            onClick={handleAdd}
+            disabled={isAdding || !newDocumentId.trim()}
+          >
             {isAdding ? t("handFolder.adding") : t("handFolder.add")}
           </button>
         </div>
@@ -154,6 +170,7 @@ export function HandFolderReferencesModal({
                 <span className="flex gap-2">
                   <button
                     type="button"
+                    className={secondaryBtn}
                     onClick={() => handleRemove(reference)}
                     disabled={busyDocumentId === reference.document_id}
                   >

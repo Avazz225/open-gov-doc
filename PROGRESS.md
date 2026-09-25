@@ -2,7 +2,32 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P77-S6 (sixth session of Phase 77 — `admin-ui`'s remaining smaller components, 18
+**Last completed:** P77-S7 (seventh session of Phase 77, first in `user-ui` — the 8 "mixed" modals plus
+`share/page.tsx`). Same styling formula as admin-ui's P77-S1 through S6, applied via two parallel
+subagents. `share/page.tsx` needed no changes (no native form controls). **Found a more consequential
+dead-CSS-class bug** while verifying: `.checkbox-label`, `.legal-hold-active`, `.legal-hold-form`, and
+`.retention-panel` — used throughout `FolderRetentionModal.tsx` and `RetentionPanel.tsx` (the latter
+scheduled for P77-S10) — were never defined in `user-ui`'s own `globals.css` (only `.checkbox-label`
+existed, and only in *admin-ui*'s stylesheet — the inverse of the repeated admin-ui copy-paste bug from
+this phase). Fixed by adding real flex layout rules matching the file's existing conventions. No new
+ADR. `tsc` clean, `eslint` clean (same 2 pre-existing `<img>` warnings from P77-S1), 292/292 Vitest, real
+`next build` succeeds.
+
+**Live-verified all 7 changed files** against the real rebuilt/redeployed Docker image via a full
+Playwright flow: created an isolated test folder + uploaded a real tiny PDF via API, then drove the UI —
+folder retention icon (modal opens with the newly-fixed layout, styled primary button), hand-folder-
+references icon (styled input/button), upload-form toggle (styled file-input/text-input/buttons), doc
+checkbox → bulk-edit modal (opens correctly, shows its empty-state message since the test doc has no
+object type — expected), right-click → share-link modal (styled primary button), open PDF → "Schwärzen"
+→ redaction modal (styled primary button). Screenshots + `getComputedStyle()`/className checks confirm
+correct styling throughout; all test data cascading-trashed afterward.
+
+**Next session:** P77-S8 — `user-ui`'s `PreviewPane.tsx` (923 lines) and `ExplorerPane.tsx` (881 lines),
+the two largest, most-used panes.
+
+---
+
+Immediately before: P77-S6 (sixth session of Phase 77 — `admin-ui`'s remaining smaller components, 18
 files in scope). Same styling formula as P77-S1 through S5. 11 files needed real edits
 (`ExportSettings.tsx`, `DelegationsAdmin.tsx`, `StorageOperationalConfig.tsx`, `OcrSettings.tsx`,
 `LicenseStatusView.tsx`, `ShareLinkSettings.tsx`, `SignatureConfig.tsx`, `InstallationManager.tsx`,
