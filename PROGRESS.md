@@ -22,10 +22,29 @@ apps, migration-console 20/20 Vitest (was 19/20 before the stale-test fix), offi
 needed); live-verified the fixed form's `border-radius` via `getComputedStyle` (now `6px`, matching every
 other rounded element in the app) and a screenshot. **This closes Phase 77 entirely.**
 
-**Next session:** Phase 77's own closing DoD — `graphify update .` and the full unfiltered backend
-regression suite (`scripts/run-tests.sh --build`), both deferred to phase-end per standing project
-convention — then Phase 78 planning (whatever the next initiative is; check `IMPLEMENTATION_PLAN.md` for
-whether a further phase has already been scoped).
+**Phase 77's closing DoD, completed immediately after S13**: `graphify update .` (incremental — 76
+changed/1 deleted file since the last graph build; 73 code files AST-extracted directly, the 3 changed
+docs — `PROGRESS.md`, `IMPLEMENTATION_PLAN.md`, ADR 0228 — semantically extracted via 9 parallel
+subagents, `PROGRESS.md`/`IMPLEMENTATION_PLAN.md` each paginated per this project's own established
+oversized-file convention; graph now 19,061 nodes/31,964 edges/2,497 communities, health check clean;
+hit and verified-then-overrode the shrink-guard — 926 of 968 removed nodes were from the two re-extracted
+accumulator files replacing many prior incremental extractions with one more curated pass, confirmed
+legitimate, not data loss). Then the full unfiltered backend regression suite
+(`scripts/run-tests.sh --build`): **31 of 32 services fully green**; `auth-service` (4 failed) and
+`workflow-service` (6 failed) both trace to the single, already-known, already-documented federation-hub
+SSRF guard blocking self-registration in this bundled dev stack (Phase 60/ADR 0228, deliberately left
+"documented, not fixed" per the user's own earlier decision) — confirmed via log inspection (every
+failure's setup log shows the identical `federation_hub_initial_registration_failed` warning), including
+one less obvious cascade (`workflow-service`'s XDOMEA-handoff-package test fails because no
+`FederationIdentity` row exists to build the package from, a downstream effect of the same root cause,
+not an independent bug). `ruff` also failed, entirely in `apps/libreoffice-addin/python/ogdoc_addin.py` —
+a file no Phase 77 session ever touched. **Zero backend regressions from Phase 77's frontend-only work.**
+Full logs in `.test-results/`.
+
+**Next session:** no Phase 78 scoped yet in `IMPLEMENTATION_PLAN.md`. Per this project's established
+post-phase-close pattern (Phase 32+/38+/44+), the natural next step is a fresh gap-analysis round — but
+that needs the user's go-ahead, not an autonomous continuation, since Phase 77's own explicit scope (and
+the standing "weiter bis zum abschluss von P77" instruction) ends here.
 
 ---
 
