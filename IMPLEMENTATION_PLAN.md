@@ -2102,7 +2102,60 @@ new architecture, not a completion of existing scope) plus everything Phase 73/7
 (tests, docs, live verification); the other two stay scoped-not-scheduled exactly as
 `docs/extension-points.md` already leaves them, no further action needed until picked up.
 
-## Definition of Done for Phase 73–76 (unchanged, `CONTRIBUTING.md`)
+## Phase 77 — UI Modernization Part 2: Apply the Login-Page Idiom to Every Remaining Component (user-requested, deferred Phase 76 in favor of this)
+
+**Context**: the user flagged the document-attribute auto-layout as "still pretty clunky" and asked for a
+full assessment of the whole UI's visual state, benchmarked against `user-ui`'s login page (the one place
+Phase 75/ADR 0219 did a real visual redesign, not just a mechanical Tailwind-class conversion). Four
+parallel research agents surveyed every component across all six apps. **Finding, more concentrated than
+initially assumed**: `admin-ui` and `user-ui` are the actual gap — both apps' Phase 75 rollout (ADR
+0226/0227) deliberately scoped itself to "shell + a handful of shared single-element classes only,"
+explicitly leaving each app's ~25-33 route/pane-specific components untouched. The other four apps
+(`reviewer-ui`, `process-designer`, `migration-console`, `office-addin`) already carry the full
+login-page-idiom styling on every control (`rounded-md border border-border ... focus:border-accent
+focus:ring-2 focus:ring-accent-bg` for inputs/selects, `rounded-md bg-accent ... hover:opacity-90` for
+primary buttons, `rounded-md border border-border ... hover:bg-hover-bg` for secondary buttons) — a
+Phase-75-adjacent pass evidently already applied it there. `process-designer` has one genuine, permanent
+exception: three property-panel provider components (~650 lines) render inside `@bpmn-io/properties-panel`'s
+Preact tree via `useService`, where hand-authored React JSX silently fails to render (already documented
+in-code) — not fixable without a different approach, same class of exception as `office-addin`'s reduced
+theming.
+
+**No new design decision needed** — the styling formula itself is already established and approved
+(the login pages, plus its confirmed-working application in the four already-modern apps). This phase is
+pure, mechanical-but-careful execution: apply the same `className` formula to every remaining bare
+`<input>`/`<select>`/`<button>`/`<textarea>`, plus real table styling (replacing the legacy `.data-table`
+CSS class) where tables appear. No new ADR expected per session unless a session hits a genuine exception
+worth recording (same DoD shape as Phase 49's rollout).
+
+| Session | Scope |
+|---|---|
+| P77-S1 | **Document-attribute auto-layout** (the user's concrete example, done first): `admin-ui`'s `LayoutDesigner.tsx` (349 lines, 16 bare controls — the object-type layout editor) plus `user-ui`'s `LayoutFormFields.tsx` (shared row/column renderer) and `MetadataPanel.tsx` (260 lines) — the admin-editor and end-user-renderer sides of the same feature, done together since they're the same underlying UI concept. |
+| P77-S2 | `admin-ui`: `UserManagement.tsx` (728 lines, 32 controls), `ObjectTypeEditor.tsx` (736 lines, 29 controls) — the two largest, most-used admin components. |
+| P77-S3 | `admin-ui`: `QueryConsoleView.tsx`, `ReportsView.tsx`, `ArchivalTransfersView.tsx`, `ProcessingFailuresView.tsx`. |
+| P77-S4 | `admin-ui`: `AdGroupMappings.tsx`, `RetentionSettings.tsx`, `ConfigPackages.tsx`, `UserTracking.tsx`, `StorageGuard.tsx`, `FleetManagementView.tsx`. |
+| P77-S5 | `admin-ui`: `AuditTraceSettings.tsx`, `EmailTemplates.tsx`, `ForensicTraceView.tsx`, `ConfigCompare.tsx`, `ApprovalSettings.tsx`, `SuperuserBreakGlass.tsx`. |
+| P77-S6 | `admin-ui`: remaining smaller components — `ExportSettings.tsx`, `DelegationsAdmin.tsx`, `DeletionRegister.tsx`, `StorageOperationalConfig.tsx`, `OcrSettings.tsx`, `LicenseStatusView.tsx`, `ShareLinkSettings.tsx`, `SignatureConfig.tsx`, `InstallationManager.tsx`, `KennzeichenSettings.tsx`, `UploadSettings.tsx`, `RetimestampStatus.tsx`, `TeamspacesAdmin.tsx`, `RegistryOverview.tsx`, `DashboardWidgets.tsx`, the two banner components, plus `AdminSidebar.tsx`'s one unstyled group-header button. Closes `admin-ui`. |
+| P77-S7 | `user-ui`: the 8 "mixed" modals (`BulkEditModal.tsx`, `FolderRetentionModal.tsx`, `RedactionModal.tsx`, `UploadForm.tsx`, `HandFolderReferencesModal.tsx`, `ShareLinkModal.tsx`) plus `share/page.tsx` — styled shell already present, bare controls inside need the fix. |
+| P77-S8 | `user-ui`: `PreviewPane.tsx` (923 lines) and `ExplorerPane.tsx` (881 lines) — the two largest, most-used panes. |
+| P77-S9 | `user-ui`: `CasesPane.tsx`, `PoststellePane.tsx`, `TeamspacesPane.tsx`. |
+| P77-S10 | `user-ui`: `FolderTree.tsx`, `DelegationsPane.tsx`, `RetentionPanel.tsx`, `TrashPane.tsx`, `SearchPane.tsx`. |
+| P77-S11 | `user-ui`: `VorlagenPane.tsx`, `HandFolderOverviewPane.tsx`, `SignaturesPanel.tsx`, `FavoritesPane.tsx`, `QuarantinePane.tsx`, `AussonderungPane.tsx`. |
+| P77-S12 | `user-ui`: remaining smaller panes — `RecordsQuarantinePanel.tsx`, `RecordsQuarantineOverviewPane.tsx`, `ApprovalsPane.tsx`, `KontaktePane.tsx`, `ClassificationPanel.tsx`, `DerivedDocumentsPanel.tsx`. Closes `user-ui`. |
+| P77-S13 | `migration-console` + `office-addin`: card-container polish on the four largest, already control-level-modern views (`TransferConsole.tsx`, `PairedInstallationList.tsx`, `TaskPane.tsx`, `WorkflowPanel.tsx`) plus the one `rounded-sm`/`rounded-md` inconsistency found in `PairedInstallationList.tsx`. Smallest, lowest-priority session — both apps are already close to done. |
+
+**Deliberately not in scope**: `reviewer-ui` (already fully modern, per this round's assessment — only
+`CasesPane.tsx`'s intentionally link-style inline buttons stand out, a design choice worth a one-line
+note, not a session); `process-designer`'s three Preact-blocked property-panel providers and its
+third-party BPMN/DMN canvas chrome (not ours to restyle, same permanent-exception status as
+`office-addin`'s reduced theming).
+
+**Definition of Done**: no new ADR expected per session (execution of an already-approved styling
+formula) unless a session hits a genuine exception; live browser verification with screenshots, both
+themes, for every session — same non-negotiable standard as Phase 49/75; `docs/services/*.md` and
+`PROGRESS.md` updated per session; full regression once at phase end, not per session.
+
+## Definition of Done for Phase 73–77 (unchanged, `CONTRIBUTING.md`)
 
 Same standing rule as every phase above: tests green, `docs/services/*.md` current, new ADR for
 non-trivial decisions (see per-phase notes above for which sessions need one), `PROGRESS.md` update,

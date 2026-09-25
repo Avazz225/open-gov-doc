@@ -2,7 +2,42 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** Fixture-ordering audit (user-requested follow-up to ADR 0228's fixture-ordering
+**Last completed:** Phase 77 planning session (UI modernization assessment). User flagged the
+document-attribute auto-layout as "still pretty clunky" and asked for the whole UI to be assessed and
+brought to the same modern standard as `user-ui`'s login page (Phase 75/ADR 0219's one real visual
+redesign, vs. the rest of that phase's deliberately mechanical class-conversion scope). Asked whether to
+start immediately or assess first — **user chose: assess all six apps first**, same discipline as this
+project's earlier gap-analysis rounds.
+
+**Four parallel research agents surveyed every component across all six apps.** Finding, more
+concentrated than the opening assumption suggested: `admin-ui` and `user-ui` are the actual gap — both
+apps' own Phase 75 rollout (ADR 0226/0227) explicitly scoped itself to "shell + a handful of shared
+single-element classes only," leaving ~33 route components (`admin-ui`) and ~25 pane components
+(`user-ui`, ~7,800 of ~10,100 total lines) with zero styling on every `<input>`/`<select>`/`<button>` —
+confirmed component-by-component, not estimated. The other four apps (`reviewer-ui`, `process-designer`,
+`migration-console`, `office-addin`) already carry the full login-page-idiom styling on every control —
+evidently a Phase-75-adjacent pass already applied it there, contradicting the initial assumption that
+only the login pages were modern. `process-designer` has one confirmed, permanent, non-fixable exception:
+three property-panel provider components (~650 lines) render inside `@bpmn-io/properties-panel`'s Preact
+tree, where hand-authored React JSX silently fails to render (already documented in-code) — same
+exception class as `office-addin`'s deliberately reduced theming.
+
+**No new design decision needed** — the styling formula (`rounded-md border border-border ...
+focus:border-accent focus:ring-2 focus:ring-accent-bg` for inputs/selects; matching button variants) is
+already established, approved, and proven working in the four already-modern apps. New Phase 77 written
+into `IMPLEMENTATION_PLAN.md`: 13 sessions, prioritized `admin-ui` (P77-S1 through S6, starting with the
+document-attribute layout — the user's own example) then `user-ui` (P77-S7 through S12) then a small
+`migration-console`/`office-addin` card-polish pass (P77-S13). `reviewer-ui` needs no session (already
+modern bar one deliberate design choice); `process-designer`'s remaining gap stays permanently
+out-of-scope, same status as `office-addin`'s reduced theming. No code changed this session (assessment
+only).
+
+**Next session:** P77-S1 — `admin-ui`'s `LayoutDesigner.tsx` plus `user-ui`'s `LayoutFormFields.tsx`/
+`MetadataPanel.tsx` (the document-attribute auto-layout, done first as the user's own concrete example).
+
+---
+
+Immediately before: Fixture-ordering audit (user-requested follow-up to ADR 0228's fixture-ordering
 finding, after Phase 75 closed). Asked whether to start Phase 76 (a deliberate user-prioritization
 decision `IMPLEMENTATION_PLAN.md` reserves, not something to pick autonomously) — user deferred Phase 76
 and asked instead to systematically apply ADR 0228's fixture-ordering fix across the "roughly a dozen
