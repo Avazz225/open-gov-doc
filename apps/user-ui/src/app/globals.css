@@ -187,10 +187,12 @@ body {
 .trash-pane,
 .vorlagen-pane,
 .hand-folder-overview-pane,
-.signatures-panel,
 .favorites-pane,
 .quarantine-pane,
-.aussonderung-pane {
+.aussonderung-pane,
+.records-quarantine-overview-pane,
+.approvals-pane,
+.kontakte-pane {
   /* dockview mountet diese Panes über eine reine Block-Elternkette
      (`.dv-content-container` → `div.dv-react-part`, kein Flex/Grid) - ohne
      eine explizite Höhe bleibt `height` hier `auto` (sizing-to-content), wodurch
@@ -226,10 +228,12 @@ body {
 .trash-pane::-webkit-scrollbar,
 .vorlagen-pane::-webkit-scrollbar,
 .hand-folder-overview-pane::-webkit-scrollbar,
-.signatures-panel::-webkit-scrollbar,
 .favorites-pane::-webkit-scrollbar,
 .quarantine-pane::-webkit-scrollbar,
-.aussonderung-pane::-webkit-scrollbar {
+.aussonderung-pane::-webkit-scrollbar,
+.records-quarantine-overview-pane::-webkit-scrollbar,
+.approvals-pane::-webkit-scrollbar,
+.kontakte-pane::-webkit-scrollbar {
   width: 10px;
 }
 
@@ -244,10 +248,12 @@ body {
 .trash-pane::-webkit-scrollbar-thumb,
 .vorlagen-pane::-webkit-scrollbar-thumb,
 .hand-folder-overview-pane::-webkit-scrollbar-thumb,
-.signatures-panel::-webkit-scrollbar-thumb,
 .favorites-pane::-webkit-scrollbar-thumb,
 .quarantine-pane::-webkit-scrollbar-thumb,
-.aussonderung-pane::-webkit-scrollbar-thumb {
+.aussonderung-pane::-webkit-scrollbar-thumb,
+.records-quarantine-overview-pane::-webkit-scrollbar-thumb,
+.approvals-pane::-webkit-scrollbar-thumb,
+.kontakte-pane::-webkit-scrollbar-thumb {
   background-color: var(--dms-border);
   border-radius: 5px;
 }
@@ -914,8 +920,30 @@ body {
   gap: var(--dms-space-2);
 }
 
+/* Phase 77 Session 12 correction - `.signatures-panel` (`SignaturesPanel.tsx`)
+   is embedded inside `MetadataPanel.tsx` like `.retention-panel`, NOT a
+   standalone dockview-mounted view - P77-S11 mistakenly joined it into the
+   shared dockview-pane rule above (`height:100%`/`overflow-y:auto`/padding),
+   which is wrong for a nested fragment inside an already-scrolling parent.
+   Un-joined here and given the same scoped flex-column layout as
+   `.retention-panel` instead. Same fix applied directly (no separate
+   mistake to correct) to `.records-quarantine-panel`/`.classification-panel`/
+   `.derived-documents-panel` (`RecordsQuarantinePanel.tsx`/
+   `ClassificationPanel.tsx`/`DerivedDocumentsPanel.tsx`), all three also
+   embedded in `MetadataPanel.tsx` and found dead in the same P77-S12 sweep. */
+.signatures-panel,
+.records-quarantine-panel,
+.classification-panel,
+.derived-documents-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dms-space-2);
+}
+
 .legal-hold-active,
-.legal-hold-form {
+.legal-hold-form,
+.quarantine-active,
+.quarantine-form {
   display: flex;
   flex-direction: column;
   gap: var(--dms-space-2);

@@ -104,6 +104,13 @@ export function RecordsQuarantinePanel({ document: activeDocument }: { document:
     }
   }
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+
   return (
     <section className="records-quarantine-panel" aria-label={t("recordsQuarantine.heading")}>
       <h2 className="m-0 mb-3 text-base">{t("recordsQuarantine.heading")}</h2>
@@ -119,7 +126,7 @@ export function RecordsQuarantinePanel({ document: activeDocument }: { document:
                 })}`
               : ""}
           </p>
-          <button type="button" onClick={handleRelease} disabled={isBusy}>
+          <button type="button" className={secondaryBtn} onClick={handleRelease} disabled={isBusy}>
             {t("recordsQuarantine.release")}
           </button>
         </div>
@@ -127,17 +134,18 @@ export function RecordsQuarantinePanel({ document: activeDocument }: { document:
         <div className="quarantine-form">
           <label>
             {t("recordsQuarantine.reasonLabel")}
-            <input value={reason} onChange={(e) => setReason(e.target.value)} />
+            <input className={fieldInput} value={reason} onChange={(e) => setReason(e.target.value)} />
           </label>
           <label>
             {t("recordsQuarantine.autoDeleteAtLabel")}
             <input
               type="date"
+              className={fieldInput}
               value={autoDeleteAt}
               onChange={(e) => setAutoDeleteAt(e.target.value)}
             />
           </label>
-          <button type="button" onClick={handleSetQuarantine} disabled={isBusy}>
+          <button type="button" className={primaryBtn} onClick={handleSetQuarantine} disabled={isBusy}>
             {t("recordsQuarantine.set")}
           </button>
         </div>

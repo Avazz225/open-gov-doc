@@ -84,6 +84,11 @@ export function ApprovalsPane({
     }
   }
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+
   return (
     <section className="approvals-pane" aria-label={t("approvals.paneLabel")}>
       <h2 className="m-0 mb-3 text-base">{t("approvals.heading")}</h2>
@@ -114,6 +119,7 @@ export function ApprovalsPane({
                 <span className="flex gap-2">
                   <button
                     type="button"
+                    className={primaryBtn}
                     onClick={() => handleApprove(request)}
                     disabled={busyId === request.id || isOwnRequest}
                     title={isOwnRequest ? t("approvals.cannotApproveOwn") : undefined}
@@ -122,6 +128,7 @@ export function ApprovalsPane({
                   </button>
                   <button
                     type="button"
+                    className={secondaryBtn}
                     onClick={() => handleReject(request)}
                     disabled={busyId === request.id}
                   >

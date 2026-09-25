@@ -94,6 +94,9 @@ export function RecordsQuarantineOverviewPane({
     }
   }
 
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+
   return (
     <section
       className="records-quarantine-overview-pane"
@@ -135,6 +138,7 @@ export function RecordsQuarantineOverviewPane({
               <span className="flex gap-2">
                 <button
                   type="button"
+                  className={secondaryBtn}
                   onClick={() => handleRelease(row)}
                   disabled={busyId === row.entry.id}
                 >

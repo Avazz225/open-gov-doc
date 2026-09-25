@@ -60,6 +60,11 @@ export function ClassificationPanel({
   // above does for the select's initial value.
   const isNoOpRaise = selected === activeDocument.classification_level;
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+
   return (
     <section className="classification-panel" aria-label={t("classification.paneLabel")}>
       <h2 className="m-0 mb-3 text-base">{t("classification.heading")}</h2>
@@ -81,6 +86,7 @@ export function ClassificationPanel({
           <label>
             {t("classification.raiseToLabel")}
             <select
+              className={fieldInput}
               value={selected}
               onChange={(e) => setSelected(e.target.value as ClassificationLevel)}
             >
@@ -91,7 +97,7 @@ export function ClassificationPanel({
               ))}
             </select>
           </label>
-          <button type="button" onClick={handleRaise} disabled={isSaving || isNoOpRaise}>
+          <button type="button" className={primaryBtn} onClick={handleRaise} disabled={isSaving || isNoOpRaise}>
             {isSaving ? t("classification.saving") : t("classification.raiseAction")}
           </button>
         </div>

@@ -57,6 +57,12 @@ export function KontaktePane({ token }: { token: string }) {
     }
   }
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+  const checkbox = "h-4 w-4 rounded border-border accent-accent";
+
   return (
     <section className="kontakte-pane" aria-label={t("kontakte.paneLabel")}>
       <h2 className="m-0 mb-3 text-base">{t("kontakte.heading")}</h2>
@@ -65,6 +71,7 @@ export function KontaktePane({ token }: { token: string }) {
       <form onSubmit={runSearch}>
         <input
           type="text"
+          className={fieldInput}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={t("kontakte.searchPlaceholder")}
@@ -74,13 +81,14 @@ export function KontaktePane({ token }: { token: string }) {
           <label>
             <input
               type="checkbox"
+              className={checkbox}
               checked={includeFederated}
               onChange={(e) => setIncludeFederated(e.target.checked)}
             />
             {t("kontakte.includeFederated")}
           </label>
         )}
-        <button type="submit" disabled={!query.trim() || isLoading}>
+        <button type="submit" className={primaryBtn} disabled={!query.trim() || isLoading}>
           {t("kontakte.search")}
         </button>
       </form>
