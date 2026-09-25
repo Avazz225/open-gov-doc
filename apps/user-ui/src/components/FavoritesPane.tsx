@@ -97,6 +97,9 @@ export function FavoritesPane({
     }
   }
 
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+
   return (
     <section className="favorites-pane" aria-label={t("favorites.paneLabel")}>
       <h2 className="m-0 mb-3 text-base">{t("favorites.heading")}</h2>
@@ -133,22 +136,23 @@ export function FavoritesPane({
                 </span>
                 <span className="flex gap-2">
                   {document && (
-                    <button type="button" onClick={() => onOpenDocument(document)}>
+                    <button type="button" className={secondaryBtn} onClick={() => onOpenDocument(document)}>
                       {t("favorites.open")}
                     </button>
                   )}
                   {folder && (
-                    <button type="button" onClick={() => onOpenFolder(folder)}>
+                    <button type="button" className={secondaryBtn} onClick={() => onOpenFolder(folder)}>
                       {t("favorites.open")}
                     </button>
                   )}
                   {caseItem && (
-                    <button type="button" onClick={() => onOpenCase(caseItem)}>
+                    <button type="button" className={secondaryBtn} onClick={() => onOpenCase(caseItem)}>
                       {t("favorites.open")}
                     </button>
                   )}
                   <button
                     type="button"
+                    className={secondaryBtn}
                     onClick={() => handleRemove(favorite)}
                     disabled={busyId === favorite.id}
                   >

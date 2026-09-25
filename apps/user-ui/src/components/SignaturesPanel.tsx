@@ -114,6 +114,13 @@ export function SignaturesPanel({
     }
   }
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+
   return (
     <section className="signatures-panel" aria-label={t("signatures.heading")}>
       <h2 className="m-0 mb-3 text-base">{t("signatures.heading")}</h2>
@@ -135,6 +142,7 @@ export function SignaturesPanel({
                 </span>
                 <button
                   type="button"
+                  className={secondaryBtn}
                   onClick={() => handleVerify(signature.id)}
                   disabled={verifyingId === signature.id}
                 >
@@ -143,7 +151,7 @@ export function SignaturesPanel({
                     : t("signatures.verifyButton")}
                 </button>
                 {verification && (
-                  <span className={verification.valid ? "badge-valid" : "badge-invalid"}>
+                  <span className={verification.valid ? "badge ok" : "badge down"}>
                     {verification.valid ? t("signatures.statusValid") : t("signatures.statusInvalid")}
                   </span>
                 )}
@@ -157,7 +165,11 @@ export function SignaturesPanel({
         <div className="flex items-center gap-2">
           <label>
             {t("signatures.levelLabel")}
-            <select value={level} onChange={(e) => setLevel(e.target.value as SignatureLevel)}>
+            <select
+              className={fieldInput}
+              value={level}
+              onChange={(e) => setLevel(e.target.value as SignatureLevel)}
+            >
               <option value="ses">{t("signatures.levelSes")}</option>
               <option value="aes">{t("signatures.levelAes")}</option>
               <option value="qes" disabled>
@@ -165,7 +177,7 @@ export function SignaturesPanel({
               </option>
             </select>
           </label>
-          <button type="button" onClick={handleSign} disabled={isSigning}>
+          <button type="button" className={primaryBtn} onClick={handleSign} disabled={isSigning}>
             {isSigning ? t("signatures.signing") : t("signatures.signButton")}
           </button>
         </div>

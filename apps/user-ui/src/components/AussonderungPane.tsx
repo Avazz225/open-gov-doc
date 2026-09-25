@@ -92,6 +92,13 @@ export function AussonderungPane({ token }: { token: string }) {
     }
   }
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+
   return (
     <section className="aussonderung-pane" aria-label={t("aussonderung.paneLabel")}>
       <h2 className="m-0 mb-3 text-base">{t("aussonderung.heading")}</h2>
@@ -100,12 +107,13 @@ export function AussonderungPane({ token }: { token: string }) {
       <form onSubmit={runSearch}>
         <input
           type="text"
+          className={fieldInput}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={t("aussonderung.searchPlaceholder")}
           aria-label={t("aussonderung.searchLabel")}
         />
-        <button type="submit" disabled={isLoading}>
+        <button type="submit" className={primaryBtn} disabled={isLoading}>
           {t("aussonderung.search")}
         </button>
       </form>
@@ -140,6 +148,7 @@ export function AussonderungPane({ token }: { token: string }) {
                 {item.kind === "document" ? (
                   <button
                     type="button"
+                    className={secondaryBtn}
                     onClick={() => handleRetrieve(item)}
                     disabled={busyId === item.transfer_id}
                   >
@@ -148,6 +157,7 @@ export function AussonderungPane({ token }: { token: string }) {
                 ) : (
                   <button
                     type="button"
+                    className={secondaryBtn}
                     onClick={() => handleDownloadPackage(item)}
                     disabled={busyId === item.transfer_id}
                   >

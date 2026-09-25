@@ -109,6 +109,13 @@ export function VorlagenPane({ token, createdBy }: { token: string; createdBy: s
     }
   }
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+
   return (
     <section className="vorlagen-pane" aria-label={t("vorlagen.paneLabel")}>
       <h2 className="m-0 mb-3 text-base">{t("vorlagen.heading")}</h2>
@@ -119,6 +126,7 @@ export function VorlagenPane({ token, createdBy }: { token: string; createdBy: s
           {t("vorlagen.sourceFolderLabel")}
           <input
             type="text"
+            className={fieldInput}
             value={sourceFolderId}
             onChange={(e) => setSourceFolderId(e.target.value)}
             placeholder={t("vorlagen.sourceFolderPlaceholder")}
@@ -126,18 +134,25 @@ export function VorlagenPane({ token, createdBy }: { token: string; createdBy: s
         </label>
         <label>
           {t("vorlagen.nameLabel")}
-          <input type="text" value={newName} onChange={(e) => setNewName(e.target.value)} />
+          <input
+            type="text"
+            className={fieldInput}
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+          />
         </label>
         <label>
           {t("vorlagen.descriptionLabel")}
           <input
             type="text"
+            className={fieldInput}
             value={newDescription}
             onChange={(e) => setNewDescription(e.target.value)}
           />
         </label>
         <button
           type="submit"
+          className={primaryBtn}
           disabled={isCreating || !sourceFolderId.trim() || !newName.trim()}
         >
           {t("vorlagen.create")}
@@ -165,6 +180,7 @@ export function VorlagenPane({ token, createdBy }: { token: string; createdBy: s
               <span className="flex gap-2">
                 <button
                   type="button"
+                  className={secondaryBtn}
                   onClick={() => startApply(template)}
                   disabled={busyId === template.id}
                 >
@@ -172,6 +188,7 @@ export function VorlagenPane({ token, createdBy }: { token: string; createdBy: s
                 </button>
                 <button
                   type="button"
+                  className={secondaryBtn}
                   onClick={() => handleDelete(template)}
                   disabled={busyId === template.id}
                 >
@@ -184,6 +201,7 @@ export function VorlagenPane({ token, createdBy }: { token: string; createdBy: s
                     {t("vorlagen.targetFolderLabel")}
                     <input
                       type="text"
+                      className={fieldInput}
                       value={targetParentId}
                       onChange={(e) => setTargetParentId(e.target.value)}
                       placeholder={t("vorlagen.targetFolderPlaceholder")}
@@ -192,12 +210,13 @@ export function VorlagenPane({ token, createdBy }: { token: string; createdBy: s
                   <span className="flex gap-2">
                     <button
                       type="button"
+                      className={primaryBtn}
                       onClick={() => confirmApply(template)}
                       disabled={busyId === template.id || !targetParentId.trim()}
                     >
                       {t("vorlagen.applyConfirm")}
                     </button>
-                    <button type="button" onClick={() => setApplyingId(null)}>
+                    <button type="button" className={secondaryBtn} onClick={() => setApplyingId(null)}>
                       {t("vorlagen.applyCancel")}
                     </button>
                   </span>

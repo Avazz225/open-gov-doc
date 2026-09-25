@@ -94,6 +94,9 @@ export function HandFolderOverviewPane({
     }
   }
 
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+
   return (
     <section className="hand-folder-overview-pane" aria-label={t("handFolderOverview.paneLabel")}>
       <h2 className="m-0 mb-3 text-base">{t("handFolderOverview.heading")}</h2>
@@ -124,12 +127,12 @@ export function HandFolderOverviewPane({
               {references.map((ref) => (
                 <tr key={`${ref.folder_id}:${ref.document_id}`}>
                   <td>
-                    <button type="button" onClick={() => handleOpenReferencedFolder(ref)}>
+                    <button type="button" className={secondaryBtn} onClick={() => handleOpenReferencedFolder(ref)}>
                       {ref.folder_name ?? ref.folder_id}
                     </button>
                   </td>
                   <td>
-                    <button type="button" onClick={() => handleOpenReferencedDocument(ref)}>
+                    <button type="button" className={secondaryBtn} onClick={() => handleOpenReferencedDocument(ref)}>
                       {ref.document_title ?? ref.document_id}
                     </button>
                   </td>
@@ -167,7 +170,7 @@ export function HandFolderOverviewPane({
               {workTrayDocs.map((doc) => (
                 <tr key={doc.id}>
                   <td>
-                    <button type="button" onClick={() => onOpenDocument(doc)}>
+                    <button type="button" className={secondaryBtn} onClick={() => onOpenDocument(doc)}>
                       {doc.title}
                     </button>
                   </td>

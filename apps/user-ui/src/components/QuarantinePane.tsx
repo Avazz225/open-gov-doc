@@ -83,6 +83,13 @@ export function QuarantinePane({ token }: { token: string }) {
     }
   }
 
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+  const fieldInput =
+    "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+
   return (
     <section className="quarantine-pane" aria-label={t("quarantine.paneLabel")}>
       <h2 className="m-0 mb-3 text-base">{t("quarantine.heading")}</h2>
@@ -109,6 +116,7 @@ export function QuarantinePane({ token }: { token: string }) {
               <span className="flex gap-2">
                 <button
                   type="button"
+                  className={secondaryBtn}
                   onClick={() => startRelease(scan)}
                   disabled={busyId === scan.id}
                 >
@@ -116,6 +124,7 @@ export function QuarantinePane({ token }: { token: string }) {
                 </button>
                 <button
                   type="button"
+                  className={secondaryBtn}
                   onClick={() => handlePurge(scan)}
                   disabled={busyId === scan.id}
                 >
@@ -128,6 +137,7 @@ export function QuarantinePane({ token }: { token: string }) {
                     {t("quarantine.releaseTitleLabel")}
                     <input
                       type="text"
+                      className={fieldInput}
                       value={releaseTitle}
                       onChange={(e) => setReleaseTitle(e.target.value)}
                     />
@@ -136,6 +146,7 @@ export function QuarantinePane({ token }: { token: string }) {
                     {t("quarantine.releaseFolderLabel")}
                     <input
                       type="text"
+                      className={fieldInput}
                       value={releaseFolderId}
                       onChange={(e) => setReleaseFolderId(e.target.value)}
                       placeholder={t("quarantine.releaseFolderPlaceholder")}
@@ -144,12 +155,13 @@ export function QuarantinePane({ token }: { token: string }) {
                   <span className="flex gap-2">
                     <button
                       type="button"
+                      className={primaryBtn}
                       onClick={() => confirmRelease(scan)}
                       disabled={busyId === scan.id || releaseTitle.trim() === ""}
                     >
                       {t("quarantine.releaseConfirm")}
                     </button>
-                    <button type="button" onClick={() => setReleasingId(null)}>
+                    <button type="button" className={secondaryBtn} onClick={() => setReleasingId(null)}>
                       {t("quarantine.releaseCancel")}
                     </button>
                   </span>

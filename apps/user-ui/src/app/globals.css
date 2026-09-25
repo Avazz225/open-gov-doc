@@ -184,7 +184,13 @@ body {
 .poststelle-pane,
 .teamspaces-pane,
 .delegations-pane,
-.trash-pane {
+.trash-pane,
+.vorlagen-pane,
+.hand-folder-overview-pane,
+.signatures-panel,
+.favorites-pane,
+.quarantine-pane,
+.aussonderung-pane {
   /* dockview mountet diese Panes über eine reine Block-Elternkette
      (`.dv-content-container` → `div.dv-react-part`, kein Flex/Grid) - ohne
      eine explizite Höhe bleibt `height` hier `auto` (sizing-to-content), wodurch
@@ -217,7 +223,13 @@ body {
 .poststelle-pane::-webkit-scrollbar,
 .teamspaces-pane::-webkit-scrollbar,
 .delegations-pane::-webkit-scrollbar,
-.trash-pane::-webkit-scrollbar {
+.trash-pane::-webkit-scrollbar,
+.vorlagen-pane::-webkit-scrollbar,
+.hand-folder-overview-pane::-webkit-scrollbar,
+.signatures-panel::-webkit-scrollbar,
+.favorites-pane::-webkit-scrollbar,
+.quarantine-pane::-webkit-scrollbar,
+.aussonderung-pane::-webkit-scrollbar {
   width: 10px;
 }
 
@@ -229,7 +241,13 @@ body {
 .poststelle-pane::-webkit-scrollbar-thumb,
 .teamspaces-pane::-webkit-scrollbar-thumb,
 .delegations-pane::-webkit-scrollbar-thumb,
-.trash-pane::-webkit-scrollbar-thumb {
+.trash-pane::-webkit-scrollbar-thumb,
+.vorlagen-pane::-webkit-scrollbar-thumb,
+.hand-folder-overview-pane::-webkit-scrollbar-thumb,
+.signatures-panel::-webkit-scrollbar-thumb,
+.favorites-pane::-webkit-scrollbar-thumb,
+.quarantine-pane::-webkit-scrollbar-thumb,
+.aussonderung-pane::-webkit-scrollbar-thumb {
   background-color: var(--dms-border);
   border-radius: 5px;
 }
@@ -674,10 +692,51 @@ body {
 .teamspaces-create-form,
 .teamspaces-invite-form,
 .teamspaces-appointment-form,
-.teamspaces-contact-form {
+.teamspaces-contact-form,
+.vorlagen-apply-form,
+.quarantine-release-form {
   display: flex;
   gap: var(--dms-space-2);
   margin-bottom: var(--dms-space-3);
+}
+
+/* Phase 77 Session 11 - `HandFolderOverviewPane.tsx` is the only user-ui
+   file using a native `<table>`, referenced via `.data-table` without ever
+   being defined here - ported verbatim from admin-ui's own `.data-table`
+   (`apps/admin-ui/src/app/globals.css`), the only place this pattern
+   already existed. */
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: var(--dms-space-6);
+}
+
+.data-table th,
+.data-table td {
+  text-align: left;
+  padding: var(--dms-space-2) var(--dms-space-2);
+  border-bottom: 1px solid var(--dms-border);
+}
+
+/* `SignaturesPanel.tsx` - referenced but never defined; same row shape as
+   `.entry-row` (level tag + signer text + verify button). */
+.signature-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.signature-list li {
+  display: flex;
+  align-items: center;
+  gap: var(--dms-space-2);
+  padding: var(--dms-space-2) 0;
+  border-bottom: 1px solid var(--dms-border);
+}
+
+.signature-level {
+  font-weight: 600;
+  font-size: var(--dms-font-size-xs);
 }
 
 .metadata-panel form {
