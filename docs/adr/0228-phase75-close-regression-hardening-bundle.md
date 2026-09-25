@@ -92,14 +92,22 @@ consumer fixture's `POST /roles` call correctly got 403 (the principal genuinely
 Fixed by declaring the explicit dependency (`async def _grant_notification_write_permission(_grant_role_admin_permission):`), which pytest resolves deterministically. Files:
 `services/notification-service/tests/test_api.py`, `services/reporting-service/tests/test_api.py`.
 
-**Note on scope**: this same "implicit ordering between the grant fixture and its consumers" shape exists,
-copy-pasted, across roughly a dozen more services (`archival-service`, `audit-service`, `case-service`,
-`document-service`, `folder-service`, `rendering-service`, `search-service`, `virus-scan-service`, and
-others — confirmed via `grep -rln "ROLE_ADMIN_PRINCIPAL_ID" services/*/tests/*.py`). None of these
-reproduced a failure in dozens of runs today, so they were **not** touched this session — but the fix in
-(6)/(7) proves the failure mode is real and non-deterministic, not merely theoretical. Worth a dedicated
-future test-infrastructure-hardening session across all remaining instances, rather than opportunistic
-one-off fixes each time one happens to flip.
+**Note on scope (audited in a follow-up pass, corrected from this ADR's original draft)**: an initial
+`grep -rln "ROLE_ADMIN_PRINCIPAL_ID" services/*/tests/*.py` suggested roughly a dozen more services might
+share this exact risk. A precise, per-file audit of every match found the actual vulnerable shape — a
+session-scoped `autouse=True` fixture calling a *gated* endpoint (`POST /roles`, the only one that
+requires `X-DMS-Principal`) using a principal granted by *another* session-scoped `autouse=True` fixture,
+with no declared dependency between them — exists **only** in the two services already fixed above.
+Every other `ROLE_ADMIN_PRINCIPAL_ID` usage found falls into one of three provably safe shapes instead:
+(a) a function-scoped, on-demand fixture like `everyone_role_without` (`archival-service`, `audit-service`,
+`auth-service`, `case-service`, `reporting-service`, `virus-scan-service`) — safe because pytest resolves
+all session-scoped fixtures before any function-scoped one, regardless of same-scope ordering; (b) direct
+use inside a test function body (`rendering-service/tests/test_api.py`) — safe for the same
+scope-ordering reason; (c) other session-scoped `_grant_*_permission` fixtures
+(`archival-service`/`audit-service`/`case-service`/`document-service`/`folder-service`/
+`rendering-service`/`search-service`/`virus-scan-service`) that only call the *ungated*
+`POST /role-assignments` endpoint directly, needing no admin principal at all. No further action needed
+— this was a complete fix, not a partial one.
 
 ## Findings documented, not fixed (both require the user's own product/security judgment)
 
@@ -144,5 +152,6 @@ work).
   continue to show these same ~10 test failures, predictably, forever, until one of the three options
   above is chosen. This is now the expected, documented baseline for a fresh install — not something a
   future session should spend time re-diagnosing from scratch.
-- The fixture-ordering bug class (6/7) is confirmed real and worth a dedicated future pass across the
-  ~12 other services sharing the same anti-pattern, rather than reactive one-off fixes.
+- The fixture-ordering bug class (6/7) is confirmed real and non-deterministic, but a full follow-up
+  audit (same session) found its actual footprint was exactly these two services, not the dozen the
+  initial `grep` suggested — no further fixture-ordering work is needed.

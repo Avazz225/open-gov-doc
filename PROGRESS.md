@@ -2,11 +2,40 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** Phase 75 close (full regression + graphify update outcome, after P75-S10 closed the
-phase). See [ADR 0228](docs/adr/0228-phase75-close-regression-hardening-bundle.md) for the full writeup.
-Standard phase-end cadence per `CONTRIBUTING.md`: one unfiltered `scripts/run-tests.sh --build` run
-across all ~31 backend services, `graphify update .` — Phase 75 itself was frontend-only (Tailwind CSS),
-so no frontend regression re-run was needed beyond what each P75 session already did live.
+**Last completed:** Fixture-ordering audit (user-requested follow-up to ADR 0228's fixture-ordering
+finding, after Phase 75 closed). Asked whether to start Phase 76 (a deliberate user-prioritization
+decision `IMPLEMENTATION_PLAN.md` reserves, not something to pick autonomously) — user deferred Phase 76
+and asked instead to systematically apply ADR 0228's fixture-ordering fix across the "roughly a dozen
+more services" that ADR speculated might share the same risk.
+
+**Audited every one of those services precisely instead of applying speculative fixes.** ADR 0228's
+original note was based on a broad `grep -rln "ROLE_ADMIN_PRINCIPAL_ID"` — a superset that doesn't
+distinguish the actually-vulnerable shape from safe ones. Checked each match by hand: the real bug
+requires a session-scoped `autouse=True` fixture calling a *gated* endpoint (only `POST /roles` qualifies
+— `POST /role-assignments` is ungated by default) using a principal granted by *another* session-scoped
+`autouse=True` fixture, with no declared dependency between them. Found: **only 3 `POST /roles` calls
+exist anywhere in the test suite** — the 2 already fixed at Phase 75 close, plus one in
+`rendering-service/tests/test_api.py` that sits directly inside a test function body (not a fixture),
+which is automatically safe regardless of fixture ordering (pytest guarantees every session-scoped
+fixture completes before any test body runs — the ordering ambiguity only exists *between* same-scope
+fixtures). Every other `ROLE_ADMIN_PRINCIPAL_ID` usage across `archival-service`/`audit-service`/
+`case-service`/`document-service`/`folder-service`/`rendering-service`/`search-service`/
+`virus-scan-service` is either a function-scoped on-demand fixture (`everyone_role_without`-style, same
+scope-ordering safety) or a fixture that only calls the ungated `/role-assignments` endpoint directly,
+needing no admin principal at all. **No code changes needed** — corrected ADR 0228's "roughly a dozen
+more services" note to record this precise, complete finding instead, so a future session doesn't
+re-open a search that's already been fully closed.
+
+**Next session:** Phase 76 remains deferred (see below, still a user-prioritization decision, not yet
+made). No other queued work — awaiting the user's next instruction.
+
+---
+
+**Immediately before:** Phase 75 close (full regression + graphify update outcome, after P75-S10 closed
+the phase). See [ADR 0228](docs/adr/0228-phase75-close-regression-hardening-bundle.md) for the full
+writeup. Standard phase-end cadence per `CONTRIBUTING.md`: one unfiltered `scripts/run-tests.sh --build`
+run across all ~31 backend services, `graphify update .` — Phase 75 itself was frontend-only (Tailwind
+CSS), so no frontend regression re-run was needed beyond what each P75 session already did live.
 
 **Backend regression took a full session to get to green**, not because of anything Phase 75 touched
 (zero backend files changed across P75-S1 through S10) but because the phase-end regression gate is the
