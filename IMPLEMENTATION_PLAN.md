@@ -2170,6 +2170,302 @@ point is user-visible.
 round's Phases 73/74) closed 2026-09-23. Phase 75 (Tailwind, reordered ahead of Phase 76 at the user's
 explicit request) is next.
 
+---
+
+# Phase 78+: Gap analysis after Phase 77, plus two user-requested initiatives
+
+## Context
+
+After Phase 77 (UI modernization Part 2, P77-S1 through P77-S13) closed, the user asked for a fourth
+gap-analysis round to build a new plan from Phase 78 onward — same methodology as the Phase 32+/38+/44+
+rounds: parallel research agents sweeping ADRs' self-named open scope, `docs/services/*.md` Open Points,
+`Konzept.md` coverage, and previously-deferred items for staleness. Six agents ran in parallel this
+round: (1) a full ADR self-named open-scope sweep across all 228 ADRs (0211-0228, Phase 73-75's own
+output, had never been swept by any prior round and got the most scrutiny); (2) a `docs/services/*.md`
+Open Points sweep across all 39 service/app docs, split into four sub-agent groups; (3) a `Konzept.md`
+coverage check across all 14 sections, split into three sub-agent groups; (4) a deferred-items staleness
+reassessment against the Phase 73+ round's own "Deliberately Not Included" list; (5) a dedicated
+completeness check of the eGov configuration package (`packages/egov/config.json`) against `Konzept.md`
+§14.2's own 9-item checklist, per the user's explicit request that this project's own preset package stay
+capable of representing eGov-relevant functionality; (6) implicitly, this round also carries a
+user-reported UI-spacing complaint (see Phase 81 below) that didn't need a research agent — the user
+named the symptoms directly.
+
+**Result**: the system remains mature — `Konzept.md` coverage is essentially complete (all of sections
+1-3a, 4-7, and 8-14 confirmed built; the one exception, CheckMK integration, was already explicitly
+declined by the user in a much earlier session and isn't a gap). The deferred-items reassessment found
+**zero staleness** — every item on the Phase 73+ "Deliberately Not Included" list was independently
+re-verified against current code (not just re-trusted) and every blocking premise still holds (e.g.
+`workflow-service` is still single-replica in `infra/k8s/dms/values.yaml`, Azurite still can't do WORM,
+no SAML/HSM/XAdES code exists anywhere). The real, actionable findings came almost entirely from the ADR
+sweep and the `docs/services/*.md` sweep — together well over 150 raw findings, most of which are
+already-known, deliberately-accepted limitations restated from their own ADR's "Consequences" section
+(not new information) or environment-only blockers (no real Office/LibreOffice host available in this
+sandbox, no real Kubernetes cluster to test Helm rendering against). This round's plan below is a
+curated selection of the genuinely actionable subset, bundled by theme.
+
+**Two findings from the ADR sweep turned out to already be closed** — the sweeping agent's own batch
+context didn't have full visibility into the adjacent 0211-0228 range and flagged both for a follow-up
+check, which confirmed closure: **ADR 0043's teamspace-group-invitation gap** was fully built at P74-S3
+(ADR 0217 — `TeamspaceAdGroupBinding` table, live reconciliation, four new endpoints); **ADR 0081's
+federation-hub in-memory retry-cache risk** (and the same underlying mechanism's re-flagged appearance in
+ADR 0147's "Consequences") was fully closed at P73-S3 (ADR 0213 — the two `app.state` dicts were replaced
+with a real `federation.handover_retry_payload` table, removing the memory-pressure risk structurally,
+not just bounding it further). Neither appears anywhere below.
+
+**Nummerierung**: last phase is 77, highest ADR is 0228 — this plan starts at **Phase 78** / **ADR 0229**.
+
+**Prinzip der Reihenfolge**: security-relevant hardening first (cheap, high value, matches every prior
+round's own ordering principle), then a bundle of small/cheap cross-service fixes plus the one genuine
+operational-reliability item that's actually gotten worse with time (`webdav-connector`'s root `PROPFIND`
+timeout) and a test-suite-health cleanup, then the two user-requested initiatives (eGov package
+completion, UI spacing/layout polish) as their own phases since both come with explicit user context and
+deserve dedicated focus rather than being diluted into the general bundle, then a short scoping-only
+phase for the handful of findings that are real but too large/expensive to just bundle in.
+
+## Phase 78 — Security Hardening (cheap, high value)
+
+- **P78-S1 — DNS-rebinding TOCTOU fix for both SSRF guards, one session**: `migration-service`'s
+  `_validate_peer_base_url` (ADR 0182) and `federation-hub-service`'s `_validate_callback_base_url`
+  (ADR 0183, shared pattern with `ocr-service`'s equivalent) both validate a target hostname's resolved
+  IP once at creation/registration time, then trust the hostname again on every subsequent call — a
+  classic DNS-rebinding TOCTOU gap (attacker controls DNS, points the hostname at a private/loopback
+  address only after the validation check passes). Same underlying bug shape in both services, same fix:
+  re-resolve and re-validate at the actual call site (or pin the validated IP and connect to it directly
+  with the original hostname only for TLS SNI/cert validation), not just once at setup. Bundle both since
+  it's the identical fix pattern, one session.
+- **P78-S2 — Gateway backend-port bypass + chunked-encoding body-size bypass, one session**: `gateway-
+  service`'s own docs (ADR 0005) still name backend service ports as directly published in `docker-
+  compose.yml`, meaning a caller on the same network can skip the gateway (and its auth/rate-limiting/
+  maintenance-mode enforcement) entirely by hitting a backend service's port directly — genuinely a
+  perimeter gap, not yet closed by any later ADR. In the same session: `libs/dms-common`'s shared
+  `MaxBodySizeMiddleware` (ADR 0187) only inspects the declared `Content-Length` header — a
+  chunked-transfer-encoded request with no `Content-Length` at all bypasses the size cap completely.
+  Bundled together since both are request/network-boundary hardening gaps found in the same sweep, not
+  because they're the same fix (`MaxBodySizeMiddleware` needs a running-byte-count check as the stream is
+  read, not just a header check; the port issue likely needs either firewalling backend ports in
+  `docker-compose.yml`/Helm to internal-network-only, or accepting it as a documented dev-stack-only
+  posture — the session decides after a first look at what's actually feasible without breaking direct
+  service-to-service calls that are themselves legitimate, ADR 0005's own documented pattern).
+- **P78-S3 — Realm-role assignment API + group-principal role assignments, one session**: both
+  `auth-service` and `document-service`'s own docs independently name the same gap — Keycloak realm
+  roles (`dms-admin`, `dms-poststelle`, etc.) can be *created* via `POST /realm-roles` but *assigning*
+  one to a specific user has no API/admin-UI path, Keycloak-Admin-Console-only. In the same session:
+  `admin-ui`'s role-assignment creation form hardcodes `principalType: "user"` — a `RoleAssignment` can
+  never target a `group` principal even though `Group` is now a real, manageable entity (built across
+  several earlier phases). Bundled since both are "the RBAC admin surface doesn't yet cover a principal
+  type/role type it structurally already supports," found independently in two different docs sweeps.
+
+**Definition of Done**: regression test per fix (especially one proving the DNS-rebinding window is
+actually closed, e.g. a test that re-points a hostname mid-flow and confirms the second call still gets
+rejected); new ADR for P78-S1 and P78-S2 (real security-boundary decisions); no new ADR expected for
+P78-S3 (execution of an already-supported capability, not a new architecture decision) unless the session
+finds otherwise; docs and `PROGRESS.md` updated per session.
+
+## Phase 79 — Small-Fix Bundle, `webdav-connector` Pagination, Test-Suite Health
+
+- **P79-S1 — Cross-service small-fix bundle, admin-UI-adjacent gaps**: `folder-service` gets a real
+  breadcrumb/full-path endpoint (ADR 0015 — currently only direct children are retrievable, blocking
+  deep-linking to an unexpanded folder in `user-ui`'s tree view); `admin-ui`'s `ObjectTypeEditor` gets a
+  retroactive re-check warning when a saved layout override references an attribute that was since
+  renamed/removed (ADR 0014); `folder-service`'s structure-template application gets parent-child
+  object-type nesting validation (ADR 0056, currently silently skipped); `DelegationsPane.tsx` gets the
+  one delegation-scope-dimension picker it's still missing (`scope_process_definition_ids` — ADR 0131/
+  0154, the sibling dimensions already got one). Four small, independent, config/UI-surface completions
+  found across three different service docs, bundled into one session since none needs its own.
+- **P79-S2 — `webdav-connector` root `PROPFIND` pagination (real feature, finally built)**: flagged
+  repeatedly across multiple gap-analysis rounds as "O(N) in total item count, will get worse" and
+  explicitly re-confirmed at Phase 75's own close (ADR 0228) as now **actually timing out**, not just
+  slow, at this dev stack's accumulated scale (1,639 folders/1,675 documents) — the highest-value single
+  item in this phase, since it's a real, worsening operational limitation with no remaining excuse to
+  defer further. Needs genuine pagination of the root listing (RFC 4918's `Depth: 1` response can be
+  paged via a WebDAV client's own incremental `PROPFIND` re-issuing behavior for large collections, or a
+  practical page-size cap with a documented client-side workaround if true WebDAV-protocol pagination
+  proves impractical — session decides after investigating real WebDAV client behavior).
+- **P79-S3 — Test-suite health cleanup**: `admin-ui`'s three stale Playwright specs
+  (`user-management.spec.ts`, `fleet-management.spec.ts`, `email-templates.spec.ts` — drifted behind
+  real i18n/label changes since only `login.spec.ts` was fixed at P71-S3); `auth-service`'s circular-
+  dependency test failure (permission-service's superuser check calls back into auth-service while its
+  own container is stopped mid-test, ADR 0200); `workflow-service`'s `approval_config_override` pytest
+  fixture timing bug (4 pre-existing failures, ADR 0216, explicitly flagged "not attempted here"); the
+  intermittent `federation/xdomea-dispatch` test flake first found at ADR 0195 and still unresolved as of
+  ADR 0211. Four independent, known, already-diagnosed test-suite-noise items bundled into one cleanup
+  session so the regression suite stops carrying known-red baggage into every future phase's own
+  regression gate.
+
+**Definition of Done**: regression test per fix; no new ADR expected (execution/completion of
+already-established patterns, no new architecture decisions) except P79-S2 if the pagination approach
+ends up being a real protocol-level design choice rather than a straightforward page-size cap; docs and
+`PROGRESS.md` updated per session.
+
+## Phase 80 — eGov Configuration Package Completion (user-requested)
+
+**Context**: the user explicitly asked that this project's own first-party eGov configuration package
+(`packages/egov/config.json`, Konzept.md §14.2, ADR 0058/0059/0060) stay capable of representing the
+functionality a real e-government/records-management DMS package would have. A dedicated research pass
+verified the package component-by-component against `Konzept.md` §14.2's own 9-item checklist: 6 of 9
+are present and complete (file-plan hierarchy, reference-number format, mail-room role, process
+templates, business calendar, extended admin roles); 3 are present but thin (retention suggestions are
+flat/undifferentiated across file types, only one of four named classification levels is ever
+demonstrated, the four-eyes preset doesn't cover a same-family action type added to the platform after
+the package was last touched). The package has also drifted from its own manifest: it silently gained
+two object types at P31-S7 (`Handakte`/`Arbeitsvorrat`) without a version bump or a README update, even
+though ADR 0060 itself named "future changes will regularly increment the version" as the expectation.
+
+- **P80-S1 — Config-only completions, cheap, one session**: (a) add `permission.role.create` to
+  `approval_config` (same "permission change" family as the already-covered `permission.role_assignment.
+  create`); (b) add object-type examples/documentation for the three undemonstrated classification levels
+  (`VS-VERTRAULICH`, `GEHEIM`, `STRENG GEHEIM` — the concept names all four, only `VS-NfD` currently
+  appears anywhere in the package); (c) differentiate `default_retention_days`/set
+  `default_archive_after_days` per file type instead of the current flat 3653-day value on both shipped
+  document types; (d) set `required_signature_level`/`deletion_reason_required_override` on the
+  classified-documents object type (both fields already exist in the exportable schema, just unset in
+  this package); (e) fix the manifest drift — bump `manifest.version`, update its `description` and
+  `packages/egov/README.md`'s object-type table to actually list `Handakte`/`Arbeitsvorrat`. Five
+  independent, config-only, cheap additions/fixes to the same one file plus its README, one session.
+- **P80-S2 — New exportable config categories, needed for the two remaining structural gaps**:
+  `config-service`'s `ConfigDocument` format has no exportable category today for (a) a deletion-reason
+  catalog (the platform already has an admin-configurable, non-enum catalog of deletion justifications —
+  a records-management package could plausibly ship a small set of common German administrative
+  justifications as defaults, the same way it already ships business calendars) or (b) org-units/groups
+  (the platform separately has a supervisor/org-hierarchy mechanism that an `Amtsleitung`/department-head
+  role would naturally sit on top of, but the package's `Abteilung` folders and admin roles are two
+  currently-unconnected islands with no way to link them via config import). Real backend/schema work
+  first (new `ConfigCategory` variants, export/import support in `config-service`), then package concrete
+  eGov defaults using the new categories once they exist. Session decides whether output-stamping
+  defaults (a third, smaller gap — no export/stamp settings are part of the config-package format at all
+  today) fits in the same session or needs its own follow-up, based on how large the deletion-reason-
+  catalog/org-unit category work turns out to be in practice.
+
+**Definition of Done**: P80-S1 needs no new ADR (pure config content, no architecture decision) beyond
+maybe a short note if the classification-level/retention choices need justification; P80-S2 needs a real
+ADR (new exportable config category is a genuine schema/architecture decision); a concrete before/after
+diff of `packages/egov/config.json` in both sessions' `PROGRESS.md` entries; docs updated.
+
+## Phase 81 — UI Spacing & Layout Polish (user-requested)
+
+**Context**: the user reported, in their own words, that several concrete visual issues remain even
+after Phase 77's UI-modernization work: buttons sitting directly adjacent to each other with no gap,
+line-wrap behavior that reads as unintentional/unintuitive, and auto-generated layout rows (the
+`.form-grid`/`.layout-row`-style containers) that feel cramped together with missing spacing between
+rows. This is a **distinct** problem from what Phase 77 fixed — Phase 77's formula added *color and
+border* to previously-bare native controls (the `primaryBtn`/`secondaryBtn`/`fieldInput` classes), it
+never touched *spacing* (gaps, margins, the actual numeric values behind `--dms-space-*` tokens or
+per-component `gap-*`/gap-related Tailwind utilities). No research agent in this round specifically
+audited spacing/gap values — that needs a dedicated visual pass, not a text-based ADR/docs sweep.
+
+- **P81-S1 — Assessment: systematic spacing/gap audit across all six frontend apps**: same discipline
+  the user chose for Phase 77 itself ("full assessment first," not blind fixing). Screenshot
+  representative pages across `admin-ui`/`user-ui`/`reviewer-ui`/`process-designer`/`migration-console`/
+  `office-addin`, specifically looking for: (a) button groups using a too-tight `gap` value or no gap at
+  all (the established formula's buttons often sit in a bare `<span className="flex gap-2">` — 8px may
+  be reading as cramped in practice, worth checking against the actual rendered result, not just the
+  class name); (b) `flex-wrap` usage without a sensible `min-width`/basis on wrapped children, producing
+  the "unintuitive line break" symptom (a child wrapping mid-way through a logical group rather than at a
+  sensible boundary); (c) the `.form-grid`/`.layout-row` family's actual `gap`/`row-gap` values across
+  admin-ui and user-ui (both apps' `globals.css` define these somewhat independently per ADR 0006's
+  "duplicate on purpose" stance — check whether they've drifted to different, both-too-small values).
+  Produces a concrete, itemized list of specific gap-value/wrap-behavior fixes (e.g. "bump `gap-2` to
+  `gap-3` in every button-group span," "add `min-width` to X's flex children," "increase `.form-grid`'s
+  `row-gap` from `--dms-space-2` to `--dms-space-3`") — not a redesign, a spacing-scale correction.
+- **P81-S2 onward — apply the assessed fixes app by app**: same rollout shape as Phase 49/75/77's own
+  precedent (small apps first to prove the fix mechanics cheaply, then `user-ui`/`admin-ui` each getting
+  their own session given size). Exact session count and grouping depends entirely on what P81-S1's audit
+  actually finds — could be as small as a couple of shared `globals.css` token corrections that
+  automatically fix most instances at once (if the root cause turns out to be a couple of too-small
+  `--dms-space-*` values used everywhere), or could need per-component spot-fixes if the cramping is
+  inconsistent across components. P81-S1's own findings determine this phase's real session count.
+
+**Definition of Done**: P81-S1 needs no new ADR (pure assessment, produces a punch list); later sessions
+need a new ADR only if a shared token value changes (a real, if small, design-system decision) — a
+per-component spot-fix does not; live browser verification with before/after screenshots is
+**non-negotiable** for every session in this phase, same standard as Phase 49/75/77, since the entire
+point is visually inspectable; docs and `PROGRESS.md` updated per session.
+
+## Phase 82 — Scoping-Only Sessions for the Larger Remaining Items
+
+Bundles the handful of genuinely real, but too large to just fix in a bundled session, findings from this
+round that deserve a proper scoping pass before a future build session, following the same
+scoping-not-building precedent as ADR 0147/0161/0207/0209/0212.
+
+- **P82-S1 (scoping only) — `fleet-management-service` per-operator authentication**: ADR 0212 (Phase 73
+  Session 2) already scoped a concrete fix (per-operator bearer tokens, a new `FleetOperator` table) for
+  the plain-text `actor != proposed_by` four-eyes check, and even named a specific follow-up session
+  (P73-S2b) — which was never executed. Confirmed directly in code (`_require_operator_key` still has no
+  identity resolution) that the gap is real and the design already exists. This session either just
+  builds ADR 0212's already-scoped design directly (likely the right call, given the scoping work is
+  already done) or re-confirms it's still the right design before building — session decides which,
+  but either way this is the cheapest scoping-only session in this phase since the scoping already
+  happened once.
+- **P82-S2 (scoping only) — `case-service` destruction-scheduling/quarantine primitive**: ADR 0116
+  (records quarantine) named this as a real, unbuilt gap — `case-service` has only a read-only quarantine
+  indicator, no actual scheduling/destruction primitive comparable to what `document-service` has for
+  documents. Needs a scoping pass to decide the concrete shape (reuse `document-service`'s pattern
+  directly vs. a case-specific variant, given cases aggregate documents that may each have their own
+  independent retention state) before a build session is worth planning.
+- **P82-S3 (scoping only) — PDF/UA conformance validation (veraPDF or equivalent)**: named independently
+  across three different ADRs (0107 PDF export, 0158 multi-document structure-tree merge, and the
+  accessibility work from Phase 33) as "not independently ISO 14289/PDF-UA validated, `is_tagged_pdf()`
+  is an approximation" — the same underlying gap keeps resurfacing because no session has ever scoped
+  what a real conformance-validation integration would actually need (a maintained veraPDF Java/CLI
+  wrapper callable from `rendering-service`'s Python codebase, licensing check, output-format decision).
+  Worth closing for good with one real scoping pass instead of it continuing to surface as a recurring
+  "known limitation" footnote.
+
+**Definition of Done**: each session produces a real ADR with a concrete, build-ready recommendation (or
+an explicit "still not worth building, here's why" verdict) — no code diff expected except possibly docs;
+`PROGRESS.md` marks each explicitly as "Scoping, kein Feature."
+
+## Bewusst nicht in diesen Plan aufgenommen
+
+Re-confirmed, not stale, still correctly deferred (this round's staleness-reassessment agent independently
+verified every one of these against current code rather than re-trusting the Phase 73+ list's own text):
+
+- **`workflow-service`'s distributed lock for boundary timers across replicas** — `infra/k8s/dms/
+  values.yaml` confirmed still `replicas: 1`/`autoscaling.enabled: false`; premise still doesn't hold.
+- **`storage-service` Azure WORM** — Azurite still can't do immutability policies, confirmed in code
+  comments verbatim unchanged.
+- **`signature-service` PKCS#11/HSM, QES, OCSP/CRL revocation** — no code exists for any of the three;
+  QES specifically remains blocked on a real external QTSP business relationship, no trigger.
+- **`mail-connector` Microsoft Graph/O365 backend** (ADR 0161, already scoped) — no `GraphBackend` file
+  exists; stays scoped-not-scheduled, no operator need identified.
+- **SAML 2.0, XAdES/CAdES** — zero references anywhere in the codebase, re-confirmed via direct grep.
+- **CheckMK integration** — already explicitly declined by the user in an earlier session ("I want
+  Grafana, no CheckMK"), documented in `docs/operations/monitoring.md`; not a gap, a settled decision.
+- **`registry-service`'s unpolled `health_endpoint`** — confirmed still genuinely unpolled (relies purely
+  on heartbeat push); low-value, no session has picked it up across several rounds, stays deferred.
+- **`permission-service`'s coarse (non-subtree-scoped) cache invalidation** — confirmed still a full
+  `DELETE FROM EffectivePermissionCache` on every change; possible future optimization, no API change
+  needed, stays a low-value polish item.
+- **CMIS Connector's remaining CMIS 1.1 scope** (full type system, renditions, relationships, policies,
+  ACL, multi-repository, etc.) — deliberate reference-implementation scope boundary from the start, not
+  a gap to close.
+- **`ocr-service`'s PaddleOCR engine, batch-scan intake splitting, ZUGFeRD/Factur-X extraction** (ADR
+  0011/0207/0209) — the latter two are already scoped (ADR 0207/0209) but no session has picked them up;
+  stay scoped-not-scheduled, same as `mail-connector`'s Graph backend, no operator demand identified.
+- **`reviewer-ui`'s BPMN-lane-based task pre-selection** — blocked on `workflow-service` never enforcing
+  BPMN lanes structurally (a separate, larger gap than just the UI surface); stays deferred until lane
+  enforcement itself becomes worth building.
+- **`auth-service`'s superuser-session elevated-audit-priority / rolling-inactivity deactivation** —
+  investigated independently at P63-S1 and again in this round; both remain deliberately-scoped
+  limitations named in ADR 0023's own "Consequences," not newly discovered gaps.
+- Assorted smaller, already-individually-named-and-declined polish items surfaced again this round
+  (`config-service`'s shallow diff, `object-type-service`'s cycle detection, `query-service`'s free-text
+  SQL manipulation, `search-service`'s two-word proximity cap, gateway's non-latency-aware instance
+  selection) — unchanged, still individually too low-value for their own session, several explicitly
+  re-examined-and-declined by name in their own ADRs already.
+
+## Definition of Done for Phases 78–82 (unchanged, `CONTRIBUTING.md`)
+
+Same standing rule as every phase above: tests green, `docs/services/*.md` current, new ADR for
+non-trivial decisions (see per-phase notes above for which sessions need one), `PROGRESS.md` update,
+`graphify update .` at phase end only (not after every session), backend regression
+(`scripts/run-tests.sh --build`) + frontend regression (`tsc`/`eslint`/`vitest`/`next build`) before
+closing a session, real browser verification (screenshots) for every UI-visible change — non-negotiable
+for Phase 81 specifically, since its entire point is user-visible.
+
+---
+
 ## PROGRESS.md — Resume Mechanism
 
 `dms/PROGRESS.md` is created as the first order of business in P0-S1 and is the entry point for every new session:
