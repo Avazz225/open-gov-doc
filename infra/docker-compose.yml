@@ -1500,6 +1500,15 @@ services:
       # federation-hub-service, ADR 0028) - an operator would run it
       # separately.
       DMS_POSTGRES_DSN: postgresql+asyncpg://svc_fleet:${POSTGRES_PASSWORD_FLEET:-fleet_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      # Phase 79 Session 3: previously left unset entirely (fail-closed
+      # default, `None`) - correct for a production posture where an
+      # operator deliberately configures a real secret, but it also meant
+      # `admin-ui`'s own fleet-management-view.md E2E spec had no way to
+      # ever pass this dev stack's gate, timing out on every run (looked
+      # like "stale test" drift, was actually a missing dev-only default -
+      # see docs/services/fleet-management-service.md). Same `_dev_only`
+      # placeholder-secret convention already used throughout this file.
+      DMS_FLEET_OPERATOR_KEY: ${FLEET_OPERATOR_KEY:-fleet-operator-dev-only-key}
     ports:
       - "127.0.0.1:${FLEET_MANAGEMENT_SERVICE_PORT:-8031}:8000"
     depends_on:

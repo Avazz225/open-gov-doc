@@ -16,10 +16,13 @@ export const GATEWAY_BASE_URL = process.env.E2E_GATEWAY_BASE_URL || "http://loca
 
 export { test, expect };
 
-export async function loginViaUi(page: import("@playwright/test").Page) {
+export async function loginViaUi(
+  page: import("@playwright/test").Page,
+  credentials?: { username: string; password: string }
+) {
   await page.goto("/login");
-  await page.locator("#username").fill(TEST_USERNAME);
-  await page.locator("#password").fill(TEST_PASSWORD);
+  await page.locator("#username").fill(credentials?.username ?? TEST_USERNAME);
+  await page.locator("#password").fill(credentials?.password ?? TEST_PASSWORD);
   await page.getByRole("button", { name: "Anmelden" }).click();
   await expect(page).toHaveURL("/");
 }

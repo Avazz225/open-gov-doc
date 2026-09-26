@@ -2376,7 +2376,7 @@ reconfirmed).
   → 35-40s/19 passed. `cmis-connector` confirmed NOT to share this bug despite sharing
   `dms-connector-sdk` — it's a plain FastAPI service with no `wsgidav`-style per-member call pattern.
   Rebuilt/redeployed; docs updated (`webdav-connector.md` Open Points, corrected with the real cause).
-- **P79-S3 — Test-suite health cleanup**: `admin-ui`'s three stale Playwright specs
+- **P79-S3 — Test-suite health cleanup**: ✅ ~~`admin-ui`'s three stale Playwright specs
   (`user-management.spec.ts`, `fleet-management.spec.ts`, `email-templates.spec.ts` — drifted behind
   real i18n/label changes since only `login.spec.ts` was fixed at P71-S3); `auth-service`'s circular-
   dependency test failure (permission-service's superuser check calls back into auth-service while its
@@ -2385,7 +2385,36 @@ reconfirmed).
   intermittent `federation/xdomea-dispatch` test flake first found at ADR 0195 and still unresolved as of
   ADR 0211. Four independent, known, already-diagnosed test-suite-noise items bundled into one cleanup
   session so the regression suite stops carrying known-red baggage into every future phase's own
-  regression gate.
+  regression gate.~~ **Done, with two corrections found while implementing.** (1) `user-management.spec.ts`
+  was the only one of the three admin-ui specs with genuinely stale text (`"Nutzer anlegen"` →
+  `"Konto anlegen"`); `fleet-management.spec.ts` failed on a missing `DMS_FLEET_OPERATOR_KEY` dev default
+  (never permanently set after P67-S1's one-off live verification); `email-templates.spec.ts`/
+  `object-types.spec.ts` (a FOURTH stale-looking spec named in ADR 0197 but not in this plan entry) both
+  failed because the shared `users-admin` E2E account genuinely lacks `admin.notification_config`/
+  `admin.object_config` — not stale text at all. Fixed by logging into `object-types.spec.ts` as the
+  existing `config-admin` account and adding a new bootstrapped `notification-admin` technical account
+  (`bootstrap.py`) for `email-templates.spec.ts`, plus the operator-key default. All 7 admin-ui Playwright
+  specs pass now (was 3/7). (2) **The "ADR 0200" cited for the circular-dependency item is a plan-writing
+  mistake** — that ADR is about an unrelated `business_key`-validation revert; the actual, correctly-named
+  ADR for the `approval_config_override` fixture bug is **0216** (auth-service's own fixture, not
+  workflow-service's as this plan entry also misstated). Root cause (confirmed by direct code read, not
+  assumed): `permission-service`'s `_require_role_management` unconditionally calls
+  `_is_active_superuser()` → a cross-service HTTP call to `auth-service` with a 30s timeout, on the hot
+  path of every role/role-assignment/approval-config write - exactly the circular structural risk during
+  `auth-service`'s own test run (its container stopped, only an in-process `TestClient` serving) AND the
+  same call the `approval_config_override` fixture's two ungated `PUT`s depend on. Fixed with a short,
+  dedicated 3s timeout on that one call (`permission_service/auth_client.py`) plus `.raise_for_status()`
+  and `required_permission` passthrough on the fixture's two `PUT`s (that field is replace-not-merge by
+  design, already documented/worked around in `admin-ui`'s `ApprovalSettings.tsx` - the fixture just
+  hadn't followed the same rule). The federation/xdomea-dispatch flake (ADR 0195/0211) turned out to be
+  fully deterministic, not intermittent: `installation_gateway_base_url`'s default
+  (`http://gateway-service:8000`) resolves to a private Docker-network address, which Phase 60's SSRF
+  guard correctly rejects, leaving self-registration silently failed on every test run - new **ADR 0232**
+  corrects both prior ADRs' "flake, cause unknown" framing and documents the fix (test-only callback-URL
+  override to a public placeholder). New ADR 0231 (P79-S2, webdav) and 0232 (this item) - the rest is
+  execution of already-decided patterns. Results: `auth-service` 158/162→162/162, `workflow-service`
+  232/238→238/238, admin-ui Playwright 3/7→7/7, `permission-service` 190/190 unchanged (regression-tested
+  after the timeout change). `ruff`/`ruff format` clean on every touched file.
 
 **Definition of Done**: regression test per fix; no new ADR expected (execution/completion of
 already-established patterns, no new architecture decisions) except P79-S2 if the pagination approach

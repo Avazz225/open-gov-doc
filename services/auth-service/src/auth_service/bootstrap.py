@@ -47,20 +47,28 @@ def _ensure_dms_admin_role(admin: KeycloakAdmin) -> None:
 
 DOMAIN_ADMIN_USERS_USERNAME = "users-admin"
 DOMAIN_ADMIN_CONFIG_USERNAME = "config-admin"
+DOMAIN_ADMIN_NOTIFICATION_USERNAME = "notification-admin"
 
-# Technical accounts per domain for which this session already wires up
-# real enforcement (`(username, native permission-service role)`) -
+# Technical accounts per domain for which a real interactive admin-ui flow
+# already exists (`(username, native permission-service role)`) -
 # `users-admin`/"user/permission management" since P6-S5, `config-admin`/
 # "object type/workflow configuration" since P6-S6 (workflow definitions/
-# script task upload). The remaining 5 domains seeded in
+# script task upload), `notification-admin`/"notification configuration"
+# since Phase 79 Session 3 (email-template CRUD, `admin-ui`'s
+# `/email-templates/` page - found missing while fixing that page's own
+# stale-looking Playwright spec, which was actually failing because
+# `users-admin` genuinely lacks `admin.notification_config`, not because of
+# drifted UI text). The many other domains seeded in
 # `permission_service.repository.DOMAIN_ADMIN_ROLES` deliberately don't get
-# an account yet (see the rationale there). Since P18-S3 these accounts
-# live as `TechnicalAccount` in this service's own DB instead of in
+# an account yet - only added here once a real flow needs one to log in
+# interactively as, same precedent as the first two. Since P18-S3 these
+# accounts live as `TechnicalAccount` in this service's own DB instead of in
 # Keycloak (see `domain_admins.py`) - hence no last-name field anymore,
 # that was a pure Keycloak profile requirement.
 DOMAIN_ADMIN_ACCOUNTS: list[tuple[str, str]] = [
     (DOMAIN_ADMIN_USERS_USERNAME, "domain-admin-users"),
     (DOMAIN_ADMIN_CONFIG_USERNAME, "domain-admin-config"),
+    (DOMAIN_ADMIN_NOTIFICATION_USERNAME, "domain-admin-notification"),
 ]
 
 

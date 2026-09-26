@@ -113,12 +113,31 @@ def test_federated_search_inbound_returns_403_when_disabled(client):
 def federation_enabled(monkeypatch):
     """Echte Selbst-Registrierung am laufenden Federation Hub (7.4) - gleiches
     Selbst-Loopback-Testmuster wie überall sonst in diesem Projekt
-    (federation-hub-service P6-S9, mail-connector P15-S3)."""
+    (federation-hub-service P6-S9, mail-connector P15-S3).
+
+    Phase 79 Session 3 (ADR 0195/0211's "federation/xdomea-dispatch flake"
+    root-caused): `settings.installation_gateway_base_url`'s own default
+    (`http://gateway-service:8000`) resolves, from `federation-hub-service`'s
+    own point of view (same Docker network), to a PRIVATE address - Phase
+    60's `_validate_callback_base_url` SSRF guard correctly rejects it with
+    `422`, which previously left self-registration silently failed
+    (`app.state.federation_hub_client = None`) and every test depending on
+    it failing with `503`/empty results, misdiagnosed across two ADRs as an
+    intermittent ordering flake rather than this deterministic cause. This
+    fixture is specifically about EXERCISING the registration success path,
+    so it overrides the callback URL to a genuinely public, non-reserved
+    address (`8.8.8.8`, same placeholder this project's own P78-S1 SSRF
+    tests already use) - passes the guard, and nothing here ever attempts a
+    real callback delivery to it (that would need a separate peer
+    installation, out of scope for these tests)."""
     import auth_service.main as main_module
 
     hub_url = "http://localhost:8018"
     monkeypatch.setattr(main_module.settings, "federation_hub_base_url", hub_url)
     monkeypatch.setattr(main_module.settings, "federated_directory_enabled", True)
+    monkeypatch.setattr(
+        main_module.settings, "installation_gateway_base_url", "http://8.8.8.8:8000"
+    )
     with TestClient(main_module.app) as c:
         yield c
 

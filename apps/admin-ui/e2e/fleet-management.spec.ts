@@ -3,10 +3,16 @@ import { test, expect, loginViaUi } from "./fixtures";
 // Fleet management (P67-S1) - wires up fleet-management-service, which had
 // no admin-ui caller at all before this session. Every fleet-management-
 // service endpoint (including the plain list) requires the operator key
-// (`DMS_FLEET_OPERATOR_KEY`, TEMPORARILY set in infra/docker-compose.yml
-// for this live verification only, same as P54-S1's own precedent - not a
-// normal admin-JWT-gated flow like the other E2E specs in this directory).
-const OPERATOR_KEY = process.env.E2E_FLEET_OPERATOR_KEY || "p67s1-live-verify-key";
+// (`DMS_FLEET_OPERATOR_KEY`) - not a normal admin-JWT-gated flow like the
+// other E2E specs in this directory. P67-S1 itself set this key only
+// TEMPORARILY for a one-off live verification, then removed it again
+// (fail-closed default), which meant this very spec could never actually
+// pass afterward - looked like "drifted UI text" in later gap-analysis
+// rounds, but was really just a missing dev-only default. Phase 79 Session 3
+// gave `infra/docker-compose.yml` a permanent `_dev_only`-style default for
+// this key (same convention every other dev secret in that file already
+// uses) - this constant's fallback must match it exactly.
+const OPERATOR_KEY = process.env.E2E_FLEET_OPERATOR_KEY || "fleet-operator-dev-only-key";
 
 test("registers a managed installation, shows the one-time key, then removes it", async ({
   page,

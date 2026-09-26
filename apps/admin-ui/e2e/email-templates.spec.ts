@@ -6,7 +6,13 @@ import { test, expect, loginViaUi } from "./fixtures";
 // in the table, then edits and deletes it again (cleanup, same convention
 // as user-management.spec.ts's create/delete round-trip).
 test("creates, edits, and deletes an email template", async ({ page }) => {
-  await loginViaUi(page);
+  // `/email-templates/` is gated behind `admin.notification_config`
+  // (RequireCapability) - `users-admin` only carries `admin.user_management`
+  // and does not have this capability (confirmed live against the running
+  // stack, Phase 79 Session 3), so this spec must log in as the new
+  // `notification-admin` technical account (bootstrap.py) instead. This, not
+  // stale UI text, was the actual reason this spec previously timed out.
+  await loginViaUi(page, { username: "notification-admin", password: "notification-admin" });
   await page.goto("/email-templates/");
 
   const form = page.getByRole("form", { name: "Vorlage konfigurieren" });

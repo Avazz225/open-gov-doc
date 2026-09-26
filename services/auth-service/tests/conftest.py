@@ -294,19 +294,41 @@ def approval_config_override():
         with httpx.Client(base_url=settings.permission_service_base_url, timeout=10.0) as pc:
             config = pc.get(f"/approval-config/{action_type}")
             originally_required = config.status_code == 200 and config.json()["requires_approval"]
+            # `required_permission` must be sent through explicitly on every
+            # PUT (same documented requirement as `admin-ui`'s
+            # `ApprovalSettings.tsx`/`putApprovalConfig` - the backend
+            # replaces, not merges, so omitting it here would silently wipe
+            # any four-eyes-eligibility restriction already configured for
+            # this action_type on a real installation).
+            required_permission = (
+                config.json().get("required_permission") if config.status_code == 200 else None
+            )
+            # Phase 79 Session 3 (ADR 0200): both PUTs previously had no
+            # `.raise_for_status()` - a failed/slow override (e.g. this
+            # call's own dependency chain briefly reaching an unreachable
+            # auth-service, see `permission_service.auth_client`'s new
+            # short timeout) silently left the override unapplied instead of
+            # surfacing as a clear setup error, producing a confusing
+            # downstream assertion failure instead ("the timing bug").
             pc.put(
                 f"/approval-config/{action_type}",
-                json={"requires_approval": requires_approval},
+                json={
+                    "requires_approval": requires_approval,
+                    "required_permission": required_permission,
+                },
                 headers=admin_headers,
-            )
+            ).raise_for_status()
             try:
                 yield
             finally:
                 pc.put(
                     f"/approval-config/{action_type}",
-                    json={"requires_approval": originally_required},
+                    json={
+                        "requires_approval": originally_required,
+                        "required_permission": required_permission,
+                    },
                     headers=admin_headers,
-                )
+                ).raise_for_status()
 
     yield _override
 

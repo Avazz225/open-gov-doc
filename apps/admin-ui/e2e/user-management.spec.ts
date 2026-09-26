@@ -13,7 +13,7 @@ test("creates a user, sees it in the list, and deletes it again", async ({ page 
   const username = `e2e-admin-ui-${Date.now()}`;
   const email = `${username}@example.invalid`;
 
-  const createUserForm = page.getByRole("form", { name: "Nutzer anlegen" });
+  const createUserForm = page.getByRole("form", { name: "Konto anlegen" });
   await createUserForm.getByLabel("Benutzername").fill(username);
   await createUserForm.getByLabel("E-Mail").fill(email);
   await createUserForm.getByLabel("Passwort").fill("e2e-Passw0rd!");

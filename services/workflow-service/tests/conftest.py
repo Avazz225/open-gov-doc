@@ -28,6 +28,21 @@ FEDERATION_HUB_SERVICE_URL = os.environ.get(
     "TEST_FEDERATION_HUB_SERVICE_URL", "http://localhost:8018"
 )
 os.environ["DMS_FEDERATION_HUB_BASE_URL"] = FEDERATION_HUB_SERVICE_URL
+# Phase 79 Session 3 (ADR 0195/0211's "federation/xdomea-dispatch flake"
+# root-caused): `installation_gateway_base_url`'s own default
+# (`http://gateway-service:8000`) resolves, from `federation-hub-service`'s
+# own point of view (same Docker network), to a PRIVATE address - Phase 60's
+# `_validate_callback_base_url` SSRF guard correctly rejects it with `422`,
+# which previously left self-registration silently failed
+# (`app.state.federation_client = None`) on EVERY test app startup (this
+# module sets `DMS_FEDERATION_HUB_BASE_URL` unconditionally above, so
+# self-registration is always attempted) and every test depending on it
+# failing, misdiagnosed across two ADRs as an intermittent ordering flake
+# rather than this deterministic cause. Overridden here to a genuinely
+# public, non-reserved address (`8.8.8.8`, same placeholder this project's
+# own P78-S1 SSRF tests already use) - passes the guard; nothing here ever
+# attempts a real callback delivery to it.
+os.environ["DMS_INSTALLATION_GATEWAY_BASE_URL"] = "http://8.8.8.8:8000"
 
 PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://localhost:8004")
 # Fester Principal statt uuid4() je Testlauf, damit die Rollenzuweisung

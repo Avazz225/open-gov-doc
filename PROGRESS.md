@@ -2,7 +2,78 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P79-S2 (second session of Phase 79 — `webdav-connector` root `PROPFIND` pagination).
+**Last completed:** P79-S3 (third and final session of Phase 79 — test-suite health cleanup). Four
+independent, already-diagnosed items, closed together — **two of the plan's own citations turned out
+wrong**, corrected while implementing rather than silently worked around.
+
+**1. admin-ui's "stale Playwright specs"** — re-ran the full `e2e/` suite fresh first rather than trusting
+the plan's diagnosis: only `user-management.spec.ts` had genuinely stale text (`"Nutzer anlegen"` →
+`"Konto anlegen"`, one line). `fleet-management.spec.ts` failed on a missing `DMS_FLEET_OPERATOR_KEY` dev
+default — P67-S1 set it only temporarily for a one-off live verification, then removed it again
+(fail-closed default), so this spec could never actually pass afterward; added a permanent `_dev_only`
+default to `infra/docker-compose.yml` (same convention as every other dev secret there). `object-types.spec.ts`
+(a fourth stale-looking spec named in ADR 0197 but not in this session's own plan entry) and
+`email-templates.spec.ts` both failed for a THIRD, different reason — confirmed via a direct
+`permission-service` `/check` call that the shared `users-admin` E2E account genuinely lacks
+`admin.object_config`/`admin.notification_config` (not UI drift at all). Fixed by logging
+`object-types.spec.ts` in as the existing `config-admin` account and adding a brand-new
+`notification-admin` bootstrapped technical account (`auth-service`'s `bootstrap.py`, same
+`DOMAIN_ADMIN_ACCOUNTS` mechanism as `users-admin`/`config-admin`) for `email-templates.spec.ts`;
+`fixtures.ts`'s `loginViaUi()` gained an optional per-call credentials parameter. All 7 `e2e/` specs pass
+now (was 3/7).
+
+**2 & 3. The "ADR 0200" circular-dependency citation was a plan-writing mistake** — that ADR is about an
+unrelated `business_key`-validation revert. The actual, correctly-named ADR for the `approval_config_override`
+fixture-timing bug is **0216** (it's `auth-service`'s own fixture, not `workflow-service`'s, as the plan
+also misstated). Direct code read (not assumed) found the real, shared mechanism behind both items:
+`permission-service`'s `_require_role_management` unconditionally calls `_is_active_superuser()` — a
+cross-service HTTP call to `auth-service` with a 30s timeout — on the hot path of every
+role/role-assignment/approval-config write. That's both the structural circular-dependency risk during
+`auth-service`'s own test run (its container stopped, only an in-process `TestClient` serving, while
+`permission-service` still tries to reach it) AND exactly the call the `approval_config_override` fixture's
+two `PUT`s depend on. Fixed with a dedicated 3s timeout on that one call
+(`permission_service/auth_client.py` — it has exactly one caller, already fails safe on any exception, so
+this changes latency bounds only, not behavior) plus `.raise_for_status()` and `required_permission`
+passthrough on the fixture's two `PUT`s (that field is replace-not-merge by design, already documented and
+worked around in `admin-ui`'s `ApprovalSettings.tsx` — the test fixture just hadn't followed the same
+rule, silently clobbering it to `null` on every override).
+
+**4. The federation/xdomea-dispatch flake (ADR 0195/0211) turned out fully deterministic, not
+intermittent.** `installation_gateway_base_url`'s default (`http://gateway-service:8000`) resolves, from
+`federation-hub-service`'s own point of view, to a private Docker-network address — Phase 60's callback
+SSRF guard (ADR added well after this default was chosen) correctly rejects it with `422`, leaving
+self-registration silently failed on every test run. `workflow-service`'s `conftest.py` enables
+federation unconditionally for every test, so this was never actually intermittent there (6/6 of the
+flagged tests failed together, every run) — the *symptom* varying by test ordering/selection across two
+ADRs' different observation windows is what made it look like a race. New **ADR 0232** corrects both
+prior ADRs' "cause unknown" framing (neither is rewritten, per this project's own standing rule) and
+documents the fix: override the callback URL to a genuinely public, non-reserved placeholder (`8.8.8.8`,
+already this project's own established SSRF-test placeholder from P78-S1) in exactly the two places that
+self-register for real (`auth-service`'s `federation_enabled` fixture, `workflow-service`'s `conftest.py`
+import-time env var) — passes the guard without weakening it, no production code touched.
+
+**No new ADR for items 1-3** (execution of already-decided patterns once the real causes were found); new
+ADR 0232 for item 4 (a genuine "two prior ADRs' diagnosis was incomplete, here's the actual cause"
+correction). Results: `auth-service` 158/162 → 162/162 (the exact 4 federation failures reproduced at
+Phase 78's close and again at P79-S1's own close, now gone); `workflow-service` 232/238 → 238/238;
+`permission-service` 190/190 unchanged (re-run after the timeout change, confirming no regression);
+admin-ui Playwright 3/7 → 7/7. `ruff`/`ruff format` clean on every touched file. `auth-service`/
+`permission-service` rebuilt/redeployed; live-verified the new `notification-admin` account (`POST
+/login` succeeds, JWT carries `domain-admin-notification`) and the fleet operator key
+(`GET /installations` with the new dev-only bearer succeeds) against the real running stack. Docs updated:
+`admin-ui.md` (Open Points, the P71-S3 bullet this session's own investigation superseded),
+`auth-service.md` (new technical account), `permission-service.md` (`auth_client` timeout rationale),
+`workflow-service.md` (Open Points, ADR 0232 cross-reference).
+
+**This closes Phase 79 in full** (P79-S1 small-fix bundle, P79-S2 webdav-connector pagination, P79-S3 this
+entry) — phase-end DoD (`graphify update .` + full unfiltered backend regression) still outstanding.
+
+**Next session:** Phase 79 phase-end DoD, then Phase 80 — eGov configuration package completion (the
+user's own explicitly requested initiative).
+
+---
+
+Immediately before: P79-S2 (second session of Phase 79 — `webdav-connector` root `PROPFIND` pagination).
 **Not the fix the plan anticipated.** Re-reproduced the failure fresh before touching any code (full
 `webdav-connector` suite: 6 failed/12 passed, 239s, `httpcore.ReadTimeout`) and checked the CURRENT item
 counts under this dev stack's `root` — only 175 folders/131 documents now (down from the historical
@@ -43,11 +114,6 @@ redeployed `webdav-connector`; live-verified via the real test suite against the
 separate manual curl verification needed — the regression test itself IS the live verification here, since
 it exercises the real WebDAV protocol path end-to-end). Docs updated: `webdav-connector.md` (Open Points,
 corrected with the real root cause in place of the originally-assumed one).
-
-**Next session:** P79-S3 — test-suite health cleanup (admin-ui's 3 stale Playwright specs, auth-service's
-circular-dependency test failure, `workflow-service`'s `approval_config_override` fixture timing bug, and
-the federation/xdomea-dispatch flake reconfirmed twice now — once at Phase 78 close, once again in
-`auth-service`'s own P79-S1 test run).
 
 ---
 

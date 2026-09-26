@@ -7,7 +7,12 @@ import { test, expect, loginViaUi } from "./fixtures";
 // can create/delete object types with its existing permissions - no new
 // grant needed.
 test("creates an object type, edits its attributes, and deletes it", async ({ page }) => {
-  await loginViaUi(page);
+  // `/object-types/` is gated behind `admin.object_config` (RequireCapability)
+  // - `users-admin` only carries `admin.user_management` and does not have
+  // this capability (confirmed live against the running stack, Phase 79
+  // Session 3), so this spec must log in as `config-admin` instead. This,
+  // not stale UI text, was the actual reason this spec previously timed out.
+  await loginViaUi(page, { username: "config-admin", password: "config-admin" });
   await page.goto("/object-types/");
 
   const typeName = `e2e-admin-ui-objtype-${Date.now()}`;
