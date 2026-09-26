@@ -2,7 +2,38 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** Gap-analysis round after Phase 77 — six parallel research agents (ADR self-named
+**Last completed:** P78-S1 (first session of Phase 78 — DNS-rebinding TOCTOU fix for `migration-service`'s
+and `federation-hub-service`'s SSRF guards). Both guards (`_validate_peer_base_url`/ADR 0182,
+`_validate_callback_base_url`/ADR 0183) previously validated a target hostname exactly once — at pairing-
+creation/registration time — then trusted it forever after; an attacker controlling DNS for an
+already-legitimately-paired peer could point it at a private/loopback/metadata address only after the
+one-time check passed. **Fix**: the same validation function now also runs immediately before every
+actual outbound call — `migration-service`'s `_make_peer_client` (the single constructor for all 4 real
+transfer-step peer interactions) and `federation-hub-service`'s `_deliver` (the single choke point for all
+6 delivery call sites, immediate + both retry-tick loops). A rejection at delivery time is treated exactly
+like any other delivery failure (existing retry/exhaustion machinery), no new status needed. New ADR 0229.
+No custom IP-pinning transport built (considered, rejected as disproportionate new infrastructure for the
+actual severity — re-validating at point-of-use closes the realistic exploitation window without it,
+same cost/benefit judgment call recorded in the ADR). New tests: `migration-service` +1 (unit-level,
+monkeypatches `socket.getaddrinfo` since this service's suite is otherwise 100% black-box HTTP with no way
+to simulate DNS rebinding against a live container), 19/19; `federation-hub-service` +1 (simulates a
+genuine rebinding sequence — resolves publicly at registration, privately at delivery — and asserts the
+mocked transport is never reached once rejected), 90/90. `ruff` clean for both changed files (project-wide
+`ruff` still fails only on the pre-existing, unrelated `libreoffice-addin` issue).
+
+**Rebuilt/redeployed both services**; live-verified against the real running stack: both guards still
+correctly reject a direct private target at creation/registration time and `migration-service` still
+accepts a real self-loopback pairing (all pre-existing behavior unchanged) — the new re-validate-at-use
+behavior itself is exhaustively covered by the two new unit tests, since a live DNS-rebinding reproduction
+would need a real, test-controlled second DNS record this environment doesn't have. Test data/temporary
+role grant cleaned up afterward. `docs/services/migration-service.md`/`federation-hub-service.md` updated
+(`federation-hub-service.md`'s "Open Points" gets the pattern's usual struck-through closed entry).
+
+**Next session:** P78-S2 — gateway backend-port bypass + chunked-encoding body-size bypass.
+
+---
+
+Immediately before: Gap-analysis round after Phase 77 — six parallel research agents (ADR self-named
 open-scope sweep across all 228 ADRs; `docs/services/*.md` Open Points sweep across all 39 service/app
 docs, 4 sub-groups; `Konzept.md` coverage check across all 14 sections, 3 sub-groups; deferred-items
 staleness reassessment; a dedicated eGov config-package completeness check against `Konzept.md` §14.2's

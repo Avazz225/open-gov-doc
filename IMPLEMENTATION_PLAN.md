@@ -2225,7 +2225,7 @@ phase for the handful of findings that are real but too large/expensive to just 
 
 ## Phase 78 — Security Hardening (cheap, high value)
 
-- **P78-S1 — DNS-rebinding TOCTOU fix for both SSRF guards, one session**: `migration-service`'s
+- **P78-S1 — DNS-rebinding TOCTOU fix for both SSRF guards, one session**: ✅ ~~`migration-service`'s
   `_validate_peer_base_url` (ADR 0182) and `federation-hub-service`'s `_validate_callback_base_url`
   (ADR 0183, shared pattern with `ocr-service`'s equivalent) both validate a target hostname's resolved
   IP once at creation/registration time, then trust the hostname again on every subsequent call — a
@@ -2233,7 +2233,20 @@ phase for the handful of findings that are real but too large/expensive to just 
   address only after the validation check passes). Same underlying bug shape in both services, same fix:
   re-resolve and re-validate at the actual call site (or pin the validated IP and connect to it directly
   with the original hostname only for TLS SNI/cert validation), not just once at setup. Bundle both since
-  it's the identical fix pattern, one session.
+  it's the identical fix pattern, one session.~~ **Done.** Correction found while implementing: ADR 0183's
+  "ocr-service's equivalent" reference was a plan-writing mistake — ADR 0183 (filename "...-ssrf-and-ocr-
+  service-document-idor.md") bundles two UNRELATED fixes from the same past session, an SSRF guard
+  (federation-hub-service) and a separate Document IDOR (ocr-service, not an SSRF guard at all); `ocr-
+  service` has no SSRF-guard code anywhere, confirmed via grep, nothing to fix there. Re-ran the same
+  validation function immediately before every actual outbound call in both real services instead of only
+  once at creation/registration time: `migration-service`'s `_make_peer_client` (single constructor for
+  all 4 transfer-step peer interactions), `federation-hub-service`'s `_deliver` (single choke point for
+  all 6 delivery call sites). New ADR 0229. New tests: `migration-service` +1 unit-level (monkeypatches
+  `socket.getaddrinfo`, this suite is otherwise 100% black-box HTTP with no way to simulate real DNS
+  rebinding), 19/19; `federation-hub-service` +1 simulating a genuine rebinding sequence (resolves
+  publicly at registration, privately at delivery, asserts the mocked transport is never reached once
+  rejected), 90/90. Both services rebuilt/redeployed, live-verified (pre-existing creation/registration-
+  time rejection behavior confirmed unchanged); docs updated.
 - **P78-S2 — Gateway backend-port bypass + chunked-encoding body-size bypass, one session**: `gateway-
   service`'s own docs (ADR 0005) still name backend service ports as directly published in `docker-
   compose.yml`, meaning a caller on the same network can skip the gateway (and its auth/rate-limiting/

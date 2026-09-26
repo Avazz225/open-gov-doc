@@ -577,6 +577,62 @@ async def test_create_handover_marks_pending_retry_on_unreachable_target(client,
     assert await _has_pending_payload(session_factory, body["id"], leg="forward")
 
 
+async def test_deliver_rejects_target_that_rebinds_to_a_private_address(
+    client, session_factory, monkeypatch
+):
+    """DNS-rebinding TOCTOU fix (Phase 78 Session 1, gap-analysis round
+    after Phase 77) - `_validate_callback_base_url` previously only ran once,
+    at registration time; a real delivery attempt (immediate or, worse, a
+    much-later retry-tick delivery) never saw it again. Simulates a genuine
+    rebinding sequence: the callback hostname resolves to a normal public
+    address at registration (passes the guard, installation created), then
+    to a private address by the time `_deliver` actually tries to reach it -
+    exactly the exploitable shape the fix closes. Confirms the handover
+    does NOT reach `delivered` and the SSRF guard, not a network error, is
+    what stopped it (no delivery attempt reaches the transport at all)."""
+    import socket
+
+    real_getaddrinfo = socket.getaddrinfo
+    resolve_calls = {"n": 0}
+
+    def _rebinding_getaddrinfo(host, *args, **kwargs):
+        if host != "rebind.example.test":
+            return real_getaddrinfo(host, *args, **kwargs)
+        resolve_calls["n"] += 1
+        ip = "8.8.8.8" if resolve_calls["n"] == 1 else "10.0.0.5"
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 80))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", _rebinding_getaddrinfo)
+
+    sender, sender_key = register_installation(client)
+    target, _ = register_installation(
+        client, callback_base_url="http://rebind.example.test"
+    )
+    assert resolve_calls["n"] == 1  # registration-time check, resolved publicly, passed
+
+    delivery_attempted = {"called": False}
+
+    def _fail_if_called(*_args, **_kwargs):
+        delivery_attempted["called"] = True
+        raise AssertionError("transport must never be reached once the guard rejects the URL")
+
+    app.state.http_client = httpx.AsyncClient(transport=httpx.MockTransport(_fail_if_called))
+
+    payload = {
+        "handover_id": str(uuid.uuid4()),
+        "to_installation_id": target["id"],
+        "process_type": "test-process",
+        "encrypted_payload": "opaque",
+    }
+    response = _signed_post(client, "/handovers", payload, sender_key, installation_id=sender["id"])
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["status"] != "delivered"
+    assert not delivery_attempted["called"]
+    assert resolve_calls["n"] == 2  # re-validated again at actual delivery time
+
+
 async def test_create_handover_reaches_delivery_failed_after_exhausting_attempts(
     client, session_factory
 ):

@@ -338,9 +338,17 @@ def _validate_callback_base_url(base_url: str) -> None:
     convention. This still closes the literal, actually-exploitable shape
     the finding describes (a metadata/loopback/private IP given directly,
     or a hostname that DOES resolve to one) - a hostname that fails to
-    resolve is simply allowed through unresolved, an accepted residual gap
-    (no DNS-rebinding protection either, same caveat as migration-service's
-    equivalent guard)."""
+    resolve is simply allowed through unresolved.
+
+    **Since Phase 78 Session 1 (gap-analysis round after Phase 77)**: also
+    called again from `_deliver` immediately before every actual delivery
+    attempt, not just once at registration time - closes the DNS-rebinding
+    TOCTOU window a registration-time-only check left open. This matters
+    more here than for migration-service's equivalent guard: a handover
+    delivery can retry hours after registration (`_run_retry_tick`/
+    `_run_result_retry_tick`'s poll loop), a much wider real-world window
+    for an attacker to flip DNS than migration-service's near-immediate
+    transfer-step calls."""
     parsed = urlparse(base_url)
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         raise HTTPException(
@@ -509,7 +517,20 @@ async def _deliver(url: str, body: dict) -> bool:
     the receiving side can verify over exactly these bytes. Network
     errors/non-2xx responses count as a failed delivery but do not raise an
     exception - the caller decides the handover status based on the return
-    value."""
+    value. **Since Phase 78 Session 1**: re-runs `_validate_callback_base_url`
+    against `url` right before the actual call, on every one of the 6 call
+    sites (immediate delivery + both retry-tick loops, forward and result
+    legs) - see that function's own docstring for why a registration-time-
+    only check left a real DNS-rebinding TOCTOU window open. An SSRF-guard
+    rejection here is treated exactly like any other delivery failure
+    (`HTTPException` caught, `False` returned) - the existing retry/
+    exhaustion machinery already handles "this target couldn't be reached"
+    correctly, no new status/handling needed."""
+    try:
+        _validate_callback_base_url(url)
+    except HTTPException:
+        logger.warning("federation_delivery_rejected_ssrf_guard", extra={"url": url})
+        return False
     raw = json.dumps(body).encode("utf-8")
     signature = sign_body(app.state.hub_private_key_pem, raw)
     try:

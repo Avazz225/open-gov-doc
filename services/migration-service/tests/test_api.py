@@ -401,6 +401,41 @@ def test_create_paired_installation_rejects_loopback_without_flag():
     assert response.status_code == 422
 
 
+def test_make_peer_client_rejects_target_that_now_resolves_privately(monkeypatch):
+    """DNS-rebinding TOCTOU fix (Phase 78 Session 1, gap-analysis round
+    after Phase 77) - `_validate_peer_base_url` previously only ran once, at
+    pairing-creation time; an attacker controlling a legitimately-paired
+    peer's DNS could point it at a private/internal address afterward and
+    the SSRF guard would never see it again. Simulates the exploitable
+    shape directly at the unit level (rather than through this file's
+    otherwise-exclusive black-box HTTP style): a real DNS-rebinding attack
+    can't be reproduced against a live container without a test-controlled
+    DNS server, which no test in this codebase sets up, so this patches
+    `socket.getaddrinfo` to make the same hostname that would have passed
+    validation once now resolve privately, and confirms `_make_peer_client` -
+    called fresh immediately before every one of the 4 real transfer-step
+    peer interactions - rejects it instead of silently proceeding."""
+    import socket
+
+    from fastapi import HTTPException
+    from migration_service import main as migration_main
+
+    class _FakeInstallation:
+        base_url = "http://peer.example.test:8000"
+        api_key = "irrelevant"
+
+    def _fake_getaddrinfo(host, *_args, **_kwargs):
+        assert host == "peer.example.test"
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.5", 8000))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", _fake_getaddrinfo)
+    try:
+        migration_main._make_peer_client(_FakeInstallation())
+        raise AssertionError("expected _make_peer_client to reject a now-private target")
+    except HTTPException as exc:
+        assert exc.status_code == 422
+
+
 def test_create_transfer_without_principal_header_is_401():
     folder = _create_folder(name=f"quelle-{uuid.uuid4().hex[:8]}")
     with httpx.Client(base_url=MIGRATION_SERVICE_URL, timeout=30.0) as client:

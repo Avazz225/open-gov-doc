@@ -153,14 +153,18 @@ def _validate_peer_base_url(base_url: str) -> None:
     permission pushes) then sends real internal data to whatever this URL
     resolves to. Rejects loopback/private/link-local/reserved/multicast
     targets (covers `169.254.169.254` cloud-metadata endpoints via the
-    link-local check) at creation time - a coarse, one-time check, not a
-    per-request guard, so it does not protect against DNS rebinding between
-    creation and actual use (a real, accepted residual gap for a first
-    pass, not previously flagged by this round's research either).
-    `settings.allow_loopback_peers` exempts ONLY loopback (never private/
-    link-local/etc.) - this project's own test suite deliberately pairs an
-    installation with itself via `http://localhost:8000`, see the settings
-    field's own docstring."""
+    link-local check). **Since Phase 78 Session 1 (gap-analysis round after
+    Phase 77)**: called both at pairing-creation time AND again inside
+    `_make_peer_client` immediately before every actual peer interaction -
+    closes the DNS-rebinding TOCTOU window a create-time-only check left
+    open (an attacker controlling the paired hostname's DNS could point it
+    at a private/loopback address only after the one-time check passed;
+    re-resolving right before each of the 4 real transfer-step call sites
+    that build a fresh `PeerClient` closes this without needing a custom
+    IP-pinning transport). `settings.allow_loopback_peers` exempts ONLY
+    loopback (never private/link-local/etc.) - this project's own test
+    suite deliberately pairs an installation with itself via
+    `http://localhost:8000`, see the settings field's own docstring."""
     parsed = urlparse(base_url)
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         raise HTTPException(
@@ -419,6 +423,11 @@ async def _reject_during_maintenance(x_dms_maintenance_active: str) -> None:
 
 
 def _make_peer_client(installation) -> PeerClient:
+    """Re-validates `installation.base_url` immediately before every actual
+    peer interaction (Phase 78 Session 1) - see `_validate_peer_base_url`'s
+    own docstring for why this call, not just the one at pairing-creation
+    time, is what actually closes the DNS-rebinding TOCTOU window."""
+    _validate_peer_base_url(installation.base_url)
     return PeerClient(
         base_url=installation.base_url,
         api_key=installation.api_key,

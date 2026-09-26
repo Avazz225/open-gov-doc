@@ -125,7 +125,11 @@ folder they had no read access to at all, and pair with an arbitrary attacker-co
   allow_loopback_peers` (`False` by default) exempts ONLY loopback, needed by this project's own
   self-loopback test convention (see "Deliberate limitations" below) — `infra/docker-compose.yml` sets it
   `true` explicitly for this dev/test stack, documented there as never something a real installation
-  should need.
+  should need. **Since Phase 78 Session 1** (gap-analysis round after Phase 77): the same validation also
+  re-runs inside `_make_peer_client`, immediately before every one of the 4 real transfer-step peer
+  interactions, not just once at pairing-creation time — closes a DNS-rebinding TOCTOU window a
+  create-time-only check left open (an attacker controlling an already-paired peer's DNS could point it
+  at a private address only after the one-time check passed).
 
 ## Deliberate limitations
 
