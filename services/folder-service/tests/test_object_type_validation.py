@@ -277,6 +277,85 @@ def test_folder_without_object_type_is_unaffected_by_parent_constraints(client):
     assert response.status_code == 201
 
 
+# Phase 79 Session 1 - closes ADR 0056's own documented "Structure templates
+# check neither required attributes nor parent-child object-type nesting
+# rules when applying" gap (the nesting half only, see that ADR's own
+# "Rationale" for why required-attribute checks stay deliberately deferred).
+
+
+def test_apply_folder_template_with_root_only_type_succeeds_at_root(client, top_level_type_id):
+    """Positive-path regression: the new nesting check at apply time must
+    not reject a structurally VALID placement."""
+    source = client.post(
+        "/folders",
+        json={"name": "Vorlagequelle", "created_by": "alice", "object_type_id": top_level_type_id},
+    ).json()
+    template = client.post(
+        "/folder-templates",
+        json={
+            "source_folder_id": source["id"],
+            "name": "Vorlage-Root",
+            "description": None,
+            "created_by": "alice",
+        },
+    ).json()
+
+    response = client.post(
+        f"/folder-templates/{template['id']}/apply",
+        json={"target_parent_id": "root", "created_by": "bob"},
+    )
+
+    assert response.status_code == 200
+
+
+def test_apply_folder_template_rejects_invalid_nesting(
+    client, top_level_type_id, second_level_type_id
+):
+    """A `second_level_type_id`-typed node (only allowed under
+    `meinTopLevelOrd`) captured as a template and then applied directly
+    under `root` must now be rejected with `400`, matching what
+    `POST /folders` already rejects for the identical placement
+    (`test_create_folder_under_wrong_parent_class_is_rejected` above) -
+    before this fix, `apply_template` bypassed this check entirely and
+    would have silently created a structurally invalid folder."""
+    top = client.post(
+        "/folders", json={"name": "Top", "created_by": "alice", "object_type_id": top_level_type_id}
+    ).json()
+    second = client.post(
+        "/folders",
+        json={
+            "name": "Second",
+            "created_by": "alice",
+            "object_type_id": second_level_type_id,
+            "parent_id": top["id"],
+        },
+    ).json()
+    template = client.post(
+        "/folder-templates",
+        json={
+            "source_folder_id": second["id"],
+            "name": "Vorlage-Second",
+            "description": None,
+            "created_by": "alice",
+        },
+    ).json()
+
+    response = client.post(
+        f"/folder-templates/{template['id']}/apply",
+        json={"target_parent_id": "root", "created_by": "bob"},
+    )
+
+    assert response.status_code == 400
+    detail = str(response.json()["detail"])
+    assert "Second" in detail
+    assert "meinTopLevelOrd" in detail
+
+    # No partial application - since the invalid node was the template's own
+    # root, nothing at all should have been created under "root" from this.
+    root_children = client.get("/folders/root/children").json()
+    assert "Second" not in [c["name"] for c in root_children]
+
+
 @pytest.fixture
 def reference_type_id():
     """P64-S1 (4.5): a fresh folder object type with one non-required

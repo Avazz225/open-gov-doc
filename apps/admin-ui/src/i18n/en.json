@@ -347,6 +347,7 @@
     "purposeUpload": "Upload",
     "customBadge": "Customized",
     "generatedBadge": "Automatically generated",
+    "staleAttributesWarning": "This saved layout still references attribute(s) that no longer exist on this object type: {attributes}. Remove or replace the affected field(s), or reset to the automatically generated layout.",
     "rowHeading": "Row {n}",
     "fieldLabel": "Display name",
     "fieldRequired": "Required field",

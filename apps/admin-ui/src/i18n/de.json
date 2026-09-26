@@ -347,6 +347,7 @@
     "purposeUpload": "Upload",
     "customBadge": "Angepasst",
     "generatedBadge": "Automatisch generiert",
+    "staleAttributesWarning": "Dieses gespeicherte Layout verweist noch auf Attribut(e), die an diesem Objekttyp nicht mehr existieren: {attributes}. Entfernen oder ersetzen Sie das betroffene Feld, oder setzen Sie auf das automatisch generierte Layout zurück.",
     "rowHeading": "Zeile {n}",
     "fieldLabel": "Anzeigename",
     "fieldRequired": "Pflichtfeld",

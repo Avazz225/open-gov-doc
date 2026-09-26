@@ -947,6 +947,33 @@ def test_apply_folder_template_unknown_template_returns_404(client):
     assert response.status_code == 404
 
 
+def test_get_breadcrumb_returns_ancestor_chain_root_first(client):
+    """Phase 79 Session 1 - closes ADR 0015's own long-standing "no endpoint
+    for breadcrumb/full path" gap."""
+    top = _create_folder(client, name="Top")
+    middle = _create_folder(client, name="Mitte", parent_id=top["id"])
+    leaf = _create_folder(client, name="Blatt", parent_id=middle["id"])
+
+    response = client.get(f"/folders/{leaf['id']}/breadcrumb")
+
+    assert response.status_code == 200
+    ids = [f["id"] for f in response.json()]
+    names = [f["name"] for f in response.json()]
+    assert ids == ["root", top["id"], middle["id"], leaf["id"]]
+    assert names[1:] == ["Top", "Mitte", "Blatt"]
+
+
+def test_get_breadcrumb_for_root_itself_returns_single_entry(client):
+    response = client.get("/folders/root/breadcrumb")
+    assert response.status_code == 200
+    assert [f["id"] for f in response.json()] == ["root"]
+
+
+def test_get_breadcrumb_for_unknown_folder_returns_404(client):
+    response = client.get("/folders/does-not-exist/breadcrumb")
+    assert response.status_code == 404
+
+
 def test_apply_folder_template_unknown_target_returns_404(client):
     projekte = _create_folder(client, name="Projekte")
     template = client.post(

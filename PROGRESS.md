@@ -2,7 +2,55 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** Phase 78 close (full backend regression + `graphify update .`, after P78-S3 closed the
+**Last completed:** P79-S1 (first session of Phase 79 — cross-service small-fix bundle). Four small,
+independent fixes bundled per the plan. **Breadcrumb**: `folder-service` gains `GET
+/folders/{id}/breadcrumb` (`repository.get_breadcrumb`, root-first ancestor walk) — closes ADR 0015's own
+long-standing "no endpoint for breadcrumb/full path" gap. **Structure-template nesting**: applying a
+template previously bypassed parent-child object-type nesting rules (`allowedParentTypes`) entirely
+(ADR 0056) — `main._validate_template_nesting` now walks the whole template tree BEFORE creating anything,
+via a new public `dms_constraint_engine.validate_parent()` (factored out of the existing private
+`_validate_parent`, so `object-type-service`'s own full `validate()` and this new narrow entry point stay
+one single source of truth) — deliberately NOT the full validate/`_validate_against_object_type` path,
+since a template node's still-empty `attributes={}` would spuriously fail required-field checks (ADR 0056
+defers those to the later `PATCH`); `folder-service` now depends on `dms-constraint-engine` directly for
+this one purpose. **Layout staleness warning**: investigation found the plan's own assumption imprecise —
+the retroactive re-check belongs in `LayoutDesigner.tsx`, not `ObjectTypeEditor.tsx` (that component only
+pushes the *initial* smart layout at creation time, it never loads an existing saved layout at all);
+`LayoutDesigner` now diffs a CUSTOM layout's referenced attributes against the object type's current list
+on every load and shows a warning naming the stale one(s) — a GENERATED layout can never go stale by
+construction (always freshly computed from current attributes), so it's never checked. **Delegation scope
+picker**: `DelegationsPane.tsx` gained a `<select multiple>` over `listProcessDefinitions()` for
+`scope_process_definition_ids` (same picker shape as the sibling object-type dimension, not the two
+resource-id dimensions' free-text idiom) — all four scope dimensions now have UI, closing a gap named
+independently in both `permission-service.md` and `user-ui.md`.
+
+No new ADR (four completions of already-decided patterns, no new architecture decisions). New tests:
+`folder-service` +7 (3 breadcrumb incl. root-itself and unknown-folder cases, 2 nesting positive/negative
+incl. a no-partial-application check reusing the existing `top_level_type_id`/`second_level_type_id`
+fixtures), 178/178; `admin-ui` +3 (staleness warning, incl. a regression proving a generated layout is
+never flagged even hypothetically), `tsc`/`eslint` clean, 309/309 vitest total; `user-ui` +1
+(process-definition scope creation), `tsc`/`eslint` clean, 293/293 vitest total. All three services
+rebuilt/redeployed; live-verified end-to-end against the real running stack: breadcrumb chain via `curl`
+(root→leaf, 3 levels deep); template-nesting rejection via `curl` (created two real object types with a
+genuine `allowedParentTypes` constraint, confirmed `400` with zero partial folder creation, plus a
+positive-path control confirming a valid placement still succeeds) — needed a throwaway
+`domain-admin-config` role-assignment for the live-verification principal, cleaned up after; both frontend
+changes via real headless-Chromium Playwright screenshots (no dev Node.js on this host, so `vitest`/`tsc`/
+`eslint`/Playwright all ran inside throwaway `node:22-alpine`/`mcr.microsoft.com/playwright` containers
+against the already-running stack) — the staleness warning correctly naming a real removed attribute
+after a genuine add-save-remove round trip against `object-type-service`, and the process-definition
+picker populated with 246 real entries from the live stack. Docs updated: `folder-service.md` (API table,
+Structure Templates, Open Points), `object-type-service.md` (corrected the now-inaccurate "only
+object-type-service imports the constraint-engine lib" claim), `admin-ui.md` (Open Points),
+`user-ui.md`/`permission-service.md` (`DelegationsPane` bullets, Open Points).
+
+**Next session:** P79-S2 — `webdav-connector` root `PROPFIND` pagination, the highest-value remaining item
+in this phase (real, already-reproduced timeout at this dev stack's scale, see Phase 78 close below for
+the reproduction).
+
+---
+
+Immediately before: Phase 78 close (full backend regression + `graphify update .`, after P78-S3 closed the
 phase). Standard phase-end cadence per `CONTRIBUTING.md`: one unfiltered `scripts/run-tests.sh --build`
 run across all ~31 backend services, plus `graphify update .` (code-only changes get free AST extraction;
 the 15 changed/added docs — including the two oversized `PROGRESS.md`/`IMPLEMENTATION_PLAN.md`, which per
@@ -34,13 +82,6 @@ session's code changes. `ruff`/`ruff format` project-wide also still fails, but 
 pre-existing, unrelated files already noted at P78-S2's close (`libreoffice-addin`, the loadtest notebook,
 five services' `logger.warning(...)` line-length, one `archival-service`/`signature-service` test file) —
 none touched this phase either.
-
-**Next session:** Phase 79 — small-fix bundle (folder breadcrumbs, layout-override retroactive check,
-structure-template nesting validation, `DelegationsPane` scope picker), `webdav-connector` root `PROPFIND`
-pagination (closes the exact timeout just reproduced above), and test-suite health (the federation/
-xdomea-dispatch flake just reconfirmed above, admin-ui's 3 stale Playwright specs, `workflow-service`'s
-`approval_config_override` fixture timing bug) — per the user's own standing instruction to keep
-committing after every session AND every phase through this whole Phase 78-82 plan.
 
 ---
 

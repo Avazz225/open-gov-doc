@@ -150,6 +150,28 @@ async def list_children(session: AsyncSession, folder_id: str) -> list[Folder]:
     return list(result.scalars().all())
 
 
+async def get_breadcrumb(session: AsyncSession, folder_id: str) -> list[Folder]:
+    """Ancestor chain from `root` down to (and including) `folder_id`,
+    root-first (Phase 79 Session 1, ADR 0015's own long-standing "Open
+    Points" gap) - only direct children were retrievable before this,
+    blocking deep-linking to an unexpanded folder in `user-ui`'s tree view
+    (the tree can't know which ancestors to expand without walking up
+    itself, one request per level). Walks `parent_id` one row at a time
+    (mirrors `list_active_subtree_ids`'s BFS-by-frontier shape, just
+    upward and single-chain instead of downward and fan-out) - a folder
+    tree has no bound on depth, so this is unavoidably O(depth) round
+    trips, but depth is realistically small (a handful of levels) compared
+    to the O(N)-in-item-count problems this same phase's P79-S2 fixes."""
+    folder = await get_folder(session, folder_id)
+    chain = [folder]
+    current = folder
+    while current.parent_id is not None:
+        current = await get_folder(session, current.parent_id)
+        chain.append(current)
+    chain.reverse()
+    return chain
+
+
 async def create_folder(
     session: AsyncSession,
     *,

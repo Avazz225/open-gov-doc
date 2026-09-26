@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime, timedelta
 
 from dms_common import configure_logging
+from dms_constraint_engine import ROOT_PARENT_TYPE, validate_parent
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
 from dms_metrics_client import (
@@ -706,6 +707,26 @@ async def list_children(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     await _require_folder_permission(x_dms_principal, folder_id, access_type="read")
     return children
+
+
+@app.get("/folders/{folder_id}/breadcrumb", response_model=list[FolderOut])
+async def get_breadcrumb(
+    folder_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> list[FolderOut]:
+    """Ancestor chain from `root` to `folder_id`, root-first (Phase 79
+    Session 1) - closes ADR 0015's own long-standing "no endpoint for
+    breadcrumb/full path" gap, see `repository.get_breadcrumb`. Gated like
+    `GET /folders/{folder_id}` itself (`folder.read` on the target, same
+    reasoning as `list_children` above - a caller who can read the folder
+    can also see its ancestor chain)."""
+    try:
+        chain = await repository.get_breadcrumb(session, folder_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await _require_folder_permission(x_dms_principal, folder_id, access_type="read")
+    return chain
 
 
 @app.patch("/folders/{folder_id}", response_model=FolderOut)
@@ -1794,6 +1815,58 @@ async def delete_folder_template(
     await session.commit()
 
 
+async def _validate_template_nesting(
+    node: dict,
+    object_type_client: ObjectTypeClient,
+    *,
+    parent_object_type_id: int | None,
+    parent_is_root: bool,
+) -> list[str]:
+    """Phase 79 Session 1 - the parent-child nesting half of ADR 0056's own
+    documented "Structure templates check neither required attributes nor
+    parent-child object-type nesting rules when applying" gap. Deliberately
+    does NOT reuse `_validate_against_object_type` (that also enforces
+    required attributes/naming, which a template node's still-empty
+    `attributes={}` would spuriously fail - ADR 0056 defers those checks to
+    the later `PATCH` once a real value is filled in). Only checks
+    placement, via the shared `dms_constraint_engine.validate_parent` - the
+    same single source of truth `object-type-service`'s own `/validate`
+    uses internally, without a round trip to it (`object_type_client.get()`
+    already returns `allowed_parent_types` on the same response this
+    service fetches for other reasons elsewhere, e.g. pseudonymization).
+    Walks the whole subtree BEFORE any folder is created (called ahead of
+    `repository.apply_template`) so an invalid node deep in the tree
+    rejects the entire application instead of leaving a partially-created
+    subtree behind."""
+    errors: list[str] = []
+    object_type_id = node.get("object_type_id")
+    if object_type_id is not None:
+        object_type = await object_type_client.get(object_type_id)
+        if object_type is not None:
+            if parent_is_root:
+                parent_type_name = ROOT_PARENT_TYPE
+            elif parent_object_type_id is not None:
+                parent_type = await object_type_client.get(parent_object_type_id)
+                parent_type_name = parent_type["name"] if parent_type is not None else None
+            else:
+                parent_type_name = None
+            node_errors = validate_parent(
+                {"allowedParentTypes": object_type.get("allowed_parent_types")}, parent_type_name
+            )
+            if node_errors:
+                errors.append(f"{node['name']!r}: " + "; ".join(node_errors))
+    for child in node.get("children", []):
+        errors.extend(
+            await _validate_template_nesting(
+                child,
+                object_type_client,
+                parent_object_type_id=object_type_id,
+                parent_is_root=False,
+            )
+        )
+    return errors
+
+
 @app.post("/folder-templates/{template_id}/apply", response_model=FolderTemplateApplyResult)
 async def apply_folder_template(
     template_id: str,
@@ -1818,10 +1891,18 @@ async def apply_folder_template(
     # an unknown `target_parent_id` would 403 (no `ResourceNode` to walk)
     # before ever reaching `repository.apply_template`'s own 404.
     try:
-        await repository.get_folder(session, payload.target_parent_id)
+        target_folder = await repository.get_folder(session, payload.target_parent_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     await _require_folder_permission(x_dms_principal, payload.target_parent_id, access_type="write")
+    nesting_errors = await _validate_template_nesting(
+        template.structure,
+        app.state.object_type_client,
+        parent_object_type_id=target_folder.object_type_id,
+        parent_is_root=payload.target_parent_id == ROOT_FOLDER_ID,
+    )
+    if nesting_errors:
+        raise HTTPException(status_code=400, detail={"errors": nesting_errors})
     try:
         created = await repository.apply_template(
             session,

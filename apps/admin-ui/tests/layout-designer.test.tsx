@@ -103,6 +103,48 @@ describe("LayoutDesigner", () => {
     expect(screen.getByDisplayValue("Rechnungsnummer")).toBeInTheDocument();
   });
 
+  it("does not warn for a generated layout even if it referenced an unknown attribute", async () => {
+    // A generated layout (is_custom: false) is always freshly computed from
+    // the CURRENT attribute list on every read (ADR 0014) - it can never go
+    // stale, so no warning should ever show for one, even hypothetically.
+    getObjectTypeLayoutMock.mockResolvedValue({
+      ...GENERATED_LAYOUT,
+      rows: [{ columns: [{ attribute: "Gelöscht", label: "Gelöscht", required: false }] }],
+    });
+    renderLayoutDesigner();
+    await screen.findByText("Automatisch generiert");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("does not warn for a custom layout whose attributes still all exist", async () => {
+    getObjectTypeLayoutMock.mockResolvedValue({ ...GENERATED_LAYOUT, is_custom: true });
+    renderLayoutDesigner();
+    await screen.findByText("Angepasst");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("warns about a saved custom layout referencing a since-renamed/removed attribute (Phase 79 Session 1, ADR 0014)", async () => {
+    getObjectTypeLayoutMock.mockResolvedValue({
+      rows: [
+        {
+          columns: [
+            { attribute: "Rechnungsnummer", label: "Rechnungsnummer", required: true },
+            { attribute: "StorniertesAttribut", label: "Alt", required: false },
+          ],
+        },
+      ],
+      responsive_breakpoint_px: 600,
+      is_custom: true,
+    });
+    renderLayoutDesigner();
+
+    await screen.findByText("Angepasst");
+    const warning = await screen.findByRole("alert");
+    expect(warning.textContent).toContain("StorniertesAttribut");
+    // The still-valid attribute must not be mentioned as stale.
+    expect(warning.textContent).not.toContain("Rechnungsnummer");
+  });
+
   it("switches purpose and reloads the layout", async () => {
     renderLayoutDesigner();
     await waitFor(() => expect(getObjectTypeLayoutMock).toHaveBeenCalledTimes(1));

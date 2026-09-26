@@ -2618,6 +2618,13 @@ export async function createDelegation(
     // `folderResourceIds` above, no case picker exists anywhere in this
     // app yet.
     caseResourceIds?: string[];
+    // Since Phase 79 Session 1 (ADR 0131/0154's own documented UI gap,
+    // closed here) - the sibling `objectTypeIds` dimension already has a
+    // `<select multiple>`; process definitions are a comparably small,
+    // bounded list (`listProcessDefinitions`), so the same picker shape
+    // applies here instead of the free-text idiom the two resource-id
+    // dimensions use.
+    processDefinitionIds?: number[];
   }
 ): Promise<Delegation> {
   const response = await request(
@@ -2636,6 +2643,9 @@ export async function createDelegation(
           : {}),
         ...(params.caseResourceIds?.length
           ? { scope_case_resource_ids: params.caseResourceIds }
+          : {}),
+        ...(params.processDefinitionIds?.length
+          ? { scope_process_definition_ids: params.processDefinitionIds }
           : {}),
       }),
     },

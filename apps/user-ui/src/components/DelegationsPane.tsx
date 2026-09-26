@@ -8,10 +8,12 @@ import {
   listActiveDelegationsForDeputy,
   listMyDelegations,
   listObjectTypes,
+  listProcessDefinitions,
   lookupUserByUsername,
   revokeDelegation,
   type Delegation,
   type ObjectType,
+  type ProcessDefinition,
 } from "@/lib/api";
 import { usePrincipalNames } from "@/lib/usePrincipalNames";
 
@@ -69,10 +71,18 @@ export function DelegationsPane({
   // /cases` wouldn't scale the way it does for the much smaller object-
   // type list above).
   const [scopeCaseResourceIdsText, setScopeCaseResourceIdsText] = useState("");
+  // Third scope dimension, still missing a picker until Phase 79 Session 1
+  // (ADR 0131/0154's own documented UI gap) - process definitions are a
+  // small, bounded list like object types above, so the same `<select
+  // multiple>` idiom applies instead of the two resource-id dimensions'
+  // free-text fields.
+  const [processDefinitions, setProcessDefinitions] = useState<ProcessDefinition[]>([]);
+  const [scopeProcessDefinitionIds, setScopeProcessDefinitionIds] = useState<number[]>([]);
 
   useEffect(() => {
     if (!token) return;
     listObjectTypes(token).then(setObjectTypes).catch(() => setObjectTypes([]));
+    listProcessDefinitions(token).then(setProcessDefinitions).catch(() => setProcessDefinitions([]));
   }, [token]);
 
   const reload = useCallback(async () => {
@@ -126,11 +136,13 @@ export function DelegationsPane({
         objectTypeIds: scopeObjectTypeIds,
         folderResourceIds,
         caseResourceIds,
+        processDefinitionIds: scopeProcessDefinitionIds,
       });
       setDeputyUsername("");
       setScopeObjectTypeIds([]);
       setScopeFolderResourceIdsText("");
       setScopeCaseResourceIdsText("");
+      setScopeProcessDefinitionIds([]);
       await reload();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("delegations.createError"));
@@ -214,6 +226,26 @@ export function DelegationsPane({
           </select>
         </label>
         <p className="text-sm opacity-80">{t("delegations.scopeObjectTypesHint")}</p>
+        <label>
+          {t("delegations.scopeProcessDefinitionsLabel")}
+          <select
+            multiple
+            className={fieldInput}
+            value={scopeProcessDefinitionIds.map(String)}
+            onChange={(e) =>
+              setScopeProcessDefinitionIds(
+                Array.from(e.target.selectedOptions, (option) => Number(option.value))
+              )
+            }
+          >
+            {processDefinitions.map((processDefinition) => (
+              <option key={processDefinition.id} value={processDefinition.id}>
+                {processDefinition.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p className="text-sm opacity-80">{t("delegations.scopeProcessDefinitionsHint")}</p>
         <label>
           {t("delegations.scopeFolderResourceIdsLabel")}
           <input

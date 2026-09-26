@@ -13,6 +13,7 @@ dependencies = [
     "dms-registry-client",
     "dms-permission-client",
     "dms-metrics-client",
+    "dms-constraint-engine",
     "cryptography>=42",
 ]
 
@@ -23,6 +24,7 @@ dms-eventbus-client = { workspace = true }
 dms-registry-client = { workspace = true }
 dms-permission-client = { workspace = true }
 dms-metrics-client = { workspace = true }
+dms-constraint-engine = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

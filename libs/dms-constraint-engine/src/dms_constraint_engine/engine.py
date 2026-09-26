@@ -184,6 +184,21 @@ def _validate_parent(schema: dict, parent_type_name: str | None, errors: list[st
         )
 
 
+def validate_parent(schema: dict, parent_type_name: str | None) -> list[str]:
+    """Public, standalone entry point for JUST the placement-hierarchy rule
+    (2.2a) - added in Phase 79 Session 1 so `folder-service`'s structure-
+    template application can check parent-child nesting without also
+    triggering the required-attribute/naming checks `validate()` bundles in
+    (a template node's `attributes` are deliberately still empty at apply
+    time, see ADR 0056 - a full `validate()` call would spuriously reject
+    every typed node with a required field). Single source of truth for
+    the nesting rule either way: this and `validate()` both call the same
+    private `_validate_parent`."""
+    errors: list[str] = []
+    _validate_parent(schema, parent_type_name, errors)
+    return errors
+
+
 def validate(
     schema: dict,
     *,

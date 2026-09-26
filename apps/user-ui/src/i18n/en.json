@@ -599,6 +599,8 @@
     "endsAtLabel": "Valid until",
     "scopeObjectTypesLabel": "Only for these document classes (optional)",
     "scopeObjectTypesHint": "Without a selection, the delegation applies to every document class.",
+    "scopeProcessDefinitionsLabel": "Only for these process types (optional)",
+    "scopeProcessDefinitionsHint": "Without a selection, the delegation applies to every process type.",
     "scopeFolderResourceIdsLabel": "Only for these folder IDs (optional, comma-separated)",
     "scopeFolderResourceIdsHint": "Without specifying any, the delegation applies to every folder.",
     "scopeCaseResourceIdsLabel": "Only for these case IDs (optional, comma-separated)",

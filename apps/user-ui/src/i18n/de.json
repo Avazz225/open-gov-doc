@@ -599,6 +599,8 @@
     "endsAtLabel": "Gültig bis",
     "scopeObjectTypesLabel": "Nur für diese Dokumentklassen (optional)",
     "scopeObjectTypesHint": "Ohne Auswahl gilt die Stellvertretung für jede Dokumentklasse.",
+    "scopeProcessDefinitionsLabel": "Nur für diese Prozessarten (optional)",
+    "scopeProcessDefinitionsHint": "Ohne Auswahl gilt die Stellvertretung für jede Prozessart.",
     "scopeFolderResourceIdsLabel": "Nur für diese Ordner-IDs (optional, kommagetrennt)",
     "scopeFolderResourceIdsHint": "Ohne Angabe gilt die Stellvertretung für jeden Ordner.",
     "scopeCaseResourceIdsLabel": "Nur für diese Fall-IDs (optional, kommagetrennt)",

@@ -2316,7 +2316,7 @@ reconfirmed).
 
 ## Phase 79 — Small-Fix Bundle, `webdav-connector` Pagination, Test-Suite Health
 
-- **P79-S1 — Cross-service small-fix bundle, admin-UI-adjacent gaps**: `folder-service` gets a real
+- **P79-S1 — Cross-service small-fix bundle, admin-UI-adjacent gaps**: ✅ ~~`folder-service` gets a real
   breadcrumb/full-path endpoint (ADR 0015 — currently only direct children are retrievable, blocking
   deep-linking to an unexpanded folder in `user-ui`'s tree view); `admin-ui`'s `ObjectTypeEditor` gets a
   retroactive re-check warning when a saved layout override references an attribute that was since
@@ -2324,7 +2324,34 @@ reconfirmed).
   object-type nesting validation (ADR 0056, currently silently skipped); `DelegationsPane.tsx` gets the
   one delegation-scope-dimension picker it's still missing (`scope_process_definition_ids` — ADR 0131/
   0154, the sibling dimensions already got one). Four small, independent, config/UI-surface completions
-  found across three different service docs, bundled into one session since none needs its own.
+  found across three different service docs, bundled into one session since none needs its own.~~
+  **Done.** Breadcrumb: `GET /folders/{id}/breadcrumb` + `repository.get_breadcrumb` (root-first ancestor
+  walk). Nesting: `main._validate_template_nesting` walks the whole template tree before creating
+  anything, using a new public `dms_constraint_engine.validate_parent()` (factored out of the existing
+  private `_validate_parent`, single source of truth with `object-type-service`'s own full `validate()`)
+  — deliberately does NOT call the full validate/`_validate_against_object_type` path, since a template
+  node's `attributes={}` would spuriously fail required-field checks (ADR 0056 defers those to the later
+  `PATCH`); `folder-service` now depends on `dms-constraint-engine` directly for this one narrow entry
+  point. Layout warning: found during investigation that the retroactive check actually belongs in
+  `LayoutDesigner.tsx`, not `ObjectTypeEditor.tsx` as the plan assumed (that component only pushes the
+  *initial* smart layout at creation time and never loads an existing saved one) — `LayoutDesigner` now
+  diffs a CUSTOM layout's referenced attributes against the object type's current list on every load and
+  shows a warning naming the stale ones; a GENERATED layout can never go stale by construction, so it's
+  skipped. Delegation scope: `DelegationsPane.tsx` gained a `<select multiple>` over
+  `listProcessDefinitions()` (same picker shape as the sibling object-type dimension, not the two
+  resource-id dimensions' free-text idiom) — all four scope dimensions now have UI. No new ADR (four
+  small completions of already-decided patterns). New tests: `folder-service` +7 (3 breadcrumb, 2 nesting
+  positive/negative incl. a no-partial-application check), 178/178; `admin-ui` +3 (LayoutDesigner
+  staleness warning, incl. a regression proving a generated layout is never flagged even hypothetically),
+  309/309 total; `user-ui` +1 (process-definition scope creation), 293/293 total; `tsc`/`eslint` clean on
+  both apps. All three services rebuilt/redeployed; live-verified end-to-end against the real running
+  stack over `curl` (breadcrumb chain, template-nesting rejection with zero partial creation plus a
+  positive-path control) and via real headless-Chromium Playwright screenshots for both frontend changes
+  (the stale-attribute warning banner naming the actual removed attribute; the process-definition
+  multi-select populated with 246 real entries from the live stack). Docs updated: `folder-service.md`
+  (API table, Structure Templates, Open Points), `object-type-service.md` (Constraint Engine section's
+  now-inaccurate "only object-type-service imports the lib" claim corrected), `admin-ui.md` (Open
+  Points), `user-ui.md`/`permission-service.md` (`DelegationsPane` bullets, Open Points).
 - **P79-S2 — `webdav-connector` root `PROPFIND` pagination (real feature, finally built)**: flagged
   repeatedly across multiple gap-analysis rounds as "O(N) in total item count, will get worse" and
   explicitly re-confirmed at Phase 75's own close (ADR 0228) as now **actually timing out**, not just

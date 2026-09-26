@@ -11,6 +11,7 @@ const revokeDelegationMock = vi.fn();
 const lookupUserByUsernameMock = vi.fn();
 const lookupUserByIdMock = vi.fn();
 const listObjectTypesMock = vi.fn();
+const listProcessDefinitionsMock = vi.fn();
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
@@ -24,6 +25,7 @@ vi.mock("@/lib/api", async () => {
     lookupUserByUsername: (...args: unknown[]) => lookupUserByUsernameMock(...args),
     lookupUserById: (...args: unknown[]) => lookupUserByIdMock(...args),
     listObjectTypes: (...args: unknown[]) => listObjectTypesMock(...args),
+    listProcessDefinitions: (...args: unknown[]) => listProcessDefinitionsMock(...args),
   };
 });
 
@@ -47,10 +49,12 @@ describe("DelegationsPane", () => {
     lookupUserByUsernameMock.mockReset();
     lookupUserByIdMock.mockReset();
     listObjectTypesMock.mockReset();
+    listProcessDefinitionsMock.mockReset();
 
     listMyDelegationsMock.mockResolvedValue([]);
     listActiveDelegationsForDeputyMock.mockResolvedValue([]);
     listObjectTypesMock.mockResolvedValue([]);
+    listProcessDefinitionsMock.mockResolvedValue([]);
     // Not resolvable by default (P19-S4) - `usePrincipalNames` falls back to
     // the raw principal_id in this case, so existing tests remain valid
     // unchanged; a dedicated test below verifies actual name resolution.
@@ -188,6 +192,42 @@ describe("DelegationsPane", () => {
     expect(params.objectTypeIds).toEqual([1]);
     expect(params.folderResourceIds).toEqual(["folder-a"]);
     expect(params.caseResourceIds).toEqual(["case-a"]);
+  });
+
+  it("creates a scoped delegation with selected process definitions (Phase 79 Session 1, ADR 0131/0154)", async () => {
+    listProcessDefinitionsMock.mockResolvedValue([
+      { id: 1, name: "Rechnungsfreigabe", version: 1 },
+      { id: 2, name: "Vertragsprüfung", version: 3 },
+    ]);
+    lookupUserByUsernameMock.mockResolvedValue({ id: "bob-sub", username: "bob" });
+    createDelegationMock.mockResolvedValue({
+      id: "d1",
+      delegator_principal_id: "alice-sub",
+      deputy_principal_id: "bob-sub",
+      starts_at: farFutureStart,
+      ends_at: farFutureEnd,
+      scope_object_type_ids: null,
+      scope_process_definition_ids: [2],
+      scope_folder_resource_ids: null,
+      created_at: farFutureStart,
+      revoked_at: null,
+      revoked_by: null,
+    });
+
+    const user = userEvent.setup();
+    renderPane();
+
+    await screen.findByText("Noch keine Stellvertretung hinterlegt.");
+    await screen.findByText("Vertragsprüfung");
+    await user.type(screen.getByPlaceholderText("Nutzername der Stellvertretung"), "bob");
+    await user.selectOptions(
+      screen.getByLabelText("Nur für diese Prozessarten (optional)"),
+      "2"
+    );
+    await user.click(screen.getByText("Hinterlegen"));
+
+    await waitFor(() => expect(createDelegationMock).toHaveBeenCalled());
+    expect(createDelegationMock.mock.calls[0][1].processDefinitionIds).toEqual([2]);
   });
 
   it("trims and filters multiple comma-separated case IDs, same as the existing folder-ID field (Phase 53 Session 2)", async () => {

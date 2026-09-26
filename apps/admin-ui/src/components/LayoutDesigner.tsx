@@ -90,6 +90,22 @@ export function LayoutDesigner() {
     [selectedObjectType, usedAttributes]
   );
 
+  // Retroactive re-check (Phase 79 Session 1, ADR 0014 "Consequences" - a
+  // saved custom layout is a deliberate snapshot, never updated when the
+  // object type's attributes change later, see that ADR's own rationale.
+  // A GENERATED layout (`is_custom: false`) is always freshly computed from
+  // the current attribute list on every read, so it can never go stale -
+  // only a saved override can reference an attribute that was since
+  // renamed/removed.
+  const staleAttributeNames = useMemo(() => {
+    if (!layout?.is_custom || !selectedObjectType) return [];
+    const currentNames = new Set(selectedObjectType.attributes.map((a) => a.name));
+    const referenced = new Set(
+      layout.rows.flatMap((row) => row.columns.map((c) => c.attribute))
+    );
+    return [...referenced].filter((name) => !currentNames.has(name));
+  }, [layout, selectedObjectType]);
+
   function updateRows(updater: (rows: LayoutRow[]) => LayoutRow[]) {
     setLayout((prev) => (prev ? { ...prev, rows: updater(cloneRows(prev.rows)) } : prev));
   }
@@ -259,6 +275,14 @@ export function LayoutDesigner() {
                     : t("layoutDesigner.generatedBadge")}
                 </span>
               </p>
+
+              {staleAttributeNames.length > 0 && (
+                <p className="text-danger" role="alert">
+                  {t("layoutDesigner.staleAttributesWarning", {
+                    attributes: staleAttributeNames.join(", "),
+                  })}
+                </p>
+              )}
 
               {layout.rows.length === 0 && (
                 <p className="italic opacity-70">{t("layoutDesigner.emptyLayout")}</p>
