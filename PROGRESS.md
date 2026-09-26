@@ -2,7 +2,49 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P78-S3 (third and final session of Phase 78 — realm-role assignment API +
+**Last completed:** Phase 78 close (full backend regression + `graphify update .`, after P78-S3 closed the
+phase). Standard phase-end cadence per `CONTRIBUTING.md`: one unfiltered `scripts/run-tests.sh --build`
+run across all ~31 backend services, plus `graphify update .` (code-only changes get free AST extraction;
+the 15 changed/added docs — including the two oversized `PROGRESS.md`/`IMPLEMENTATION_PLAN.md`, which per
+established project practice need their own paginated subagents rather than one agent per file to avoid
+the `#479` shrink-guard — went through 11 parallel semantic-extraction subagents, one of which initially
+tried to self-paginate a single 2527-line file in one shot and only covered a third of it; caught this via
+a direct line-count sanity check and dispatched two more agents for the missed ranges before merging, and
+a second one (`PROGRESS.md` lines 4401-8800 in one 4400-line span) hit the model's 64k output-token limit
+outright, refixed by splitting that same range into two ~2200-line agents with an explicit "keep it
+compact" instruction). Final graph: 19,603 nodes, 33,139 edges, 2,413 communities, health check clean (no
+dangling/missing/collapsed edges). One pre-existing false-positive handled during detection: `CLAUDE.md`
+was flagged `deleted` by the incremental detector despite demonstrably still existing on disk (stale
+manifest entry, unrelated to any work this phase) — excluded it from the prune list (never prune a file
+that still exists) and reclassified it as changed instead, so its own manifest entry gets refreshed rather
+than its real graph nodes being silently deleted.
+
+**Backend regression: no new failures caused by Phase 78.** 28 of 32 tested backend services fully green.
+The 4 that failed (`auth-service` 4/162, `federation-hub-service` 1/90, `webdav-connector` 6/18,
+`workflow-service` 6/238) were individually verified, not just assumed, to be pre-existing and already
+named in the Phase 79 plan, not regressions from P78-S1/S2/S3: `auth-service`'s 4 and `workflow-service`'s
+6 failures are the same federation-hub registration/signature-check cascade (`federation_hub_initial_registration_failed`
+→ `503` instead of the expected `401`/`201`) already flagged as "the federation/xdomea-dispatch flake" for
+P79-S3; `federation-hub-service`'s 1 failure (`test_run_retry_tick_redelivers_a_due_handover`, asserted
+`len(received) == 1`, got `2`) reproduces only under the full-suite's shared state and passed cleanly when
+re-run in isolation — same flake family, not a new one; `webdav-connector`'s 6 failures are all
+`httpcore.ReadTimeout` on root `PROPFIND`, the exact O(N)-in-item-count degradation already documented and
+already scheduled to be fixed for real in **P79-S2**. None of the four services were touched by any P78
+session's code changes. `ruff`/`ruff format` project-wide also still fails, but only on the same
+pre-existing, unrelated files already noted at P78-S2's close (`libreoffice-addin`, the loadtest notebook,
+five services' `logger.warning(...)` line-length, one `archival-service`/`signature-service` test file) —
+none touched this phase either.
+
+**Next session:** Phase 79 — small-fix bundle (folder breadcrumbs, layout-override retroactive check,
+structure-template nesting validation, `DelegationsPane` scope picker), `webdav-connector` root `PROPFIND`
+pagination (closes the exact timeout just reproduced above), and test-suite health (the federation/
+xdomea-dispatch flake just reconfirmed above, admin-ui's 3 stale Playwright specs, `workflow-service`'s
+`approval_config_override` fixture timing bug) — per the user's own standing instruction to keep
+committing after every session AND every phase through this whole Phase 78-82 plan.
+
+---
+
+Immediately before: P78-S3 (third and final session of Phase 78 — realm-role assignment API +
 group-principal role assignments). **Realm-role half**: `auth-service` gains the missing counterpart to
 `POST /realm-roles` (create-only since P17-S1) — three new endpoints, `POST`/`DELETE`/`GET
 /realm-roles/{role_name}/assignments`, gated identically to every other identity-mutating endpoint in
@@ -41,13 +83,8 @@ container against the already-running stack, no project files left behind. Docs 
 (cross-reference to the closed gap, Open Points), `admin-ui.md` (Open Points).
 
 This closes Phase 78 in full (P78-S1 DNS-rebinding, P78-S2 gateway-port + chunked-body-size, P78-S3 this
-entry) — phase-end DoD (`graphify update .` + full unfiltered backend regression) still outstanding, see
-next session note.
-
-**Next session:** Phase 78 phase-end DoD (`graphify update .`, full `scripts/run-tests.sh --build`), then
-Phase 79 — small-fix bundle, `webdav-connector` pagination, test-suite health (per the user's own
-standing instruction to keep committing after every session AND every phase through this whole
-Phase 78-82 plan).
+entry) — phase-end DoD (`graphify update .` + full unfiltered backend regression) ran immediately after,
+see the entry above.
 
 ---
 

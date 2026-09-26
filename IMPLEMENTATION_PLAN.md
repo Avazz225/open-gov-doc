@@ -2305,7 +2305,14 @@ phase for the handful of findings that are real but too large/expensive to just 
 actually closed, e.g. a test that re-points a hostname mid-flow and confirms the second call still gets
 rejected); new ADR for P78-S1 and P78-S2 (real security-boundary decisions); no new ADR expected for
 P78-S3 (execution of an already-supported capability, not a new architecture decision) unless the session
-finds otherwise; docs and `PROGRESS.md` updated per session.
+finds otherwise; docs and `PROGRESS.md` updated per session. ✅ **Phase closed.** Phase-end DoD run after
+P78-S3: `graphify update .` (19,603 nodes/33,139 edges, health check clean) and a full unfiltered
+`scripts/run-tests.sh --build` (28/32 backend services green; the 4 that failed — `auth-service`,
+`federation-hub-service`, `webdav-connector`, `workflow-service` — were individually verified to be
+pre-existing issues already named in the Phase 79 plan below, not regressions from this phase, see
+`PROGRESS.md`'s "Phase 78 close" entry for the full verification). No new ADR needed for the phase-close
+itself (unlike Phase 75's ADR 0228, no previously-masked bugs were found — only already-tracked flakes
+reconfirmed).
 
 ## Phase 79 — Small-Fix Bundle, `webdav-connector` Pagination, Test-Suite Health
 
