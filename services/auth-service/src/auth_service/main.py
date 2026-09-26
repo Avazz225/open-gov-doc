@@ -75,6 +75,7 @@ from auth_service.schemas import (
     OidcAuthorizeOut,
     OidcCallbackRequest,
     PreferencesUpdate,
+    RealmRoleAssignmentIn,
     RealmRoleOut,
     RealmRolesRequest,
     RefreshRequest,
@@ -1119,6 +1120,59 @@ async def ensure_realm_roles(
     await _require_service_user_management(x_dms_principal)
     for name in payload.names:
         app.state.keycloak_admin.create_realm_role(payload={"name": name}, skip_exists=True)
+
+
+@app.post("/realm-roles/{role_name}/assignments", status_code=status.HTTP_204_NO_CONTENT)
+async def assign_realm_role(
+    role_name: str, payload: RealmRoleAssignmentIn, user: dict = Depends(get_current_user)
+) -> None:
+    """The missing counterpart to `POST /realm-roles` above (Phase 78
+    Session 3): that endpoint only creates a role, its own docstring
+    explicitly says "assignment continues to happen outside this service
+    via the Keycloak Admin Console" - this closes that gap for real.
+    Gated like `POST /users`/`GET /users` (`admin.user_management`), the
+    same "user/permission management" domain as every other admin-facing
+    identity mutation in this service."""
+    await _require_user_management(user)
+    role = admin_users.find_realm_role(app.state.keycloak_admin, role_name)
+    if role is None:
+        raise HTTPException(status_code=404, detail=f"Rolle {role_name!r} unbekannt")
+    target = admin_users.find_user_by_username(app.state.keycloak_admin, payload.username)
+    if target is None:
+        raise HTTPException(status_code=404, detail=f"Benutzer {payload.username!r} unbekannt")
+    admin_users.assign_realm_role_to_user(app.state.keycloak_admin, role=role, user_id=target["id"])
+
+
+@app.delete(
+    "/realm-roles/{role_name}/assignments/{username}", status_code=status.HTTP_204_NO_CONTENT
+)
+async def unassign_realm_role(
+    role_name: str, username: str, user: dict = Depends(get_current_user)
+) -> None:
+    await _require_user_management(user)
+    role = admin_users.find_realm_role(app.state.keycloak_admin, role_name)
+    if role is None:
+        raise HTTPException(status_code=404, detail=f"Rolle {role_name!r} unbekannt")
+    target = admin_users.find_user_by_username(app.state.keycloak_admin, username)
+    if target is None:
+        raise HTTPException(status_code=404, detail=f"Benutzer {username!r} unbekannt")
+    admin_users.unassign_realm_role_from_user(
+        app.state.keycloak_admin, role=role, user_id=target["id"]
+    )
+
+
+@app.get("/realm-roles/{role_name}/assignments", response_model=list[UserLookupOut])
+async def list_realm_role_assignments(
+    role_name: str, user: dict = Depends(get_current_user)
+) -> list[dict]:
+    """Same trimmed `UserLookupOut` shape as `GET /groups/{name}/members` -
+    deliberately minimal, not a general directory function (see that
+    endpoint's docstring)."""
+    await _require_user_management(user)
+    role = admin_users.find_realm_role(app.state.keycloak_admin, role_name)
+    if role is None:
+        raise HTTPException(status_code=404, detail=f"Rolle {role_name!r} unbekannt")
+    return admin_users.list_realm_role_members(app.state.keycloak_admin, role_name)
 
 
 async def _maybe_defer_to_approval(

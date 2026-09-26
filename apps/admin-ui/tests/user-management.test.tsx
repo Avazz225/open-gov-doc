@@ -118,6 +118,23 @@ describe("UserManagement", () => {
     expect(screen.getAllByText("root").length).toBeGreaterThan(0);
   });
 
+  it("resolves a group principal's name in the assignments table (Phase 78 Session 3)", async () => {
+    listGroupsMock.mockResolvedValue([
+      { id: "g1", name: "Poststelle", description: "", created_at: "", is_org_unit: false },
+    ]);
+    listRoleAssignmentsMock.mockResolvedValue([
+      { id: 20, principal_type: "group", principal_id: "g1", role_id: 1, resource_id: "root" },
+    ]);
+    renderUserManagement();
+
+    // "Poststelle" legitimately appears twice - once in the Groups section's
+    // own list, once resolved into the assignments table - so scope the
+    // lookup to the row that also carries the "Gruppe" type cell.
+    const matches = await screen.findAllByText("Poststelle");
+    const row = matches.map((el) => el.closest("tr")).find((tr) => tr && within(tr).queryByText("Gruppe"));
+    expect(row).toBeTruthy();
+  });
+
   it("creates a user and reloads the list", async () => {
     createUserMock.mockResolvedValue({});
     renderUserManagement();
@@ -240,6 +257,38 @@ describe("UserManagement", () => {
         "Vier-Augen-Prinzip aktiv - die Zuweisung wartet auf Genehmigung durch eine zweite Person, bevor sie wirksam wird."
       )
     ).not.toBeInTheDocument();
+  });
+
+  it("creates a group-principal role assignment (Phase 78 Session 3)", async () => {
+    listGroupsMock.mockResolvedValue([
+      { id: "g1", name: "Poststelle", description: "", created_at: "", is_org_unit: false },
+    ]);
+    createRoleAssignmentMock.mockResolvedValue({
+      status: "created",
+      role_assignment: { id: 12, principal_type: "group", principal_id: "g1", role_id: 1, resource_id: "root" },
+      approval_request_id: null,
+    });
+    renderUserManagement();
+    await waitFor(() => expect(listRoleAssignmentsMock).toHaveBeenCalledTimes(1));
+
+    const form = screen.getByRole("form", { name: "Rolle zuweisen" });
+    fireEvent.change(within(form).getByLabelText("Zuweisen an"), { target: { value: "group" } });
+    // Switching to "group" swaps the username input for a group <select> -
+    // the old "Nutzername" field must no longer be present.
+    expect(within(form).queryByLabelText("Nutzername")).not.toBeInTheDocument();
+    fireEvent.change(within(form).getByLabelText("Gruppe"), { target: { value: "g1" } });
+    fireEvent.change(within(form).getByLabelText("Rolle"), { target: { value: "1" } });
+    fireEvent.submit(form);
+
+    await waitFor(() =>
+      expect(createRoleAssignmentMock).toHaveBeenCalledWith("token-123", {
+        principalType: "group",
+        principalId: "g1",
+        roleId: 1,
+        resourceId: "root",
+      })
+    );
+    await waitFor(() => expect(listRoleAssignmentsMock).toHaveBeenCalledTimes(2));
   });
 
   it("shows a pending-approval hint without reloading when four-eyes is active", async () => {

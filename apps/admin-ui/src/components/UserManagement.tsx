@@ -69,6 +69,7 @@ export function UserManagement() {
   });
   const [newRole, setNewRole] = useState({ name: "", description: "", permissions: "" });
   const [newAssignment, setNewAssignment] = useState({
+    principalType: "user" as "user" | "group",
     principalId: "",
     roleId: "",
     resourceId: ROOT_RESOURCE_ID,
@@ -156,12 +157,17 @@ export function UserManagement() {
     setAssignmentPending(false);
     try {
       const result = await createRoleAssignment(accessToken, {
-        principalType: "user",
+        principalType: newAssignment.principalType,
         principalId: newAssignment.principalId,
         roleId: Number(newAssignment.roleId),
         resourceId: newAssignment.resourceId,
       });
-      setNewAssignment({ principalId: "", roleId: "", resourceId: ROOT_RESOURCE_ID });
+      setNewAssignment({
+        principalType: "user",
+        principalId: "",
+        roleId: "",
+        resourceId: ROOT_RESOURCE_ID,
+      });
       if (result.status === "pending_approval") {
         // Four-eyes principle active (4.3/14.2) - not yet created, so no
         // reload() (the list would remain unchanged anyway).
@@ -701,16 +707,56 @@ export function UserManagement() {
           onSubmit={handleCreateAssignment}
         >
           <label>
-            {t("roleAssignments.username")}
-            <input
-              value={newAssignment.principalId}
+            {t("roleAssignments.principalType")}
+            <select
+              value={newAssignment.principalType}
               onChange={(e) =>
-                setNewAssignment({ ...newAssignment, principalId: e.target.value })
+                setNewAssignment({
+                  ...newAssignment,
+                  principalType: e.target.value as "user" | "group",
+                  principalId: "",
+                })
               }
-              required
               className={fieldInput}
-            />
+            >
+              <option value="user">{t("roleAssignments.principalTypeUser")}</option>
+              <option value="group">{t("roleAssignments.principalTypeGroup")}</option>
+            </select>
           </label>
+          {newAssignment.principalType === "group" ? (
+            <label>
+              {t("roleAssignments.group")}
+              <select
+                value={newAssignment.principalId}
+                onChange={(e) =>
+                  setNewAssignment({ ...newAssignment, principalId: e.target.value })
+                }
+                required
+                className={fieldInput}
+              >
+                <option value="" disabled>
+                  {t("roleAssignments.groupPlaceholder")}
+                </option>
+                {groups.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <label>
+              {t("roleAssignments.username")}
+              <input
+                value={newAssignment.principalId}
+                onChange={(e) =>
+                  setNewAssignment({ ...newAssignment, principalId: e.target.value })
+                }
+                required
+                className={fieldInput}
+              />
+            </label>
+          )}
           <label>
             {t("roleAssignments.role")}
             <select
@@ -749,6 +795,7 @@ export function UserManagement() {
         <table className="data-table">
           <thead>
             <tr>
+              <th>{t("roleAssignments.typeColumn")}</th>
               <th>{t("roleAssignments.userColumn")}</th>
               <th>{t("roleAssignments.roleColumn")}</th>
               <th>{t("roleAssignments.resourceColumn")}</th>
@@ -758,7 +805,16 @@ export function UserManagement() {
           <tbody>
             {assignments.map((a) => (
               <tr key={a.id}>
-                <td>{a.principal_id}</td>
+                <td>
+                  {a.principal_type === "group"
+                    ? t("roleAssignments.principalTypeGroup")
+                    : t("roleAssignments.principalTypeUser")}
+                </td>
+                <td>
+                  {a.principal_type === "group"
+                    ? (groups.find((g) => g.id === a.principal_id)?.name ?? a.principal_id)
+                    : a.principal_id}
+                </td>
                 <td>{roleName(a.role_id)}</td>
                 <td>{a.resource_id}</td>
                 <td>

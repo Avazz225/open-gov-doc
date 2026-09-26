@@ -2274,14 +2274,32 @@ phase for the handful of findings that are real but too large/expensive to just 
   net (one old test asserting the now-closed gap replaced with two new ones), 5/5;
   `virus-scan-service`/`rendering-service`/`storage-service` full suites re-run unchanged, 310 passed
   combined. All rebuilt/redeployed, docs updated.
-- **P78-S3 — Realm-role assignment API + group-principal role assignments, one session**: both
+- **P78-S3 — Realm-role assignment API + group-principal role assignments, one session**: ✅ ~~both
   `auth-service` and `document-service`'s own docs independently name the same gap — Keycloak realm
   roles (`dms-admin`, `dms-poststelle`, etc.) can be *created* via `POST /realm-roles` but *assigning*
   one to a specific user has no API/admin-UI path, Keycloak-Admin-Console-only. In the same session:
   `admin-ui`'s role-assignment creation form hardcodes `principalType: "user"` — a `RoleAssignment` can
   never target a `group` principal even though `Group` is now a real, manageable entity (built across
   several earlier phases). Bundled since both are "the RBAC admin surface doesn't yet cover a principal
-  type/role type it structurally already supports," found independently in two different docs sweeps.
+  type/role type it structurally already supports," found independently in two different docs sweeps.~~
+  **Done.** Realm-role half: three new `auth-service` endpoints (`POST`/`DELETE`/`GET
+  /realm-roles/{role_name}/assignments`), same `admin.user_management` gate and `find_*`-404 idiom as
+  every other identity endpoint in this service; new `admin_users.find_realm_role`/
+  `assign_realm_role_to_user`/`unassign_realm_role_from_user`/`list_realm_role_members`, thin wrappers
+  around already-vendored, previously-unused `python-keycloak` primitives. Group-principal half:
+  `admin-ui`'s `UserManagement.tsx` role-assignment form gained a "Zuweisen an" (user/group) selector —
+  picking "group" swaps the username field for a `<select>` over the already-loaded `groups` list;
+  `permission-service`'s `POST /role-assignments` already accepted `principal_type: "group"`
+  server-side, this was purely a frontend gap. No new ADR (confirmed during the session, per the DoD
+  note below — pure execution of already-decided patterns on both halves, no new trust boundary). New
+  tests: `auth-service` +8 (`test_realm_roles.py`, incl. a live assign→list→unassign roundtrip against
+  real Keycloak), 158/162 (4 pre-existing federation flakes unrelated, already tracked for P79-S3); +2
+  `admin-ui` vitest (group-principal assignment creation, group-name resolution in the assignments
+  table), 306/306 total; `tsc`/`eslint`/`next build` all clean. Both services rebuilt/redeployed,
+  live-verified end-to-end against the real running stack (role create → assign → list → unassign →
+  role delete, cleaned up), plus a real-browser Playwright check of the new group selector. Docs
+  updated: `auth-service.md` (API table + "Realm Role Management" section + Open Points),
+  `document-service.md` (Open Points, cross-reference), `admin-ui.md` (Open Points).
 
 **Definition of Done**: regression test per fix (especially one proving the DNS-rebinding window is
 actually closed, e.g. a test that re-points a hostname mid-flow and confirms the second call still gets

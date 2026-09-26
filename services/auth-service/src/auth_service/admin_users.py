@@ -99,6 +99,42 @@ def find_group_members_by_name(admin: KeycloakAdmin, name: str) -> list[dict] | 
     return [_to_user_dict(member) for member in admin.get_group_members(group["id"])]
 
 
+def find_realm_role(admin: KeycloakAdmin, role_name: str) -> dict | None:
+    """Realm-role lookup for the assignment endpoints (Phase 78 Session 3) -
+    the counterpart to `find_group_members_by_name` for realm roles instead
+    of groups, same try/except-404 idiom. Returns the full role
+    representation, not just the name - both `assign_realm_role_to_user`/
+    `unassign_realm_role_from_user` below require it (`python-keycloak`'s
+    `assign_realm_roles`/`delete_realm_roles_of_user` take role dicts, not
+    bare names)."""
+    try:
+        return admin.get_realm_role(role_name)
+    except KeycloakGetError as exc:
+        if exc.response_code == 404:
+            return None
+        raise
+
+
+def assign_realm_role_to_user(admin: KeycloakAdmin, *, role: dict, user_id: str) -> None:
+    """Phase 78 Session 3 - the missing counterpart to `POST /realm-roles`
+    (create-only, see its own docstring in `main.py`): assigning an
+    already-existing role to a user previously had no path but the
+    Keycloak Admin Console."""
+    admin.assign_realm_roles(user_id, [role])
+
+
+def unassign_realm_role_from_user(admin: KeycloakAdmin, *, role: dict, user_id: str) -> None:
+    admin.delete_realm_roles_of_user(user_id, [role])
+
+
+def list_realm_role_members(admin: KeycloakAdmin, role_name: str) -> list[dict]:
+    """Assumes the role's existence has already been checked by the caller
+    (see `find_realm_role`) - `get_realm_role_members` itself returns an
+    empty list rather than raising for an unknown role name, which would
+    silently hide a typo'd role name as "nobody assigned" instead of 404."""
+    return [_to_user_dict(member) for member in admin.get_realm_role_members(role_name)]
+
+
 def find_user_by_id(admin: KeycloakAdmin, user_id: str) -> dict | None:
     """Reverse identity resolution for `GET /users/{user_id}` (Post-Roadmap
     Phase 19 Session 4, ADR 0069) - the counterpart to `find_user_by_username`

@@ -2,7 +2,56 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P78-S2 (second session of Phase 78 — gateway backend-port bypass + chunked-encoding
+**Last completed:** P78-S3 (third and final session of Phase 78 — realm-role assignment API +
+group-principal role assignments). **Realm-role half**: `auth-service` gains the missing counterpart to
+`POST /realm-roles` (create-only since P17-S1) — three new endpoints, `POST`/`DELETE`/`GET
+/realm-roles/{role_name}/assignments`, gated identically to every other identity-mutating endpoint in
+this service (`admin.user_management` via `Depends(get_current_user)`, not the service-to-service
+`X-DMS-Principal` header `POST /realm-roles` itself uses, since this is an interactive admin action).
+New `admin_users.find_realm_role`/`assign_realm_role_to_user`/`unassign_realm_role_from_user`/
+`list_realm_role_members` — thin wrappers around `python-keycloak`'s `get_realm_role`/
+`assign_realm_roles`/`delete_realm_roles_of_user`/`get_realm_role_members`, already vendored, never
+previously called anywhere in this codebase. Same try/except-`KeycloakGetError`-404 idiom as
+`find_group_members_by_name` (Phase 74 Session 3). **Group-principal half**: `admin-ui`'s
+`UserManagement.tsx` role-assignment form hardcoded `principalType: "user"` — `permission-service`'s
+`POST /role-assignments` already accepted `principal_type: "group"` server-side (confirmed via its
+`schemas.py`), so this was purely a frontend gap. Added a "Zuweisen an" (user/group) selector; picking
+"group" swaps the free-text username field for a `<select>` populated from the already-loaded `groups`
+list, sending the group's own `id` as `principal_id`. The assignments table also gained a "Typ" column
+and resolves a group principal's name via the same `groups` list instead of showing a raw id.
+
+**No new ADR** — decided during the session, not just assumed from the plan's own DoD note: both halves
+are pure execution of already-decided patterns (same permission gate, same response-shape convention,
+no new trust boundary, no new data model on either side). New tests: `auth-service` — 8 new in
+`test_realm_roles.py` (401/403 gates, 404 for unknown role/username, a live assign→list→unassign
+roundtrip against real Keycloak proving the actual side effect, not just 2xx), 158/162 passed (the 4
+failures are the pre-existing federation-hub registration flake already tracked for P79-S3, unrelated to
+this session — confirmed by re-running before/after this session's changes). `admin-ui` — 2 new vitest
+cases (group-principal assignment creation, group-name resolution in the assignments table), full suite
+306/306 green, plus `tsc --noEmit`/`eslint .` both clean and a successful `next build` (verified via the
+same Docker build used for the real image). Both services rebuilt/redeployed; live-verified end-to-end
+against the real running stack over `curl` (created a throwaway realm role via the existing
+service-to-service path, created a throwaway user, assigned/listed/unassigned the role via the three new
+bearer-token endpoints, deleted both afterward, confirmed via `kcadm.sh` that no leftover role remained)
+and via a real headless-Chromium Playwright check of the new group selector (screenshotted, confirmed the
+"Gruppe" dropdown appears and is correctly populated) — no dev Node.js on this host, so both the vitest
+run and the Playwright check ran inside a throwaway `node:22-alpine`/`mcr.microsoft.com/playwright`
+container against the already-running stack, no project files left behind. Docs updated:
+`auth-service.md` (API table, "Realm Role Management" section, Open Points), `document-service.md`
+(cross-reference to the closed gap, Open Points), `admin-ui.md` (Open Points).
+
+This closes Phase 78 in full (P78-S1 DNS-rebinding, P78-S2 gateway-port + chunked-body-size, P78-S3 this
+entry) — phase-end DoD (`graphify update .` + full unfiltered backend regression) still outstanding, see
+next session note.
+
+**Next session:** Phase 78 phase-end DoD (`graphify update .`, full `scripts/run-tests.sh --build`), then
+Phase 79 — small-fix bundle, `webdav-connector` pagination, test-suite health (per the user's own
+standing instruction to keep committing after every session AND every phase through this whole
+Phase 78-82 plan).
+
+---
+
+Immediately before: P78-S2 (second session of Phase 78 — gateway backend-port bypass + chunked-encoding
 body-size bypass). **Port fix**: all 31 domain backend services' `ports:` mappings in `infra/docker-
 compose.yml` now bind to `127.0.0.1` explicitly (was implicit `0.0.0.0`) — closes ADR 0005's own
 long-documented "a caller on the same network can skip the gateway" gap. `gateway-service` and the 6
@@ -31,8 +80,6 @@ upload endpoint, 310 passed combined. `ruff`/`ruff format` clean for every file 
 touched). All 31 rebound services plus the 3 upload-limited services rebuilt/redeployed; live-verified as
 described above. `docs/services/gateway-service.md`/`virus-scan-service.md`/`rendering-service.md`/
 `storage-service.md` updated.
-
-**Next session:** P78-S3 — realm-role assignment API + group-principal role assignments.
 
 ---
 

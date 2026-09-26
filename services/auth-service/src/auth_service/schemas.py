@@ -199,6 +199,15 @@ class RealmRolesRequest(BaseModel):
     names: list[str]
 
 
+class RealmRoleAssignmentIn(BaseModel):
+    """Body for `POST /realm-roles/{role_name}/assignments` (Phase 78
+    Session 3) - the missing counterpart to `RealmRolesRequest` above
+    (create-only): assigning an already-existing realm role to a specific
+    user previously had no path but the Keycloak Admin Console."""
+
+    username: str
+
+
 class AdGroupRoleMappingIn(BaseModel):
     """Payload for `POST /ad-group-mappings` (4.4, P24-S2) - deliberately
     only simple 1:1 mapping, see `models.AdGroupRoleMapping` docstring."""
