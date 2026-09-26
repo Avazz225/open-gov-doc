@@ -172,6 +172,33 @@ def test_root_listing_shows_a_freshly_created_folder(real_user):
     assert folder["name"] in names
 
 
+def test_listing_a_folder_with_many_children_stays_fast(real_user):
+    """Phase 79 Session 2 - regression for the actual root cause of the
+    root-`PROPFIND` timeouts reproduced at Phase 74's phase-close (see
+    `dav_provider.DmsDavFolder.get_member_list`'s own docstring): `wsgidav`'s
+    default `get_member_list()` calls `get_member()` once per member, and
+    the old `get_member()` re-fetched the ENTIRE folder listing every time -
+    N members meant N+1 full-listing round trips, not just N+1 single-item
+    lookups. A dedicated folder (not `root` itself, to stay independent of
+    whatever this shared dev stack has already accumulated there) with 60
+    children reproduces the same shape at a much smaller, CI-friendly scale
+    - under the old N+1 behavior this took the full 30s client timeout to
+    even fail; the single-fetch fix keeps it well under a few seconds
+    regardless of child count."""
+    import time
+
+    parent = _create_folder(name=f"webdav-viele-kinder-{uuid.uuid4().hex[:8]}")
+    for _ in range(60):
+        _create_folder(parent_id=parent["id"], name=f"kind-{uuid.uuid4().hex[:8]}")
+
+    started = time.monotonic()
+    entries = _dav_client(real_user).ls(f"/{parent['name']}", detail=True)
+    elapsed = time.monotonic() - started
+
+    assert len(entries) == 60
+    assert elapsed < 5.0, f"listing 60 children took {elapsed:.1f}s - N+1 regression?"
+
+
 def test_put_creates_a_new_document(real_user):
     filename = f"neu-{uuid.uuid4().hex[:8]}.txt"
 

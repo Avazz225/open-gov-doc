@@ -2,7 +2,56 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P79-S1 (first session of Phase 79 — cross-service small-fix bundle). Four small,
+**Last completed:** P79-S2 (second session of Phase 79 — `webdav-connector` root `PROPFIND` pagination).
+**Not the fix the plan anticipated.** Re-reproduced the failure fresh before touching any code (full
+`webdav-connector` suite: 6 failed/12 passed, 239s, `httpcore.ReadTimeout`) and checked the CURRENT item
+counts under this dev stack's `root` — only 175 folders/131 documents now (down from the historical
+1,639/1,675 the plan cited, likely thinned by cleanup across the intervening ~5 phases). A ~300-item
+listing timing out even at 30s pointed at something other than raw payload size, so investigated the actual
+call pattern instead of building the anticipated pagination: `wsgidav`'s own default `get_member_list()`
+(the method its `PROPFIND` handler actually calls to enumerate a directory) calls `get_member_names()`
+once, then `get_member(name)` **once per member** — and `DmsDavFolder.get_member()` re-fetched the
+**entire** `list_children()` (2-3 HTTP round trips to `folder-service`/`document-service` each) on every
+single call. An N-member directory therefore triggered N+1 *full-listing* fetches, not just N+1
+single-item lookups — 300 members meant 300+ redundant full listings, which explains multi-minute-scale
+timeouts even at real historical item counts and still blows past 30s at today's smaller ones.
+
+**Fix**: `DmsDavFolder` gains a `get_member_list()` override — `wsgidav`'s own base class explicitly
+documents this method as overridable "for performance reasons" — that calls `list_children()` exactly
+once and builds every child `DmsDavFolder`/`DmsDavDocument` resource directly from that single result.
+`get_member_names()`/`get_member()` are unchanged, since they remain correct and cheap for their other
+call sites (`resolve_path`'s segment-by-segment traversal, single-name `get_resource_inst` lookups) — only
+the whole-directory listing path needed (and now has) the single-fetch version.
+
+**No WebDAV-protocol-level pagination was built, deliberately** — RFC 4918 defines none for `PROPFIND`
+(`Depth: 1` is inherently "give me the complete listing in one response"), and real clients (Windows
+Explorer, macOS Finder, `webdav4`) issue exactly one such request with no "give me page 2" concept; a
+bespoke pagination scheme would silently truncate directory listings for every unmodified real client,
+which is worse than the timeout it would replace. Once the actual N+1 is gone, a complete listing of a few
+hundred items is fast in a handful of round trips and needs no cap at all. Also confirmed `cmis-connector`
+does NOT share this bug despite using the same `dms-connector-sdk` client — it's a plain FastAPI service
+that calls `list_children()` directly once per endpoint handler, with no `wsgidav`-style per-member call
+pattern to begin with.
+
+New ADR 0231 (a real "investigated and rejected an approach" architectural decision, not execution of an
+already-decided pattern — matches the plan's own "unless the pagination approach ends up being a real
+design choice" condition for one). New test: `test_listing_a_folder_with_many_children_stays_fast` — a
+dedicated 60-child folder (not `root` itself, to stay independent of whatever this shared dev stack has
+already accumulated there), asserts the listing completes under 5 seconds. Full suite result: 239s/6
+failed → 35-40s/19 passed (18 pre-existing + this 1 new test), `ruff`/`ruff format` clean. Rebuilt/
+redeployed `webdav-connector`; live-verified via the real test suite against the real running stack (no
+separate manual curl verification needed — the regression test itself IS the live verification here, since
+it exercises the real WebDAV protocol path end-to-end). Docs updated: `webdav-connector.md` (Open Points,
+corrected with the real root cause in place of the originally-assumed one).
+
+**Next session:** P79-S3 — test-suite health cleanup (admin-ui's 3 stale Playwright specs, auth-service's
+circular-dependency test failure, `workflow-service`'s `approval_config_override` fixture timing bug, and
+the federation/xdomea-dispatch flake reconfirmed twice now — once at Phase 78 close, once again in
+`auth-service`'s own P79-S1 test run).
+
+---
+
+Immediately before: P79-S1 (first session of Phase 79 — cross-service small-fix bundle). Four small,
 independent fixes bundled per the plan. **Breadcrumb**: `folder-service` gains `GET
 /folders/{id}/breadcrumb` (`repository.get_breadcrumb`, root-first ancestor walk) — closes ADR 0015's own
 long-standing "no endpoint for breadcrumb/full path" gap. **Structure-template nesting**: applying a
@@ -43,10 +92,6 @@ picker populated with 246 real entries from the live stack. Docs updated: `folde
 Structure Templates, Open Points), `object-type-service.md` (corrected the now-inaccurate "only
 object-type-service imports the constraint-engine lib" claim), `admin-ui.md` (Open Points),
 `user-ui.md`/`permission-service.md` (`DelegationsPane` bullets, Open Points).
-
-**Next session:** P79-S2 — `webdav-connector` root `PROPFIND` pagination, the highest-value remaining item
-in this phase (real, already-reproduced timeout at this dev stack's scale, see Phase 78 close below for
-the reproduction).
 
 ---
 

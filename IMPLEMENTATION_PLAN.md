@@ -2352,7 +2352,7 @@ reconfirmed).
   (API table, Structure Templates, Open Points), `object-type-service.md` (Constraint Engine section's
   now-inaccurate "only object-type-service imports the lib" claim corrected), `admin-ui.md` (Open
   Points), `user-ui.md`/`permission-service.md` (`DelegationsPane` bullets, Open Points).
-- **P79-S2 — `webdav-connector` root `PROPFIND` pagination (real feature, finally built)**: flagged
+- **P79-S2 — `webdav-connector` root `PROPFIND` pagination (real feature, finally built)**: ✅ ~~flagged
   repeatedly across multiple gap-analysis rounds as "O(N) in total item count, will get worse" and
   explicitly re-confirmed at Phase 75's own close (ADR 0228) as now **actually timing out**, not just
   slow, at this dev stack's accumulated scale (1,639 folders/1,675 documents) — the highest-value single
@@ -2360,7 +2360,22 @@ reconfirmed).
   defer further. Needs genuine pagination of the root listing (RFC 4918's `Depth: 1` response can be
   paged via a WebDAV client's own incremental `PROPFIND` re-issuing behavior for large collections, or a
   practical page-size cap with a documented client-side workaround if true WebDAV-protocol pagination
-  proves impractical — session decides after investigating real WebDAV client behavior).
+  proves impractical — session decides after investigating real WebDAV client behavior).~~ **Done, but
+  not the anticipated fix.** Investigation found the real root cause was a DIFFERENT N+1 than "too many
+  items for one response": `wsgidav`'s own default `get_member_list()` calls `get_member(name)` once per
+  member, and `DmsDavFolder.get_member()` re-fetched the ENTIRE `list_children()` (2-3 HTTP round trips)
+  on every single call — an N-member directory triggered N+1 *full-listing* fetches, not N+1 single-item
+  lookups (300 members => 300+ redundant full listings). Fixed by overriding `get_member_list()` to fetch
+  `list_children()` exactly once and build every child resource directly from it — `wsgidav`'s own base
+  class explicitly documents this method as overridable for performance. No pagination built or needed:
+  RFC 4918 defines none for `PROPFIND`, real clients (Explorer/Finder/`webdav4`) don't request one, and a
+  genuinely complete listing is fast in a handful of round trips once the real bottleneck is gone. New
+  ADR 0231 (a real "investigated and rejected an approach" decision, not execution of an already-decided
+  pattern). New test: `test_listing_a_folder_with_many_children_stays_fast` (60-child folder, asserts
+  under 5s). Full suite: 239s/6 failed (`httpcore.ReadTimeout`, reproduced fresh before touching any code)
+  → 35-40s/19 passed. `cmis-connector` confirmed NOT to share this bug despite sharing
+  `dms-connector-sdk` — it's a plain FastAPI service with no `wsgidav`-style per-member call pattern.
+  Rebuilt/redeployed; docs updated (`webdav-connector.md` Open Points, corrected with the real cause).
 - **P79-S3 — Test-suite health cleanup**: `admin-ui`'s three stale Playwright specs
   (`user-management.spec.ts`, `fleet-management.spec.ts`, `email-templates.spec.ts` — drifted behind
   real i18n/label changes since only `login.spec.ts` was fixed at P71-S3); `auth-service`'s circular-

@@ -130,6 +130,53 @@ class DmsDavFolder(DAVCollection):
             )
         return None
 
+    def get_member_list(self) -> list:
+        """Phase 79 Session 2 - the actual cause of root `PROPFIND` timing
+        out at this project's real accumulated scale (flagged repeatedly
+        across gap-analysis rounds as "O(N) in total item count", finally
+        reproduced as genuine `httpcore.ReadTimeout`s at Phase 74's own
+        phase-close regression). Root cause was NOT primarily "too many
+        items for one response" - `wsgidav`'s own default `get_member_list()`
+        (`DAVCollection`, dav_provider.py) calls `get_member_names()` ONCE
+        and then `get_member(name)` ONCE PER NAME, and `get_member()` above
+        re-fetches the ENTIRE `list_children()` (2-3 HTTP round trips to
+        folder-service/document-service each) on every single call - a
+        directory with N members previously triggered N+1 FULL listing
+        fetches, not just N+1 single-item lookups, for one `PROPFIND
+        Depth: 1` request (300 members => 300+ redundant full-listing round
+        trips). `wsgidav`'s own base implementation explicitly documents
+        this method as overridable "for performance reasons" - this
+        override fetches `list_children()` exactly ONCE and builds every
+        child resource directly from that single result, eliminating the
+        N+1 without changing any WebDAV response semantics (still a
+        complete, non-paginated `Depth: 1` listing - RFC 4918 does not
+        define a pagination mechanism for PROPFIND, and real clients like
+        Windows Explorer/Finder do not request one; genuine protocol-level
+        pagination was investigated and rejected as infeasible without
+        breaking client compatibility, see ADR 0231). `get_member_names()`/
+        `get_member()` above remain unchanged and correct for the other,
+        single-name call sites (`resolve_path`'s segment-by-segment
+        traversal, `get_resource_inst`) - only the listing path that
+        iterates every member benefits from (and needs) the single-fetch
+        version."""
+        folders, documents = self._tree.list_children(
+            self.folder.id, x_dms_principal=_actor(self.environ)
+        )
+        members: list = [
+            DmsDavFolder(join_uri(self.path, f.name), self.environ, f) for f in folders
+        ]
+        members.extend(
+            DmsDavDocument(
+                join_uri(self.path, d.title),
+                self.environ,
+                folder_id=self.folder.id,
+                filename=d.title,
+                document=d,
+            )
+            for d in documents
+        )
+        return members
+
     def create_collection(self, name: str):
         self.provider.check_license("write")
         actor = _actor(self.environ)
