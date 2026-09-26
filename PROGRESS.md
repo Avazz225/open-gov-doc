@@ -2,7 +2,41 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P78-S1 (first session of Phase 78 — DNS-rebinding TOCTOU fix for `migration-service`'s
+**Last completed:** P78-S2 (second session of Phase 78 — gateway backend-port bypass + chunked-encoding
+body-size bypass). **Port fix**: all 31 domain backend services' `ports:` mappings in `infra/docker-
+compose.yml` now bind to `127.0.0.1` explicitly (was implicit `0.0.0.0`) — closes ADR 0005's own
+long-documented "a caller on the same network can skip the gateway" gap. `gateway-service` and the 6
+frontend apps deliberately kept on `0.0.0.0` (legitimate LAN-browser use case). Chose `127.0.0.1` over
+removing host publishing entirely specifically to preserve this project's own extensively-used
+`curl localhost:<port>` dev/test workflow (used constantly throughout every session's own history,
+including this one) — verified `localhost`/`127.0.0.1` still return `200`, the host's real LAN IP now
+gets connection-refused, and a real end-to-end gateway login (which internally calls `auth-service`
+container-to-container) still succeeds. Kubernetes/Helm needed no change (`ClusterIP` by default, no
+`NodePort`/`LoadBalancer` anywhere in the chart — confirmed via grep). **Body-size fix**: `libs/dms-
+common`'s `MaxBodySizeMiddleware` rewritten from `BaseHTTPMiddleware` to a raw ASGI middleware wrapping
+`receive` directly — the `Content-Length` fast path is unchanged, but a request with no `Content-Length`
+at all (genuinely chunked-encoded, previously an accepted bypass) is now byte-counted as it streams in,
+buffered up to `max_bytes + 1`, and rejected with `413` before the app is ever invoked; a request within
+the limit is replayed byte-identical to the app afterward. Public interface unchanged — zero code change
+needed in any of the 3 consuming services (`virus-scan-service`/`rendering-service`/`storage-service`).
+
+**Also fixed one leftover formatting issue from P78-S1** found while checking `ruff` file-by-file this
+session instead of trusting the bundled project-wide summary (a habit worth keeping going forward — see
+the correction note in the previous entry). New ADR 0230. New/updated tests: `libs/dms-common` — one old
+test asserting the now-closed gap replaced with two new ones (chunked-over-limit rejected with `413`,
+chunked-under-limit still reaches the app byte-identical), 5/5; `virus-scan-service`/`rendering-service`/
+`storage-service` full suites re-run unchanged to confirm the middleware rewrite breaks no real multipart
+upload endpoint, 310 passed combined. `ruff`/`ruff format` clean for every file touched this session
+(project-wide `ruff` still fails only on pre-existing, unrelated issues in files this round never
+touched). All 31 rebound services plus the 3 upload-limited services rebuilt/redeployed; live-verified as
+described above. `docs/services/gateway-service.md`/`virus-scan-service.md`/`rendering-service.md`/
+`storage-service.md` updated.
+
+**Next session:** P78-S3 — realm-role assignment API + group-principal role assignments.
+
+---
+
+Immediately before: P78-S1 (first session of Phase 78 — DNS-rebinding TOCTOU fix for `migration-service`'s
 and `federation-hub-service`'s SSRF guards). Both guards (`_validate_peer_base_url`/ADR 0182,
 `_validate_callback_base_url`/ADR 0183) previously validated a target hostname exactly once — at pairing-
 creation/registration time — then trusted it forever after; an attacker controlling DNS for an
@@ -18,8 +52,11 @@ same cost/benefit judgment call recorded in the ADR). New tests: `migration-serv
 monkeypatches `socket.getaddrinfo` since this service's suite is otherwise 100% black-box HTTP with no way
 to simulate DNS rebinding against a live container), 19/19; `federation-hub-service` +1 (simulates a
 genuine rebinding sequence — resolves publicly at registration, privately at delivery — and asserts the
-mocked transport is never reached once rejected), 90/90. `ruff` clean for both changed files (project-wide
-`ruff` still fails only on the pre-existing, unrelated `libreoffice-addin` issue).
+mocked transport is never reached once rejected), 90/90. **Correction found at P78-S2**: this session's
+own claim that `ruff` was "clean for both changed files" was imprecise — `federation-hub-service/tests/
+test_api.py`'s new test had one real `ruff format` line-wrap issue, missed because the bundled
+`scripts/run-tests.sh` project-wide `ruff` failure was attributed entirely to the already-known
+`libreoffice-addin` issue without checking file-by-file. Fixed at P78-S2.
 
 **Rebuilt/redeployed both services**; live-verified against the real running stack: both guards still
 correctly reject a direct private target at creation/registration time and `migration-service` still
@@ -28,8 +65,6 @@ behavior itself is exhaustively covered by the two new unit tests, since a live 
 would need a real, test-controlled second DNS record this environment doesn't have. Test data/temporary
 role grant cleaned up afterward. `docs/services/migration-service.md`/`federation-hub-service.md` updated
 (`federation-hub-service.md`'s "Open Points" gets the pattern's usual struck-through closed entry).
-
-**Next session:** P78-S2 — gateway backend-port bypass + chunked-encoding body-size bypass.
 
 ---
 

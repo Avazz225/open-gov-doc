@@ -2247,7 +2247,7 @@ phase for the handful of findings that are real but too large/expensive to just 
   publicly at registration, privately at delivery, asserts the mocked transport is never reached once
   rejected), 90/90. Both services rebuilt/redeployed, live-verified (pre-existing creation/registration-
   time rejection behavior confirmed unchanged); docs updated.
-- **P78-S2 — Gateway backend-port bypass + chunked-encoding body-size bypass, one session**: `gateway-
+- **P78-S2 — Gateway backend-port bypass + chunked-encoding body-size bypass, one session**: ✅ ~~`gateway-
   service`'s own docs (ADR 0005) still name backend service ports as directly published in `docker-
   compose.yml`, meaning a caller on the same network can skip the gateway (and its auth/rate-limiting/
   maintenance-mode enforcement) entirely by hitting a backend service's port directly — genuinely a
@@ -2259,7 +2259,21 @@ phase for the handful of findings that are real but too large/expensive to just 
   read, not just a header check; the port issue likely needs either firewalling backend ports in
   `docker-compose.yml`/Helm to internal-network-only, or accepting it as a documented dev-stack-only
   posture — the session decides after a first look at what's actually feasible without breaking direct
-  service-to-service calls that are themselves legitimate, ADR 0005's own documented pattern).
+  service-to-service calls that are themselves legitimate, ADR 0005's own documented pattern).~~ **Done.**
+  Port fix: bound all 31 domain backend services' `ports:` mappings to `127.0.0.1` explicitly (was implicit
+  `0.0.0.0`) — `gateway-service` and the 6 frontend apps deliberately kept on `0.0.0.0` (legitimate
+  LAN-browser use case); `localhost`/`127.0.0.1` dev access and all inter-container traffic (never routed
+  through host port mappings) fully preserved, live-verified via `curl` from `localhost` (still `200`) vs.
+  the host's real LAN IP (now connection-refused) plus a real end-to-end gateway login. Kubernetes/Helm
+  needed no change (`ClusterIP` by default already, confirmed no `NodePort`/`LoadBalancer` anywhere in the
+  chart). Body-size fix: rewrote `MaxBodySizeMiddleware` from `BaseHTTPMiddleware` to a raw ASGI middleware
+  that wraps `receive` directly — `Content-Length` fast path unchanged, the no-`Content-Length` case now
+  buffers up to `max_bytes + 1` byte-counted as it streams in, rejects with `413` before ever invoking the
+  app, or replays byte-identical data to the app if within the limit. Public interface unchanged, zero code
+  change needed in any of the 3 consuming services. New ADR 0230. New/updated tests: `libs/dms-common` +1
+  net (one old test asserting the now-closed gap replaced with two new ones), 5/5;
+  `virus-scan-service`/`rendering-service`/`storage-service` full suites re-run unchanged, 310 passed
+  combined. All rebuilt/redeployed, docs updated.
 - **P78-S3 — Realm-role assignment API + group-principal role assignments, one session**: both
   `auth-service` and `document-service`'s own docs independently name the same gap — Keycloak realm
   roles (`dms-admin`, `dms-poststelle`, etc.) can be *created* via `POST /realm-roles` but *assigning*

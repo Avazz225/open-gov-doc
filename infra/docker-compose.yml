@@ -325,7 +325,7 @@ services:
       # locked, same "operator must deliberately enable" default).
       DMS_REGISTRY_OPERATOR_KEY: ${REGISTRY_OPERATOR_KEY:-registry_operator_dev_only}
     ports:
-      - "${REGISTRY_SERVICE_PORT:-8001}:8000"
+      - "127.0.0.1:${REGISTRY_SERVICE_PORT:-8001}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -361,7 +361,7 @@ services:
       # (scripts/restore.sh) does not roll it back too.
       - deletion-ledger-data:/deletion-ledger
     ports:
-      - "${AUDIT_SERVICE_PORT:-8002}:8000"
+      - "127.0.0.1:${AUDIT_SERVICE_PORT:-8002}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -416,7 +416,7 @@ services:
       DMS_FEDERATED_DIRECTORY_ENABLED: ${AUTH_SERVICE_FEDERATED_DIRECTORY_ENABLED:-true}
       DMS_INSTALLATION_GATEWAY_BASE_URL: ${INSTALLATION_GATEWAY_BASE_URL:-http://gateway-service:8000}
     ports:
-      - "${AUTH_SERVICE_PORT:-8003}:8000"
+      - "127.0.0.1:${AUTH_SERVICE_PORT:-8003}:8000"
     depends_on:
       keycloak:
         condition: service_healthy
@@ -448,7 +448,7 @@ services:
       # `POST /maintenance-mode/lift` at runtime, not during its own startup.
       DMS_AUTH_SERVICE_BASE_URL: http://auth-service:8000
     ports:
-      - "${PERMISSION_SERVICE_PORT:-8004}:8000"
+      - "127.0.0.1:${PERMISSION_SERVICE_PORT:-8004}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -515,7 +515,7 @@ services:
       - storage-local-data:/data/storage
       - storage-archive-data:/data/archive
     ports:
-      - "${STORAGE_SERVICE_PORT:-8005}:8000"
+      - "127.0.0.1:${STORAGE_SERVICE_PORT:-8005}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -573,7 +573,7 @@ services:
       DMS_RENDERING_SERVICE_BASE_URL: http://rendering-service:8000
       DMS_AUDIT_SERVICE_BASE_URL: http://audit-service:8000
     ports:
-      - "${DOCUMENT_SERVICE_PORT:-8006}:8000"
+      - "127.0.0.1:${DOCUMENT_SERVICE_PORT:-8006}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -617,7 +617,7 @@ services:
       DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
       DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
     ports:
-      - "${VIRUS_SCAN_SERVICE_PORT:-8010}:8000"
+      - "127.0.0.1:${VIRUS_SCAN_SERVICE_PORT:-8010}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -648,7 +648,7 @@ services:
       DMS_SELF_ADDRESS: http://rendering-service:8000
       DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
     ports:
-      - "${RENDERING_SERVICE_PORT:-8011}:8000"
+      - "127.0.0.1:${RENDERING_SERVICE_PORT:-8011}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -695,7 +695,7 @@ services:
       # `needs_review` flag alone (Phase 45 Session 3).
       DMS_WORKFLOW_SERVICE_BASE_URL: http://workflow-service:8000
     ports:
-      - "${OCR_SERVICE_PORT:-8012}:8000"
+      - "127.0.0.1:${OCR_SERVICE_PORT:-8012}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -732,7 +732,7 @@ services:
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://search-service:8000
     ports:
-      - "${SEARCH_SERVICE_PORT:-8013}:8000"
+      - "127.0.0.1:${SEARCH_SERVICE_PORT:-8013}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -798,7 +798,7 @@ services:
       # just a redundant one.
       DMS_ARCHIVAL_SERVICE_BASE_URL: http://archival-service:8000
     ports:
-      - "${WORKFLOW_SERVICE_PORT:-8014}:8000"
+      - "127.0.0.1:${WORKFLOW_SERVICE_PORT:-8014}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -845,7 +845,7 @@ services:
       # needed by a real installation, never set true there.
       DMS_ALLOW_LOOPBACK_WEBHOOKS: "true"
     ports:
-      - "${NOTIFICATION_SERVICE_PORT:-8015}:8000"
+      - "127.0.0.1:${NOTIFICATION_SERVICE_PORT:-8015}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -885,7 +885,7 @@ services:
       # docstring.
       DMS_ATTRIBUTE_PSEUDONYMIZATION_KEY: ${CASE_SERVICE_PSEUDONYMIZATION_KEY:-Y2FzZS1zZXJ2aWNlLXBzZXVkb255bS1rZXktMzIxMTI=}
     ports:
-      - "${CASE_SERVICE_PORT:-8016}:8000"
+      - "127.0.0.1:${CASE_SERVICE_PORT:-8016}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -922,7 +922,7 @@ services:
       # now requires `admin.signature_config`.
       DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
     ports:
-      - "${SIGNATURE_SERVICE_PORT:-8017}:8000"
+      - "127.0.0.1:${SIGNATURE_SERVICE_PORT:-8017}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -961,7 +961,7 @@ services:
       # already established for this service, see Settings' own docstring).
       DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
     ports:
-      - "${FEDERATION_HUB_SERVICE_PORT:-8018}:8000"
+      - "127.0.0.1:${FEDERATION_HUB_SERVICE_PORT:-8018}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -984,7 +984,7 @@ services:
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://favorite-service:8000
     ports:
-      - "${FAVORITE_SERVICE_PORT:-8019}:8000"
+      - "127.0.0.1:${FAVORITE_SERVICE_PORT:-8019}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -1021,7 +1021,7 @@ services:
       DMS_GATEWAY_BASE_URL: ${REPORTING_SERVICE_GATEWAY_BASE_URL:-http://localhost:8009}
       DMS_REPORT_POLL_INTERVAL_SECONDS: ${REPORTING_SERVICE_POLL_INTERVAL_SECONDS:-3600}
     ports:
-      - "${REPORTING_SERVICE_PORT:-8020}:8000"
+      - "127.0.0.1:${REPORTING_SERVICE_PORT:-8020}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -1073,7 +1073,7 @@ services:
       # this via a secret or runs its own `KeyStore` plugin.
       DMS_ARCHIVE_ENCRYPTION_KEY: ${ARCHIVAL_SERVICE_ENCRYPTION_KEY:-MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
     ports:
-      - "${ARCHIVAL_SERVICE_PORT:-8021}:8000"
+      - "127.0.0.1:${ARCHIVAL_SERVICE_PORT:-8021}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -1120,7 +1120,7 @@ services:
       # DMS_ARCHIVE_ENCRYPTION_KEY.
       DMS_DRY_RUN_SECRET: ${QUERY_SERVICE_DRY_RUN_SECRET:-dev-only-dry-run-secret-do-not-use-in-production}
     ports:
-      - "${QUERY_SERVICE_PORT:-8022}:8000"
+      - "127.0.0.1:${QUERY_SERVICE_PORT:-8022}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -1172,7 +1172,7 @@ services:
       # own compose override file, since the compact "${VAR:-default}"
       # syntax cannot carry a multi-line PEM as a default.
     ports:
-      - "${LICENSE_SERVICE_PORT:-8023}:8000"
+      - "127.0.0.1:${LICENSE_SERVICE_PORT:-8023}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -1205,7 +1205,7 @@ services:
       DMS_AUTH_SERVICE_BASE_URL: http://auth-service:8000
       DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
     ports:
-      - "${PLUGIN_ORCHESTRATION_SERVICE_PORT:-8024}:8000"
+      - "127.0.0.1:${PLUGIN_ORCHESTRATION_SERVICE_PORT:-8024}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -1238,7 +1238,7 @@ services:
       DMS_AUTH_SERVICE_BASE_URL: http://auth-service:8000
       DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
     ports:
-      - "${MONITORING_SERVICE_PORT:-8026}:8000"
+      - "127.0.0.1:${MONITORING_SERVICE_PORT:-8026}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -1271,7 +1271,7 @@ services:
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://webdav-connector:8000
     ports:
-      - "${WEBDAV_CONNECTOR_PORT:-8027}:8000"
+      - "127.0.0.1:${WEBDAV_CONNECTOR_PORT:-8027}:8000"
     depends_on:
       document-service:
         condition: service_started
@@ -1306,7 +1306,7 @@ services:
       # registry-service above.
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
     ports:
-      - "${CMIS_CONNECTOR_PORT:-8030}:8000"
+      - "127.0.0.1:${CMIS_CONNECTOR_PORT:-8030}:8000"
     depends_on:
       document-service:
         condition: service_started
@@ -1377,7 +1377,7 @@ services:
       # document-service/registry-service.
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
     ports:
-      - "${MAIL_CONNECTOR_PORT:-8033}:8000"
+      - "127.0.0.1:${MAIL_CONNECTOR_PORT:-8033}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -1421,7 +1421,7 @@ services:
       # never needed by a real installation, never set true there.
       DMS_ALLOW_LOOPBACK_PEERS: "true"
     ports:
-      - "${MIGRATION_SERVICE_PORT:-8028}:8000"
+      - "127.0.0.1:${MIGRATION_SERVICE_PORT:-8028}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -1468,7 +1468,7 @@ services:
       # does not reach the `nats` service in the container (P17-S3 finding).
       DMS_NATS_URL: nats://nats:4222
     ports:
-      - "${CONFIG_SERVICE_PORT:-8029}:8000"
+      - "127.0.0.1:${CONFIG_SERVICE_PORT:-8029}:8000"
     depends_on:
       nats:
         condition: service_healthy
@@ -1501,7 +1501,7 @@ services:
       # separately.
       DMS_POSTGRES_DSN: postgresql+asyncpg://svc_fleet:${POSTGRES_PASSWORD_FLEET:-fleet_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
     ports:
-      - "${FLEET_MANAGEMENT_SERVICE_PORT:-8031}:8000"
+      - "127.0.0.1:${FLEET_MANAGEMENT_SERVICE_PORT:-8031}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -1527,7 +1527,7 @@ services:
       # 0160/ADR 0217) - `AuthServiceClient.get_group_members`.
       DMS_AUTH_SERVICE_BASE_URL: http://auth-service:8000
     ports:
-      - "${TEAMSPACE_SERVICE_PORT:-8032}:8000"
+      - "127.0.0.1:${TEAMSPACE_SERVICE_PORT:-8032}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -1627,7 +1627,7 @@ services:
       # kennzeichen-config mutation now requires `admin.object_config`.
       DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
     ports:
-      - "${OBJECT_TYPE_SERVICE_PORT:-8007}:8000"
+      - "127.0.0.1:${OBJECT_TYPE_SERVICE_PORT:-8007}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -1666,7 +1666,7 @@ services:
       # document-service's own, see folder_service/settings.py's docstring.
       DMS_ATTRIBUTE_PSEUDONYMIZATION_KEY: ${FOLDER_SERVICE_PSEUDONYMIZATION_KEY:-Zm9sZGVyLXNlcnZpY2UtcHNldWRvbnltLWtleS0zMjE=}
     ports:
-      - "${FOLDER_SERVICE_PORT:-8008}:8000"
+      - "127.0.0.1:${FOLDER_SERVICE_PORT:-8008}:8000"
     depends_on:
       postgres:
         condition: service_healthy

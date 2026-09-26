@@ -39,14 +39,34 @@ def test_request_exactly_at_limit_passes_through():
     assert response.status_code == 200
 
 
-def test_request_without_content_length_header_is_not_blocked():
-    """Accepted residual gap (see module docstring) - a request with no
-    `Content-Length` at all (rare for real upload clients) is not caught
-    by this pre-emptive check."""
+def test_chunked_request_over_limit_without_content_length_is_rejected_with_413():
+    """Phase 78 Session 2 (gap-analysis round after Phase 77) - closes what
+    was previously an accepted residual gap: a request with no
+    `Content-Length` header at all (a genuinely chunked-encoded body) used
+    to skip the size check entirely. Now byte-counted as the body streams
+    in and rejected once the bound is exceeded, before the app is ever
+    invoked."""
     client = TestClient(_make_app(max_bytes=10))
 
     def _generate():
         yield b"x" * 100
 
     response = client.post("/upload", content=_generate())
+    assert response.status_code == 413
+
+
+def test_chunked_request_under_limit_without_content_length_still_reaches_the_app():
+    """The other half of the Phase 78 Session 2 fix: a genuinely
+    chunked-encoded body that fits within the limit must still reach the
+    real endpoint afterward, byte-for-byte identical to what it sent -
+    proves the buffer-then-replay path doesn't corrupt or drop data for the
+    legitimate case."""
+    client = TestClient(_make_app(max_bytes=1024))
+
+    def _generate():
+        yield b"x" * 30
+        yield b"y" * 20
+
+    response = client.post("/upload", content=_generate())
     assert response.status_code == 200
+    assert response.text == "received 50 bytes"

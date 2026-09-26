@@ -605,9 +605,7 @@ async def test_deliver_rejects_target_that_rebinds_to_a_private_address(
     monkeypatch.setattr(socket, "getaddrinfo", _rebinding_getaddrinfo)
 
     sender, sender_key = register_installation(client)
-    target, _ = register_installation(
-        client, callback_base_url="http://rebind.example.test"
-    )
+    target, _ = register_installation(client, callback_base_url="http://rebind.example.test")
     assert resolve_calls["n"] == 1  # registration-time check, resolved publicly, passed
 
     delivery_attempted = {"called": False}

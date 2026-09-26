@@ -280,10 +280,23 @@ None yet — to follow in Phase 11.
   itself (would need a synthetic header-echoing test target with no existing precedent in this
   service's test suite); verified instead via live E2E through the real running gateway with a real
   login, see `docs/services/auth-service.md` "Fine-Grained User Tracking".
-- Backend service ports remain directly published in the Docker Compose
+- ~~Backend service ports remain directly published in the Docker Compose
   environment (developer convenience) — a genuine network perimeter that
   makes backends reachable exclusively via the gateway is a later
-  deployment step.
+  deployment step.~~ — **closed in Phase 78 Session 2** (gap-analysis round
+  after Phase 77, ADR 0230): all 31 domain backend services' `ports:`
+  mappings in `infra/docker-compose.yml` now bind to `127.0.0.1` explicitly
+  instead of the implicit `0.0.0.0` — unreachable from another machine on
+  the same network (the actual exploitable shape this gap named), while
+  `localhost`/`127.0.0.1` access on the host itself (this project's own
+  extensively-used dev/test convention, and legitimate inter-container
+  traffic, which never goes through host port mappings at all) is
+  completely unaffected. `gateway-service` itself and the six frontend apps
+  deliberately stay on `0.0.0.0` — a browser on another machine on the LAN
+  is a legitimate use case for those two, unlike a direct backend-service
+  call. Kubernetes/Helm deployments were already unaffected (`ClusterIP`
+  Services by default, no `NodePort`/`LoadBalancer` anywhere in the chart) —
+  this was a Docker Compose-only gap.
 - Since P25-S4, least-open-connections selection is used instead of random
   instance selection (see "Instance Selection / Load Balancing" above), but it remains
   **not latency-aware** — an instance with few open requests, but a high
