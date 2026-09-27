@@ -2,7 +2,57 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** Phase 79 close (full backend regression + `graphify update .`, after P79-S3 closed the
+**Last completed:** P80-S1 (first session of Phase 80 — eGov configuration package completion, cheap
+config-only fixes). Five independent items in `packages/egov/config.json`/`README.md`, per the plan's own
+component-by-component checklist verification against Konzept §14.2. **(a)** `permission.role.create`
+added to `approval_config` — the same "permission change" family as the already-covered
+`permission.role_assignment.create`. **(b)** three new document object types
+(`Verschlusssache-Akte-Vertraulich`/`-Geheim`/`-Streng-Geheim`) demonstrate the three classification
+levels the concept names but the package never used (previously only `VS-NfD` appeared anywhere).
+**(c)** retention/archive periods now scale with classification instead of one flat 3653-day (10-year)
+value on both original document types — `Akte` unchanged (10y), the four VS tiers span 10y (VS-NfD) to
+30y (STRENG GEHEIM), each archived 1 year after its own retention expires (Konzept 5.6's disposal-review
+buffer, not a legal requirement). **(d)** every classified-documents type now has an escalating
+`required_signature_level` (AES for VS-NfD/VS-VERTRAULICH, QES for the two most sensitive tiers) and
+`deletion_reason_required_override: true` — both fields already existed in the exportable schema, simply
+unset before. **(e)** the P31-S7 manifest drift fixed: `manifest.version` bumped `1.0.0` → `1.1.0`,
+`description` updated, README's object-type table now lists `Handakte`/`Arbeitsvorrat` (silently added at
+P31-S7, never documented).
+
+**No new ADR** (pure config content, no architecture decision, matches the plan's own DoD for this
+session). Honored the standing external-reference-graph citation constraint throughout this session,
+including while researching what a real eGov records-management package would plausibly need —
+confirmed via post-hoc grep of every file touched, no mention anywhere.
+
+**Live-verified against the real running stack, not just JSON-validated.** `POST /config/import`'d the
+complete updated package for real: all six categories applied with **zero errors** — 9/9 object types
+created, 3/3 workflows, 17/17 business calendars, 2/2 roles, 6/6 approval-config entries, the realm role
+idempotently reconfirmed present. Inspected `object-type-service`'s resulting rows directly afterward to
+confirm every new field (retention/archive/classification/signature-level/deletion-reason) round-tripped
+exactly as configured — not just "the import didn't error," but the actual persisted values match. Since
+this is a shared, general-purpose dev stack (not a real eGov installation, and later Phase 81/82 sessions
+don't need this content cluttering admin-ui screenshots or unexpectedly gating their own role/config
+work), cleaned up afterward: deleted all 9 object types and all 17 business calendars, reverted all 6
+`approval_config` entries back to their pre-import `requires_approval: false` state (captured before
+reverting by cross-checking each entry's `updated_at` timestamp against the import moment — all six
+showed the exact same import timestamp, confirming they'd all just been flipped from an existing `false`
+row, not freshly created). **Two residuals could not be cleaned up**: the 2 new roles
+(`Registratur/Aktenverwaltung`/`Amtsleitung`) and 3 BPMN process definitions (`egov_freigabe`/
+`egov_kenntnisnahme`/`egov_aufgabe`) — this platform has no `DELETE` endpoint for either resource type at
+all (roles and process definitions are both append-only/versioned by design, confirmed via direct code
+read of both services' `main.py`, not just a failed guess) — they remain defined but genuinely inert (no
+role assignments, no running instances) on this dev stack. `config-service`/`object-type-service`/
+`permission-service`/`workflow-service` full suites re-run afterward to confirm the cleanup left nothing
+behind that could affect them: 590 passed combined, no failures.
+
+**Next session:** P80-S2 — new exportable config categories (deletion-reason catalog, org-units/groups)
+needed for the two remaining structural gaps Konzept §14.2 names — real backend/schema work in
+`config-service` first, then package concrete eGov defaults using the new categories. Needs a real ADR
+(new exportable config category is a genuine schema/architecture decision), unlike this session.
+
+---
+
+Immediately before: Phase 79 close (full backend regression + `graphify update .`, after P79-S3 closed the
 phase). Standard phase-end cadence per `CONTRIBUTING.md`.
 
 **Backend regression found one real, genuine bug — in `migration-service`, unrelated to any P79 session's
@@ -53,9 +103,6 @@ unlabeled community (the P66-S2→P79-S3 flake root-cause chain).
 **This closes Phase 79 in full** (P79-S1 small-fix bundle, P79-S2 webdav-connector pagination, P79-S3
 test-suite health, plus this phase-close's own migration-service fix) — no phase-end DoD items remain
 outstanding.
-
-**Next session:** Phase 80 — eGov configuration package completion (the user's own explicitly requested
-initiative).
 
 ---
 

@@ -3,9 +3,9 @@
   "exported_at": "2026-08-11T00:00:00Z",
   "manifest": {
     "name": "eGov-Konfigurationspaket",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "compatibility_range": ">=1.0",
-    "description": "Standardkonfiguration für die deutsche öffentliche Verwaltung (Konzept 14.2) - vollständig: Aktenplan-Objekttyp-Hierarchie (Abteilung → Aktenplan → Akte), Aktenzeichen-Format, Aufbewahrungsfristen-Vorschlag, Verschlusssachen-Klassifizierung (Teil 1, P17-S2); Poststelle-Rollenvorlage, BPMN-Prozessvorlagen für Umlaufmappen (Freigabe/Kenntnisnahme/Aufgabe), Vier-Augen-Vorbelegung für sensible Aktionstypen, bundeseinheitlicher und landesspezifischer Geschäftskalender, erweiterte domänengetrennte Admin-Rollen (Teil 2, P17-S3).",
+    "description": "Standardkonfiguration für die deutsche öffentliche Verwaltung (Konzept 14.2) - vollständig: Aktenplan-Objekttyp-Hierarchie (Abteilung → Aktenplan → Akte, plus Handakte/Arbeitsvorrat als weitere Ordnerklassen), Aktenzeichen-Format, nach Verschlusssachen-Einstufung differenzierte Aufbewahrungs-/Aussonderungsfristen, alle vier VS-Einstufungsstufen demonstriert (VS-NfD/VS-VERTRAULICH/GEHEIM/STRENG GEHEIM, je mit passendem Mindest-Signaturniveau und verpflichtender Löschbegründung) (Teil 1, P17-S2, erweitert Phase 80 Session 1); Poststelle-Rollenvorlage, BPMN-Prozessvorlagen für Umlaufmappen (Freigabe/Kenntnisnahme/Aufgabe), Vier-Augen-Vorbelegung für sensible Aktionstypen (inkl. Rollen-Neuanlage), bundeseinheitlicher und landesspezifischer Geschäftskalender, erweiterte domänengetrennte Admin-Rollen (Teil 2, P17-S3).",
     "origin": "dms-project",
     "license": "MIT"
   },
@@ -47,7 +47,8 @@
         "Aktenplan"
       ],
       "kennzeichen_format": "{Federführung}-{YYYY}-{Laufende_Nummer}",
-      "default_retention_days": 3653
+      "default_retention_days": 3653,
+      "default_archive_after_days": 4018
     },
     {
       "name": "Verschlusssache-Akte",
@@ -69,7 +70,85 @@
       ],
       "kennzeichen_format": "{Federführung}-{YYYY}-{Laufende_Nummer}",
       "default_retention_days": 3653,
-      "classification_level": "VS-NfD"
+      "classification_level": "VS-NfD",
+      "default_archive_after_days": 4018,
+      "required_signature_level": "aes",
+      "deletion_reason_required_override": true
+    },
+    {
+      "name": "Verschlusssache-Akte-Vertraulich",
+      "applies_to": "document",
+      "attributes": [
+        {
+          "name": "Aktentitel",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "Federführung",
+          "type": "string",
+          "required": true
+        }
+      ],
+      "allowed_parent_types": [
+        "Aktenplan"
+      ],
+      "kennzeichen_format": "{Federführung}-{YYYY}-{Laufende_Nummer}",
+      "default_retention_days": 5478,
+      "default_archive_after_days": 5843,
+      "classification_level": "VS-VERTRAULICH",
+      "required_signature_level": "aes",
+      "deletion_reason_required_override": true
+    },
+    {
+      "name": "Verschlusssache-Akte-Geheim",
+      "applies_to": "document",
+      "attributes": [
+        {
+          "name": "Aktentitel",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "Federführung",
+          "type": "string",
+          "required": true
+        }
+      ],
+      "allowed_parent_types": [
+        "Aktenplan"
+      ],
+      "kennzeichen_format": "{Federführung}-{YYYY}-{Laufende_Nummer}",
+      "default_retention_days": 7305,
+      "default_archive_after_days": 7670,
+      "classification_level": "GEHEIM",
+      "required_signature_level": "qes",
+      "deletion_reason_required_override": true
+    },
+    {
+      "name": "Verschlusssache-Akte-Streng-Geheim",
+      "applies_to": "document",
+      "attributes": [
+        {
+          "name": "Aktentitel",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "Federführung",
+          "type": "string",
+          "required": true
+        }
+      ],
+      "allowed_parent_types": [
+        "Aktenplan"
+      ],
+      "kennzeichen_format": "{Federführung}-{YYYY}-{Laufende_Nummer}",
+      "default_retention_days": 10958,
+      "default_archive_after_days": 11323,
+      "classification_level": "STRENG GEHEIM",
+      "required_signature_level": "qes",
+      "deletion_reason_required_override": true
     },
     {
       "name": "Handakte",
@@ -128,6 +207,10 @@
     },
     {
       "action_type": "config.import",
+      "requires_approval": true
+    },
+    {
+      "action_type": "permission.role.create",
       "requires_approval": true
     }
   ],

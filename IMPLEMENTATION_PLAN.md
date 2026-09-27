@@ -2440,7 +2440,7 @@ the package was last touched). The package has also drifted from its own manifes
 two object types at P31-S7 (`Handakte`/`Arbeitsvorrat`) without a version bump or a README update, even
 though ADR 0060 itself named "future changes will regularly increment the version" as the expectation.
 
-- **P80-S1 — Config-only completions, cheap, one session**: (a) add `permission.role.create` to
+- **P80-S1 — Config-only completions, cheap, one session**: ✅ ~~(a) add `permission.role.create` to
   `approval_config` (same "permission change" family as the already-covered `permission.role_assignment.
   create`); (b) add object-type examples/documentation for the three undemonstrated classification levels
   (`VS-VERTRAULICH`, `GEHEIM`, `STRENG GEHEIM` — the concept names all four, only `VS-NfD` currently
@@ -2450,7 +2450,28 @@ though ADR 0060 itself named "future changes will regularly increment the versio
   classified-documents object type (both fields already exist in the exportable schema, just unset in
   this package); (e) fix the manifest drift — bump `manifest.version`, update its `description` and
   `packages/egov/README.md`'s object-type table to actually list `Handakte`/`Arbeitsvorrat`. Five
-  independent, config-only, cheap additions/fixes to the same one file plus its README, one session.
+  independent, config-only, cheap additions/fixes to the same one file plus its README, one session.~~
+  **Done**, honoring the standing external-reference-graph citation constraint throughout (verified via
+  post-hoc grep of every file touched). All five items implemented in `packages/egov/config.json`/
+  `README.md`: `permission.role.create` added to `approval_config`; three new
+  `Verschlusssache-Akte-{Vertraulich,Geheim,Streng-Geheim}` document types demonstrate the three
+  previously-unused classification levels; retention/archive periods now scale with classification
+  (10y→30y, each archived 1y after its own retention expiry, instead of one flat 3653-day value on both
+  original document types); every classified-documents object type now has an escalating
+  `required_signature_level` (AES for VS-NfD/VS-VERTRAULICH, QES for the two most sensitive tiers) and
+  `deletion_reason_required_override: true`; `manifest.version` bumped `1.0.0` → `1.1.0`,
+  `manifest.description` and the README's object-type table updated to list `Handakte`/`Arbeitsvorrat`
+  (the P31-S7 manifest drift). No new ADR (pure config content, matches the DoD below). **Live-verified**
+  against the real running stack: `POST /config/import`'d the full updated package for real — 9/9 object
+  types, 3/3 workflows, 17/17 business calendars, 2/2 roles, 6/6 approval-config entries all applied with
+  zero errors; inspected `object-type-service`'s resulting rows directly to confirm every new field
+  (retention/archive/classification/signature/deletion-reason) round-tripped exactly as configured.
+  Cleaned up afterward (a shared dev stack, not a real eGov installation) — deleted the object types/
+  business calendars, reverted `approval_config` to its pre-import `false` defaults; the 2 roles and 3
+  workflows couldn't be cleaned up (no delete endpoint exists for either resource type on this platform,
+  by design) and remain as harmless, unused, unassigned residuals. `config-service`/`object-type-service`/
+  `permission-service`/`workflow-service` full suites re-run afterward to confirm no residual state
+  affected them, 590 passed combined.
 - **P80-S2 — New exportable config categories, needed for the two remaining structural gaps**:
   `config-service`'s `ConfigDocument` format has no exportable category today for (a) a deletion-reason
   catalog (the platform already has an admin-configurable, non-enum catalog of deletion justifications —

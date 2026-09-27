@@ -21,16 +21,21 @@ for Part 2 of this specific package.
 Additive/upsert, repeatably applicable (§14.1) — can also be applied to an already running,
 partially differently configured installation; no initial-setup requirement.
 
-## Aktenplan Object-Type Hierarchy (Part 1, P17-S2)
+## Aktenplan Object-Type Hierarchy (Part 1, P17-S2; extended Phase 80 Session 1)
 
 Contains the `object_types` category:
 
-| Object Type | Type | Parent | Attributes | Reference-Number Format | Retention | VS Classification |
-|---|---|---|---|---|---|---|
-| `Abteilung` | Folder | `$ROOT` | — | — | — | — |
-| `Aktenplan` | Folder | `Abteilung` | — | — | — | — |
-| `Akte` | Document | `Aktenplan` | Aktentitel*, Federführung* | `{Federführung}-{YYYY}-{Laufende_Nummer}` | 10 years (3653 days) | — |
-| `Verschlusssache-Akte` | Document | `Aktenplan` | Aktentitel*, Federführung* | `{Federführung}-{YYYY}-{Laufende_Nummer}` | 10 years (3653 days) | VS-NfD |
+| Object Type | Type | Parent | Attributes | Reference-Number Format | Retention → Archive | VS Classification | Min. Signature | Deletion Reason |
+|---|---|---|---|---|---|---|---|---|
+| `Abteilung` | Folder | `$ROOT` | — | — | — | — | — | — |
+| `Aktenplan` | Folder | `Abteilung` | — | — | — | — | — | — |
+| `Handakte` | Folder | `$ROOT`/`Abteilung` | — | — | — | — | — | — |
+| `Arbeitsvorrat` | Folder | `$ROOT`/`Abteilung` | — | — | — | — | — | — |
+| `Akte` | Document | `Aktenplan` | Aktentitel*, Federführung* | `{Federführung}-{YYYY}-{Laufende_Nummer}` | 10y → +1y (3653 → 4018d) | — | — | — |
+| `Verschlusssache-Akte` | Document | `Aktenplan` | Aktentitel*, Federführung* | `{Federführung}-{YYYY}-{Laufende_Nummer}` | 10y → +1y (3653 → 4018d) | VS-NfD | AES | required |
+| `Verschlusssache-Akte-Vertraulich` | Document | `Aktenplan` | Aktentitel*, Federführung* | `{Federführung}-{YYYY}-{Laufende_Nummer}` | 15y → +1y (5478 → 5843d) | VS-VERTRAULICH | AES | required |
+| `Verschlusssache-Akte-Geheim` | Document | `Aktenplan` | Aktentitel*, Federführung* | `{Federführung}-{YYYY}-{Laufende_Nummer}` | 20y → +1y (7305 → 7670d) | GEHEIM | QES | required |
+| `Verschlusssache-Akte-Streng-Geheim` | Document | `Aktenplan` | Aktentitel*, Federführung* | `{Federführung}-{YYYY}-{Laufende_Nummer}` | 30y → +1y (10958 → 11323d) | STRENG GEHEIM | QES | required |
 
 \* Required attribute. The reference-number generation itself (`{Laufende_Nummer}`, year-based
 reset) is the already existing reference-number generator (P5e sessions) — `{Federführung}` is a
@@ -41,27 +46,68 @@ more sensible `Federführung`, which is already a required attribute, instead of
 second "Abteilung" attribute (the Akte is structurally already located under an
 `Abteilung` folder instance anyway).
 
-The retention period (10 years) and the choice to default `Verschlusssache-Akte` to `VS-NfD`
-instead of a higher level are **changeable defaults, not a system requirement** — the concrete
-legal deadline/classification remains the responsibility of the installation per federal
-state/legal domain (concept text, verbatim).
+`Handakte`/`Arbeitsvorrat` (hand folders/work trays, 14.2) were added at P31-S7 — documented here
+retroactively (Phase 80 Session 1) after being found to have silently drifted out of sync with this
+README and the manifest version, despite ADR 0060 itself naming "future changes will regularly
+increment the version" as the expectation.
+
+**All four VS classification levels the concept names are now demonstrated** (Phase 80 Session 1,
+previously only `VS-NfD`) — with a **plausible minimum signature level and mandatory deletion
+justification per tier**, escalating with sensitivity (AES for VS-NfD/VS-VERTRAULICH, QES for the two
+most sensitive tiers), and **retention/archival periods now differentiated by tier** instead of one
+flat 10-year value for every document class — regular `Akte`s keep the original 10 years, classified
+ones scale from 10 (VS-NfD) up to 30 years (STRENG GEHEIM), each archived one year after its own
+retention period expires (Konzept 5.6, an administrative buffer for the disposal review itself, not a
+legal requirement). **All of these remain changeable defaults, not a system requirement** — the
+concrete legal deadline/classification/signature policy remains the responsibility of the installation
+per federal state/legal domain (concept text, verbatim, same framing as the original P17-S2 session).
 
 ## Mailroom, Process Templates, Four-Eyes, Business Calendar, Admin Roles (Part 2, P17-S3)
 
 Extends the same `config.json` (14.1: additive/upsert, no new file) with the remaining five
-components mentioned in §14.2 — `manifest.version` has been set to `1.0.0` since this session,
-the first complete version of the package. Details/rationale: see
+components mentioned in §14.2 — `manifest.version` was `1.0.0` as of this session, the first
+complete version of the package (now `1.1.0`, see Part 3 below). Details/rationale: see
 [ADR 0060](../../docs/adr/0060-egov-paket-teil-2-vier-augen-luecken-und-umlaufmappen-prozessvorlagen.md).
 
 | Category | Content |
 |---|---|
 | `realm_roles` | `dms-poststelle` — Keycloak realm role for incoming/outgoing mail (2.5), already enforced by `mail-connector` (since P15-S3), packaged here for the first time. |
 | `workflows` | Three BPMN process templates for the Umlaufmappe (circulation folder) pattern (2.3/7.1): `egov_freigabe` (approve/reject decision via `exclusiveGateway`), `egov_kenntnisnahme` and `egov_aufgabe` (each a linear `manualTask`). Source XML is additionally located under [`workflows/`](workflows/) for easier maintenance/diff readability. |
-| `approval_config` | Four-eyes default (4.3) for the three sensitive action types named in 14.2 — `document.force_delete`, `folder.force_delete`, `document.force_unlock` (permanent deletion), `permission.role_assignment.create` (permission change, actually enforced since P17-S3), `config.import` (configuration import, actually enforced since P17-S3) — each with `requires_approval: true`. |
+| `approval_config` | Four-eyes default (4.3) for the sensitive action types named in 14.2 — `document.force_delete`, `folder.force_delete`, `document.force_unlock` (permanent deletion), `permission.role_assignment.create` (permission change, actually enforced since P17-S3), `config.import` (configuration import, actually enforced since P17-S3), and, since Phase 80 Session 1, `permission.role.create` (permission-*change*-family entry that had been missing — role *creation* itself, not just assigning an existing role, is the same sensitivity class) — each with `requires_approval: true`. |
 | `business_calendars` | `DE-Bund` (default, nine nationwide holidays) plus 16 state calendars `DE-BW` … `DE-TH` (each including federal holidays), real dates for 2026/2027. |
 | `roles` | `Registratur/Aktenverwaltung` (`read`, `write`) and `Amtsleitung` (`read`, `write`, `scope_lock.bypass`) — extended, domain-separated admin roles on top of the technical `domain-admin-*` system roles (4.6). |
 
 The four-eyes default requires that the approving person **not** be identical to the
-initiating person (4.3) — after applying this package, permanent deletion, role assignment,
-and configuration import therefore generally require a second person before they take
-effect (`POST /approval-requests/{id}/approve`).
+initiating person (4.3) — after applying this package, permanent deletion, role creation/
+assignment, and configuration import therefore generally require a second person before they
+take effect (`POST /approval-requests/{id}/approve`).
+
+## Config-Only Completions & Manifest-Drift Fix (Part 3, Phase 80 Session 1)
+
+A dedicated research pass verified this package component-by-component against Konzept §14.2's own
+9-item checklist and found it drifted from its own manifest (two object types, `Handakte`/`Arbeitsvorrat`,
+had silently been added at P31-S7 with no version bump or README update) plus three areas that were
+present but thin. This session closed all of it, config-only, no backend changes:
+
+1. **`permission.role.create` added to `approval_config`** — the same "permission change" family as the
+   already-covered `permission.role_assignment.create`, previously missing.
+2. **All four VS classification levels now demonstrated** (previously only `VS-NfD`) — see the object-type
+   table above for the three new `Verschlusssache-Akte-*` siblings.
+3. **Retention/archival periods differentiated by file type** instead of one flat 10-year value for every
+   document class (see the object-type table above).
+4. **`required_signature_level`/`deletion_reason_required_override` set on every classified-documents
+   object type** — both fields already existed in the exportable schema, simply unset in this package
+   before now.
+5. **Manifest drift fixed**: `manifest.version` bumped `1.0.0` → `1.1.0`, `manifest.description` updated,
+   and this README's object-type table now lists `Handakte`/`Arbeitsvorrat`.
+
+**Live-verified against the real running stack**: imported the full updated package via
+`POST /config/import` — all categories applied with zero errors (9/9 object types, 3/3 workflows, 17/17
+business calendars, 2/2 roles, 6/6 approval-config entries, the realm role idempotently confirmed
+present), then inspected the resulting `object-type-service`/`permission-service` state directly to
+confirm every new field round-tripped exactly as configured. Cleaned up afterward (this is a shared
+development stack, not a real eGov installation) — deleted the object types/business calendars, reverted
+`approval_config` back to its pre-import `false` defaults. Two residuals could not be cleaned up because
+this platform has no delete endpoint for either resource type (by design — both are treated as
+append-only/versioned): the 2 new roles and the 3 BPMN process definitions remain defined but unused
+(no assignments, no running instances) on this particular dev stack.
