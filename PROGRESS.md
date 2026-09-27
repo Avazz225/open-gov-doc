@@ -2,7 +2,68 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** Phase 80 close (full backend regression, after P80-S2 closed the phase). Standard
+**Last completed:** P81-S1 (first session of Phase 81 — UI Spacing & Layout Polish, user-requested).
+Assessment-only session, no code changes (per the plan's own DoD — a punch list, not fixes yet). Same
+"full assessment first" discipline the user chose for Phase 77.
+
+**No Node.js/Playwright available in this environment** — `node` is not on `PATH` at all, so the existing
+`admin-ui`/`user-ui`/`migration-console` e2e Playwright specs cannot be driven here. Found a working
+alternative instead of skipping visual verification entirely: a real headless Chromium binary already
+exists at `~/.cache/ms-playwright/chromium-1140/chrome-linux/chrome` (installed for some earlier
+Playwright setup) — launched directly with `--remote-debugging-port`, driven over the raw Chrome
+DevTools Protocol from a small Python script (`websockets`, via `uv run --with websockets`, no project
+dependency added), logging in as `users-admin`/`users-admin` (the same bootstrapped technical account
+`admin-ui`/`user-ui`/`migration-console`'s own e2e fixtures already use) and capturing real PNG
+screenshots at both a wide (1400px) and narrow (700px) viewport. Not a permanent addition to this
+project's tooling — a one-off workaround for this session's specific need, written to the session
+scratchpad, not committed.
+
+Backed by a `gap-*`/`flex-wrap`/`.form-grid`/`.layout-row` grep sweep across all six apps' source and
+CSS. **One plan assumption corrected**: the plan text assumed `.form-grid`/`.layout-row` exist in both
+`admin-ui` AND `user-ui` ("both apps' `globals.css` define these somewhat independently... check whether
+they've drifted to different values") — verified via grep that `user-ui` has **zero** occurrences of
+either class anywhere in its source. Not drift, two genuinely different structural approaches (`admin-ui`
+uses these shared classes, `user-ui` uses ad hoc `flex`/`gap-2` spans throughout).
+
+**Real, screenshot-confirmed findings** (full itemized list also written into `IMPLEMENTATION_PLAN.md`'s
+P81-S1 entry):
+1. A genuine wrap bug in `admin-ui`'s `ForensicTraceView.tsx`/`ReportsView.tsx` (`flex flex-wrap
+   items-end gap-2` filter forms): at 700px, the primary `Trace abfragen` submit button wraps onto the
+   same row as the unrelated `Bis` date field with almost no visible separation, while the two export
+   buttons wrap to their own row below — the exact "child wrapping mid-way through a logical group"
+   symptom the plan named, not hypothetical.
+2. `admin-ui`'s header controls (`Sprache`/`Design`/username/`Abmelden`) wrap cramped directly under the
+   page title at narrow width, with the username itself line-wrapping mid-word.
+3. `gap-2` (8px) is the dominant button-group spacing choice **platform-wide** (38–39 occurrences each in
+   `admin-ui`/`user-ui`, plurality choice in all four smaller apps too) — confirmed via real screenshots
+   of both apps' button groups that the gap is visually present but reads tight, matching the user's
+   complaint more precisely than a hypothesis of a literal zero-gap bug.
+4. `.form-grid`/`.layout-row` (`admin-ui` only) use `--dms-space-2`/`--dms-space-3` — plausible one-step
+   bump candidates, lower priority since no screenshot showed them actually breaking.
+5. Explicitly ruled OUT: `user-ui`'s `Liste`/`Baum` view-mode toggle has zero gap between the two buttons
+   by design (a segmented control sharing a border) — correctly distinguished from the real button-group
+   cramping cases, not flagged as a bug.
+
+**Root-cause correction to the plan's own working hypothesis**: this is NOT "a couple of shared
+`--dms-space-*` values are too small" (the 4/8/12/16px scale itself, `libs/dms-ui/tokens.css`, Phase 48/49,
+is fine) — it's specific per-component choices of which scale step to apply to button groups, plus one
+real flex-wrap grouping bug. Confirms the "per-component spot-fixes, not a one-line shared-token change"
+branch the plan itself named as a live possibility — Phase 81's remaining sessions should be scoped
+accordingly.
+
+No new ADR (pure assessment, matches the plan's own DoD). `docs/services/*.md` unaffected (frontend-only,
+no service behavior changed).
+
+**Next session:** P81-S2 — apply the assessed fixes, starting with the highest-value/lowest-risk items
+from P81-S1's punch list (the `ForensicTraceView.tsx`/`ReportsView.tsx` wrap bug and the `gap-2`→`gap-3`
+button-group bump), same rollout shape as Phase 49/75/77 (small/targeted fixes first). Live browser
+verification with before/after screenshots is non-negotiable per this phase's own DoD — reuse this
+session's CDP-based screenshot workaround unless Node/Playwright becomes available by then. No graphify
+update — still deferred to the end of the whole Phase 78–82 plan (Phase 82's close).
+
+---
+
+**Immediately before:** Phase 80 close (full backend regression, after P80-S2 closed the phase). Standard
 phase-end cadence per `CONTRIBUTING.md` — **with one deliberate change this time**: per the user's own
 explicit mid-session correction during P80-S1 ("graphify kannst du am ende des plans machen btw"),
 `graphify update .` is **not** run at this phase's close. The cadence is now "once at the end of the
@@ -36,11 +97,6 @@ is a test-runner artifact of parallel execution, not a runtime code path. All 32
 the confirmed re-runs (1195+ tests across the P80-touched services alone, full combined count not
 re-tallied since re-runs were per-service, not a second full `--build` pass). `ruff` clean except the one
 pre-existing, unrelated `libreoffice-addin` line-length issue already known from prior sessions.
-
-**Next session:** P81-S1 — Phase 81 (UI Spacing & Layout Polish, user-requested): systematic spacing/gap
-assessment pass across all six frontend apps, same "assessment first, not blind fixing" discipline the
-user chose for Phase 77. No graphify update at this session's own close either — still deferred to the
-end of the whole Phase 78–82 plan (Phase 82's close).
 
 ---
 

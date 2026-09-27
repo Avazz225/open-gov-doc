@@ -2523,8 +2523,8 @@ never touched *spacing* (gaps, margins, the actual numeric values behind `--dms-
 per-component `gap-*`/gap-related Tailwind utilities). No research agent in this round specifically
 audited spacing/gap values — that needs a dedicated visual pass, not a text-based ADR/docs sweep.
 
-- **P81-S1 — Assessment: systematic spacing/gap audit across all six frontend apps**: same discipline
-  the user chose for Phase 77 itself ("full assessment first," not blind fixing). Screenshot
+- **P81-S1 — Assessment: systematic spacing/gap audit across all six frontend apps**: ✅ ~~same
+  discipline the user chose for Phase 77 itself ("full assessment first," not blind fixing). Screenshot
   representative pages across `admin-ui`/`user-ui`/`reviewer-ui`/`process-designer`/`migration-console`/
   `office-addin`, specifically looking for: (a) button groups using a too-tight `gap` value or no gap at
   all (the established formula's buttons often sit in a bare `<span className="flex gap-2">` — 8px may
@@ -2536,7 +2536,50 @@ audited spacing/gap values — that needs a dedicated visual pass, not a text-ba
   "duplicate on purpose" stance — check whether they've drifted to different, both-too-small values).
   Produces a concrete, itemized list of specific gap-value/wrap-behavior fixes (e.g. "bump `gap-2` to
   `gap-3` in every button-group span," "add `min-width` to X's flex children," "increase `.form-grid`'s
-  `row-gap` from `--dms-space-2` to `--dms-space-3`") — not a redesign, a spacing-scale correction.
+  `row-gap` from `--dms-space-2` to `--dms-space-3`") — not a redesign, a spacing-scale correction.~~
+  **Done.** Live-verified via real headless-Chrome screenshots (login + navigate as `users-admin`, both
+  wide 1400px and narrow 700px viewports — no Playwright/Node available in this environment, so driven
+  directly over the Chrome DevTools Protocol from Python instead) against `admin-ui`/`user-ui`, backed by
+  a `gap-*`/`flex-wrap`/`.form-grid`/`.layout-row` grep sweep across all six apps. **One plan assumption
+  corrected**: `.form-grid`/`.layout-row` exist ONLY in `admin-ui` — `user-ui` has zero occurrences of
+  either (confirmed via grep, not just a quick look), it uses ad hoc `flex`/`gap-2` spans instead. Not
+  "drifted to different values" as the plan assumed, but two structurally different approaches. Punch
+  list:
+  1. **Real wrap bug, `admin-ui`'s `ForensicTraceView.tsx` (and the same `flex flex-wrap items-end gap-2`
+     shape in `ReportsView.tsx`)**: at narrow width, the primary submit button (`Trace abfragen`) wraps
+     onto the SAME row as the unrelated `Bis` date field with almost no visible separation, while the two
+     export buttons wrap to their own row below — exactly the "child wrapping mid-way through a logical
+     group" symptom named in the plan, screenshotted live. Fix: give the button cluster its own
+     wrap boundary (e.g. `flex-basis: 100%` / a dedicated wrapping row) instead of letting it interleave
+     with filter fields.
+  2. **Header controls wrap cramped at narrow width** (`admin-ui`, confirmed at 700px): `Sprache`/
+     `Design`/username/`Abmelden` wrap onto their own line squeezed directly under the page title with
+     minimal gap, and the username itself line-wraps mid-word. Fix: increase the gap on this control
+     cluster and/or let it stack below the title as a clearly separated group rather than crowding the
+     same line.
+  3. **`gap-2` (8px) is the overwhelmingly dominant button-group spacing choice platform-wide**, not a
+     localized issue: 38–39 occurrences each in `admin-ui`/`user-ui`, and it's the plurality choice in all
+     four smaller apps too (grep count, all six apps). Real screenshots of both `admin-ui` (`Trace
+     abfragen`/`CSV-Export`/`PDF-Export`) and `user-ui` (`Neuer Ordner`/`Hochladen`/`Papierkorb anzeigen`)
+     confirm the gap is visually present but reads tight, matching the user's "cramped" complaint more
+     than a literal zero-gap bug. Fix: bump `gap-2` → `gap-3` (12px) specifically on button-group
+     `<span>`/`<div>` wrappers — a large, repetitive, mechanical find-and-fix across dozens of files per
+     app, not a shared-token change (bumping `--dms-space-2` globally would also move every non-button-
+     group 8px gap in both apps, too broad a hammer for a complaint specifically about buttons).
+  4. **`.form-grid`/`.layout-row` (admin-ui only)**: `gap: var(--dms-space-2)` (8px) and `margin-bottom:
+     var(--dms-space-3)` (12px) respectively — real candidates to bump one step (`--dms-space-3`/
+     `--dms-space-4`), but lower priority than 1–3 since no screenshot in this pass showed these reading
+     as broken, only plausibly tight.
+  5. Two segmented-control-style adjacent-button pairs found with literally zero gap (`user-ui`'s
+     `Liste`/`Baum` view toggle) are **not** a bug — a shared-border toggle group is a deliberate, standard
+     pattern, correctly distinguished from the real button-group cases above rather than flagged
+     indiscriminately.
+  Confirms the plan's own hypothesis was directionally right but its likely ROOT CAUSE guess was off: this
+  is not "a couple of shared `--dms-space-*` values are too small" (the scale itself — 4/8/12/16px — is
+  fine) but specific per-component/per-pattern choices (which scale step got applied to button groups,
+  and one real flex-wrap grouping bug) — meaning Phase 81's remaining sessions are likely per-component
+  spot-fixes, not a one-line shared-token change, exactly the "could need per-component spot-fixes if the
+  cramping is inconsistent" branch this plan itself named as a live possibility.
 - **P81-S2 onward — apply the assessed fixes app by app**: same rollout shape as Phase 49/75/77's own
   precedent (small apps first to prove the fix mechanics cheaply, then `user-ui`/`admin-ui` each getting
   their own session given size). Exact session count and grouping depends entirely on what P81-S1's audit
