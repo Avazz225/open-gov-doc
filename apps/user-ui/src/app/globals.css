@@ -587,7 +587,7 @@ body {
 
 .explorer-toolbar {
   display: flex;
-  gap: var(--dms-space-2);
+  gap: var(--dms-space-3);
   margin-bottom: var(--dms-space-3);
 }
 

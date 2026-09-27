@@ -325,7 +325,7 @@ export function PoststellePane({ token }: { token: string }) {
                   {mailboxes.length > 1 && ` · ${mailboxName(message.mailbox_id)}`}
                 </span>
                 {(message.status === "unassigned" || message.status === "proposed_match") && (
-                  <span className="flex gap-2">
+                  <span className="flex gap-3">
                     <button
                       type="button"
                       className={primaryBtn}
@@ -384,7 +384,7 @@ export function PoststellePane({ token }: { token: string }) {
                         onChange={(e) => setRouteReason(e.target.value)}
                       />
                     </label>
-                    <span className="flex gap-2">
+                    <span className="flex gap-3">
                       <button
                         type="button"
                         className={primaryBtn}
@@ -432,7 +432,7 @@ export function PoststellePane({ token }: { token: string }) {
                         />
                       </label>
                     )}
-                    <span className="flex gap-2">
+                    <span className="flex gap-3">
                       <button
                         type="button"
                         className={primaryBtn}

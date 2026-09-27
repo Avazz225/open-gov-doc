@@ -793,7 +793,7 @@ export function ExplorerPane({
                       )}{" "}
                       {folder.name}
                     </button>
-                    <span className="flex gap-2">
+                    <span className="flex gap-3">
                       <button
                         type="button"
                         className={iconBtn}

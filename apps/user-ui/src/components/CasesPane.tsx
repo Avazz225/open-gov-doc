@@ -369,7 +369,7 @@ function NewCaseImportSection({
               ))}
             </select>
           </label>
-          <span className="flex gap-2">
+          <span className="flex gap-3">
             <button
               type="button"
               className={primaryBtn}
@@ -426,7 +426,7 @@ function NewCaseImportSection({
               ))}
             </select>
           </label>
-          <span className="flex gap-2">
+          <span className="flex gap-3">
             <button
               type="button"
               className={primaryBtn}
@@ -750,7 +750,7 @@ function CaseDetail({
                   placeholder={t("cases.xdomeaExportLeserPlaceholder")}
                 />
               </label>
-              <span className="flex gap-2">
+              <span className="flex gap-3">
                 <button
                   type="button"
                   className={primaryBtn}
@@ -791,7 +791,7 @@ function CaseDetail({
                   placeholder={t("cases.xjustizExportEmpfaengerPlaceholder")}
                 />
               </label>
-              <span className="flex gap-2">
+              <span className="flex gap-3">
                 <button
                   type="button"
                   className={primaryBtn}
@@ -844,7 +844,7 @@ function CaseDetail({
                   onChange={(e) => setXdomeaImportFolderId(e.target.value)}
                 />
               </label>
-              <span className="flex gap-2">
+              <span className="flex gap-3">
                 <button
                   type="button"
                   className={primaryBtn}
@@ -896,7 +896,7 @@ function CaseDetail({
                   onChange={(e) => setXjustizImportFolderId(e.target.value)}
                 />
               </label>
-              <span className="flex gap-2">
+              <span className="flex gap-3">
                 <button
                   type="button"
                   className={primaryBtn}

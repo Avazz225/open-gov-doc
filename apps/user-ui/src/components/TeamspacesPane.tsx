@@ -341,7 +341,7 @@ export function TeamspacesPane({
         <div className="teamspace-detail">
           <div className="flex items-center justify-between border-b border-border px-6 py-3">
             <h3>{selected.name}</h3>
-            <span className="flex gap-2">
+            <span className="flex gap-3">
               <button type="button" className={secondaryBtn} onClick={() => onOpenFolder(selected.root_folder_id)}>
                 {t("teamspaces.openFolder")}
               </button>

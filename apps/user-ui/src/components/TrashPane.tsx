@@ -197,7 +197,7 @@ export function TrashPane({ token }: { token: string }) {
               <span className="entry-name">
                 {t("trash.typeFolder")} {folder.name}
               </span>
-              <span className="flex gap-2">
+              <span className="flex gap-3">
                 <button
                   type="button"
                   className={secondaryBtn}
@@ -224,7 +224,7 @@ export function TrashPane({ token }: { token: string }) {
               <span className="entry-name">
                 {t("trash.typeDocument")} {document.title}
               </span>
-              <span className="flex gap-2">
+              <span className="flex gap-3">
                 <button
                   type="button"
                   className={secondaryBtn}

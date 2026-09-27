@@ -2,7 +2,50 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P81-S3 (third session of Phase 81 — platform-wide `gap-2`→`gap-3` button-group bump,
+**Last completed:** P81-S4 (fourth session of Phase 81 — `user-ui`'s own `gap-2`→`gap-3` button-group
+sweep). `admin-ui`'s own sweep deferred to P81-S5, same rollout shape as Phase 49/75/77.
+
+Same inspect-before-bump discipline as P81-S3: every `gap-2` occurrence checked individually, not
+find-and-replaced blindly. **Found a real gap in P81-S3's own methodology this time**: `user-ui`'s main
+toolbar ("Neuer Ordner"/"Hochladen"/"Papierkorb anzeigen" — the exact button row P81-S1's assessment
+screenshotted) uses a shared CSS class (`.explorer-toolbar`, `gap: var(--dms-space-2)`), not an inline
+Tailwind class — it never showed up in a `gap-2`-string grep at all, Tailwind or otherwise. Caught by
+separately grepping `globals.css` for `gap: var(--dms-space-2)` declarations (27 found) and checking each
+one's class name/usage individually. Only `.explorer-toolbar` turned out to be a genuine button-group
+among those 27 — the rest are form/list-container spacing (the same class of concern as `admin-ui`'s
+`.form-grid`/`.layout-row`, correctly deferred, not bumped here).
+
+Found 24 genuine Tailwind button-group instances across 13 component files: `FavoritesPane.tsx`,
+`ApprovalsPane.tsx`, `CasesPane.tsx` (×6 — xdomea/xjustiz import/export submit+cancel pairs),
+`BulkEditModal.tsx`, `PoststellePane.tsx` (×3), `PreviewPane.tsx` (×2), `TeamspacesPane.tsx`,
+`QuarantinePane.tsx` (×2), `TrashPane.tsx` (×2), `RedactionModal.tsx`, `UploadForm.tsx`,
+`VorlagenPane.tsx` (×2), `ExplorerPane.tsx`'s folder rename/retention/hand-folder-reference icon trio —
+25 bumps total with the CSS class. Explicitly left alone: single-button `flex gap-2`/`justify-between`
+spans (no adjacency to fix — several components use this exact wrapper for a lone conditional button, a
+red herring that looks like a button-group pattern but isn't one), label+single-submit-button pairs (same
+"not a multi-button adjacency issue" reasoning as `SignaturesPanel.tsx`/office-addin's `DocumentPicker.tsx`
+from earlier sessions), and `IconRail.tsx`'s vertical `<nav>` icon rail (navigation stays tighter by
+design, same reasoning as `admin-ui`'s tab bar in P81-S3).
+
+**Live-verified**: rebuilt `user-ui`'s Docker image, logged in as `users-admin` (same raw-CDP screenshot
+workaround, still no Node/Playwright here), screenshotted the documents view. The toolbar's gap increase
+is clearly visible; the `Liste`/`Baum` view-mode toggle's zero-gap segmented control correctly remained
+untouched (confirmed it's still a deliberate design choice, not a missed fix).
+
+**Frontend regression, run inside a throwaway `node:22-alpine` container**: `tsc`/`eslint`/`vitest` green
+— **293/293 tests passed** across 38 test files. `next build` already validated by the Docker image
+rebuild. No new ADR (per-component/per-class spot-fix, not a shared-token change).
+
+**Next session:** P81-S5 — `admin-ui`'s own `gap-2`→`gap-3` sweep: the occurrences not already touched by
+P81-S2's three form fixes, the lower-priority `.form-grid`/`.layout-row` gap bump, and a `globals.css`
+sweep for CSS-class-based button groups analogous to `user-ui`'s `.explorer-toolbar` finding (grep
+`gap: var(--dms-space-2)` directly, don't rely on a Tailwind-string grep alone — P81-S4 showed that misses
+real cases). No graphify update — still deferred to the end of the whole Phase 78–82 plan (Phase 82's
+close).
+
+---
+
+**Immediately before:** P81-S3 (third session of Phase 81 — platform-wide `gap-2`→`gap-3` button-group bump,
 small-apps half: `reviewer-ui`/`process-designer`/`migration-console`/`office-addin`). `user-ui`/`admin-ui`
 each get their own follow-up session given size (P81-S4+), same rollout shape as Phase 49/75/77.
 
@@ -31,10 +74,6 @@ before).
 (`migration-console`) + 21 (`office-addin`) = **151 tests passed**. `next build` already validated by each
 Docker image rebuild succeeding. No new ADR (per-component spot-fix pattern, same as P81-S2 — confirmed
 again this session that this is NOT a shared-token change).
-
-**Next session:** P81-S4+ — `user-ui`/`admin-ui`'s own `gap-2`→`gap-3` button-group sweep (each gets its
-own session given size), plus the lower-priority `.form-grid`/`.layout-row` gap bump (`admin-ui` only). No
-graphify update — still deferred to the end of the whole Phase 78–82 plan (Phase 82's close).
 
 ---
 

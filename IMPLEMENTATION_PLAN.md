@@ -2623,17 +2623,40 @@ audited spacing/gap values — that needs a dedicated visual pass, not a text-ba
   regressions, gap increase visibly confirmed in each). `tsc`/`eslint`/`vitest` green for all four apps
   (55+55+20+21 = 151 tests, run inside throwaway `node:22-alpine` containers); `next build` already
   validated by each Docker image rebuild.
-- **P81-S4+ — remaining rollout**: `user-ui`/`admin-ui`'s own `gap-2`→`gap-3` button-group sweep (each has
-  its own session given size — 38–39 occurrences apiece, `admin-ui`'s three forms already partially bumped
-  by P81-S2 but its remaining occurrences elsewhere are untouched) and the lower-priority
-  `.form-grid`/`.layout-row` gap bump (`admin-ui` only).
+- **P81-S4 — `user-ui`'s own `gap-2`→`gap-3` button-group sweep**: ✅ ~~`user-ui`/`admin-ui`'s own
+  `gap-2`→`gap-3` button-group sweep (each has its own session given size — 38–39 occurrences apiece,
+  `admin-ui`'s three forms already partially bumped by P81-S2 but its remaining occurrences elsewhere are
+  untouched) and the lower-priority `.form-grid`/`.layout-row` gap bump (`admin-ui` only).~~ **Done** for
+  `user-ui` (`admin-ui`'s own sweep deferred to P81-S5). Same inspect-before-bump discipline as P81-S3:
+  every `gap-2` occurrence checked individually, not find-and-replaced. Found a real gap in P81-S3's own
+  Tailwind-only grep this time — `user-ui`'s main toolbar ("Neuer Ordner"/"Hochladen"/"Papierkorb
+  anzeigen", the exact button row P81-S1 screenshotted) uses a shared CSS class (`.explorer-toolbar`,
+  `gap: var(--dms-space-2)`), not an inline Tailwind class, so it never showed up in a `gap-2`-string grep
+  at all — caught by separately grepping `globals.css` for `gap: var(--dms-space-2)` declarations (27
+  found) and checking each one's class name/usage. Only `.explorer-toolbar` was a genuine button-group
+  among those 27 (the rest are form/list-container spacing, the same class of concern as `admin-ui`'s
+  `.form-grid`/`.layout-row` — deferred, not in scope here). Found 24 genuine Tailwind button-group
+  instances across 13 component files (`FavoritesPane`, `ApprovalsPane`, `CasesPane`×6, `BulkEditModal`,
+  `PoststellePane`×3, `PreviewPane`×2, `TeamspacesPane`, `QuarantinePane`×2, `TrashPane`×2, `RedactionModal`,
+  `UploadForm`, `VorlagenPane`×2, `ExplorerPane`'s folder rename/retention/hand-folder icon trio) plus the
+  1 CSS class — 25 total bumps. Explicitly left alone: single-button `justify-between`/`flex gap-2` spans
+  (no adjacency to fix), label+single-submit-button pairs, and `IconRail.tsx`'s vertical navigation rail
+  (a `<nav>`, same "navigation stays tighter by design" reasoning as `admin-ui`'s tab bar in P81-S3).
+  Live-verified: rebuilt `user-ui`'s Docker image, logged in as `users-admin`, screenshotted the documents
+  view — the toolbar's gap increase is clearly visible, `Liste`/`Baum`'s zero-gap segmented control
+  correctly untouched. `tsc`/`eslint`/`vitest` green (293/293 tests, 38 files, run inside a throwaway
+  `node:22-alpine` container); `next build` already validated by the Docker image rebuild.
+- **P81-S5 — `admin-ui`'s own `gap-2`→`gap-3` sweep**: the remaining occurrences not already touched by
+  P81-S2's three form fixes, plus the lower-priority `.form-grid`/`.layout-row` gap bump and any
+  CSS-class-based button groups analogous to `user-ui`'s `.explorer-toolbar` finding (check `globals.css`
+  for `gap: var(--dms-space-2)` declarations the same way, not just a Tailwind-string grep).
 
 **Definition of Done**: P81-S1 needs no new ADR (pure assessment, produces a punch list); later sessions
 need a new ADR only if a shared token value changes (a real, if small, design-system decision) — a
-per-component spot-fix does not (confirmed: neither P81-S2 nor P81-S3 needed one); live browser
-verification with before/after screenshots is **non-negotiable** for every session in this phase, same
-standard as Phase 49/75/77, since the entire point is visually inspectable; docs and `PROGRESS.md` updated
-per session.
+per-component spot-fix does not (confirmed: none of P81-S2/S3/S4 needed one); live browser verification
+with before/after screenshots is **non-negotiable** for every session in this phase, same standard as
+Phase 49/75/77, since the entire point is visually inspectable; docs and `PROGRESS.md` updated per
+session.
 
 ## Phase 82 — Scoping-Only Sessions for the Larger Remaining Items
 

@@ -238,7 +238,7 @@ export function RedactionModal({
           </p>
         )}
 
-        <div className="flex gap-2">
+        <div className="flex gap-3">
           <button
             type="button"
             className={primaryBtn}

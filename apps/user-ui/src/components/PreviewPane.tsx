@@ -848,7 +848,7 @@ export function PreviewPane({
               placeholder={t("preview.xdomeaExportLeserPlaceholder")}
             />
           </label>
-          <span className="flex gap-2">
+          <span className="flex gap-3">
             <button
               type="button"
               className={primaryBtn}
@@ -890,7 +890,7 @@ export function PreviewPane({
               placeholder={t("preview.xjustizExportEmpfaengerPlaceholder")}
             />
           </label>
-          <span className="flex gap-2">
+          <span className="flex gap-3">
             <button
               type="button"
               className={primaryBtn}

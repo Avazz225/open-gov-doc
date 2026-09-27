@@ -177,7 +177,7 @@ export function VorlagenPane({ token, createdBy }: { token: string; createdBy: s
                 {template.name}
                 {template.description ? ` — ${template.description}` : ""}
               </span>
-              <span className="flex gap-2">
+              <span className="flex gap-3">
                 <button
                   type="button"
                   className={secondaryBtn}
@@ -207,7 +207,7 @@ export function VorlagenPane({ token, createdBy }: { token: string; createdBy: s
                       placeholder={t("vorlagen.targetFolderPlaceholder")}
                     />
                   </label>
-                  <span className="flex gap-2">
+                  <span className="flex gap-3">
                     <button
                       type="button"
                       className={primaryBtn}

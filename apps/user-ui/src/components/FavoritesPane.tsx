@@ -134,7 +134,7 @@ export function FavoritesPane({
                 <span className="entry-name">
                   {typeLabel} {name}
                 </span>
-                <span className="flex gap-2">
+                <span className="flex gap-3">
                   {document && (
                     <button type="button" className={secondaryBtn} onClick={() => onOpenDocument(document)}>
                       {t("favorites.open")}

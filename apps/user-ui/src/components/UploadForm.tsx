@@ -230,7 +230,7 @@ export function UploadForm({
             />
           )}
 
-          <div className="flex gap-2">
+          <div className="flex gap-3">
             <button type="submit" className={primaryBtn} disabled={!file || submitting}>
               {submitting ? t("upload.submitting") : t("upload.submit")}
             </button>

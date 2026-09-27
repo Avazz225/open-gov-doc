@@ -116,7 +116,7 @@ export function ApprovalsPane({
                     : t("approvals.typeFolder")}{" "}
                   {objectId(request)} — {t("approvals.requestedBy", { name: request.initiated_by })}
                 </span>
-                <span className="flex gap-2">
+                <span className="flex gap-3">
                   <button
                     type="button"
                     className={primaryBtn}

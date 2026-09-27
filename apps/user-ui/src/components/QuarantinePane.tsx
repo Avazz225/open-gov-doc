@@ -113,7 +113,7 @@ export function QuarantinePane({ token }: { token: string }) {
                 {scan.filename}
                 {scan.threat_name ? ` — ${scan.threat_name}` : ""}
               </span>
-              <span className="flex gap-2">
+              <span className="flex gap-3">
                 <button
                   type="button"
                   className={secondaryBtn}
@@ -152,7 +152,7 @@ export function QuarantinePane({ token }: { token: string }) {
                       placeholder={t("quarantine.releaseFolderPlaceholder")}
                     />
                   </label>
-                  <span className="flex gap-2">
+                  <span className="flex gap-3">
                     <button
                       type="button"
                       className={primaryBtn}
