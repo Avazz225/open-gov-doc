@@ -2,7 +2,49 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P80-S2 (second session of Phase 80 — new exportable `config-service` categories:
+**Last completed:** Phase 80 close (full backend regression, after P80-S2 closed the phase). Standard
+phase-end cadence per `CONTRIBUTING.md` — **with one deliberate change this time**: per the user's own
+explicit mid-session correction during P80-S1 ("graphify kannst du am ende des plans machen btw"),
+`graphify update .` is **not** run at this phase's close. The cadence is now "once at the end of the
+entire Phase 78–82 plan," not once per phase as before (Phase 78 close and Phase 79 close each still ran
+it, per the cadence understood at the time) — deferred until Phase 82 completes the whole plan.
+
+Full regression (`scripts/run-tests.sh --build`, all 32 backend services): two failures on the first pass,
+both investigated and confirmed as pre-existing test flakiness unrelated to any P80 session's own changes
+(neither P80-S1 nor P80-S2 touched either service) rather than real regressions:
+- `federation-hub-service::test_run_retry_tick_skips_handovers_not_yet_due` — asserts a handover's
+  `next_retry_at` (full-jitter backoff, `dms_retry.compute_backoff_seconds`, `random.uniform(0,
+  exponential)` with `exponential=1.0` after the first failure) is still in the future immediately after
+  being set. The jitter can legitimately land anywhere in `[0, 1)` seconds, so under the heavier wall-clock
+  load a full `--build` run across all 32 services puts on the machine, the real time between "handover
+  created" and "retry tick runs" can occasionally exceed a very low jitter roll, making the retry
+  genuinely due. Confirmed non-reproducible: passed cleanly on 3 immediate re-runs (2 targeted, 1 full
+  suite, 90/90).
+- `rendering-service::test_run_retry_tick_processes_a_due_rendition` — failed with `RuntimeError:
+  <asyncio.locks.Event object ...> is bound to a different event loop`, a known pytest-asyncio test-
+  isolation failure mode (a fixture-held async primitive created in one test's event loop being reused by
+  a later test under loop-per-test isolation), not a code defect — confirmed by re-running the full suite
+  standalone immediately after: 103/103 passed, including this exact test.
+
+Both are genuine flakiness in existing test infrastructure (jitter-window timing, asyncio loop reuse under
+load), not something this session introduced or should silently paper over — investigated and root-caused
+rather than just re-run until green, consistent with this project's own precedent (Phase 79 close's
+`migration-service` finding) of treating regression failures as things to understand, not just retry.
+Neither warranted a code fix: the jitter window is by design (AWS "Full Jitter," deliberately allows a
+near-zero delay to spread thundering-herd retries as widely as possible), and the asyncio event-loop issue
+is a test-runner artifact of parallel execution, not a runtime code path. All 32 backend services green on
+the confirmed re-runs (1195+ tests across the P80-touched services alone, full combined count not
+re-tallied since re-runs were per-service, not a second full `--build` pass). `ruff` clean except the one
+pre-existing, unrelated `libreoffice-addin` line-length issue already known from prior sessions.
+
+**Next session:** P81-S1 — Phase 81 (UI Spacing & Layout Polish, user-requested): systematic spacing/gap
+assessment pass across all six frontend apps, same "assessment first, not blind fixing" discipline the
+user chose for Phase 77. No graphify update at this session's own close either — still deferred to the
+end of the whole Phase 78–82 plan (Phase 82's close).
+
+---
+
+**Immediately before:** P80-S2 (second session of Phase 80 — new exportable `config-service` categories:
 deletion-reason catalog, org-units/groups, org-unit→role linking). Real backend/schema work, unlike
 P80-S1: three new `ConfigDocument` categories added, per
 [ADR 0233](docs/adr/0233-config-service-org-unit-role-and-deletion-reason-categories.md).
@@ -59,12 +101,6 @@ in its own `finally` cleanup (used `authorized_principal`, which lacks `admin.re
 config-service/permission-service/document-service/folder-service/workflow-service/object-type-service:
 **1195 passed**, no failures. `ruff` clean for every file this session touched (the one remaining
 project-wide `ruff` failure is pre-existing, in `libreoffice-addin`, unrelated to this session).
-
-**Next session:** P80 close (Phase 80 has both its planned sessions done — full backend regression per
-phase-end convention, **no `graphify update .`** this time per the user's own explicit correction this
-session ("graphify kannst du am ende des plans machen btw") — the graphify update is now deferred until
-the entire Phase 78–82 plan closes, not run at every individual phase's close as before. Then continue
-into Phase 81 (P81-S1, UI spacing/layout assessment pass).
 
 ---
 
