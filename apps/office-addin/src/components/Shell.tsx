@@ -18,7 +18,7 @@ export function Shell({ children }: { children: ReactNode }) {
     <div className="p-3">
       <div className="mb-3 flex items-center justify-between border-b border-border pb-2 text-sm">
         <span className="font-semibold">{t("meta.title")}</span>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
           {user && <span>{user.username}</span>}
           <button
             type="button"

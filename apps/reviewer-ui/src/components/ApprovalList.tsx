@@ -166,7 +166,7 @@ export function ApprovalList() {
                     </span>
                   </td>
                   <td className={td}>
-                    <div className="flex gap-2">
+                    <div className="flex gap-3">
                       <button
                         type="button"
                         onClick={() =>
@@ -218,7 +218,7 @@ export function ApprovalList() {
                             className={fieldInput}
                           />
                         </label>
-                        <div className="flex gap-2">
+                        <div className="flex gap-3">
                           <button type="submit" disabled={busyId === request.id} className={primaryBtn}>
                             {t("approvalList.rejectConfirm")}
                           </button>

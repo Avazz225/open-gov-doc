@@ -399,7 +399,7 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
                               {formError}
                             </p>
                           )}
-                          <div className="flex gap-2">
+                          <div className="flex gap-3">
                             <button type="submit" disabled={submitting} className={primaryBtn}>
                               {submitting ? t("taskList.submitting") : t("taskList.submit")}
                             </button>

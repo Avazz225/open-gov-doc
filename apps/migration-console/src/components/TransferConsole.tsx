@@ -229,7 +229,7 @@ export function TransferConsole() {
               {formError}
             </p>
           )}
-          <div className="flex gap-2">
+          <div className="flex gap-3">
             <button type="submit" disabled={submitting} className={primaryBtn}>
               {submitting ? t("transfers.submitting") : t("transfers.submit")}
             </button>

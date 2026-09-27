@@ -2604,16 +2604,36 @@ audited spacing/gap values — that needs a dedicated visual pass, not a text-ba
   confirmed both fixes render correctly with no regression at either width. `tsc`/`eslint`/`vitest`
   (309/309, run inside a throwaway `node:22-alpine` container since the host has no `node`) all green;
   `next build` already validated by the Docker image rebuild itself.
-- **P81-S3+ — remaining rollout**: the platform-wide `gap-2`→`gap-3` button-group bump (38–39 occurrences
-  each in `admin-ui`/`user-ui` alone, plurality choice in the four smaller apps too) and the lower-priority
-  `.form-grid`/`.layout-row` gap bump, grouped per app per P81-S1's own findings — small apps first, then
-  `user-ui`/`admin-ui` each getting their own session given size, as originally planned.
+- **P81-S3 — Platform-wide `gap-2`→`gap-3` button-group bump, small apps first**: ✅ ~~the platform-wide
+  `gap-2`→`gap-3` button-group bump (38–39 occurrences each in `admin-ui`/`user-ui` alone, plurality choice
+  in the four smaller apps too) and the lower-priority `.form-grid`/`.layout-row` gap bump, grouped per app
+  per P81-S1's own findings — small apps first, then `user-ui`/`admin-ui` each getting their own session
+  given size, as originally planned.~~ **Done** for the small-apps half (`reviewer-ui`/`process-designer`/
+  `migration-console`/`office-addin`) — `.form-grid`/`.layout-row` bump and `user-ui`/`admin-ui`'s own
+  `gap-2` sweep deferred to P81-S4+ (see below). Each of the 16 files across these four apps using `gap-2`
+  was individually inspected, not blindly find-and-replaced: only genuine multi-button clusters (2+
+  `<button>`/`<Link><button></Link>` siblings in one flex row) got bumped — `justify-between` list rows
+  (single button + a text/badge span, spaced apart by `justify-content` rather than adjacency), label/
+  checkbox pairs, and a tab-navigation row were correctly left alone as different, non-cramped patterns.
+  10 genuine button-group instances found and fixed across 8 files (`reviewer-ui`: `TaskList.tsx`,
+  `ApprovalList.tsx`\[×2\]; `process-designer`: `ProcessDefinitionList.tsx`\[×2\], `DmnDefinitionList.tsx`\[×2\];
+  `migration-console`: `PairedInstallationList.tsx`, `TransferConsole.tsx`; `office-addin`: `Shell.tsx`
+  header cluster (same pattern as `admin-ui`'s P81-S2 header fix), `TaskPane.tsx`). Live-verified: rebuilt
+  all four Docker images, logged in as `users-admin`, screenshotted a representative page per app (no
+  regressions, gap increase visibly confirmed in each). `tsc`/`eslint`/`vitest` green for all four apps
+  (55+55+20+21 = 151 tests, run inside throwaway `node:22-alpine` containers); `next build` already
+  validated by each Docker image rebuild.
+- **P81-S4+ — remaining rollout**: `user-ui`/`admin-ui`'s own `gap-2`→`gap-3` button-group sweep (each has
+  its own session given size — 38–39 occurrences apiece, `admin-ui`'s three forms already partially bumped
+  by P81-S2 but its remaining occurrences elsewhere are untouched) and the lower-priority
+  `.form-grid`/`.layout-row` gap bump (`admin-ui` only).
 
 **Definition of Done**: P81-S1 needs no new ADR (pure assessment, produces a punch list); later sessions
 need a new ADR only if a shared token value changes (a real, if small, design-system decision) — a
-per-component spot-fix does not (confirmed: P81-S2 needed none); live browser verification with
-before/after screenshots is **non-negotiable** for every session in this phase, same standard as Phase 49/75/77, since the entire
-point is visually inspectable; docs and `PROGRESS.md` updated per session.
+per-component spot-fix does not (confirmed: neither P81-S2 nor P81-S3 needed one); live browser
+verification with before/after screenshots is **non-negotiable** for every session in this phase, same
+standard as Phase 49/75/77, since the entire point is visually inspectable; docs and `PROGRESS.md` updated
+per session.
 
 ## Phase 82 — Scoping-Only Sessions for the Larger Remaining Items
 

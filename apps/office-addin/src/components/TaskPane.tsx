@@ -264,7 +264,7 @@ export function TaskPane() {
             submitLabel={t("metadataForm.saveButton")}
             onSubmit={handleSaveMetadata}
           />
-          <div className="mt-2 flex flex-wrap gap-2">
+          <div className="mt-2 flex flex-wrap gap-3">
             <button
               type="button"
               disabled={isBusy || !canManage}

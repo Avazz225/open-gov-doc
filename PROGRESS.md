@@ -2,7 +2,43 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P81-S2 (second session of Phase 81 — fixing the two concrete, screenshot-confirmed
+**Last completed:** P81-S3 (third session of Phase 81 — platform-wide `gap-2`→`gap-3` button-group bump,
+small-apps half: `reviewer-ui`/`process-designer`/`migration-console`/`office-addin`). `user-ui`/`admin-ui`
+each get their own follow-up session given size (P81-S4+), same rollout shape as Phase 49/75/77.
+
+**Every one of the 16 `gap-2`-using files across these four apps was individually inspected, not
+find-and-replaced blindly**: only genuine multi-button clusters (2+ `<button>`/`<Link><button></Link>`
+siblings sharing one flex row) got bumped to `gap-3`. Correctly left alone: `justify-between` list rows
+(a single button + a text/status span, spaced by `justify-content` rather than adjacency — a different,
+non-cramped pattern), label/checkbox pairs, a tab-navigation row, and one `<span className="flex gap-2">`
+that turned out to wrap only a single button (no adjacency at all, so no visual effect either way). Found
+10 genuine button-group instances across 8 files: `reviewer-ui/TaskList.tsx` (submit+cancel),
+`reviewer-ui/ApprovalList.tsx` (×2 — toggle/approve/reject, and reject-confirm+cancel),
+`process-designer/ProcessDefinitionList.tsx` (×2 — open+delete, open+restore),
+`process-designer/DmnDefinitionList.tsx` (×2 — same shape), `migration-console/PairedInstallationList.tsx`
+and `TransferConsole.tsx` (submit+cancel each), `office-addin/Shell.tsx` (the header username+logout
+cluster — same pattern as `admin-ui`'s P81-S2 header fix) and `TaskPane.tsx` (save-version+unlink).
+
+**Live-verified, not just diffed**: rebuilt all four apps' Docker images, logged in as `users-admin` (same
+raw-CDP Python screenshot workaround as P81-S1/S2 — still no Node/Playwright in this environment),
+screenshotted a representative page per app. Confirmed the gap increase renders visibly and correctly with
+no regression in every app (`migration-console`'s "Transfer starten"/"Abbrechen" pair and
+`process-designer`'s "Öffnen"/"Versionen anzeigen" pair both show a clearly more comfortable gap than
+before).
+
+**Frontend regression, all four apps, run inside throwaway `node:22-alpine` containers** (host has no
+`node`): `tsc`/`eslint`/`vitest` green for every app — 55 (`reviewer-ui`) + 55 (`process-designer`) + 20
+(`migration-console`) + 21 (`office-addin`) = **151 tests passed**. `next build` already validated by each
+Docker image rebuild succeeding. No new ADR (per-component spot-fix pattern, same as P81-S2 — confirmed
+again this session that this is NOT a shared-token change).
+
+**Next session:** P81-S4+ — `user-ui`/`admin-ui`'s own `gap-2`→`gap-3` button-group sweep (each gets its
+own session given size), plus the lower-priority `.form-grid`/`.layout-row` gap bump (`admin-ui` only). No
+graphify update — still deferred to the end of the whole Phase 78–82 plan (Phase 82's close).
+
+---
+
+**Immediately before:** P81-S2 (second session of Phase 81 — fixing the two concrete, screenshot-confirmed
 bugs from P81-S1's punch list). Scoped to `admin-ui` only, per-component spot-fixes (P81-S1 already ruled
 out a shared-token root cause) — the platform-wide `gap-2`→`gap-3` button-group bump (item 3 of the
 punch list) is deliberately deferred to its own future session, not folded in here.
@@ -20,7 +56,7 @@ submit button (`Trace abfragen`) could land wrapped onto the same row as the unr
 Two separate flex containers (filters, then actions) guarantee the action buttons always start their own
 row, at every width, not just when there happens to be leftover space. Bumped `gap-2`→`gap-3` within these
 three touched forms plus `ExportButtons`' internal span since they were already being restructured — not
-a platform-wide sweep (that's P81-S3+'s job).
+a platform-wide sweep (that's what P81-S3 did).
 
 **Live-verified, not just eyeballed in the diff**: rebuilt the `admin-ui` Docker image, then — since this
 environment has no Node.js/Playwright at all (confirmed again this session, same constraint as P81-S1) —
@@ -37,12 +73,6 @@ widths.
 `next build` already implicitly re-validated by the Docker image rebuild itself (the image would not have
 built otherwise). No new ADR (per-component spot-fix, not a shared-token change — P81-S1 already
 determined this was the likely shape of the fix).
-
-**Next session:** P81-S3+ — the platform-wide `gap-2`→`gap-3` button-group bump (38–39 occurrences each in
-`admin-ui`/`user-ui`, plurality choice in the four smaller apps too) plus the lower-priority
-`.form-grid`/`.layout-row` gap bump, grouped per app per P81-S1's own findings (small apps first, then
-`user-ui`/`admin-ui` each their own session). No graphify update — still deferred to the end of the whole
-Phase 78–82 plan (Phase 82's close).
 
 ---
 

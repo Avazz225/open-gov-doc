@@ -140,7 +140,7 @@ export function ProcessDefinitionList() {
                   <td className={td}>{definition.version}</td>
                   <td className={td}>{definition.bpmn_process_id}</td>
                   <td className={td}>{new Date(definition.updated_at).toLocaleString()}</td>
-                  <td className={`${td} flex gap-2`}>
+                  <td className={`${td} flex gap-3`}>
                     <Link href={`/designer/?id=${definition.id}`}>
                       <button type="button" className={secondaryBtn}>
                         {t("common.open")}
@@ -179,7 +179,7 @@ export function ProcessDefinitionList() {
                             <span>
                               v{version.version} — {new Date(version.created_at).toLocaleString()}
                             </span>
-                            <span className="flex gap-2">
+                            <span className="flex gap-3">
                               <Link href={`/designer/?id=${version.id}`}>
                                 <button type="button" className={secondaryBtn}>
                                   {t("common.open")}

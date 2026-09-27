@@ -141,7 +141,7 @@ export function DmnDefinitionList() {
                   <td className={td}>{definition.version}</td>
                   <td className={td}>{definition.decision_id}</td>
                   <td className={td}>{new Date(definition.updated_at).toLocaleString()}</td>
-                  <td className={`${td} flex flex-wrap gap-2`}>
+                  <td className={`${td} flex flex-wrap gap-3`}>
                     <Link href={`/dmn-designer/?id=${definition.id}`}>
                       <button type="button" className={secondaryBtn}>
                         {t("common.open")}
@@ -219,7 +219,7 @@ export function DmnDefinitionList() {
                             <span>
                               v{version.version} — {new Date(version.created_at).toLocaleString()}
                             </span>
-                            <span className="flex gap-2">
+                            <span className="flex gap-3">
                               <Link href={`/dmn-designer/?id=${version.id}`}>
                                 <button type="button" className={secondaryBtn}>
                                   {t("common.open")}

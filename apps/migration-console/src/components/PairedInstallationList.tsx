@@ -142,7 +142,7 @@ export function PairedInstallationList() {
               {formError}
             </p>
           )}
-          <div className="flex gap-2">
+          <div className="flex gap-3">
             <button type="submit" disabled={submitting} className={primaryBtn}>
               {submitting
                 ? t("pairedInstallations.submitting")
