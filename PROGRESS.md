@@ -2,7 +2,27 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P81-S5 (fifth session of Phase 81 — `admin-ui`'s own `gap-2`→`gap-3` sweep). **This
+**Last completed:** Phase 81 close (full backend regression, after P81-S5 closed the phase). Standard
+phase-end cadence per `CONTRIBUTING.md` — **no `graphify update .`**, same deliberate deferral as Phase 80
+close (the cadence is "once at the end of the entire Phase 78–82 plan," per the user's own mid-session
+correction during P80-S1).
+
+Full regression (`scripts/run-tests.sh --build`, all 32 backend services): **clean pass, no failures at
+all** this time — unlike Phase 80 close's two flaky (and confirmed unrelated) test failures. Phase 81 was
+entirely frontend-only, so this run served as confirmation that none of the five UI sessions had any
+backend side effects, not a bug hunt. `ruff` still shows its one pre-existing failure category (several
+`services/*/main.py` files and `loadtest/notebook/analysis.ipynb` — all confirmed via `git log`/`git diff`
+to be untouched by any P80 or P81 session, predating this entire work arc) — not something this phase
+introduced or needs to fix.
+
+**Next session:** P82-S1 — Phase 82 (three scoping-only sessions: fleet-management per-operator auth,
+case-service destruction-scheduling, PDF/UA conformance validation), starting with whichever the plan
+lists first. No graphify update at this session's own close either — still deferred to the end of the
+whole Phase 78–82 plan (this phase's own close).
+
+---
+
+**Immediately before:** P81-S5 (fifth session of Phase 81 — `admin-ui`'s own `gap-2`→`gap-3` sweep). **This
 closes the platform-wide button-group gap rollout across all six frontend apps** started at P81-S1's
 assessment.
 
@@ -37,10 +57,6 @@ a practical screenshot height in this session's viewport-based tooling.
 `.layout-field` gap bump (`admin-ui` only) — deliberately left as accepted, unscheduled lower-priority
 polish rather than opening a dedicated session for it, since no screenshot across any session in this
 phase ever showed it actually reading as broken (only plausibly tight).
-
-**Next session:** Phase 82 (three scoping-only sessions: fleet-management per-operator auth, case-service
-destruction-scheduling, PDF/UA conformance validation) — P82-S1 first. No graphify update — still deferred
-to the end of the whole Phase 78–82 plan (this phase's own close).
 
 ---
 
