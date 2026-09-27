@@ -2729,14 +2729,29 @@ scoping-not-building precedent as ADR 0147/0161/0207/0209/0212.
   building its own duplicate quarantine table. See
   [ADR 0235](docs/adr/0235-case-service-destruction-scheduling-scoping.md) for the full build-ready
   recommendation. No code diff this session.
-- **P82-S3 (scoping only) — PDF/UA conformance validation (veraPDF or equivalent)**: named independently
-  across three different ADRs (0107 PDF export, 0158 multi-document structure-tree merge, and the
-  accessibility work from Phase 33) as "not independently ISO 14289/PDF-UA validated, `is_tagged_pdf()`
-  is an approximation" — the same underlying gap keeps resurfacing because no session has ever scoped
-  what a real conformance-validation integration would actually need (a maintained veraPDF Java/CLI
-  wrapper callable from `rendering-service`'s Python codebase, licensing check, output-format decision).
-  Worth closing for good with one real scoping pass instead of it continuing to surface as a recurring
-  "known limitation" footnote.
+- **P82-S3 (scoping only) — PDF/UA conformance validation (veraPDF or equivalent)**: ✅ ~~named
+  independently across three different ADRs (0107 PDF export, 0158 multi-document structure-tree merge,
+  and the accessibility work from Phase 33) as "not independently ISO 14289/PDF-UA validated,
+  `is_tagged_pdf()` is an approximation" — the same underlying gap keeps resurfacing because no session
+  has ever scoped what a real conformance-validation integration would actually need (a maintained
+  veraPDF Java/CLI wrapper callable from `rendering-service`'s Python codebase, licensing check,
+  output-format decision). Worth closing for good with one real scoping pass instead of it continuing to
+  surface as a recurring "known limitation" footnote.~~ **Done — closed with a definitive "do not build"
+  verdict**, not deferred again. `is_tagged_pdf()` (`export_pdf.py:42-57`) is confirmed a single
+  `/StructTreeRoot`-presence check via `pypdf` — real ISO 14289 conformance needs a ~80-rule engine walk,
+  nothing like it exists here. No JVM exists anywhere in this stack except a pre-built Keycloak image; a
+  veraPDF integration (Java library/CLI/REST server) would need one. **Directly applicable precedent
+  found**: ADR 0208 already rejected a JVM sidecar for OSCI-Transport on "genuine architectural departure"
+  grounds — the same reasoning applies at least as strongly here, since veraPDF would run on every PDF
+  export system-wide rather than for one connector. Recommendation: don't build the JVM integration, ever,
+  under current requirements (no PDF/UA certification need identified). Two optional, pure-Python,
+  no-new-runtime lower-cost improvements recommended instead for a future low-effort session: (1) extend
+  `is_tagged_pdf()` to also check `/MarkInfo /Marked`, `/Lang` presence, and `<Figure>` alt-text — still an
+  approximation, but a measurably better one; (2) document an external/offline `verapdf` CLI workflow for
+  the rare operator who needs real certified conformance. veraPDF's license (commonly GPLv3/MPLv2)
+  explicitly flagged as unverified against its current terms, not asserted as confirmed fact. See
+  [ADR 0236](docs/adr/0236-pdf-ua-conformance-validation-scoping.md). No code diff this session — this is
+  the last session of the entire Phase 78–82 plan.
 
 **Definition of Done**: each session produces a real ADR with a concrete, build-ready recommendation (or
 an explicit "still not worth building, here's why" verdict) — no code diff expected except possibly docs;

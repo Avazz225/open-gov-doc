@@ -2,10 +2,48 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P82-S2 (second session of Phase 82 — scoping-only sessions for the larger remaining
-items). **Scoping, kein Feature** — no code diff, per this phase's own DoD. Scoped `case-service`'s
-destruction-scheduling gap that ADR 0116 (P31-S5, records quarantine) named as real but deliberately
-unbuilt.
+**Last completed:** P82-S3 (third and final session of Phase 82 — scoping-only sessions for the larger
+remaining items). **Scoping, kein Feature** — no code diff, per this phase's own DoD. **This is the last
+session of the entire Phase 78–82 plan.** Gave a definitive verdict, not another deferral, to a gap three
+separate prior ADRs (0119, 0136, 0158) had each independently re-stated without resolving: PDF/UA
+(ISO 14289) conformance validation via veraPDF.
+
+Confirmed live: `is_tagged_pdf()` (`export_pdf.py:42-57`) is a single `"/StructTreeRoot" in
+reader.root_object` presence check via `pypdf` — nothing about `/MarkInfo /Marked`, tag-to-content-type
+correctness, alt-text, `/Lang`, reading order, or font glyph mapping. Real PDF/UA conformance is a
+~80-rule engine walk; this is one boolean check for one graph node. `docs/services/rendering-service.md`'s
+own Open Points already names this honestly, twice — never silently claimed as resolved.
+
+**Key finding that decided the verdict**: no JVM exists anywhere in this stack except a pre-built,
+off-the-shelf Keycloak image — `rendering-service` itself is pure Python (`pypdf`/`pymupdf`/`reportlab`) +
+a LibreOffice subprocess, no embedded JVM ever. veraPDF is a Java tool; wrapping it would need one. **Found
+direct, already-established precedent for rejecting exactly this kind of dependency**: ADR 0208 (P72-S3)
+already considered and rejected a JVM sidecar for OSCI-Transport, calling it "a genuine architectural
+departure for an otherwise entirely Python/TypeScript stack." The same reasoning applies at least as
+strongly to veraPDF, which would run on every PDF export system-wide rather than for one connector.
+
+**Verdict: do not build the JVM/veraPDF integration, under current requirements** — no PDF/UA
+certification need was identified, and the architectural cost isn't justified by what would be gained.
+Recommended two optional, pure-Python, no-new-runtime lower-cost improvements for a future session instead
+of the full integration: (1) extend `is_tagged_pdf()` to also check `/MarkInfo /Marked`, `/Lang`, and
+`<Figure>` alt-text — still an approximation, but measurably better; (2) document an external/offline
+`verapdf` CLI workflow for the rare operator who genuinely needs certified conformance. veraPDF's license
+(commonly cited as GPLv3/MPLv2) explicitly flagged as unverified against its current terms, not asserted
+as confirmed fact — a caution for whoever revisits this. Wrote up as
+[ADR 0236](docs/adr/0236-pdf-ua-conformance-validation-scoping.md).
+
+**This closes the entire Phase 78–82 plan.** Per the user's own standing instruction ("graphify kannst du
+am ende des plans machen btw," given mid-session during P80-S1), `graphify update .` was deliberately
+deferred through Phase 80's close, Phase 81's close, and every Phase 82 session — it runs exactly once now,
+at the true end of this whole plan, not at this phase's own close in isolation. See the immediately
+following "Phase 82 close" entry for that regression run and the graphify update itself.
+
+---
+
+**Immediately before:** P82-S2 (second session of Phase 82 — scoping-only sessions for the larger
+remaining items). **Scoping, kein Feature** — no code diff, per this phase's own DoD. Scoped
+`case-service`'s destruction-scheduling gap that ADR 0116 (P31-S5, records quarantine) named as real but
+deliberately unbuilt.
 
 Confirmed live: `case-service` has zero destruction/retention primitive of its own — only `status`
 open/closed and the already-existing archival `archive_after`/`archived_at`
@@ -36,10 +74,6 @@ shape, only if a genuinely new requirement for holding a case's own record (inde
 ever emerges. Wrote up as
 [ADR 0235](docs/adr/0235-case-service-destruction-scheduling-scoping.md) — a new ADR, not an edit to
 ADR 0116, per this project's standing rule.
-
-**Next session:** P82-S3 — PDF/UA conformance validation (veraPDF or equivalent), scoping only, the third
-and final session of this phase. No graphify update — still deferred to the end of the whole Phase 78–82
-plan (Phase 82's own close, which will also be this whole plan's close).
 
 ---
 
