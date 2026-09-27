@@ -24,13 +24,13 @@ export function AdminShell({ title, children }: { title: string; children: React
     <div className="flex min-h-screen flex-col">
       <MaintenanceBanner />
       <LicenseStatusBanner />
-      <div className="flex items-center justify-between border-b border-border px-6 py-3">
-        <h1>{title}</h1>
-        <div className="flex items-center gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border px-6 py-3">
+        <h1 className="whitespace-nowrap">{title}</h1>
+        <div className="flex flex-wrap items-center gap-4">
           <InstallationSwitcher />
           <LocaleSwitcher />
           <ThemeSwitcher />
-          {user && <span>{user.username} </span>}
+          {user && <span className="whitespace-nowrap">{user.username} </span>}
           <button
             type="button"
             onClick={logout}

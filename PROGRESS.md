@@ -2,7 +2,51 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P81-S1 (first session of Phase 81 — UI Spacing & Layout Polish, user-requested).
+**Last completed:** P81-S2 (second session of Phase 81 — fixing the two concrete, screenshot-confirmed
+bugs from P81-S1's punch list). Scoped to `admin-ui` only, per-component spot-fixes (P81-S1 already ruled
+out a shared-token root cause) — the platform-wide `gap-2`→`gap-3` button-group bump (item 3 of the
+punch list) is deliberately deferred to its own future session, not folded in here.
+
+**(1) `AdminShell.tsx` header-wrap fix**: added `flex-wrap gap-y-2` to the outer header row and
+`whitespace-nowrap` to the title/username — at narrow widths the title and the controls cluster (locale/
+theme/user/logout) now wrap as two clean groups instead of individual text wrapping mid-word (the
+username used to break as "users-\nadmin").
+
+**(2) Filter-form wrap-bug fix, `ForensicTraceView.tsx` + both filter forms in `ReportsView.tsx`**: split
+each form's filter fields and its action buttons into two separate flex rows instead of one shared
+`flex-wrap` row. Root cause: DOM-order flex-wrap has no concept of "these two elements belong together" —
+whichever items happen to fit on a row share it regardless of logical grouping, which is why the primary
+submit button (`Trace abfragen`) could land wrapped onto the same row as the unrelated `Bis` date field.
+Two separate flex containers (filters, then actions) guarantee the action buttons always start their own
+row, at every width, not just when there happens to be leftover space. Bumped `gap-2`→`gap-3` within these
+three touched forms plus `ExportButtons`' internal span since they were already being restructured — not
+a platform-wide sweep (that's P81-S3+'s job).
+
+**Live-verified, not just eyeballed in the diff**: rebuilt the `admin-ui` Docker image, then — since this
+environment has no Node.js/Playwright at all (confirmed again this session, same constraint as P81-S1) —
+reused the raw-CDP Python screenshot workaround from P81-S1 (headless Chromium at
+`~/.cache/ms-playwright/chromium-1140`, driven over the DevTools Protocol via `uv run --with websockets`,
+no project dependency added). Logged in as `users-admin`, screenshotted `Forensik-Trace` and
+`Standardberichte` at both 1400px and 700px viewports. Confirmed both fixes render correctly with no
+regression: the submit button now sits on its own row cleanly separated from the date field, and the
+header controls wrap as one coherent group under the title without any mid-word text breaking, at both
+widths.
+
+**Frontend regression, run inside a throwaway `node:22-alpine` container** (host has no `node` binary):
+`tsc --noEmit` clean, `eslint .` clean, `vitest run` — **309/309 tests passed** across 47 test files.
+`next build` already implicitly re-validated by the Docker image rebuild itself (the image would not have
+built otherwise). No new ADR (per-component spot-fix, not a shared-token change — P81-S1 already
+determined this was the likely shape of the fix).
+
+**Next session:** P81-S3+ — the platform-wide `gap-2`→`gap-3` button-group bump (38–39 occurrences each in
+`admin-ui`/`user-ui`, plurality choice in the four smaller apps too) plus the lower-priority
+`.form-grid`/`.layout-row` gap bump, grouped per app per P81-S1's own findings (small apps first, then
+`user-ui`/`admin-ui` each their own session). No graphify update — still deferred to the end of the whole
+Phase 78–82 plan (Phase 82's close).
+
+---
+
+**Immediately before:** P81-S1 (first session of Phase 81 — UI Spacing & Layout Polish, user-requested).
 Assessment-only session, no code changes (per the plan's own DoD — a punch list, not fixes yet). Same
 "full assessment first" discipline the user chose for Phase 77.
 
@@ -53,13 +97,6 @@ accordingly.
 
 No new ADR (pure assessment, matches the plan's own DoD). `docs/services/*.md` unaffected (frontend-only,
 no service behavior changed).
-
-**Next session:** P81-S2 — apply the assessed fixes, starting with the highest-value/lowest-risk items
-from P81-S1's punch list (the `ForensicTraceView.tsx`/`ReportsView.tsx` wrap bug and the `gap-2`→`gap-3`
-button-group bump), same rollout shape as Phase 49/75/77 (small/targeted fixes first). Live browser
-verification with before/after screenshots is non-negotiable per this phase's own DoD — reuse this
-session's CDP-based screenshot workaround unless Node/Playwright becomes available by then. No graphify
-update — still deferred to the end of the whole Phase 78–82 plan (Phase 82's close).
 
 ---
 

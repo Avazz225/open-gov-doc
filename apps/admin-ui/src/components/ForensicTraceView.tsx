@@ -101,60 +101,72 @@ export function ForensicTraceView() {
       <p className="text-sm opacity-80">{t("forensicTrace.hint")}</p>
 
       <section className="rounded-lg border border-border p-4 mb-6">
-        <form className="flex flex-wrap items-end gap-2" onSubmit={handleQuery}>
-          <input
-            placeholder={t("forensicTrace.filterActor")}
-            value={actor}
-            onChange={(e) => setActor(e.target.value)}
-            className={fieldInput}
-          />
-          <input
-            placeholder={t("forensicTrace.filterSubject")}
-            value={subject}
-            onChange={(e) => setSubject(e.target.value)}
-            className={fieldInput}
-          />
-          <select
-            value={category}
-            onChange={(e) => setCategory(e.target.value as ForensicTraceCategory | "")}
-            aria-label={t("forensicTrace.filterCategory")}
-            className={fieldInput}
-          >
-            <option value="">{t("forensicTrace.categoryAll")}</option>
-            <option value="view">{t("forensicTrace.categoryView")}</option>
-            <option value="download">{t("forensicTrace.categoryDownload")}</option>
-            <option value="change">{t("forensicTrace.categoryChange")}</option>
-            <option value="delete">{t("forensicTrace.categoryDelete")}</option>
-          </select>
-          <label>
-            {t("forensicTrace.since")}
+        <form onSubmit={handleQuery}>
+          {/* Post-Roadmap Phase 81 Session 2 (P81-S1's own live-screenshotted
+              finding): filter fields and action buttons used to be flex
+              siblings in one wrapping row, so at narrow widths the primary
+              submit button could land wrapped onto the same row as an
+              unrelated date field with almost no visual separation. Two
+              separate wrapping rows - filters, then actions - instead give
+              the action buttons their own row at every width, not just when
+              there happens to be enough space left over. */}
+          <div className="flex flex-wrap items-end gap-3">
             <input
-              type="datetime-local"
-              value={since}
-              onChange={(e) => setSince(e.target.value)}
+              placeholder={t("forensicTrace.filterActor")}
+              value={actor}
+              onChange={(e) => setActor(e.target.value)}
               className={fieldInput}
             />
-          </label>
-          <label>
-            {t("forensicTrace.until")}
             <input
-              type="datetime-local"
-              value={until}
-              onChange={(e) => setUntil(e.target.value)}
+              placeholder={t("forensicTrace.filterSubject")}
+              value={subject}
+              onChange={(e) => setSubject(e.target.value)}
               className={fieldInput}
             />
-          </label>
-          <button type="submit" disabled={isLoading} className={primaryBtn}>
-            {t("forensicTrace.query")}
-          </button>
-          <span className="flex gap-2">
-            <button type="button" onClick={() => handleExport("csv")} className={secondaryBtn}>
-              {t("forensicTrace.exportCsv")}
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value as ForensicTraceCategory | "")}
+              aria-label={t("forensicTrace.filterCategory")}
+              className={fieldInput}
+            >
+              <option value="">{t("forensicTrace.categoryAll")}</option>
+              <option value="view">{t("forensicTrace.categoryView")}</option>
+              <option value="download">{t("forensicTrace.categoryDownload")}</option>
+              <option value="change">{t("forensicTrace.categoryChange")}</option>
+              <option value="delete">{t("forensicTrace.categoryDelete")}</option>
+            </select>
+            <label>
+              {t("forensicTrace.since")}
+              <input
+                type="datetime-local"
+                value={since}
+                onChange={(e) => setSince(e.target.value)}
+                className={fieldInput}
+              />
+            </label>
+            <label>
+              {t("forensicTrace.until")}
+              <input
+                type="datetime-local"
+                value={until}
+                onChange={(e) => setUntil(e.target.value)}
+                className={fieldInput}
+              />
+            </label>
+          </div>
+          <div className="flex flex-wrap items-center gap-3 mt-3">
+            <button type="submit" disabled={isLoading} className={primaryBtn}>
+              {t("forensicTrace.query")}
             </button>
-            <button type="button" onClick={() => handleExport("pdf")} className={secondaryBtn}>
-              {t("forensicTrace.exportPdf")}
-            </button>
-          </span>
+            <span className="flex gap-3">
+              <button type="button" onClick={() => handleExport("csv")} className={secondaryBtn}>
+                {t("forensicTrace.exportCsv")}
+              </button>
+              <button type="button" onClick={() => handleExport("pdf")} className={secondaryBtn}>
+                {t("forensicTrace.exportPdf")}
+              </button>
+            </span>
+          </div>
         </form>
 
         {error && (

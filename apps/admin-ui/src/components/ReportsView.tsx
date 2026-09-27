@@ -83,7 +83,7 @@ function ExportButtons({
   }
 
   return (
-    <span className="flex gap-2">
+    <span className="flex gap-3">
       <button type="button" onClick={() => handleExport("csv")} className={secondaryBtn}>
         {t("reports.exportCsv")}
       </button>
@@ -129,7 +129,10 @@ function DocumentVolumeSection({ token }: { token: string }) {
   return (
     <section className="rounded-lg border border-border p-4 mb-6">
       <h2>{t("reports.documentVolumeHeading")}</h2>
-      <div className="flex flex-wrap items-end gap-2">
+      {/* Post-Roadmap Phase 81 Session 2: filters and actions in separate
+          wrapping rows, same fix as ForensicTraceView.tsx - keeps the reload/
+          export buttons off an unrelated filter field's wrapped row. */}
+      <div className="flex flex-wrap items-end gap-3">
         <label>
           {t("reports.groupBy")}
           <select
@@ -148,6 +151,8 @@ function DocumentVolumeSection({ token }: { token: string }) {
           onChange={(e) => setFolderId(e.target.value)}
           className={fieldInput}
         />
+      </div>
+      <div className="flex flex-wrap items-center gap-3 mt-3">
         <button type="button" onClick={load} className={secondaryBtn}>
           {t("reports.reload")}
         </button>
@@ -442,49 +447,51 @@ function ReportScheduleSection({ token }: { token: string }) {
     <section className="rounded-lg border border-border p-4 mb-6">
       <h2>{t("reports.schedulesHeading")}</h2>
       <p className="text-sm opacity-80">{t("reports.schedulesHint")}</p>
-      <form
-        className="flex flex-wrap items-end gap-2"
-        aria-label={t("reports.newScheduleFormLabel")}
-        onSubmit={handleCreate}
-      >
-        <select
-          value={reportType}
-          onChange={(e) => setReportType(e.target.value as ReportType)}
-          className={fieldInput}
-        >
-          <option value="document_volume">{t("reports.documentVolumeHeading")}</option>
-          <option value="open_workflow_tasks">{t("reports.openWorkflowTasksHeading")}</option>
-          <option value="storage_usage">{t("reports.storageUsageHeading")}</option>
-          <option value="user_activity">{t("reports.userActivityHeading")}</option>
-        </select>
-        <select
-          value={format}
-          onChange={(e) => setFormat(e.target.value as ReportFormat)}
-          className={fieldInput}
-        >
-          <option value="csv">CSV</option>
-          <option value="pdf">PDF</option>
-        </select>
-        <select
-          value={frequency}
-          onChange={(e) => setFrequency(e.target.value as ReportFrequency)}
-          className={fieldInput}
-        >
-          <option value="daily">{t("reports.frequencyDaily")}</option>
-          <option value="weekly">{t("reports.frequencyWeekly")}</option>
-          <option value="monthly">{t("reports.frequencyMonthly")}</option>
-        </select>
-        <input
-          type="email"
-          placeholder={t("reports.recipientEmail")}
-          value={recipientEmail}
-          onChange={(e) => setRecipientEmail(e.target.value)}
-          required
-          className={fieldInput}
-        />
-        <button type="submit" className={primaryBtn}>
-          {t("reports.createSchedule")}
-        </button>
+      <form aria-label={t("reports.newScheduleFormLabel")} onSubmit={handleCreate}>
+        {/* Post-Roadmap Phase 81 Session 2: fields and submit in separate
+            wrapping rows, same fix as ForensicTraceView.tsx/the form above. */}
+        <div className="flex flex-wrap items-end gap-3">
+          <select
+            value={reportType}
+            onChange={(e) => setReportType(e.target.value as ReportType)}
+            className={fieldInput}
+          >
+            <option value="document_volume">{t("reports.documentVolumeHeading")}</option>
+            <option value="open_workflow_tasks">{t("reports.openWorkflowTasksHeading")}</option>
+            <option value="storage_usage">{t("reports.storageUsageHeading")}</option>
+            <option value="user_activity">{t("reports.userActivityHeading")}</option>
+          </select>
+          <select
+            value={format}
+            onChange={(e) => setFormat(e.target.value as ReportFormat)}
+            className={fieldInput}
+          >
+            <option value="csv">CSV</option>
+            <option value="pdf">PDF</option>
+          </select>
+          <select
+            value={frequency}
+            onChange={(e) => setFrequency(e.target.value as ReportFrequency)}
+            className={fieldInput}
+          >
+            <option value="daily">{t("reports.frequencyDaily")}</option>
+            <option value="weekly">{t("reports.frequencyWeekly")}</option>
+            <option value="monthly">{t("reports.frequencyMonthly")}</option>
+          </select>
+          <input
+            type="email"
+            placeholder={t("reports.recipientEmail")}
+            value={recipientEmail}
+            onChange={(e) => setRecipientEmail(e.target.value)}
+            required
+            className={fieldInput}
+          />
+        </div>
+        <div className="flex flex-wrap items-center gap-3 mt-3">
+          <button type="submit" className={primaryBtn}>
+            {t("reports.createSchedule")}
+          </button>
+        </div>
       </form>
       {error && (
         <p className="text-danger" role="alert">

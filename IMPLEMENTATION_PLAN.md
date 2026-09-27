@@ -2580,18 +2580,39 @@ audited spacing/gap values — that needs a dedicated visual pass, not a text-ba
   and one real flex-wrap grouping bug) — meaning Phase 81's remaining sessions are likely per-component
   spot-fixes, not a one-line shared-token change, exactly the "could need per-component spot-fixes if the
   cramping is inconsistent" branch this plan itself named as a live possibility.
-- **P81-S2 onward — apply the assessed fixes app by app**: same rollout shape as Phase 49/75/77's own
-  precedent (small apps first to prove the fix mechanics cheaply, then `user-ui`/`admin-ui` each getting
-  their own session given size). Exact session count and grouping depends entirely on what P81-S1's audit
-  actually finds — could be as small as a couple of shared `globals.css` token corrections that
-  automatically fix most instances at once (if the root cause turns out to be a couple of too-small
-  `--dms-space-*` values used everywhere), or could need per-component spot-fixes if the cramping is
-  inconsistent across components. P81-S1's own findings determine this phase's real session count.
+- **P81-S2 — Fix the two concrete, screenshot-confirmed bugs from P81-S1's punch list**: ✅ ~~apply the
+  assessed fixes app by app, same rollout shape as Phase 49/75/77's own precedent (small apps first to
+  prove the fix mechanics cheaply, then `user-ui`/`admin-ui` each getting their own session given size).
+  Exact session count and grouping depends entirely on what P81-S1's audit actually finds — could be as
+  small as a couple of shared `globals.css` token corrections that automatically fix most instances at
+  once (if the root cause turns out to be a couple of too-small `--dms-space-*` values used everywhere),
+  or could need per-component spot-fixes if the cramping is inconsistent across components.~~ **Done.**
+  Per-component spot-fixes, not a shared-token change (P81-S1 already ruled the token-scale hypothesis
+  out) — scoped to `admin-ui` only, the two items P81-S1 actually screenshotted as broken (item 3, the
+  platform-wide `gap-2` bump, is explicitly deferred to its own future session as a large, mechanical,
+  lower-confidence-of-actually-mattering change, not folded in here). **(1)** `AdminShell.tsx`'s header
+  row: added `flex-wrap` + `gap-y-2` to the outer row and `whitespace-nowrap` to the title/username, so
+  the title and the controls cluster wrap as two clean groups at narrow widths instead of individual text
+  wrapping mid-word. **(2)** `ForensicTraceView.tsx` and both filter forms in `ReportsView.tsx`: split each
+  form's filter fields and action buttons into two separate flex rows instead of one shared `flex-wrap`
+  row — the actual root cause of the wrap bug (DOM-order flex-wrap has no concept of "these two elements
+  belong together," so the primary submit button could land on the same wrapped row as an unrelated date
+  field). Bumped `gap-2`→`gap-3` within these three touched forms (and `ExportButtons`' internal span)
+  since they were already being restructured — not a platform-wide sweep. Live-verified: rebuilt
+  `admin-ui`, logged in as `users-admin` and screenshotted both pages at 1400px and 700px viewports (no
+  Node/Playwright available in this environment — reused P81-S1's raw-CDP Python screenshot workaround) —
+  confirmed both fixes render correctly with no regression at either width. `tsc`/`eslint`/`vitest`
+  (309/309, run inside a throwaway `node:22-alpine` container since the host has no `node`) all green;
+  `next build` already validated by the Docker image rebuild itself.
+- **P81-S3+ — remaining rollout**: the platform-wide `gap-2`→`gap-3` button-group bump (38–39 occurrences
+  each in `admin-ui`/`user-ui` alone, plurality choice in the four smaller apps too) and the lower-priority
+  `.form-grid`/`.layout-row` gap bump, grouped per app per P81-S1's own findings — small apps first, then
+  `user-ui`/`admin-ui` each getting their own session given size, as originally planned.
 
 **Definition of Done**: P81-S1 needs no new ADR (pure assessment, produces a punch list); later sessions
 need a new ADR only if a shared token value changes (a real, if small, design-system decision) — a
-per-component spot-fix does not; live browser verification with before/after screenshots is
-**non-negotiable** for every session in this phase, same standard as Phase 49/75/77, since the entire
+per-component spot-fix does not (confirmed: P81-S2 needed none); live browser verification with
+before/after screenshots is **non-negotiable** for every session in this phase, same standard as Phase 49/75/77, since the entire
 point is visually inspectable; docs and `PROGRESS.md` updated per session.
 
 ## Phase 82 — Scoping-Only Sessions for the Larger Remaining Items
