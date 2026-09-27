@@ -161,7 +161,7 @@ export function EmailTemplates() {
                     <td>{template.recipient_domain_pattern ?? t("emailTemplates.domainCatchall")}</td>
                     <td>{template.subject_template}</td>
                     <td>{new Date(template.updated_at).toLocaleString()}</td>
-                    <td className="flex gap-2">
+                    <td className="flex gap-3">
                       <button type="button" onClick={() => handleEdit(template)} className={secondaryBtn}>
                         {t("emailTemplates.edit")}
                       </button>
@@ -247,7 +247,7 @@ export function EmailTemplates() {
             className={fieldInput}
           />
         </label>
-        <div className="col-span-full flex gap-2">
+        <div className="col-span-full flex gap-3">
           <button type="submit" disabled={isSaving} className={primaryBtn}>
             {t("common.save")}
           </button>

@@ -2646,17 +2646,39 @@ audited spacing/gap values — that needs a dedicated visual pass, not a text-ba
   view — the toolbar's gap increase is clearly visible, `Liste`/`Baum`'s zero-gap segmented control
   correctly untouched. `tsc`/`eslint`/`vitest` green (293/293 tests, 38 files, run inside a throwaway
   `node:22-alpine` container); `next build` already validated by the Docker image rebuild.
-- **P81-S5 — `admin-ui`'s own `gap-2`→`gap-3` sweep**: the remaining occurrences not already touched by
+- **P81-S5 — `admin-ui`'s own `gap-2`→`gap-3` sweep**: ✅ ~~the remaining occurrences not already touched by
   P81-S2's three form fixes, plus the lower-priority `.form-grid`/`.layout-row` gap bump and any
   CSS-class-based button groups analogous to `user-ui`'s `.explorer-toolbar` finding (check `globals.css`
-  for `gap: var(--dms-space-2)` declarations the same way, not just a Tailwind-string grep).
+  for `gap: var(--dms-space-2)` declarations the same way, not just a Tailwind-string grep).~~ **Done.**
+  CSS-class sweep (`grep gap: var(--dms-space-2)` across `globals.css`) found no additional genuine
+  button-group classes beyond the already-known, still-deferred `.form-grid`/`.layout-row`/
+  `.layout-field` and one input+single-button "add" row (`.deletion-reason-catalog-add`, same
+  not-an-adjacency-issue shape as `office-addin`'s `DocumentPicker.tsx` from P81-S1) — `admin-ui` had no
+  hidden CSS-class case like `user-ui`'s toolbar. 13 genuine Tailwind button-group instances found and
+  fixed across 7 files: `ConfigPackages.tsx` (preview+apply), `EmailTemplates.tsx`×2 (edit+delete,
+  save+cancel), `InstallationManager.tsx` (switch+delete), `ReportsView.tsx`×3 (the two remaining
+  reload+export-only sections, plus the user-activity section which — like P81-S2's document-volume fix —
+  needed the same filter/action row split, not just a gap bump, since it mixes an actor filter with the
+  reload/export buttons), `QueryConsoleView.tsx`×2 (approve+reject, confirm+cancel), `ObjectTypeEditor.tsx`
+  ×2 (create/cancel, edit+delete), `LayoutDesigner.tsx`×2 (row move-up/down icon cluster, save+reset).
+  Left alone: 18 further `gap-2` occurrences checked and confirmed single-button (mostly the same
+  recurring "field(s) + one Save button" form shape used throughout `admin-ui`'s settings pages) or
+  label+select pairs — no adjacency issue, consistent with every prior session's discipline. Live-verified:
+  rebuilt `admin-ui`'s Docker image, logged in as `users-admin`, screenshotted `Standardberichte` (the
+  document-volume section's action row, already fixed in P81-S2, confirms the same split pattern renders
+  correctly; the newly-split user-activity section uses byte-identical structure, verified via diff review
+  since the report list's own length pushed it below a practical screenshot height). `tsc`/`eslint`/
+  `vitest` green (309/309 tests); `next build` already validated by the Docker image rebuild. **This closes
+  the platform-wide `gap-2`→`gap-3` button-group rollout across all six frontend apps** — only the
+  lower-priority `.form-grid`/`.layout-row`/`.layout-field` gap bump (`admin-ui` only) remains unaddressed
+  from P81-S1's original punch list, left as accepted lower-priority polish, not scheduled its own session.
 
 **Definition of Done**: P81-S1 needs no new ADR (pure assessment, produces a punch list); later sessions
 need a new ADR only if a shared token value changes (a real, if small, design-system decision) — a
-per-component spot-fix does not (confirmed: none of P81-S2/S3/S4 needed one); live browser verification
-with before/after screenshots is **non-negotiable** for every session in this phase, same standard as
-Phase 49/75/77, since the entire point is visually inspectable; docs and `PROGRESS.md` updated per
-session.
+per-component spot-fix does not (confirmed: none of P81-S2 through S5 needed one); live browser
+verification with before/after screenshots is **non-negotiable** for every session in this phase, same
+standard as Phase 49/75/77, since the entire point is visually inspectable; docs and `PROGRESS.md` updated
+per session.
 
 ## Phase 82 — Scoping-Only Sessions for the Larger Remaining Items
 

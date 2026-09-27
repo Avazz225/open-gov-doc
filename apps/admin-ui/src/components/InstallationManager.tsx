@@ -98,7 +98,7 @@ export function InstallationManager() {
                   <span className="badge ok">{t("installations.active")}</span>
                 )}
               </td>
-              <td className="flex gap-2">
+              <td className="flex gap-3">
                 {installation.id !== activeInstallation.id && (
                   <button type="button" className={secondaryBtn} onClick={() => switchInstallation(installation.id)}>
                     {t("installations.switchTo")}

@@ -217,7 +217,7 @@ function OpenWorkflowTasksSection({ token }: { token: string }) {
   return (
     <section className="rounded-lg border border-border p-4 mb-6">
       <h2>{t("reports.openWorkflowTasksHeading")}</h2>
-      <div className="flex items-end gap-2">
+      <div className="flex items-end gap-3">
         <button type="button" onClick={load} className={secondaryBtn}>
           {t("reports.reload")}
         </button>
@@ -284,7 +284,7 @@ function StorageUsageSection({ token }: { token: string }) {
   return (
     <section className="rounded-lg border border-border p-4 mb-6">
       <h2>{t("reports.storageUsageHeading")}</h2>
-      <div className="flex items-end gap-2">
+      <div className="flex items-end gap-3">
         <button type="button" onClick={load} className={secondaryBtn}>
           {t("reports.reload")}
         </button>
@@ -350,13 +350,19 @@ function UserActivitySection({ token }: { token: string }) {
   return (
     <section className="rounded-lg border border-border p-4 mb-6">
       <h2>{t("reports.userActivityHeading")}</h2>
-      <div className="flex items-end gap-2">
+      {/* Post-Roadmap Phase 81 Session 5: filter field and action buttons in
+          separate wrapping rows, same fix as the document-volume section
+          above (P81-S2) - keeps the reload/export buttons off the same
+          wrapped row as the actor filter at narrow widths. */}
+      <div className="flex flex-wrap items-end gap-3">
         <input
           placeholder={t("reports.filterActor")}
           value={actor}
           onChange={(e) => setActor(e.target.value)}
           className={fieldInput}
         />
+      </div>
+      <div className="flex flex-wrap items-center gap-3 mt-3">
         <button type="button" onClick={load} className={secondaryBtn}>
           {t("reports.reload")}
         </button>

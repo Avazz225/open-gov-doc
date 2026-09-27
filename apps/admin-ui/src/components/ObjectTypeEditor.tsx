@@ -721,7 +721,7 @@ export function ObjectTypeEditor() {
             ))}
           </div>
 
-          <div className="flex gap-2 mt-4 border-t border-border pt-4">
+          <div className="flex gap-3 mt-4 border-t border-border pt-4">
             <button type="submit" className={primaryBtn}>
               {editingId === null ? t("common.create") : t("objectTypes.save")}
             </button>
@@ -751,7 +751,7 @@ export function ObjectTypeEditor() {
               <td>{ot.applies_to}</td>
               <td>{ot.attributes.length}</td>
               <td>{ot.icon ? iconLabel(t, ot.icon) : "—"}</td>
-              <td className="flex gap-2">
+              <td className="flex gap-3">
                 <button type="button" onClick={() => startEdit(ot)} className={secondaryBtn}>
                   {t("objectTypes.edit")}
                 </button>

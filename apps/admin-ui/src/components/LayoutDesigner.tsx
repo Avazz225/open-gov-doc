@@ -290,7 +290,7 @@ export function LayoutDesigner() {
 
               {layout.rows.map((row, rowIndex) => (
                 <div className="layout-row" key={rowIndex}>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-3">
                     <strong className="mr-1">{t("layoutDesigner.rowHeading", { n: rowIndex + 1 })}</strong>
                     <button
                       type="button"
@@ -397,7 +397,7 @@ export function LayoutDesigner() {
                 {t("layoutDesigner.addRow")}
               </button>
 
-              <div className="mt-4 flex gap-2 border-t border-border pt-4">
+              <div className="mt-4 flex gap-3 border-t border-border pt-4">
                 <button type="button" onClick={handleSave} className={primaryBtn}>
                   {t("layoutDesigner.save")}
                 </button>

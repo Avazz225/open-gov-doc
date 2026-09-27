@@ -610,7 +610,7 @@ function ManipulationSection() {
                     <td>{JSON.stringify(approval.payload)}</td>
                     <td>
                       {rejectingId !== approval.id && (
-                        <div className="flex gap-2">
+                        <div className="flex gap-3">
                           <button
                             type="button"
                             onClick={() => handleApprove(approval.id)}
@@ -646,7 +646,7 @@ function ManipulationSection() {
                               className={fieldInput}
                             />
                           </label>
-                          <div className="flex gap-2">
+                          <div className="flex gap-3">
                             <button type="submit" className={primaryBtn}>
                               {t("queryConsole.rejectConfirm")}
                             </button>
