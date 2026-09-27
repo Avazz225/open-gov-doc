@@ -2,7 +2,40 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** Phase 81 close (full backend regression, after P81-S5 closed the phase). Standard
+**Last completed:** P82-S1 (first session of Phase 82 — scoping-only sessions for the larger remaining
+items). **Scoping, kein Feature** — no code diff, per this phase's own DoD. Re-examined
+`fleet-management-service`'s per-operator authentication gap that ADR 0212 (Phase 73 Session 2) already
+scoped but whose named follow-up build session (P73-S2b) never ran.
+
+Re-verified live against current code, not assumed carried-over from the old ADR: `_require_operator_key`
+(`main.py:92-108`), `approve_installation_run`'s `payload.actor == run.proposed_by` (`main.py:665`), and
+the plain-`str` `actor` fields (`schemas.py:152-160`) are byte-for-byte unchanged since ADR 0212 was
+written — same file, same line numbers, same gap. No `FleetOperator` table exists anywhere (grepped the
+whole codebase) — confirmed the design was scoped but genuinely never built. `docs/services/
+fleet-management-service.md`'s own Open Points still lists the gap verbatim, unedited since ADR 0212.
+
+**Verdict: ADR 0212's design is unchanged and still directly buildable** — its two cited precedents
+(`migration-service`'s `paired_installation.api_key` model, `workflow-service`'s
+`_require_claim_authorization_if_claimed`) are both still real, and nothing else in the codebase has since
+built a competing pattern this design would duplicate or conflict with. No re-scoping of the core
+mechanism was needed.
+
+**Resolved the two decisions ADR 0212 itself deliberately left open** (the actual point of a scoping
+session — leave nothing for the builder to have to stop and decide): token format (UUID4, `sha256`-hashed,
+now pinned instead of just suggested) and who may mint new `/operators` (an admin-flagged operator only,
+via a new `is_admin` boolean column, bootstrap row set `True` — not "any valid operator," to avoid one
+compromised credential minting unbounded new ones, same least-privilege reasoning `permission-service`'s
+own role-management gating already applies). Wrote up the full re-confirmed, build-ready design as
+[ADR 0234](docs/adr/0234-fleet-management-service-per-operator-auth-reconfirmed.md) — a **new** ADR, per
+this project's own standing rule never to rewrite an old ADR after the fact.
+
+**Next session:** P82-S2 — `case-service` destruction-scheduling/quarantine primitive (scoping only). No
+graphify update at this session's own close either — still deferred to the end of the whole Phase 78–82
+plan (Phase 82's own close).
+
+---
+
+**Immediately before:** Phase 81 close (full backend regression, after P81-S5 closed the phase). Standard
 phase-end cadence per `CONTRIBUTING.md` — **no `graphify update .`**, same deliberate deferral as Phase 80
 close (the cadence is "once at the end of the entire Phase 78–82 plan," per the user's own mid-session
 correction during P80-S1).
@@ -14,11 +47,6 @@ backend side effects, not a bug hunt. `ruff` still shows its one pre-existing fa
 `services/*/main.py` files and `loadtest/notebook/analysis.ipynb` — all confirmed via `git log`/`git diff`
 to be untouched by any P80 or P81 session, predating this entire work arc) — not something this phase
 introduced or needs to fix.
-
-**Next session:** P82-S1 — Phase 82 (three scoping-only sessions: fleet-management per-operator auth,
-case-service destruction-scheduling, PDF/UA conformance validation), starting with whichever the plan
-lists first. No graphify update at this session's own close either — still deferred to the end of the
-whole Phase 78–82 plan (this phase's own close).
 
 ---
 

@@ -2686,15 +2686,28 @@ Bundles the handful of genuinely real, but too large to just fix in a bundled se
 round that deserve a proper scoping pass before a future build session, following the same
 scoping-not-building precedent as ADR 0147/0161/0207/0209/0212.
 
-- **P82-S1 (scoping only) — `fleet-management-service` per-operator authentication**: ADR 0212 (Phase 73
-  Session 2) already scoped a concrete fix (per-operator bearer tokens, a new `FleetOperator` table) for
-  the plain-text `actor != proposed_by` four-eyes check, and even named a specific follow-up session
+- **P82-S1 (scoping only) — `fleet-management-service` per-operator authentication**: ✅ ~~ADR 0212 (Phase
+  73 Session 2) already scoped a concrete fix (per-operator bearer tokens, a new `FleetOperator` table)
+  for the plain-text `actor != proposed_by` four-eyes check, and even named a specific follow-up session
   (P73-S2b) — which was never executed. Confirmed directly in code (`_require_operator_key` still has no
   identity resolution) that the gap is real and the design already exists. This session either just
   builds ADR 0212's already-scoped design directly (likely the right call, given the scoping work is
   already done) or re-confirms it's still the right design before building — session decides which,
   but either way this is the cheapest scoping-only session in this phase since the scoping already
-  happened once.
+  happened once.~~ **Done.** Re-verified live against current code: `_require_operator_key`
+  (`main.py:92-108`), `approve_installation_run`'s `payload.actor == run.proposed_by` (`main.py:665`), and
+  the plain-`str` `actor` fields (`schemas.py:152-160`) are byte-for-byte unchanged since ADR 0212 was
+  written — same file, same line numbers. No `FleetOperator` table exists anywhere (grepped). ADR 0212's
+  design is confirmed still sound and directly buildable, no re-scoping of the core mechanism needed.
+  Resolved the two decisions ADR 0212 itself left open (write-up chose to resolve rather than re-defer,
+  since that's exactly what a scoping session should do before handing off to a builder): token format
+  (UUID4, `sha256`-hashed, as ADR 0212 already suggested — now pinned) and who may mint new operators
+  (an admin-flagged operator only, via a new `is_admin` boolean column with the bootstrap row set `True` —
+  not "any valid operator," to avoid one compromised credential minting unbounded new ones, same
+  least-privilege reasoning this project already applies to `permission-service`'s own role-management
+  gating). See [ADR 0234](docs/adr/0234-fleet-management-service-per-operator-auth-reconfirmed.md) for
+  the full build-ready recommendation. No code diff this session, per this phase's own DoD — the actual
+  build is handed to a future session with zero scoping work left to do.
 - **P82-S2 (scoping only) — `case-service` destruction-scheduling/quarantine primitive**: ADR 0116
   (records quarantine) named this as a real, unbuilt gap — `case-service` has only a read-only quarantine
   indicator, no actual scheduling/destruction primitive comparable to what `document-service` has for
