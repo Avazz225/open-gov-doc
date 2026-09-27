@@ -2,7 +2,89 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P82-S3 (third and final session of Phase 82 — scoping-only sessions for the larger
+**Last completed:** Phase 82 close (full backend regression + the deferred whole-plan `graphify update .`,
+after P82-S3 closed the phase). **This closes the entire Phase 78–82 plan.**
+
+Full regression (`scripts/run-tests.sh --build`, all 32 backend services): two flaky failures on the first
+pass, both investigated and confirmed as the same pre-existing, timing-sensitive test flakiness family
+already documented at Phase 80 close (full-jitter backoff windows in `federation-hub-service`'s retry-tick
+tests occasionally overlapping between sibling tests; `workflow-service`'s
+`test_dispatch_builds_xdomea_package_instead_of_raw_task_data`) — neither file has been touched by any
+P78–P82 session (confirmed via `git log`), and both passed cleanly on isolated re-runs (`workflow-service`
+238/238; `federation-hub-service` needed a third re-run — the second isolated attempt reproduced a
+DIFFERENT test in the same retry-tick family failing, `test_run_retry_tick_redelivers_a_due_handover`,
+confirming this is genuinely nondeterministic jitter-timing flakiness rather than a fluke — the third run
+came back 90/90 clean). Not fixed in this session: root-causing the exact ASGITransport/jitter interaction
+precisely enough to fix it properly would be a real debugging session of its own, out of scope for a
+plan-closing regression sweep; flagged here for whoever next investigates federation-hub-service's own test
+suite. `ruff`'s one remaining failure category (several unrelated `services/*/main.py` files,
+`loadtest/notebook/analysis.ipynb`) is confirmed pre-existing, untouched by any P78–P82 session.
+
+**`graphify update .` run once now, at the true end of the whole plan** — deliberately deferred through
+Phase 80's close, Phase 81's close, and every individual Phase 82 session, per the user's own explicit
+mid-session correction during P80-S1 ("graphify kannst du am ende des plans machen btw"). Incremental
+update: 49 changed/new files (39 code, 9 document, plus `CLAUDE.md` — see below) and 1 nominally "deleted"
+file detected.
+
+**Found and corrected the recurring `CLAUDE.md`-false-positive-deletion bug again** (previously documented
+in this project's own memory/tooling notes): the incremental detector flagged `CLAUDE.md` as deleted
+despite it existing on disk unchanged (a stale manifest entry) — verified directly (`ls` confirmed the
+file is present, 1828 bytes) before reclassifying it from "deleted" to "changed" rather than letting it be
+pruned, exactly per the established fix pattern.
+
+**Found and fixed two real 64k-output-token overflows** during extraction (`PROGRESS.md` is now 13,746
+lines — larger than any prior graphify session on this project has re-extracted at once): the first
+attempt at `PROGRESS.md`'s most-recent-content page (lines 1–2750) and at its lines-8251–11000 page both
+overflowed and were re-dispatched as 3 smaller (~900-line) sub-chunks each, all of which then completed
+cleanly — same "smaller chunks fix the 64k limit" lesson this project's own tooling notes already
+document, applied twice more.
+
+**Found and fixed one malformed subagent output**: a chunk file had a stray literal `</content>` tag
+appended after its valid JSON closing brace (a subagent tool-formatting leak, not a data problem) —
+caught by validating every chunk as JSON before merging (not assumed valid just because the file existed),
+fixed by truncating the file to its last valid line.
+
+**Found and fixed a genuine shrink-guard trip that was NOT just old-stub cleanup**: the first full merge
+attempt shrank the graph by 381 nodes net, and graphify's own safety guard (#479) correctly refused to
+overwrite `graph.json` rather than silently accepting data loss. Investigated rather than forced past:
+`IMPLEMENTATION_PLAN.md` (2,823 lines) had been re-extracted by a single "keep it compact"-instructed
+agent that produced only 39 nodes, versus the ~668 nodes the file's prior extraction actually had — a real,
+large loss of detail, not an artifact. Fixed by re-dispatching `IMPLEMENTATION_PLAN.md` as 4 properly-
+thorough page chunks (~700 lines each, explicit "be reasonably thorough" instructions instead of "keep it
+compact"), which recovered comparable density (441+241+236+151 = 1,069 nodes pre-dedup) — the full re-merge
+then showed a net **gain** of +421 nodes over the prior graph (20,237 vs. 19,816), and the shrink-guard
+passed cleanly.
+
+**Noted, not fixed, a separate pre-existing data-quality issue**: ~121 `PROGRESS.md`-sourced session
+nodes in the OLD graph had an empty `source_file` field (a stub/dangling-reference artifact from some
+earlier session's extraction, unrelated to this one), and graphify's cross-chunk collision guard
+(correctly, by its own design) kept those older stub nodes rather than overwriting them with this
+session's properly-sourced re-extraction, since the guard's job is to prevent exactly this kind of
+silent overwrite when it can't tell whether two same-ID nodes from different-looking sources are the
+same entity or a genuine collision. Net effect: those ~121 specific older session-entity nodes keep
+their old (less complete) metadata rather than picking up fresher labels this run — a minor, narrow
+graph-quality gap, not a data-loss event (the entities and their edges are still present), left as a
+known issue rather than hacked around by reordering the tool's own merge internals.
+
+**Final graph**: 20,237 nodes, 34,037 edges, 2,394 communities (up from 19,816/pre-update). Given the
+scale (this graph now spans the project's entire multi-year history across ~80 phases), only the top 30
+communities by size were hand-labeled with plain-language names (covering the large majority of non-
+singleton content — 1,406 of the 2,394 communities are singletons needing no label); the remaining
+smaller communities keep generic "Community N" labels rather than being exhaustively hand-named one by
+one, a deliberate proportionality call for a graph this size. Health check: clean (0 dangling/missing/
+self-loop/collapsed edges). HTML export auto-aggregated to a community-level view (20,237 nodes exceeds
+the 5,000-node direct-render threshold).
+
+**Next session:** none queued — the Phase 78–82 plan (built from the post-P77 gap-analysis round) is now
+fully complete. Per this project's own established rhythm, the natural next step is a fresh gap-analysis
+round (parallel research agents sweeping ADRs' self-named open scope, `docs/services/*.md` Open Points,
+concept-document coverage, and this plan's own "Bewusst nicht in diesen Plan aufgenommen" deferred-items
+list for staleness) to build the next numbered plan starting at Phase 83 — but that starts only on request,
+not assumed here.
+
+---
+
+**Immediately before:** P82-S3 (third and final session of Phase 82 — scoping-only sessions for the larger
 remaining items). **Scoping, kein Feature** — no code diff, per this phase's own DoD. **This is the last
 session of the entire Phase 78–82 plan.** Gave a definitive verdict, not another deferral, to a gap three
 separate prior ADRs (0119, 0136, 0158) had each independently re-stated without resolving: PDF/UA
