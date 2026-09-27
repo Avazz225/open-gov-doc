@@ -2,7 +2,48 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P82-S1 (first session of Phase 82 — scoping-only sessions for the larger remaining
+**Last completed:** P82-S2 (second session of Phase 82 — scoping-only sessions for the larger remaining
+items). **Scoping, kein Feature** — no code diff, per this phase's own DoD. Scoped `case-service`'s
+destruction-scheduling gap that ADR 0116 (P31-S5, records quarantine) named as real but deliberately
+unbuilt.
+
+Confirmed live: `case-service` has zero destruction/retention primitive of its own — only `status`
+open/closed and the already-existing archival `archive_after`/`archived_at`
+(`repository.py:289-302`, resolved at closure time from `CaseArchivalConfig`). Its "quarantine indicator"
+is a pure live per-document passthrough to `document-service`: `_resolve_reference` (`main.py:304-337`)
+calls `DocumentClient.has_active_quarantine()` per case-document-reference on every read — no case-level
+quarantine state exists anywhere. `docs/services/case-service.md`'s own Open Points doesn't mention this
+gap at all.
+
+**Key finding that shaped the recommendation**: `case-service` has no internal poll loop of its own at all
+(unlike `document-service`'s `_retention_poll_loop`) — its archival due-check is a pure query endpoint
+(`GET /cases/due-for-archival`), and `archival-service` is the actual poller (`case_pipeline.py:31` calls
+`case_client.list_due_for_archival()`, drives `POST /cases/{id}/archive` from there). This is the pattern
+to extend for destruction, not document-service's internal-loop pattern — case-service stays reactive/
+API-driven, archival-service keeps owning cross-service scheduling.
+
+**Recommended design** (full detail in the new ADR): mirror case-service's own existing archival pattern
+exactly — new `retention_until`/`full_deletion` fields on `Case`, a `GET /cases/due-for-destruction` +
+`POST /cases/{id}/destroy` pair shaped like the existing archival pair, and a new pipeline in
+`archival-service` (not a new poll loop in case-service). The destroy guard reuses folder-service's own
+"block, don't cascade" forced-deletion precedent (`folder_service/main.py:94-113` — no automatic cascading
+forced deletion while a subtree has active children, the tick just retries later): refuse to destroy a
+case while any referenced document is still actively quarantined, by re-checking the SAME per-reference
+`has_active_quarantine` call case-service already makes — **not** by building a new case-level quarantine
+table that would duplicate `document-service`'s `RecordsQuarantine`. Explicitly recommended against
+building a case-level quarantine primitive speculatively; add one later, reusing `RecordsQuarantine`'s
+shape, only if a genuinely new requirement for holding a case's own record (independent of its documents)
+ever emerges. Wrote up as
+[ADR 0235](docs/adr/0235-case-service-destruction-scheduling-scoping.md) — a new ADR, not an edit to
+ADR 0116, per this project's standing rule.
+
+**Next session:** P82-S3 — PDF/UA conformance validation (veraPDF or equivalent), scoping only, the third
+and final session of this phase. No graphify update — still deferred to the end of the whole Phase 78–82
+plan (Phase 82's own close, which will also be this whole plan's close).
+
+---
+
+**Immediately before:** P82-S1 (first session of Phase 82 — scoping-only sessions for the larger remaining
 items). **Scoping, kein Feature** — no code diff, per this phase's own DoD. Re-examined
 `fleet-management-service`'s per-operator authentication gap that ADR 0212 (Phase 73 Session 2) already
 scoped but whose named follow-up build session (P73-S2b) never ran.
@@ -28,10 +69,6 @@ compromised credential minting unbounded new ones, same least-privilege reasonin
 own role-management gating already applies). Wrote up the full re-confirmed, build-ready design as
 [ADR 0234](docs/adr/0234-fleet-management-service-per-operator-auth-reconfirmed.md) — a **new** ADR, per
 this project's own standing rule never to rewrite an old ADR after the fact.
-
-**Next session:** P82-S2 — `case-service` destruction-scheduling/quarantine primitive (scoping only). No
-graphify update at this session's own close either — still deferred to the end of the whole Phase 78–82
-plan (Phase 82's own close).
 
 ---
 

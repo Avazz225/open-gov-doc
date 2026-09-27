@@ -2708,12 +2708,27 @@ scoping-not-building precedent as ADR 0147/0161/0207/0209/0212.
   gating). See [ADR 0234](docs/adr/0234-fleet-management-service-per-operator-auth-reconfirmed.md) for
   the full build-ready recommendation. No code diff this session, per this phase's own DoD — the actual
   build is handed to a future session with zero scoping work left to do.
-- **P82-S2 (scoping only) — `case-service` destruction-scheduling/quarantine primitive**: ADR 0116
+- **P82-S2 (scoping only) — `case-service` destruction-scheduling/quarantine primitive**: ✅ ~~ADR 0116
   (records quarantine) named this as a real, unbuilt gap — `case-service` has only a read-only quarantine
   indicator, no actual scheduling/destruction primitive comparable to what `document-service` has for
   documents. Needs a scoping pass to decide the concrete shape (reuse `document-service`'s pattern
   directly vs. a case-specific variant, given cases aggregate documents that may each have their own
-  independent retention state) before a build session is worth planning.
+  independent retention state) before a build session is worth planning.~~ **Done.** Confirmed live:
+  `case-service` has zero destruction/retention primitive (only `status` open/closed and the already-
+  existing archival `archive_after`/`archived_at`), and its "quarantine indicator" is a pure live
+  per-document passthrough to `document-service` (`_resolve_reference` calling `has_active_quarantine`
+  per reference), not a case-level state of its own. Recommended design (not `document-service`'s pattern
+  directly, and not a new case-level quarantine table): mirror case-service's own EXISTING archival
+  pattern — new `retention_until`/`full_deletion` fields, a `GET /cases/due-for-destruction` +
+  `POST /cases/{id}/destroy` endpoint pair shaped exactly like the existing due-for-archival/archive pair,
+  and a new pipeline in `archival-service` (which already polls case-service's archival endpoint via
+  `case_pipeline.py`) rather than a new internal poll loop in case-service itself, which has never had
+  one. The destroy guard reuses folder-service's own "block, don't cascade" forced-deletion precedent —
+  refuse to destroy while any referenced document is still actively quarantined, by re-checking the
+  SAME per-reference `has_active_quarantine` call case-service already makes, rather than case-service
+  building its own duplicate quarantine table. See
+  [ADR 0235](docs/adr/0235-case-service-destruction-scheduling-scoping.md) for the full build-ready
+  recommendation. No code diff this session.
 - **P82-S3 (scoping only) — PDF/UA conformance validation (veraPDF or equivalent)**: named independently
   across three different ADRs (0107 PDF export, 0158 multi-document structure-tree merge, and the
   accessibility work from Phase 33) as "not independently ISO 14289/PDF-UA validated, `is_tagged_pdf()`
