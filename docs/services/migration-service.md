@@ -145,6 +145,23 @@ folder they had no read access to at all, and pair with an arbitrary attacker-co
 - **Migrated folders always land at the root** of the target installation — no selection of
   a different target location in this session.
 
+## Startup resilience against a temporarily unreachable `workflow-service` (Phase 79 phase-close)
+
+`lifespan()` ensures its two BPMN process definitions (`migration_transfer`/`migration_dry_run`) exist in
+`workflow-service` at startup. Previously this was a bare, unguarded call — if `workflow-service` was not
+yet reachable at exactly that moment (a real startup-ordering race observed live during a full, serial
+`scripts/run-tests.sh --build` regression run, unrelated to either service's own code), the exception
+propagated out of `lifespan` and crashed this **entire** service (uvicorn's "Application startup failed.
+Exiting.") — `/healthz` itself became unreachable, not just the migration-transfer feature. Fixed with the
+same bounded-retry shape `auth-service`'s own domain-admin-account bootstrap already uses for the
+identical class of problem (5 attempts, 1s apart, logged and continues rather than crashing or silently
+skipping). On exhausted retries, the relevant `app.state.*_definition_id` stays `None` instead of the app
+refusing to start — the rest of this service (health check, paired-installation management, listing
+existing transfers) keeps working regardless; only `_start_transfer` (`POST /transfers`, and the
+post-approval consumer path) refuses cleanly (`503`/a logged warning, respectively) instead of calling
+`workflow_client.start_instance(None, ...)`. A subsequent restart of this service re-attempts the whole
+sequence.
+
 ## Configuration
 
 | Variable | Default | Meaning |

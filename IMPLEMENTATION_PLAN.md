@@ -2419,7 +2419,12 @@ reconfirmed).
 **Definition of Done**: regression test per fix; no new ADR expected (execution/completion of
 already-established patterns, no new architecture decisions) except P79-S2 if the pagination approach
 ends up being a real protocol-level design choice rather than a straightforward page-size cap; docs and
-`PROGRESS.md` updated per session.
+`PROGRESS.md` updated per session. ✅ **Phase closed.** Phase-end DoD run after P79-S3: full unfiltered
+`scripts/run-tests.sh` (no filter) against a freshly-rebooted stack — all 32 backend services green,
+including a genuine startup-ordering crash found in `migration-service` during the run (fixed with a
+bounded-retry startup guard, same pattern as `auth-service`'s own domain-admin bootstrap; unrelated to any
+P79 session's own diff, see PROGRESS.md's "Phase 79 close" entry) — and `graphify update .` (19,816
+nodes/32,721 edges, health check clean).
 
 ## Phase 80 — eGov Configuration Package Completion (user-requested)
 

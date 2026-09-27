@@ -57,6 +57,12 @@ logger = logging.getLogger(__name__)
 _RESOURCES_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "resources")
 
 
+class ProcessDefinitionUnavailableError(Exception):
+    """`workflow-service` was unreachable when this service last tried to
+    ensure its two process definitions exist (startup, or a prior retry
+    round) - see `_ensure_process_definition_with_retry`'s own docstring."""
+
+
 def _read_resource(name: str) -> str:
     with open(os.path.join(_RESOURCES_DIR, name), encoding="utf-8") as f:
         return f.read().replace(
@@ -293,6 +299,12 @@ async def _start_transfer(
     # for exactly this problem.
     await session.commit()
     definition_id = app.state.dry_run_definition_id if dry_run else app.state.transfer_definition_id
+    if definition_id is None:
+        raise ProcessDefinitionUnavailableError(
+            f"Migrations-Prozessdefinition nicht verfügbar - workflow-service war bei Start "
+            f"dieses Dienstes nicht erreichbar. Transfer {transfer.id!r} wurde angelegt, aber "
+            "nicht gestartet; ein Neustart dieses Dienstes stellt die Definition erneut sicher."
+        )
     initial_data: dict = {"transfer_id": transfer.id}
     if not dry_run:
         initial_data["retention_duration"] = f"P{resolved_retention_days}D"
@@ -300,6 +312,43 @@ async def _start_transfer(
         definition_id, created_by=created_by, initial_data=initial_data, instance_id=instance_id
     )
     return transfer
+
+
+async def _ensure_process_definition_with_retry(*, name: str, bpmn_xml: str) -> int | None:
+    """Phase 79 phase-close: `lifespan()` previously called
+    `workflow_client.ensure_process_definition()` directly, with no error
+    handling at all - if `workflow-service` was not yet reachable at exactly
+    this moment (a real, observed startup-ordering race during a full,
+    serial `scripts/run-tests.sh --build` regression run, unrelated to any
+    single service's own code), the exception propagated out of `lifespan`
+    and crashed this entire service (uvicorn's "Application startup failed.
+    Exiting.") - `/healthz` itself became unreachable, not just the
+    migration-transfer feature. Same bounded-retry shape already used by
+    `auth-service`'s own domain-admin-account role-assignment bootstrap
+    (`main.lifespan`) for the identical class of problem - short retry, not
+    a crash, not a silent one-shot skip either. `None` on final failure
+    (logged) instead of re-raising - `_start_transfer` below refuses to
+    start a transfer/dry-run when its definition id is `None` rather than
+    calling `workflow_client.start_instance(None, ...)`, so the rest of this
+    service (health check, paired-installation management, listing existing
+    transfers) keeps working even if workflow-service never comes up."""
+    for attempt in range(5):
+        try:
+            return await app.state.workflow_client.ensure_process_definition(
+                name=name, bpmn_xml=bpmn_xml
+            )
+        except Exception:
+            if attempt == 4:
+                logger.warning(
+                    "Prozessdefinition %r konnte nicht sichergestellt werden - "
+                    "workflow-service auch nach mehreren Versuchen nicht erreichbar? "
+                    "Transfers/Dry-Runs bleiben bis zum nächsten Neustart deaktiviert.",
+                    name,
+                    exc_info=True,
+                )
+                return None
+            await asyncio.sleep(1.0)
+    return None
 
 
 @asynccontextmanager
@@ -327,10 +376,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.sensor_registry = sensor_registry
 
     await _ensure_config_admin_permission()
-    app.state.transfer_definition_id = await app.state.workflow_client.ensure_process_definition(
+    app.state.transfer_definition_id = await _ensure_process_definition_with_retry(
         name="migration_transfer", bpmn_xml=_read_resource("migration_transfer.bpmn")
     )
-    app.state.dry_run_definition_id = await app.state.workflow_client.ensure_process_definition(
+    app.state.dry_run_definition_id = await _ensure_process_definition_with_retry(
         name="migration_dry_run", bpmn_xml=_read_resource("migration_dry_run.bpmn")
     )
 
@@ -343,6 +392,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await _start_transfer(session, **kwargs)
         except repository.NotFoundError:
             logger.warning("migration_transfer_start_after_approval_unknown_target: %r", kwargs)
+        except ProcessDefinitionUnavailableError:
+            logger.warning(
+                "migration_transfer_start_after_approval_process_definition_unavailable: %r",
+                kwargs,
+                exc_info=True,
+            )
 
     consumer_task = asyncio.create_task(
         consumer.start_consuming(
@@ -555,6 +610,8 @@ async def create_transfer(
         )
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ProcessDefinitionUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     await session.commit()
     return TransferStartResult(status="started", transfer=transfer)
 

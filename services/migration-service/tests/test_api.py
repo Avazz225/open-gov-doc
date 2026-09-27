@@ -436,6 +436,87 @@ def test_make_peer_client_rejects_target_that_now_resolves_privately(monkeypatch
         assert exc.status_code == 422
 
 
+async def test_ensure_process_definition_with_retry_returns_none_when_workflow_service_unreachable(
+    monkeypatch,
+):
+    """Phase 79 phase-close - `lifespan()` previously called
+    `workflow_client.ensure_process_definition()` directly with no error
+    handling, crashing this entire service's startup (`Application startup
+    failed. Exiting.`, `/healthz` itself unreachable) if `workflow-service`
+    happened to not be reachable yet at exactly that moment - reproduced
+    live during a full, serial `scripts/run-tests.sh --build` regression run
+    (an unrelated startup-ordering race, not caused by this service's own
+    code). Same in-process unit-level pattern as
+    `test_make_peer_client_rejects_target_that_now_resolves_privately`
+    above, since a real "workflow-service unreachable at exactly this
+    moment" race can't be reproduced against a live container on demand."""
+    from migration_service import main as migration_main
+
+    class _FailingWorkflowClient:
+        async def ensure_process_definition(self, *, name, bpmn_xml):
+            raise httpx.ConnectError("simulated: workflow-service unreachable")
+
+    async def _instant_sleep(*_args, **_kwargs) -> None:
+        return None
+
+    migration_main.app.state.workflow_client = _FailingWorkflowClient()
+    monkeypatch.setattr(migration_main.asyncio, "sleep", _instant_sleep)
+
+    result = await migration_main._ensure_process_definition_with_retry(
+        name="irrelevant", bpmn_xml="<irrelevant/>"
+    )
+
+    assert result is None
+
+
+async def test_start_transfer_raises_when_process_definition_unavailable(monkeypatch):
+    """Defense in depth alongside the retry fix above: even if
+    `transfer_definition_id`/`dry_run_definition_id` ends up `None` (startup
+    retries exhausted), `_start_transfer` must refuse cleanly instead of
+    calling `workflow_client.start_instance(None, ...)`."""
+    from migration_service import main as migration_main
+
+    monkeypatch.setattr(migration_main.app.state, "transfer_definition_id", None, raising=False)
+
+    async def _fake_get_paired_installation(session, target_installation_id):
+        class _Installation:
+            id = target_installation_id
+
+        return _Installation()
+
+    async def _fake_create_transfer(session, **kwargs):
+        class _Transfer:
+            id = "irrelevant-transfer-id"
+
+        return _Transfer()
+
+    async def _noop(*_args, **_kwargs) -> None:
+        return None
+
+    monkeypatch.setattr(
+        migration_main.repository, "get_paired_installation", _fake_get_paired_installation
+    )
+    monkeypatch.setattr(migration_main.repository, "create_transfer", _fake_create_transfer)
+    monkeypatch.setattr(migration_main.repository, "set_workflow_instance", _noop)
+
+    class _FakeSession:
+        async def commit(self) -> None:
+            return None
+
+    try:
+        await migration_main._start_transfer(
+            _FakeSession(),
+            source_folder_id="irrelevant",
+            target_installation_id="irrelevant",
+            created_by="tester",
+            dry_run=False,
+            retention_days=None,
+        )
+        raise AssertionError("expected ProcessDefinitionUnavailableError")
+    except migration_main.ProcessDefinitionUnavailableError:
+        pass
+
+
 def test_create_transfer_without_principal_header_is_401():
     folder = _create_folder(name=f"quelle-{uuid.uuid4().hex[:8]}")
     with httpx.Client(base_url=MIGRATION_SERVICE_URL, timeout=30.0) as client:

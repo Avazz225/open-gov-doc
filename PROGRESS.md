@@ -2,7 +2,64 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P79-S3 (third and final session of Phase 79 — test-suite health cleanup). Four
+**Last completed:** Phase 79 close (full backend regression + `graphify update .`, after P79-S3 closed the
+phase). Standard phase-end cadence per `CONTRIBUTING.md`.
+
+**Backend regression found one real, genuine bug — in `migration-service`, unrelated to any P79 session's
+own diff.** First full run (with `--build`) showed 31/32 backend services green, but `migration-service`
+crashed entirely: `18 failed, 1 passed`, including `test_healthz` itself failing with connection refused.
+`docker logs` showed the real cause: `Application startup failed. Exiting.` — `lifespan()` calls
+`workflow_client.ensure_process_definition()` twice with no error handling at all, and `workflow-service`
+happened not to be reachable yet at that exact moment during this serial, full-stack `--build` run (a
+startup-ordering race, not a code defect in either service). Confirmed by restarting `migration-service`
+alone once `workflow-service` was up — it started cleanly and its own test suite passed 19/19 in isolation.
+
+**Fixed with the same bounded-retry shape `auth-service`'s own domain-admin-account bootstrap already
+uses** for the identical class of problem: a new `_ensure_process_definition_with_retry` helper (5
+attempts, 1s apart, logs and returns `None` on exhausted retries instead of crashing the whole service).
+Added defense in depth alongside it: `_start_transfer` now raises a new `ProcessDefinitionUnavailableError`
+(→ `503` at `POST /transfers`, a logged warning at the post-approval consumer path) if its process
+definition ended up `None`, instead of calling `workflow_client.start_instance(None, ...)`. The rest of the
+service (health check, paired-installation management, listing transfers) stays fully functional
+regardless of whether workflow-service ever comes up. New tests: 2 in-process unit tests (same pattern as
+this file's existing DNS-rebinding unit test, since a real "unreachable at exactly this moment" race can't
+be reproduced against a live container on demand) — `migration-service` 19/19 → 21/21. Verified against a
+real, full, cold stack reboot (`docker compose up -d` for all 48 containers simultaneously) — the exact
+scenario that crashed it originally — and it came up clean. Rebuilt/redeployed; docs updated
+(`migration-service.md`, new "Startup resilience" section).
+
+**Second full regression run (no rebuild, fresh stack) confirmed all 32 backend services green**,
+including every service touched across all of Phase 78/79's sessions (`auth-service`, `federation-hub-service`,
+`webdav-connector`, `workflow-service`, `folder-service`, `permission-service`, `migration-service`).
+`ruff`/`ruff format` still fails project-wide, confirmed to be the same pre-existing, unrelated files
+already noted at every prior phase close (`libreoffice-addin`, several services' `logger.warning(...)`
+line-length, two pre-existing test-file formatting issues) — none touched this phase.
+
+**`graphify update .`**: 44 changed/added files (30 code, 14 docs including the two oversized
+`PROGRESS.md`/`IMPLEMENTATION_PLAN.md`) — 7 regular-doc semantic-extraction agents, 2 for
+`IMPLEMENTATION_PLAN.md` (2605 lines, split at the midpoint), 4 for `PROGRESS.md` (13235 lines, split into
+~3300-line pages this time — smaller than the ~4400-line pages that hit the model's 64k output-token limit
+during Phase 78's close — no repeat of that failure this round), plus one small follow-up agent for
+`permission-service.md` after its first pass only covered lines 1-292 of 378 (caught via a direct line-
+count check before merging, to avoid the replace-on-re-extract behavior silently dropping the uncovered
+tail's previously-known content). Same pre-existing false-positive as last time, handled the same way:
+`CLAUDE.md` flagged `deleted` by the incremental detector despite still existing on disk (stale manifest
+entry) — excluded from the prune list, reclassified as changed instead. Final graph: 19,816 nodes (+213
+since Phase 78's close), 32,721 edges, 2,411 communities, health check clean. Two community labels updated
+to reflect actual (re-clustered) membership: one whose label had gone stale ("Dockview Workspace & Query
+Service" now actually holds the `business_key`-validation/ADR-correction cluster) and one newly-relevant
+unlabeled community (the P66-S2→P79-S3 flake root-cause chain).
+
+**This closes Phase 79 in full** (P79-S1 small-fix bundle, P79-S2 webdav-connector pagination, P79-S3
+test-suite health, plus this phase-close's own migration-service fix) — no phase-end DoD items remain
+outstanding.
+
+**Next session:** Phase 80 — eGov configuration package completion (the user's own explicitly requested
+initiative).
+
+---
+
+Immediately before: P79-S3 (third and final session of Phase 79 — test-suite health cleanup). Four
 independent, already-diagnosed items, closed together — **two of the plan's own citations turned out
 wrong**, corrected while implementing rather than silently worked around.
 
@@ -66,10 +123,8 @@ admin-ui Playwright 3/7 → 7/7. `ruff`/`ruff format` clean on every touched fil
 `workflow-service.md` (Open Points, ADR 0232 cross-reference).
 
 **This closes Phase 79 in full** (P79-S1 small-fix bundle, P79-S2 webdav-connector pagination, P79-S3 this
-entry) — phase-end DoD (`graphify update .` + full unfiltered backend regression) still outstanding.
-
-**Next session:** Phase 79 phase-end DoD, then Phase 80 — eGov configuration package completion (the
-user's own explicitly requested initiative).
+entry) — phase-end DoD (`graphify update .` + full unfiltered backend regression) ran immediately after,
+see the entry above.
 
 ---
 
