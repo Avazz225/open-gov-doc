@@ -111,3 +111,35 @@ development stack, not a real eGov installation) — deleted the object types/bu
 this platform has no delete endpoint for either resource type (by design — both are treated as
 append-only/versioned): the 2 new roles and the 3 BPMN process definitions remain defined but unused
 (no assignments, no running instances) on this particular dev stack.
+
+## Deletion-Reason Catalog & Org-Unit → Role Linking (Part 4, Phase 80 Session 2)
+
+Closes the two remaining structural gaps named in Part 3's own review: config-service previously had no
+exportable category at all for the deletion-reason catalog or for connecting an org-unit group to a
+role. New backend work in `config-service` first (three new `ConfigDocument` categories — see
+[ADR 0233](../../docs/adr/0233-config-service-org-unit-role-and-deletion-reason-categories.md)), then
+concrete eGov defaults using them:
+
+| Category | Content |
+|---|---|
+| `deletion_reason_catalogs` | Four common German administrative deletion justifications: *"Aufbewahrungsfrist abgelaufen"*, *"Datenschutzrechtlicher Löschantrag"*, *"Vorgang irrtümlich angelegt"*, *"Gerichtliche Anordnung"*. Applied additively (merged into, not replacing, whatever an installation already curates) to both `document-service` and `folder-service` (ADR 0112 — the catalog is duplicated per-service). |
+| `org_units` | Two org-unit groups (`Group.is_org_unit=True`, ADR 0143): `Amtsleitung` and `Registratur` — named identically to the two roles Part 2 already ships, so a real installation's HR/AD group sync can populate real members into these groups and have them automatically receive the matching role. |
+| `org_unit_role_links` | Links each org-unit group to its identically-named role — every member of `Amtsleitung`/`Registratur` receives that role automatically via `permission-service`'s existing group-based RBAC resolution, no manual per-person role assignment needed after group membership is set. |
+
+This is the first time this package connects its `Abteilung`/organizational object types to an actual
+RBAC mechanism — previously the object-type hierarchy (Part 1) and the admin roles (Part 2) were two
+unconnected islands, closed by request during Phase 80 Session 1's own review.
+
+**Live-verified against the real running stack**: imported the full updated package — all 9 categories
+applied with zero errors (2/2 org units, 2/2 org-unit→role links, catalog merged into both retention
+configs), then confirmed directly that both `Amtsleitung`/`Registratur` groups exist with
+`is_org_unit: true` and that `permission-service` holds a real `RoleAssignment(principal_type="group",
+...)` row for each — i.e. that group membership genuinely grants the role, not just that the import
+reported success. A real ordering bug was found and fixed during this verification: applying this
+package's own `approval_config` entries before `org_unit_role_links` would have deferred the very links
+this session added to a pending four-eyes approval instead of actually creating them (see ADR 0233's
+"Consequences" section) — `config-service`'s dispatch order was corrected, and the org-unit→role links
+apply, and were re-verified to apply, before that ordering fix would otherwise have silently swallowed
+them. Cleaned up all created objects afterward (object types, business calendars, groups, role
+assignments, catalog entries, approval-config); the two new roles remain as an accepted residual, same
+reasoning as Part 3.

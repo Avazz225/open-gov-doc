@@ -23,6 +23,7 @@ from config_service.clients import (
     ObjectTypeServiceClient,
     PermissionServiceClient,
     RegistryServiceClient,
+    RetentionConfigClient,
     WorkflowServiceClient,
 )
 from config_service.schemas import (
@@ -40,12 +41,18 @@ configure_logging(settings)
 logger = logging.getLogger(__name__)
 
 _CONFIG_ADMIN_PRINCIPAL_ID = "config-service"
-# Three domain admin roles required by the write endpoints this service
+# Domain admin roles required by the write endpoints this service
 # calls (workflow-service: admin.object_config,
 # monitoring-service: admin.monitoring, since P17-S1 additionally auth-service:
-# admin.user_management for the `realm_roles` category, 14.1) - see
-# `_ensure_bootstrap_permissions`.
-_REQUIRED_ROLE_NAMES = ("domain-admin-config", "domain-admin-monitoring", "domain-admin-users")
+# admin.user_management for the `realm_roles` category, 14.1; since P80-S2
+# additionally document-service/folder-service: admin.retention for the new
+# `deletion_reason_catalogs` category) - see `_ensure_bootstrap_permissions`.
+_REQUIRED_ROLE_NAMES = (
+    "domain-admin-config",
+    "domain-admin-monitoring",
+    "domain-admin-users",
+    "domain-admin-retention",
+)
 
 
 def _resolve_categories(categories: list[str] | None) -> set[str]:
@@ -147,6 +154,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.registry_client = RegistryServiceClient(settings.registry_service_base_url)
     app.state.auth_client = AuthServiceClient(settings.auth_service_base_url)
     app.state.approval_client = ApprovalClient(settings.permission_service_base_url)
+    # `deletion_reason_catalogs` category (P80-S2) - two instances of the
+    # same shared client shape, one per owner service (ADR 0112: the
+    # catalog is duplicated per-service).
+    app.state.document_client = RetentionConfigClient(settings.document_service_base_url)
+    app.state.folder_client = RetentionConfigClient(settings.folder_service_base_url)
     await _ensure_bootstrap_permissions()
 
     sensor_config_client = SensorConfigClient(settings.monitoring_service_base_url)
@@ -190,6 +202,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await app.state.auth_client.close()
     await app.state.approval_client.close()
     await app.state.registry_client.close()
+    await app.state.document_client.close()
+    await app.state.folder_client.close()
 
 
 app = FastAPI(title=settings.service_name, lifespan=lifespan)
@@ -229,6 +243,8 @@ async def export_config(
         monitoring_client=app.state.monitoring_client,
         auth_client=app.state.auth_client,
         registry_client=app.state.registry_client,
+        document_client=app.state.document_client,
+        folder_client=app.state.folder_client,
     )
 
 
@@ -265,6 +281,8 @@ async def compare_config(
             monitoring_client=app.state.monitoring_client,
             auth_client=app.state.auth_client,
             registry_client=app.state.registry_client,
+            document_client=app.state.document_client,
+            folder_client=app.state.folder_client,
         )
     categories_result = compare.compare_documents(
         base_doc, payload.compare, categories=resolved, ignore_regex=payload.ignore_regex
@@ -302,6 +320,8 @@ async def _apply_config_document(payload: dict, categories: list[str] | None) ->
         monitoring_client=app.state.monitoring_client,
         auth_client=app.state.auth_client,
         registry_client=app.state.registry_client,
+        document_client=app.state.document_client,
+        folder_client=app.state.folder_client,
     )
     return ImportResult(schema_version=doc.schema_version, results=results)
 

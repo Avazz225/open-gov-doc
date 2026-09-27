@@ -9,6 +9,7 @@ from config_service.clients import (
     ObjectTypeServiceClient,
     PermissionServiceClient,
     RegistryServiceClient,
+    RetentionConfigClient,
     WorkflowServiceClient,
 )
 from config_service.schemas import (
@@ -17,10 +18,13 @@ from config_service.schemas import (
     BrandingConfigExport,
     BusinessCalendarExport,
     ConfigDocument,
+    DeletionReasonCatalogExport,
     DmnDefinitionExport,
     FederationConfigExport,
     ObjectTypeExport,
     ObjectTypeLayoutExport,
+    OrgUnitExport,
+    OrgUnitRoleLinkExport,
     RoleExport,
     SensorConfigExport,
     WorkflowExport,
@@ -160,6 +164,57 @@ async def export_ad_group_mappings(client: AuthServiceClient) -> AdGroupMappings
     )
 
 
+async def export_deletion_reason_catalogs(
+    document_client: RetentionConfigClient, folder_client: RetentionConfigClient
+) -> DeletionReasonCatalogExport:
+    """Union of both owner services' catalogs (P80-S2) - an export is meant
+    to capture "what reasons does this installation offer today," and the
+    two services' catalogs are expected to be kept in lockstep by this very
+    category's own apply logic (`imports.apply_deletion_reason_catalogs`),
+    so a union rather than picking one arbitrary owner is the more honest
+    round-trip."""
+    document_reasons = (await document_client.get_retention_config())["deletion_reason_catalog"]
+    folder_reasons = (await folder_client.get_retention_config())["deletion_reason_catalog"]
+    merged: list[str] = []
+    for reason in document_reasons + folder_reasons:
+        if reason not in merged:
+            merged.append(reason)
+    return DeletionReasonCatalogExport(catalog=merged)
+
+
+async def export_org_units(client: PermissionServiceClient) -> list[OrgUnitExport]:
+    groups = await client.list_groups()
+    return [
+        OrgUnitExport(name=g["name"], description=g["description"])
+        for g in groups
+        if g["is_org_unit"]
+    ]
+
+
+async def export_org_unit_role_links(
+    client: PermissionServiceClient,
+) -> list[OrgUnitRoleLinkExport]:
+    groups_by_id = {g["id"]: g for g in await client.list_groups() if g["is_org_unit"]}
+    roles_by_id = {r["id"]: r for r in await client.list_roles()}
+    assignments = await client.list_role_assignments()
+    result = []
+    for assignment in assignments:
+        if assignment["principal_type"] != "group":
+            continue
+        group = groups_by_id.get(assignment["principal_id"])
+        role = roles_by_id.get(assignment["role_id"])
+        if group is None or role is None:
+            continue
+        result.append(
+            OrgUnitRoleLinkExport(
+                org_unit_name=group["name"],
+                role_name=role["name"],
+                resource_id=assignment["resource_id"],
+            )
+        )
+    return result
+
+
 async def build_export(
     *,
     categories: set[str],
@@ -169,6 +224,8 @@ async def build_export(
     monitoring_client: MonitoringServiceClient,
     auth_client: AuthServiceClient,
     registry_client: RegistryServiceClient,
+    document_client: RetentionConfigClient,
+    folder_client: RetentionConfigClient,
 ) -> ConfigDocument:
     doc = ConfigDocument(exported_at=datetime.now(UTC))
     if "object_types" in categories:
@@ -193,4 +250,12 @@ async def build_export(
         doc.ad_group_mappings = await export_ad_group_mappings(auth_client)
     if "branding_config" in categories:
         doc.branding_config = await export_branding_config(registry_client)
+    if "deletion_reason_catalogs" in categories:
+        doc.deletion_reason_catalogs = await export_deletion_reason_catalogs(
+            document_client, folder_client
+        )
+    if "org_units" in categories:
+        doc.org_units = await export_org_units(permission_client)
+    if "org_unit_role_links" in categories:
+        doc.org_unit_role_links = await export_org_unit_role_links(permission_client)
     return doc

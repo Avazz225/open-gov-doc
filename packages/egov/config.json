@@ -3,9 +3,9 @@
   "exported_at": "2026-08-11T00:00:00Z",
   "manifest": {
     "name": "eGov-Konfigurationspaket",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "compatibility_range": ">=1.0",
-    "description": "Standardkonfiguration für die deutsche öffentliche Verwaltung (Konzept 14.2) - vollständig: Aktenplan-Objekttyp-Hierarchie (Abteilung → Aktenplan → Akte, plus Handakte/Arbeitsvorrat als weitere Ordnerklassen), Aktenzeichen-Format, nach Verschlusssachen-Einstufung differenzierte Aufbewahrungs-/Aussonderungsfristen, alle vier VS-Einstufungsstufen demonstriert (VS-NfD/VS-VERTRAULICH/GEHEIM/STRENG GEHEIM, je mit passendem Mindest-Signaturniveau und verpflichtender Löschbegründung) (Teil 1, P17-S2, erweitert Phase 80 Session 1); Poststelle-Rollenvorlage, BPMN-Prozessvorlagen für Umlaufmappen (Freigabe/Kenntnisnahme/Aufgabe), Vier-Augen-Vorbelegung für sensible Aktionstypen (inkl. Rollen-Neuanlage), bundeseinheitlicher und landesspezifischer Geschäftskalender, erweiterte domänengetrennte Admin-Rollen (Teil 2, P17-S3).",
+    "description": "Standardkonfiguration für die deutsche öffentliche Verwaltung (Konzept 14.2) - vollständig: Aktenplan-Objekttyp-Hierarchie (Abteilung → Aktenplan → Akte, plus Handakte/Arbeitsvorrat als weitere Ordnerklassen), Aktenzeichen-Format, nach Verschlusssachen-Einstufung differenzierte Aufbewahrungs-/Aussonderungsfristen, alle vier VS-Einstufungsstufen demonstriert (VS-NfD/VS-VERTRAULICH/GEHEIM/STRENG GEHEIM, je mit passendem Mindest-Signaturniveau und verpflichtender Löschbegründung) (Teil 1, P17-S2, erweitert Phase 80 Session 1); Poststelle-Rollenvorlage, BPMN-Prozessvorlagen für Umlaufmappen (Freigabe/Kenntnisnahme/Aufgabe), Vier-Augen-Vorbelegung für sensible Aktionstypen (inkl. Rollen-Neuanlage), bundeseinheitlicher und landesspezifischer Geschäftskalender, erweiterte domänengetrennte Admin-Rollen (Teil 2, P17-S3); admin-kuratierter Löschgrund-Katalog sowie Organisationseinheiten mit automatischer Rollenzuweisung (Amtsleitung/Registratur, Teil 3, Phase 80 Session 2).",
     "origin": "dms-project",
     "license": "MIT"
   },
@@ -697,6 +697,34 @@
         "write",
         "scope_lock.bypass"
       ]
+    }
+  ],
+  "deletion_reason_catalogs": {
+    "catalog": [
+      "Aufbewahrungsfrist abgelaufen",
+      "Datenschutzrechtlicher Löschantrag",
+      "Vorgang irrtümlich angelegt",
+      "Gerichtliche Anordnung"
+    ]
+  },
+  "org_units": [
+    {
+      "name": "Amtsleitung",
+      "description": "Behördenleitung (Organisationseinheit, 14.2) - Mitglieder erhalten automatisch die Rolle \"Amtsleitung\" (org_unit_role_links)."
+    },
+    {
+      "name": "Registratur",
+      "description": "Registratur/Aktenverwaltung (Organisationseinheit, 14.2) - Mitglieder erhalten automatisch die Rolle \"Registratur/Aktenverwaltung\" (org_unit_role_links)."
+    }
+  ],
+  "org_unit_role_links": [
+    {
+      "org_unit_name": "Amtsleitung",
+      "role_name": "Amtsleitung"
+    },
+    {
+      "org_unit_name": "Registratur",
+      "role_name": "Registratur/Aktenverwaltung"
     }
   ]
 }

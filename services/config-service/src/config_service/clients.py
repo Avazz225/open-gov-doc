@@ -210,6 +210,89 @@ class PermissionServiceClient:
         response.raise_for_status()
         return response.json()
 
+    async def list_groups(self) -> list[dict]:
+        response = await self._client.get("/groups")
+        response.raise_for_status()
+        return response.json()
+
+    async def create_group(self, *, name: str, description: str, is_org_unit: bool) -> dict:
+        response = await self._client.post(
+            "/groups",
+            json={"name": name, "description": description, "is_org_unit": is_org_unit},
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def set_group_org_unit(self, group_id: str, is_org_unit: bool) -> dict:
+        response = await self._client.patch(
+            f"/groups/{group_id}", json={"is_org_unit": is_org_unit}
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def list_role_assignments(self) -> list[dict]:
+        response = await self._client.get("/role-assignments")
+        response.raise_for_status()
+        return response.json()
+
+    async def create_role_assignment(
+        self, *, principal_type: str, principal_id: str, role_id: int, resource_id: str
+    ) -> dict:
+        response = await self._client.post(
+            "/role-assignments",
+            json={
+                "principal_type": principal_type,
+                "principal_id": principal_id,
+                "role_id": role_id,
+                "resource_id": resource_id,
+            },
+        )
+        response.raise_for_status()
+        return response.json()
+
+
+class RetentionConfigClient:
+    """Shared client shape for `document-service`/`folder-service`'s
+    identical `GET`/`PUT /retention-config` (P80-S2) - the deletion-reason
+    catalog is duplicated per-service (ADR 0112), so this one class is
+    instantiated twice with different base URLs rather than writing two
+    near-identical client classes."""
+
+    _CONFIG_ADMIN_PRINCIPAL_ID = "config-service"
+
+    def __init__(self, base_url: str) -> None:
+        self._client = httpx.AsyncClient(
+            base_url=base_url,
+            timeout=30.0,
+            headers={"X-DMS-Principal": self._CONFIG_ADMIN_PRINCIPAL_ID},
+        )
+
+    async def close(self) -> None:
+        await self._client.aclose()
+
+    async def get_retention_config(self) -> dict:
+        response = await self._client.get("/retention-config")
+        response.raise_for_status()
+        return response.json()
+
+    async def put_retention_config(
+        self,
+        *,
+        deletion_reason_required: bool,
+        reminder_lead_days: int | None,
+        deletion_reason_catalog: list[str],
+    ) -> dict:
+        response = await self._client.put(
+            "/retention-config",
+            json={
+                "deletion_reason_required": deletion_reason_required,
+                "reminder_lead_days": reminder_lead_days,
+                "deletion_reason_catalog": deletion_reason_catalog,
+            },
+        )
+        response.raise_for_status()
+        return response.json()
+
 
 class AuthServiceClient:
     """For the `realm_roles` category (14.1, P17-S1) - Keycloak realm roles

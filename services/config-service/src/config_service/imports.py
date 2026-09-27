@@ -10,6 +10,7 @@ from config_service.clients import (
     ObjectTypeServiceClient,
     PermissionServiceClient,
     RegistryServiceClient,
+    RetentionConfigClient,
     WorkflowServiceClient,
 )
 from config_service.schemas import CategoryResult, ConfigDocument
@@ -237,6 +238,115 @@ async def apply_ad_group_mappings(client: AuthServiceClient, entry) -> CategoryR
     return result
 
 
+async def apply_deletion_reason_catalogs(
+    document_client: RetentionConfigClient, folder_client: RetentionConfigClient, entry
+) -> CategoryResult:
+    """Additive merge (P80-S2), NOT a replace - unlike every other
+    upsert-by-name category, there is no natural key to match on for a
+    plain string list, and a config PACKAGE (14.1) applying its own
+    small set of defaults must not silently delete reasons an
+    installation already curated for itself. Fanned out to both owner
+    services (ADR 0112: the catalog is duplicated per-service)."""
+    result = CategoryResult()
+    for label, client in (("document-service", document_client), ("folder-service", folder_client)):
+        try:
+            current = await client.get_retention_config()
+            merged = list(current["deletion_reason_catalog"])
+            for reason in entry.catalog:
+                if reason not in merged:
+                    merged.append(reason)
+            await client.put_retention_config(
+                deletion_reason_required=current["deletion_reason_required"],
+                reminder_lead_days=current["reminder_lead_days"],
+                deletion_reason_catalog=merged,
+            )
+            result.updated += 1
+        except Exception as exc:  # noqa: BLE001
+            result.errors.append(f"{label}: {exc}")
+    return result
+
+
+async def apply_org_units(client: PermissionServiceClient, entries: list) -> CategoryResult:
+    """Upsert by `name`, like `apply_roles` - an existing group that is not
+    yet flagged as an org unit is promoted, never demoted (a config
+    package granting `is_org_unit` should not silently strip a flag an
+    installation set for an unrelated group of the same name it manages
+    itself)."""
+    result = CategoryResult()
+    existing = {g["name"]: g for g in await client.list_groups()}
+    for entry in entries:
+        try:
+            match = existing.get(entry.name)
+            if match is None:
+                await client.create_group(
+                    name=entry.name, description=entry.description, is_org_unit=True
+                )
+                result.created += 1
+            else:
+                if not match["is_org_unit"]:
+                    await client.set_group_org_unit(match["id"], True)
+                result.updated += 1
+        except Exception as exc:  # noqa: BLE001
+            result.errors.append(f"{entry.name}: {exc}")
+    return result
+
+
+async def apply_org_unit_role_links(
+    client: PermissionServiceClient, entries: list
+) -> CategoryResult:
+    """Depends on `org_units` and `roles` already being applied (dispatch
+    order in `apply_import` below) - an entry naming a not-yet-existing
+    org unit or role is a per-entry error, not an import-aborting
+    failure, same best-effort convention as every other category."""
+    result = CategoryResult()
+    groups_by_name = {g["name"]: g for g in await client.list_groups()}
+    roles_by_name = {r["name"]: r for r in await client.list_roles()}
+    existing_keys = {
+        (a["principal_type"], a["principal_id"], a["role_id"], a["resource_id"])
+        for a in await client.list_role_assignments()
+    }
+    for entry in entries:
+        try:
+            group = groups_by_name.get(entry.org_unit_name)
+            if group is None:
+                result.errors.append(f"{entry.org_unit_name}: Organisationseinheit nicht gefunden")
+                continue
+            role = roles_by_name.get(entry.role_name)
+            if role is None:
+                result.errors.append(f"{entry.role_name}: Rolle nicht gefunden")
+                continue
+            key = ("group", group["id"], role["id"], entry.resource_id)
+            if key in existing_keys:
+                result.skipped += 1
+                continue
+            action = await client.create_role_assignment(
+                principal_type="group",
+                principal_id=group["id"],
+                role_id=role["id"],
+                resource_id=entry.resource_id,
+            )
+            if action["status"] == "pending_approval":
+                # `permission.role_assignment.create` can itself be behind
+                # the four-eyes principle (14.2) - a real, live-verified
+                # case: a package (like the eGov one) that sets this via
+                # its own `approval_config` category AND ships
+                # `org_unit_role_links` gets exactly this, since
+                # `approval_config` is applied earlier in `apply_import`
+                # below. NOT counted as `created` - the assignment does not
+                # exist yet, only a pending request does, and silently
+                # reporting success here would hide that from whoever reads
+                # the import result.
+                result.errors.append(
+                    f"{entry.org_unit_name}->{entry.role_name}: wartet auf Genehmigung "
+                    f"(approval_request_id={action['approval_request_id']})"
+                )
+                continue
+            result.created += 1
+        except Exception as exc:  # noqa: BLE001
+            result.errors.append(f"{entry.org_unit_name}->{entry.role_name}: {exc}")
+    return result
+
+
 async def apply_import(
     doc: ConfigDocument,
     *,
@@ -247,6 +357,8 @@ async def apply_import(
     monitoring_client: MonitoringServiceClient,
     auth_client: AuthServiceClient,
     registry_client: RegistryServiceClient,
+    document_client: RetentionConfigClient,
+    folder_client: RetentionConfigClient,
 ) -> dict[str, CategoryResult]:
     results: dict[str, CategoryResult] = {}
     if "object_types" in categories and doc.object_types is not None:
@@ -268,6 +380,20 @@ async def apply_import(
         )
     if "roles" in categories and doc.roles is not None:
         results["roles"] = await apply_roles(permission_client, doc.roles)
+    # `org_units`/`org_unit_role_links` deliberately BEFORE `approval_config`:
+    # a package (like the eGov one) can set `permission.role_assignment.
+    # create` to `requires_approval: true` in its OWN `approval_config`
+    # category - applying that first would make this package's own
+    # `org_unit_role_links` entries fall under four-eyes and defer to a
+    # pending approval instead of actually taking effect, a self-inflicted
+    # footgun a config PACKAGE (14.1, "directly usable after applying it")
+    # must not hit against itself.
+    if "org_units" in categories and doc.org_units is not None:
+        results["org_units"] = await apply_org_units(permission_client, doc.org_units)
+    if "org_unit_role_links" in categories and doc.org_unit_role_links is not None:
+        results["org_unit_role_links"] = await apply_org_unit_role_links(
+            permission_client, doc.org_unit_role_links
+        )
     if "approval_config" in categories and doc.approval_config is not None:
         results["approval_config"] = await apply_approval_config(
             permission_client, doc.approval_config
@@ -287,5 +413,9 @@ async def apply_import(
     if "branding_config" in categories and doc.branding_config is not None:
         results["branding_config"] = await apply_branding_config(
             registry_client, doc.branding_config
+        )
+    if "deletion_reason_catalogs" in categories and doc.deletion_reason_catalogs is not None:
+        results["deletion_reason_catalogs"] = await apply_deletion_reason_catalogs(
+            document_client, folder_client, doc.deletion_reason_catalogs
         )
     return results

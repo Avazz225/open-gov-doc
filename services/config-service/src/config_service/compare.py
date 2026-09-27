@@ -21,8 +21,19 @@ _LIST_IDENTITY_FIELD = {
     "business_calendars": "name",
     "roles": "name",
     "approval_config": "action_type",
+    "org_units": "name",
+    # P80-S2: imperfect for the rare case of two links sharing an org unit
+    # (only the last one survives name-based matching) - accepted, same
+    # tradeoff every other identity field here makes, and the primary use
+    # case (one org unit, one role) is unaffected.
+    "org_unit_role_links": "org_unit_name",
 }
-SINGLETON_CATEGORIES = ("sensor_config", "federation_config", "branding_config")
+SINGLETON_CATEGORIES = (
+    "sensor_config",
+    "federation_config",
+    "branding_config",
+    "deletion_reason_catalogs",
+)
 # `realm_roles` is a plain name list (`list[str]`, not a
 # `list[dict]` category like the others) - its own, simpler diff mode
 # instead of `_LIST_IDENTITY_FIELD` (which expects `item[identity_field]` on

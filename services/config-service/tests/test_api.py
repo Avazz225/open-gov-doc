@@ -20,6 +20,8 @@ WORKFLOW_SERVICE_URL = os.environ.get("TEST_WORKFLOW_SERVICE_URL", "http://local
 OBJECT_TYPE_SERVICE_URL = os.environ.get("TEST_OBJECT_TYPE_SERVICE_URL", "http://localhost:8007")
 AUTH_SERVICE_URL = os.environ.get("TEST_AUTH_SERVICE_URL", "http://localhost:8003")
 REGISTRY_SERVICE_URL = os.environ.get("TEST_REGISTRY_SERVICE_URL", "http://localhost:8001")
+DOCUMENT_SERVICE_URL = os.environ.get("TEST_DOCUMENT_SERVICE_URL", "http://localhost:8006")
+FOLDER_SERVICE_URL = os.environ.get("TEST_FOLDER_SERVICE_URL", "http://localhost:8008")
 
 
 def _client() -> httpx.Client:
@@ -742,3 +744,198 @@ def test_import_branding_config_updates_registry_service(authorized_principal):
                 },
                 headers={"X-DMS-Principal": authorized_principal},
             )
+
+
+def test_import_deletion_reason_catalog_merges_additively(authorized_principal):
+    """P80-S2: unlike every other category, `deletion_reason_catalogs` is an
+    additive MERGE, not a replace - a repeated import (or a second config
+    package) must extend, not clobber, an installation's own existing
+    catalog entries. Fanned out to both owner services (ADR 0112)."""
+    with httpx.Client(base_url=DOCUMENT_SERVICE_URL) as document_client:
+        previous_document = document_client.get("/retention-config").json()
+    with httpx.Client(base_url=FOLDER_SERVICE_URL) as folder_client:
+        previous_folder = folder_client.get("/retention-config").json()
+
+    reason_a = f"P80S2-Grund-A-{uuid.uuid4().hex[:8]}"
+    reason_b = f"P80S2-Grund-B-{uuid.uuid4().hex[:8]}"
+    payload = {
+        "schema_version": "1.0",
+        "exported_at": "2026-01-01T00:00:00Z",
+        "deletion_reason_catalogs": {"catalog": [reason_a]},
+    }
+    try:
+        with _client() as client:
+            first = client.post(
+                "/config/import", json=payload, headers={"X-DMS-Principal": authorized_principal}
+            )
+        assert first.status_code == 200
+        assert first.json()["result"]["results"]["deletion_reason_catalogs"] == {
+            "created": 0,
+            "updated": 2,
+            "skipped": 0,
+            "errors": [],
+        }
+
+        with httpx.Client(base_url=DOCUMENT_SERVICE_URL) as document_client:
+            after_first = document_client.get("/retention-config").json()
+        assert set(previous_document["deletion_reason_catalog"]) | {reason_a} == set(
+            after_first["deletion_reason_catalog"]
+        )
+
+        # A second import with a DIFFERENT reason must ADD to, not replace,
+        # the entry the first import already added - the actual behavior a
+        # plain replace-by-name category (like every other one in this
+        # module) would get wrong.
+        payload["deletion_reason_catalogs"]["catalog"] = [reason_b]
+        with _client() as client:
+            second = client.post(
+                "/config/import", json=payload, headers={"X-DMS-Principal": authorized_principal}
+            )
+        assert second.status_code == 200
+
+        with httpx.Client(base_url=DOCUMENT_SERVICE_URL) as document_client:
+            after_second = document_client.get("/retention-config").json()
+        assert reason_a in after_second["deletion_reason_catalog"]
+        assert reason_b in after_second["deletion_reason_catalog"]
+        with httpx.Client(base_url=FOLDER_SERVICE_URL) as folder_client:
+            folder_after_second = folder_client.get("/retention-config").json()
+        assert reason_a in folder_after_second["deletion_reason_catalog"]
+        assert reason_b in folder_after_second["deletion_reason_catalog"]
+    finally:
+        # `authorized_principal` only holds `domain-admin-config`
+        # (`admin.object_config`) - `PUT /retention-config` needs
+        # `admin.retention` instead (P80-S2's own new bootstrap
+        # dependency), so cleanup authenticates as `config-service` itself
+        # (already granted `domain-admin-retention` at its own startup,
+        # same technical identity `RetentionConfigClient` uses).
+        with httpx.Client(base_url=DOCUMENT_SERVICE_URL) as document_client:
+            document_client.put(
+                "/retention-config",
+                json={
+                    "deletion_reason_required": previous_document["deletion_reason_required"],
+                    "reminder_lead_days": previous_document["reminder_lead_days"],
+                    "deletion_reason_catalog": previous_document["deletion_reason_catalog"],
+                },
+                headers={"X-DMS-Principal": "config-service"},
+            )
+        with httpx.Client(base_url=FOLDER_SERVICE_URL) as folder_client:
+            folder_client.put(
+                "/retention-config",
+                json={
+                    "deletion_reason_required": previous_folder["deletion_reason_required"],
+                    "reminder_lead_days": previous_folder["reminder_lead_days"],
+                    "deletion_reason_catalog": previous_folder["deletion_reason_catalog"],
+                },
+                headers={"X-DMS-Principal": "config-service"},
+            )
+
+
+def test_import_org_unit_creates_group_flagged_as_org_unit(authorized_principal):
+    """P80-S2: `org_units` upserts a `permission-service` `Group` with
+    `is_org_unit=True` (ADR 0143) by name, like `roles`."""
+    name = f"P80S2-Abteilung-{uuid.uuid4().hex[:8]}"
+    payload = {
+        "schema_version": "1.0",
+        "exported_at": "2026-01-01T00:00:00Z",
+        "org_units": [{"name": name, "description": "Testabteilung"}],
+    }
+    with _client() as client:
+        first = client.post(
+            "/config/import", json=payload, headers={"X-DMS-Principal": authorized_principal}
+        )
+    assert first.status_code == 200
+    assert first.json()["result"]["results"]["org_units"] == {
+        "created": 1,
+        "updated": 0,
+        "skipped": 0,
+        "errors": [],
+    }
+
+    with httpx.Client(base_url=PERMISSION_SERVICE_URL) as permission_client:
+        groups = permission_client.get("/groups").json()
+        group = next(g for g in groups if g["name"] == name)
+        assert group["is_org_unit"] is True
+
+        # Re-import (upsert-by-name) must not create a duplicate.
+        with _client() as client:
+            second = client.post(
+                "/config/import", json=payload, headers={"X-DMS-Principal": authorized_principal}
+            )
+        assert second.status_code == 200
+        assert second.json()["result"]["results"]["org_units"] == {
+            "created": 0,
+            "updated": 1,
+            "skipped": 0,
+            "errors": [],
+        }
+
+        permission_client.delete(
+            f"/groups/{group['id']}", headers={"X-DMS-Principal": "config-service"}
+        )
+
+
+def test_import_org_unit_role_link_grants_role_to_group(authorized_principal):
+    """P80-S2: `org_unit_role_links` creates a `permission-service`
+    `RoleAssignment(principal_type="group", ...)` for the named org unit -
+    every member of that group receives the role via the EXISTING
+    group-based RBAC resolution (`_collect_effective_roles`), no new
+    resolution mechanism. Depends on `org_units`/`roles` being applied in
+    the same or an earlier import (dispatch order in `apply_import`)."""
+    org_unit_name = f"P80S2-Amt-{uuid.uuid4().hex[:8]}"
+    role_name = f"P80S2-Rolle-{uuid.uuid4().hex[:8]}"
+    payload = {
+        "schema_version": "1.0",
+        "exported_at": "2026-01-01T00:00:00Z",
+        "roles": [{"name": role_name, "description": "Testrolle", "permissions": ["read"]}],
+        "org_units": [{"name": org_unit_name, "description": ""}],
+        "org_unit_role_links": [{"org_unit_name": org_unit_name, "role_name": role_name}],
+    }
+    with _client() as client:
+        response = client.post(
+            "/config/import", json=payload, headers={"X-DMS-Principal": authorized_principal}
+        )
+    assert response.status_code == 200
+    assert response.json()["result"]["results"]["org_unit_role_links"] == {
+        "created": 1,
+        "updated": 0,
+        "skipped": 0,
+        "errors": [],
+    }
+
+    with httpx.Client(base_url=PERMISSION_SERVICE_URL) as permission_client:
+        group = next(
+            g for g in permission_client.get("/groups").json() if g["name"] == org_unit_name
+        )
+        role = next(r for r in permission_client.get("/roles").json() if r["name"] == role_name)
+        assignments = permission_client.get("/role-assignments").json()
+        match = next(
+            a
+            for a in assignments
+            if a["principal_type"] == "group"
+            and a["principal_id"] == group["id"]
+            and a["role_id"] == role["id"]
+        )
+        assert match["resource_id"] == "root"
+
+        # Re-import must be a no-op (skipped), not a duplicate assignment -
+        # the unique constraint on (principal_type, principal_id, role_id,
+        # resource_id) would otherwise make a repeated import of the same
+        # package fail outright.
+        with _client() as client:
+            second = client.post(
+                "/config/import", json=payload, headers={"X-DMS-Principal": authorized_principal}
+            )
+        assert second.status_code == 200
+        assert second.json()["result"]["results"]["org_unit_role_links"] == {
+            "created": 0,
+            "updated": 0,
+            "skipped": 1,
+            "errors": [],
+        }
+
+        permission_client.delete(
+            f"/role-assignments/{match['id']}", headers={"X-DMS-Principal": "config-service"}
+        )
+        permission_client.delete(
+            f"/groups/{group['id']}", headers={"X-DMS-Principal": "config-service"}
+        )

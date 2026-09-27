@@ -69,7 +69,7 @@ Since `config-service` otherwise has no own event bus connection, the consumer r
 `BaseServiceSettings` falls back to `nats://localhost:4222`, which is unreachable in the container
 (a bug found by P17-S3 itself, see [ADR 0060](../adr/0060-egov-paket-teil-2-vier-augen-luecken-und-umlaufmappen-prozessvorlagen.md)).
 
-## The eleven categories
+## The fourteen categories
 
 | Category | Owner service | Natural key (upsert) | Special notes |
 |---|---|---|---|
@@ -84,10 +84,15 @@ Since `config-service` otherwise has no own event bus connection, the consumer r
 | `realm_roles` | auth-service | Name (plain `list[str]`, not `list[dict]`) | **Since P17-S1** (14.1): Keycloak realm roles (e.g. `dms-poststelle`, 2.5) — unlike `roles` above (permission-service's DB-based `Role`s), a completely separate system. Application is idempotent via `create_realm_role(..., skip_exists=True)`, identical primitive to `bootstrap._ensure_dms_admin_role` |
 | `ad_group_mappings` | auth-service | `ad_group_name`+`role_name` (mappings), `role_name`+group set (composite rules), overwrite (default role) | **Since Post-Roadmap Phase 39 Session 3** ([ADR 0153](../adr/0153-ad-group-mapping-composite-rules-default-role-four-eyes-export.md)): AD/Keycloak group→role mapping config (4.4) — a bundle of simple mappings, composite (AND) rules, and the configurable default role, via `GET`/`POST /ad-group-mapping-config`(`/import`). Idempotent per item like `realm_roles`; import deliberately bypasses this category's own four-eyes, same pre-existing precedent as `realm_roles` |
 | `branding_config` | registry-service | — (singleton) | **Since P69-S2** ([ADR 0201](../adr/0201-p69s1-branding-and-role-dependent-dashboard-scoping.md)/[ADR 0202](../adr/0202-p69s2-branding-config-and-role-dependent-dashboard.md)): installation-level branding (7.3/8) — nullable `product_name`/`accent_color`/`logo_url`, same singleton shape as `sensor_config`/`federation_config`. `registry-service`'s first ever `PermissionServiceClient` consumer; `PUT /installation/branding` requires `admin.object_config` (reused, not a new capability), `GET` stays deliberately ungated (must render on the login screen, before any token exists) |
+| `deletion_reason_catalogs` | document-service AND folder-service | — (singleton) | **Since P80-S2** ([ADR 0233](../adr/0233-config-service-org-unit-role-and-deletion-reason-categories.md)): the admin-curated deletion-reason catalog (ADR 0112). The only singleton category fanned out to **two** owner services (the catalog is duplicated per-service). The only category with **additive-merge** semantics on import instead of replace — a repeated import extends an installation's own existing catalog, it never truncates it. New bootstrap dependency: `config-service` needs `admin.retention` (`domain-admin-retention`) to write `PUT /retention-config` on both owners |
+| `org_units` | permission-service | `name` | **Since P80-S2** (ADR 0233): upserts a `Group` with `is_org_unit=True` (ADR 0143) — promotes an existing group of the same name if needed, never demotes one |
+| `org_unit_role_links` | permission-service | `org_unit_name` (compare only — see caveat below) | **Since P80-S2** (ADR 0233): grants a role to every member of an org-unit group via the already-existing group-based `RoleAssignment(principal_type="group", ...)` mechanism (Phase 19's `"everyone"` group uses the same resolution) — no new authorization logic. Depends on `org_units`/`roles` already existing; applied after both in `apply_import`. Idempotent (checked against `GET /role-assignments` first, since the unique constraint would otherwise reject a repeated import) |
 
 "UI customizations" (branding/theming) is no longer missing — closed at P69-S2 by the `branding_config`
 category above. AD group mapping rules WERE also in this "not included" list until Post-Roadmap Phase 39
-Session 3 (ADR 0153), which closed that gap the same way.
+Session 3 (ADR 0153), which closed that gap the same way. The deletion-reason catalog and org-unit→role
+linking gaps named in the eGov package's own Phase 80 Session 1 review were closed at P80-S2 by the three
+categories above.
 
 ## Upsert Semantics
 

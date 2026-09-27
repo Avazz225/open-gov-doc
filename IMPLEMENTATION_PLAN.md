@@ -2472,8 +2472,8 @@ though ADR 0060 itself named "future changes will regularly increment the versio
   by design) and remain as harmless, unused, unassigned residuals. `config-service`/`object-type-service`/
   `permission-service`/`workflow-service` full suites re-run afterward to confirm no residual state
   affected them, 590 passed combined.
-- **P80-S2 — New exportable config categories, needed for the two remaining structural gaps**:
-  `config-service`'s `ConfigDocument` format has no exportable category today for (a) a deletion-reason
+- **P80-S2 — New exportable config categories, needed for the two remaining structural gaps**: ✅
+  ~~`config-service`'s `ConfigDocument` format has no exportable category today for (a) a deletion-reason
   catalog (the platform already has an admin-configurable, non-enum catalog of deletion justifications —
   a records-management package could plausibly ship a small set of common German administrative
   justifications as defaults, the same way it already ships business calendars) or (b) org-units/groups
@@ -2484,7 +2484,27 @@ though ADR 0060 itself named "future changes will regularly increment the versio
   eGov defaults using the new categories once they exist. Session decides whether output-stamping
   defaults (a third, smaller gap — no export/stamp settings are part of the config-package format at all
   today) fits in the same session or needs its own follow-up, based on how large the deletion-reason-
-  catalog/org-unit category work turns out to be in practice.
+  catalog/org-unit category work turns out to be in practice.~~ **Done.** Three new `ConfigDocument`
+  categories added (`deletion_reason_catalogs`, `org_units`, `org_unit_role_links`, see
+  [ADR 0233](docs/adr/0233-config-service-org-unit-role-and-deletion-reason-categories.md)) —
+  `deletion_reason_catalogs` is the only singleton category fanned out to two owner services
+  (document-service AND folder-service, ADR 0112) and the only category with additive-merge instead of
+  replace semantics; `org_unit_role_links` reuses `permission-service`'s existing group-based
+  `RoleAssignment` resolution with no new authorization mechanism. A real ordering bug was found and
+  fixed live: `approval_config` was applied before `org_units`/`org_unit_role_links` in `apply_import`,
+  which would defer a package's own new role links to a pending four-eyes approval whenever that same
+  package also enables four-eyes for `permission.role_assignment.create` (as the eGov package's own
+  `approval_config` category does) — fixed both by reordering dispatch and by having
+  `apply_org_unit_role_links` check the actual response status instead of assuming success. eGov package
+  now ships concrete defaults (four German deletion-reason justifications; two org units,
+  `Amtsleitung`/`Registratur`, linked to the identically-named roles Part 2 already ships) — see the
+  package's own README "Part 4". Output-stamping defaults (the third, smaller named gap) deliberately
+  deferred to its own future session, not folded in here — this session's two categories were
+  substantial enough on their own (new cross-service client, a genuine ordering bug found and fixed).
+  Live-verified end-to-end against the real running stack (full package import, zero errors across all 9
+  categories, direct inspection of every created row, full cleanup afterward); 3 new/extended tests in
+  `config-service`; combined regression across config-service/permission-service/document-service/
+  folder-service/workflow-service/object-type-service — 1195 tests green.
 
 **Definition of Done**: P80-S1 needs no new ADR (pure config content, no architecture decision) beyond
 maybe a short note if the classification-level/retention choices need justification; P80-S2 needs a real

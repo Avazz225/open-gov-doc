@@ -9,6 +9,11 @@ class Settings(BaseServiceSettings):
     permission_service_base_url: str = "http://localhost:8004"
     monitoring_service_base_url: str = "http://localhost:8026"
     auth_service_base_url: str = "http://localhost:8003"
+    # P80-S2: owner services for the new `deletion_reason_catalogs` category
+    # (the catalog itself is duplicated per-service, see
+    # `imports.apply_deletion_reason_catalogs`).
+    document_service_base_url: str = "http://localhost:8006"
+    folder_service_base_url: str = "http://localhost:8008"
 
     # Gate for POST /config/import (7.3) - the same domain admin capability as
     # workflow-service's process definition upload (P6-S6 retrofit): a full

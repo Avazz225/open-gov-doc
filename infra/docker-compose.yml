@@ -1458,6 +1458,9 @@ services:
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       # Realm role category (14.1, P17-S1).
       DMS_AUTH_SERVICE_BASE_URL: http://auth-service:8000
+      # `deletion_reason_catalogs` category (P80-S2).
+      DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
+      DMS_FOLDER_SERVICE_BASE_URL: http://folder-service:8000
       # Fleet agent key (3a, P13-S2) - see license-service above,
       # same value (a fleet-management-service provisions both paths
       # via the same installation).
@@ -1483,6 +1486,10 @@ services:
       registry-service:
         condition: service_started
       auth-service:
+        condition: service_started
+      document-service:
+        condition: service_started
+      folder-service:
         condition: service_started
     networks:
       - dms-net

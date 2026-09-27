@@ -2,7 +2,73 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P80-S1 (first session of Phase 80 — eGov configuration package completion, cheap
+**Last completed:** P80-S2 (second session of Phase 80 — new exportable `config-service` categories:
+deletion-reason catalog, org-units/groups, org-unit→role linking). Real backend/schema work, unlike
+P80-S1: three new `ConfigDocument` categories added, per
+[ADR 0233](docs/adr/0233-config-service-org-unit-role-and-deletion-reason-categories.md).
+`deletion_reason_catalogs` is a singleton category fanned out to **two** owner services
+(document-service AND folder-service each hold their own `RetentionConfig.deletion_reason_catalog`, ADR
+0112) and the only category in this service with **additive-merge** semantics on import instead of
+replace — a repeated import extends an installation's own catalog, never truncates it. `org_units`
+upserts a `permission-service` `Group` with `is_org_unit=True` (ADR 0143). `org_unit_role_links` grants a
+role to every member of an org-unit group by reusing the **already-existing** group-based
+`RoleAssignment`/`_collect_effective_roles` resolution (the same mechanism the implicit `"everyone"`
+group has used since Phase 19) — no new authorization logic needed server-side, purely plumbing that
+resolves names and calls the existing `POST /role-assignments`.
+
+New `config-service` outbound dependency: a shared `RetentionConfigClient` (one class, two instances —
+document-service/folder-service's `retention-config` endpoints are byte-identical in shape), and a new
+bootstrap role (`domain-admin-retention`, `admin.retention`) added to `_REQUIRED_ROLE_NAMES` so
+`config-service`'s own technical account can write both owners' `PUT /retention-config`.
+
+**A real ordering bug was found and fixed live, not just by inspection.** The eGov package's own
+`approval_config` category sets `permission.role_assignment.create` to `requires_approval: true` — since
+`apply_import`'s dispatch order originally applied `approval_config` before `org_units`/
+`org_unit_role_links`, importing the whole package in one call would defer the package's own brand-new
+org-unit→role links to a pending four-eyes approval instead of actually creating them (verified live: the
+import reported `"created": 2` for `org_unit_role_links`, but `GET /role-assignments` showed nothing —
+the response's `"status": "pending_approval"` was being silently treated as success). Fixed two ways: (1)
+reordered dispatch so `org_units`/`org_unit_role_links` apply before `approval_config` (a config PACKAGE
+must not defer its own content against itself), and (2) `apply_org_unit_role_links` now checks the actual
+response status and reports a genuinely-deferred link (e.g. on an installation that already had four-eyes
+enabled independently of this import) in `CategoryResult.errors` instead of counting it as `created`.
+Re-verified after the fix: `GET /role-assignments` showed real `RoleAssignment(principal_type="group",
+...)` rows for both org units.
+
+eGov package now ships concrete defaults using the new categories (package README's own "Part 4"): four
+German deletion-reason justifications (merged additively into both owner services); two org units
+(`Amtsleitung`/`Registratur`) linked to the identically-named roles Part 2 already ships — the first time
+this package connects its object-type hierarchy to an actual RBAC mechanism, closing the "two
+unconnected islands" gap Phase 80 Session 1's own review named. Output-stamping defaults (the plan's
+named third, smaller gap) deliberately deferred to a future session — not folded in here, this session's
+two categories plus the ordering bug were substantial enough on their own.
+
+**Live-verified against the real running stack, twice** (the second run specifically to re-confirm the
+ordering fix): full package import via `POST /config/import`, zero errors across all 9 categories both
+times, direct inspection of every created row (groups, role-assignments, both services' retention
+configs) to confirm genuine persistence, not just a clean import report. Full cleanup after each run
+(object types, business calendars, groups, role-assignments, catalog entries, `approval_config` — all
+reverted); a first cleanup pass missed reverting `config.import`'s own `approval_config` entry, caught by
+the subsequent regression run (two early tests failed with `"pending_approval"` instead of `"applied"`,
+self-healed by a later test's own `finally` block within the same run, root-caused and the leftover state
+fixed directly rather than left unexplained). 3 new/extended tests added to `config-service`
+(`test_import_deletion_reason_catalog_merges_additively`, `test_import_org_unit_creates_group_flagged_as_org_unit`,
+`test_import_org_unit_role_link_grants_role_to_group`) — one of them (the catalog test) itself had a bug
+in its own `finally` cleanup (used `authorized_principal`, which lacks `admin.retention`, instead of
+`config-service`) found and fixed before this session closed. Combined regression across
+config-service/permission-service/document-service/folder-service/workflow-service/object-type-service:
+**1195 passed**, no failures. `ruff` clean for every file this session touched (the one remaining
+project-wide `ruff` failure is pre-existing, in `libreoffice-addin`, unrelated to this session).
+
+**Next session:** P80 close (Phase 80 has both its planned sessions done — full backend regression per
+phase-end convention, **no `graphify update .`** this time per the user's own explicit correction this
+session ("graphify kannst du am ende des plans machen btw") — the graphify update is now deferred until
+the entire Phase 78–82 plan closes, not run at every individual phase's close as before. Then continue
+into Phase 81 (P81-S1, UI spacing/layout assessment pass).
+
+---
+
+**Immediately before:** P80-S1 (first session of Phase 80 — eGov configuration package completion, cheap
 config-only fixes). Five independent items in `packages/egov/config.json`/`README.md`, per the plan's own
 component-by-component checklist verification against Konzept §14.2. **(a)** `permission.role.create`
 added to `approval_config` — the same "permission change" family as the already-covered
@@ -44,11 +110,6 @@ read of both services' `main.py`, not just a failed guess) — they remain defin
 role assignments, no running instances) on this dev stack. `config-service`/`object-type-service`/
 `permission-service`/`workflow-service` full suites re-run afterward to confirm the cleanup left nothing
 behind that could affect them: 590 passed combined, no failures.
-
-**Next session:** P80-S2 — new exportable config categories (deletion-reason catalog, org-units/groups)
-needed for the two remaining structural gaps Konzept §14.2 names — real backend/schema work in
-`config-service` first, then package concrete eGov defaults using the new categories. Needs a real ADR
-(new exportable config category is a genuine schema/architecture decision), unlike this session.
 
 ---
 

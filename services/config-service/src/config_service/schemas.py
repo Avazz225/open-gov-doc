@@ -21,6 +21,9 @@ CATEGORIES = (
     "realm_roles",
     "ad_group_mappings",
     "branding_config",
+    "deletion_reason_catalogs",
+    "org_units",
+    "org_unit_role_links",
 )
 
 
@@ -139,6 +142,41 @@ class AdGroupMappingsExport(BaseModel):
     default_role_name: str | None = None
 
 
+class DeletionReasonCatalogExport(BaseModel):
+    """Deletion-reason catalog (5.6, ADR 0112) - admin-curated UX
+    suggestions, not an enum constraint. A single, installation-wide
+    singleton category (P80-S2) even though the underlying data is
+    duplicated per-service today (`document-service` AND `folder-service`
+    each hold their own `RetentionConfig.deletion_reason_catalog`, see
+    `imports.apply_deletion_reason_catalogs`) - one category, fanned out to
+    both owners, additively (a repeated import extends, never replaces,
+    an installation's own existing entries)."""
+
+    catalog: list[str] = []
+
+
+class OrgUnitExport(BaseModel):
+    """Org-unit group (ADR 0143's `Group.is_org_unit`) - upsert by `name`,
+    like `roles`."""
+
+    name: str
+    description: str = ""
+
+
+class OrgUnitRoleLinkExport(BaseModel):
+    """Grants a role to every member of an org-unit group (P80-S2) - reuses
+    the existing group-based RBAC resolution
+    (`permission_service.repository._collect_effective_roles` already
+    unions role assignments for `principal_type="group"`), no new
+    resolution mechanism needed server-side. `resource_id` defaults to the
+    installation root, like every other role assignment this package
+    creates."""
+
+    org_unit_name: str
+    role_name: str
+    resource_id: str = "root"
+
+
 class PackageManifest(BaseModel):
     """Turns a raw `ConfigDocument` into a named, versioned
     **configuration package** (14.1, P17-S1) - e.g. the eGov configuration package
@@ -181,6 +219,11 @@ class ConfigDocument(BaseModel):
     realm_roles: list[str] | None = None
     ad_group_mappings: AdGroupMappingsExport | None = None
     branding_config: BrandingConfigExport | None = None
+    # P80-S2: two new exportable categories closing 14.2's remaining
+    # structural gaps (deletion-reason defaults, org-unit->role linking).
+    deletion_reason_catalogs: DeletionReasonCatalogExport | None = None
+    org_units: list[OrgUnitExport] | None = None
+    org_unit_role_links: list[OrgUnitRoleLinkExport] | None = None
 
 
 class CategoryResult(BaseModel):
