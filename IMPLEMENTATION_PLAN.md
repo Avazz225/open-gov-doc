@@ -2807,6 +2807,104 @@ for Phase 81 specifically, since its entire point is user-visible.
 
 ---
 
+## Phase 83 — UI Rework with the Stageshow Skill (user-requested)
+
+**Context**: the user asked for another UI rework pass, this time driven by the **Stageshow** skill
+(`benjitaylor/skills/stageshow`, v1.1.1, MIT, installed 2026-11-19 at `~/.claude/skills/stageshow`, see
+its `.installed-from` for the pinned commit; <https://benji.org/stageshow>). **Read this before planning
+any session**: Stageshow is NOT a design system for real application UI. It builds *faux product UI*:
+believable, simplified, framed illustrations of a product (still or a short animated cursor demo) for
+marketing heroes, feature cards, docs and onboarding, using its own React kit (`kit/`: `Stage`, `Act`,
+`Window`, `Row`, `Bar`, …) plus a filming/verification toolchain (`scripts/film.mjs --gate`). Phases
+48/49/75/77/81 already settled how the *real* controls look (the login-page idiom, ADR 0219/0226/0227,
+`libs/dms-ui` tokens) — this phase does **not** replace that and must **not** pull kit parts into real,
+functional screens (kit parts are illustration geometry, not accessible form controls).
+
+The skill therefore applies to this project in two distinct ways, and the phase keeps them separate:
+
+1. **Craft lens on the real UIs** — Stageshow's still-frame rules (`references/craft.md`: Restraint,
+   type, Spacing and alignment, Icons and logos, color, chrome; `references/framing.md`;
+   `references/teaching.md`'s bad/good pairs) and its five named failure modes (**too much**,
+   **wireframe**, **boxed**, **flat**, **bland**) are a sharp, *hierarchy*-focused audit lens that none of
+   Phase 77 (color/borders) or Phase 81 (spacing) applied: where does the eye land first on each screen,
+   is one object clearly leading, are rows busy, are empty states dead corners/voids. Fixes stay in the
+   existing Tailwind/`--dms-*` formula.
+2. **Real illustration slots** — places where a faux-UI still/animation genuinely belongs in a DMS:
+   the six login pages (currently a lone form on an empty ground — the classic "hero beside copy"
+   slot), empty states (empty folder, empty inbox/task list, empty trash/quarantine), a first-run/
+   onboarding hint, and the `README`/docs hero for the product (**"OG Doc"** in all user-facing
+   artifacts, see project naming). These are built with the kit, to the skill's full workflow.
+
+**Environment facts established while installing (2026-11-19)** — corrects older notes in this file:
+Node **is** available on the host via nvm (`~/.nvm/versions/node/v24.14.1/bin`, not on the default
+`PATH`); Phase 81's "no Node/Playwright, use raw CDP from Python" workaround is no longer required.
+Stageshow's `film.mjs` needs `CHROME_PATH=~/.cache/ms-playwright/chromium-1140/chrome-linux/chrome`
+(matches its pinned `playwright-core ~1.48`). Verified: `npm install` + `npm run typecheck` green, the
+playground serves, and filming the gold `hero-demo` produces a correct contact sheet — **but its
+`--gate` ends `rehearsal failed` (6 lines: caret jump, crawling dashed edge, a vanish without exit,
+selection drift)** on the unmodified gold example. The gate is strict, not broken; its verdict on our own
+work has to be read against that baseline (see DoD).
+
+- **P83-S1 — Assessment: craft-lens audit + illustration-slot inventory + adoption decision**: same
+  "full assessment first" discipline the user chose for Phases 77/81. (a) Read `SKILL.md`,
+  `references/craft.md`, `framing.md`, `teaching.md`, `looks.md`, `kit.md` in full. (b) Screenshot
+  representative screens of all six apps (wide 1400px + narrow 390/700px, all three themes
+  light/dark/high-contrast where relevant) and judge each against the five failure modes and the
+  "where does the eye land" question — produce an itemized, per-screen punch list (not a redesign),
+  ranked by visibility. (c) Inventory concrete illustration slots with, per slot: medium (still / loop /
+  once-in-view), design size, the story in 3–5 beats, the closest gold example from `SKILL.md`'s table
+  (likely `static-card`, `hero-demo`, `loading`, `upload`, `share`, `form-error`), and whether it
+  should exist at all (e.g. `office-addin`'s narrow task pane may get none). (d) Decide where the kit and
+  the illustrations live — candidate: a new `libs/dms-showcase/` next to `libs/dms-ui`, mirroring its
+  plain-relative-import convention, vs. per-app copies per ADR 0006; check what Next 15 needs to compile
+  TSX from outside an app dir (`transpilePackages`/`externalDir`), and the React 18 (kit types) vs.
+  React 19 (apps) mismatch. (e) Calibrate the gate: film 2–3 gold examples, record their baseline lines.
+  (f) License: kit is MIT (keep `LICENSE` + `NOTICE.md` alongside the copy); do **not** copy
+  `assets/app-icons.ts` or `kit/brands/` artwork (not MIT-covered, and no other company's marks belong in
+  an OG Doc illustration anyway). Output: punch list + slot list + **ADR 0237** (Stageshow adoption:
+  scope boundary real-UI vs. illustration, kit location, token mapping approach, gate policy).
+- **P83-S2 — Kit integration + `--dms-*` look mapping + first illustration (`user-ui` login hero)**: copy
+  the kit to the location ADR 0237 chose; map Stageshow's look tokens onto `libs/dms-ui/tokens.css` per
+  `references/looks.md` so illustrations follow light/dark/high-contrast (high-contrast: decide in S1
+  whether the illustration renders at all or falls back to its poster). Build the `user-ui` login hero
+  from the chosen gold: a recognizable OG Doc screen (explorer + preview), real words only on the story
+  (e.g. a document uploaded → classified → released), 3–7 real strings, a `compact` design for phone
+  width, a `poster` frame that tells the story on its own (also shown under `prefers-reduced-motion`),
+  DE/EN strings following the app's existing language switch, `aria-hidden` + a short text alternative
+  (Phase 33 accessibility standard). Full skill workflow including `REHEARSAL.md` beside the component.
+- **P83-S3 — Login illustrations for the remaining apps**: `admin-ui`, `reviewer-ui`, `process-designer`,
+  `migration-console` (and `office-addin` only if S1 kept it) — one story per app that shows *that* app's
+  job (e.g. reviewer: a task approved; process designer: a BPMN step connected), stills where an
+  animation adds nothing; reuse S2's look mapping unchanged. May split into two sessions if S1's slot
+  list is long.
+- **P83-S4 — Empty-state and onboarding illustrations**: the empty-state/onboarding slots from S1's
+  inventory (stills by default — `static-card`/`loading`/`many-of-one` golds), placed inside the real
+  panes without changing their functional controls.
+- **P83-S5+ — Craft-lens fixes on the real UIs**: apply S1's punch list in the established Tailwind/
+  `--dms-*` formula — small apps first, then `user-ui` and `admin-ui` in their own sessions (same rollout
+  shape as Phases 49/75/77/81). Exact session count is decided by S1's findings, not here.
+- **P83-Sn (last) — Docs/README hero + phase close**: an OG Doc hero still (and optionally a loop) for
+  `README.md`/docs, exported via `film.mjs --still`; then the phase-close regression and the whole-plan
+  `graphify update .`.
+
+**Definition of Done for Phase 83**: standing rules from `CONTRIBUTING.md` (frontend `tsc`/`eslint`/
+`vitest`/`next build` per touched app; `PROGRESS.md` per session; `docs/` current). In addition:
+- **Real-UI changes**: before/after screenshots at wide and narrow widths, non-negotiable (as Phase 81).
+- **Every illustration**: filmed with `film.mjs --gate` at its shown width **and at 390**; `poster` set and
+  reviewed; `REHEARSAL.md` beside the component (gold copied, what changed, what was not checked). The
+  gate must end `rehearsal passed`; a remaining line is acceptable **only** if ADR 0237's calibration
+  shows the same fault class on the untouched gold in this environment, and it is listed in
+  `REHEARSAL.md` — never silently.
+- No kit part inside a functional screen; no third-party logos/app icons; no stock-AI look (sparkles,
+  purple, letter-in-a-square marks — `SKILL.md`'s recurring-faults list).
+- Illustrations must not regress login/first-paint: lazy-load them, respect `prefers-reduced-motion`.
+- New ADR only for 0237 (adoption) and for any shared `--dms-*` token value change; per-component fixes
+  need none (Phase 81 precedent).
+- Full backend regression only once at phase close (backend is untouched by this phase anyway);
+  `graphify update .` only at the end of the whole phase, not per session.
+
+---
+
 ## PROGRESS.md — Resume Mechanism
 
 `dms/PROGRESS.md` is created as the first order of business in P0-S1 and is the entry point for every new session:

@@ -75,12 +75,14 @@ one, a deliberate proportionality call for a graph this size. Health check: clea
 self-loop/collapsed edges). HTML export auto-aggregated to a community-level view (20,237 nodes exceeds
 the 5,000-node direct-render threshold).
 
-**Next session:** none queued — the Phase 78–82 plan (built from the post-P77 gap-analysis round) is now
-fully complete. Per this project's own established rhythm, the natural next step is a fresh gap-analysis
-round (parallel research agents sweeping ADRs' self-named open scope, `docs/services/*.md` Open Points,
-concept-document coverage, and this plan's own "Bewusst nicht in diesen Plan aufgenommen" deferred-items
-list for staleness) to build the next numbered plan starting at Phase 83 — but that starts only on request,
-not assumed here.
+**Next session:** **P83-S1** — Phase 83 (UI rework with the Stageshow skill, user-requested 2026-11-19,
+see `IMPLEMENTATION_PLAN.md` § Phase 83): assessment session — craft-lens audit of all six apps against
+Stageshow's five failure modes, illustration-slot inventory, kit location/look-mapping decision and gate
+calibration, written up as ADR 0237. Skill installed at `~/.claude/skills/stageshow` (deps installed,
+typecheck green). Tooling note: Node is on the host via nvm (`~/.nvm/versions/node/v24.14.1/bin`, not on
+default `PATH`); filming needs `CHROME_PATH=~/.cache/ms-playwright/chromium-1140/chrome-linux/chrome`.
+(The fresh gap-analysis round mentioned at Phase 82 close stays available on request; Phase 83 was
+inserted ahead of it at the user's request.)
 
 ---
 
