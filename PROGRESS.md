@@ -2,7 +2,70 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** Phase 82 close (full backend regression + the deferred whole-plan `graphify update .`,
+**Last completed:** P83-S1 (first session of Phase 83 — UI rework with the Stageshow skill,
+user-requested). This was an assessment-only session: no app code was changed. Its outputs are
+[ADR 0237](docs/adr/0237-stageshow-adoption-illustrations-and-craft-lens.md) and the 13-item punch list in
+`IMPLEMENTATION_PLAN.md`'s P83-S1 entry.
+
+**Key correction to the phase's own premise:** Stageshow builds faux-UI *illustrations* (marketing/docs
+stills and cursor demos with its own React kit). It does not redesign functional screens. The phase
+therefore splits in two:
+- Stageshow's craft rules become an audit lens for the real UI. Fixes stay in the Tailwind/`--dms-*`
+  formula, and no kit part goes into a functional screen.
+- A fixed list of illustration slots gets built with the kit: five login pages, two `user-ui` empty
+  states, and a README hero.
+
+`office-addin` and onboarding get no illustration (ADR 0237, Decision 4).
+
+**What was verified rather than assumed:**
+- **Node exists on the host via nvm** (`~/.nvm/versions/node/v24.14.1/bin`, not on the default `PATH`).
+  Phase 81's raw-CDP-from-Python screenshot workaround is obsolete. All 96 audit screenshots (six apps,
+  1400px light + dark, 390px light) were driven by `playwright-core` with
+  `CHROME_PATH=~/.cache/ms-playwright/chromium-1140/chrome-linux/chrome`. The stack was started with
+  `docker compose up -d` in `infra/` (it had been stopped for 7 weeks) and logged in as
+  `users-admin`/`users-admin`.
+- **The kit works with this stack.** It typechecks against the apps' React 19 types with 0 errors. A
+  scratch copy of `user-ui` (repo untouched) built with `next build` / static export while importing the
+  kit from `libs/dms-showcase/`. That took four per-app additions: `lucide-react`, webpack
+  `resolve.modules`, tsconfig `paths`, and a Dockerfile `COPY`. The two failures on the way
+  (`Can't resolve 'lucide-react'`, then a `react-dom` type lookup) are recorded in ADR 0237. The test page
+  cost 23 kB.
+- **The gate was calibrated on unmodified gold examples:**
+  - `static-card` passes at both widths.
+  - `loading` fails at 390 only, with genuine framing faults (it has no `compact` design).
+  - `upload` and `hero-demo` fail only on `Count`-digit and caret/selection motion classes.
+
+  Policy: stills must pass outright. Animations may keep only those gold-proven, same-kit-part lines,
+  each documented in `REHEARSAL.md`. Framing and composition lines are never excused.
+
+**Top punch-list findings** (full list with fixes in the plan):
+1. Plan and concept references leak into user-facing strings ("(5.2, seit P7-S1c)", "Transfers (7.2)",
+   "(ADR 0034)"). That is roughly 240 grep hits across five apps' i18n files, each needing a check.
+2. `user-ui` uses emoji as icons: 46 in 8 files, including the icon rail, folders and row actions.
+3. `user-ui`'s header always says "Dokumente", whatever the pane.
+4. `user-ui`'s explorer names are centered rather than left-aligned.
+
+Further findings: columns of primary buttons; UUIDs and raw enums (`manual`, `dry_run_completed`,
+`healthy`) as primary content; `admin-ui`'s home duplicates the sidebar as unstyled link lists; button
+labels wrap inside buttons; `process-designer` lacks the shared header; five of six logins don't name the
+product. Low priority: `office-addin` crashes outside Word instead of showing a hint.
+
+**Open decision for the user (item 12):** at 390px none of the real apps is usable (sidebars and panes
+stay side by side, tables overflow). No concept section asks for phone support for these back-office
+apps, so this is recorded but **not scheduled** until the user decides whether phone width is a goal.
+
+The audit stack was stopped again afterwards. No tests were run, because no code changed.
+
+**Next session:** **P83-S2** — create `libs/dms-showcase/` (vendored kit from the pinned commit without
+`kit/brands/`, `look-ogdoc.css` token mapping) and wire it into `user-ui` (the four additions from
+ADR 0237). Then build the `user-ui` login illustration: corner bleed; story upload → class chip →
+"Freigegeben"; ≥ 1024px only; hidden in high-contrast; poster under reduced motion. Develop it via the
+stageshow playground (`examples/<name>/`, `?capture=`), gate it per ADR 0237, and put `REHEARSAL.md`
+beside it.
+
+---
+
+**Immediately before:** Phase 82 close (full backend regression + the deferred whole-plan `graphify update .`,
 after P82-S3 closed the phase). **This closes the entire Phase 78–82 plan.**
 
 Full regression (`scripts/run-tests.sh --build`, all 32 backend services): two flaky failures on the first
@@ -75,14 +138,8 @@ one, a deliberate proportionality call for a graph this size. Health check: clea
 self-loop/collapsed edges). HTML export auto-aggregated to a community-level view (20,237 nodes exceeds
 the 5,000-node direct-render threshold).
 
-**Next session:** **P83-S1** — Phase 83 (UI rework with the Stageshow skill, user-requested 2026-11-19,
-see `IMPLEMENTATION_PLAN.md` § Phase 83): assessment session — craft-lens audit of all six apps against
-Stageshow's five failure modes, illustration-slot inventory, kit location/look-mapping decision and gate
-calibration, written up as ADR 0237. Skill installed at `~/.claude/skills/stageshow` (deps installed,
-typecheck green). Tooling note: Node is on the host via nvm (`~/.nvm/versions/node/v24.14.1/bin`, not on
-default `PATH`); filming needs `CHROME_PATH=~/.cache/ms-playwright/chromium-1140/chrome-linux/chrome`.
-(The fresh gap-analysis round mentioned at Phase 82 close stays available on request; Phase 83 was
-inserted ahead of it at the user's request.)
+**Next session (at the time):** Phase 83 was planned at the user's request (UI rework with the Stageshow
+skill), ahead of the fresh gap-analysis round, which stays available on request.
 
 ---
 

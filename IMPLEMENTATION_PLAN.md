@@ -2845,7 +2845,7 @@ playground serves, and filming the gold `hero-demo` produces a correct contact s
 selection drift)** on the unmodified gold example. The gate is strict, not broken; its verdict on our own
 work has to be read against that baseline (see DoD).
 
-- **P83-S1 — Assessment: craft-lens audit + illustration-slot inventory + adoption decision**: same
+- **P83-S1 — Assessment: craft-lens audit + illustration-slot inventory + adoption decision**: ✅ same
   "full assessment first" discipline the user chose for Phases 77/81. (a) Read `SKILL.md`,
   `references/craft.md`, `framing.md`, `teaching.md`, `looks.md`, `kit.md` in full. (b) Screenshot
   representative screens of all six apps (wide 1400px + narrow 390/700px, all three themes
@@ -2863,6 +2863,83 @@ work has to be read against that baseline (see DoD).
   `assets/app-icons.ts` or `kit/brands/` artwork (not MIT-covered, and no other company's marks belong in
   an OG Doc illustration anyway). Output: punch list + slot list + **ADR 0237** (Stageshow adoption:
   scope boundary real-UI vs. illustration, kit location, token mapping approach, gate policy).
+  **Done.** See [ADR 0237](docs/adr/0237-stageshow-adoption-illustrations-and-craft-lens.md) for all
+  decisions (kit in `libs/dms-showcase/`, build-verified on a scratch copy; look mapping; high-contrast
+  renders no illustration; slot table; gate policy calibrated on 4 gold examples). The audit used 96
+  screenshots of all six apps (1400px light + dark, 390px light), driven by `playwright-core` on Node.
+  Phase 81's CDP-from-Python workaround is no longer needed. Exception: `office-addin` could only be shot
+  at its login, because its post-login path needs the Office mock. **Craft-lens punch list**, ranked by
+  visibility:
+  1. **Plan/concept references leak into user-facing text** (the "too much" failure mode, and simply
+     wrong for end users). Examples: `user-ui` "Vier-Augen-Prinzip für Löschanträge (5.2, seit P7-S1c)";
+     "Favoriten … (seit P7-S1d, Umlaufmappen seit Phase 45 Session 2)"; headings "Vier-Augen-Freigaben
+     (4.3)", "Transfers (7.2)", "Gepaarte Installationen (7.2)"; "(ADR 0034)" in a description. A rough
+     grep of the i18n JSON files finds numeric `(x.y)`/`P..-S..`/`Phase N` references in five apps:
+     `admin-ui` ~144, `user-ui` ~54, `reviewer-ui` ~24, `migration-console` ~12, `process-designer` ~4.
+     Some are legitimate (dates, versions), so each needs a check. Fix: strip them from the strings;
+     where a sentence only exists to cite the concept, shorten it to what the user needs.
+  2. **`user-ui` uses emoji as icons.** That is 46 emoji in 8 files: the icon rail 📄🔍✅⭐👥, folders
+     📁 via `lib/icons.ts`, and the row actions ✏️🕒📎. `craft.md` names this as the first tell of
+     generated UI (mixed weights, colors, platform-dependent rendering). The other five apps have none
+     (`admin-ui`: 2). Fix: one icon set at one size and stroke. ADR 0237 already brings `lucide-react`
+     into the apps that get illustrations; reusing it here is the cheap path. Choosing it deliberately
+     (vs. Phosphor/Tabler) needs a one-line note in the fix session. Class icons (`ICON_GLYPHS`) map to
+     glyph names, not emoji, which keeps the server-side `icon` values unchanged.
+  3. **`user-ui` header title is always "Dokumente"**, on Favoriten, Genehmigungen, Papierkorb, Suche,
+     Vorlagen and every other pane: title and body disagree. Fix: the header follows the active pane.
+  4. **`user-ui` explorer row names are centered** in their column, so the reading edge zig-zags with
+     name length. Fix: left-align on one grid track (`craft.md`, "Columns line up").
+  5. **Columns of primary buttons, no landing point** (the "flat" failure mode):
+     - `user-ui` Genehmigungen and `reviewer-ui` Freigaben have a filled "Genehmigen"/"Freigeben" on
+       every row (14+ per screen).
+     - `reviewer-ui` Freigabeaufgaben has three buttons per row.
+     - `user-ui` explorer has three always-visible icon buttons per row.
+
+     Fix: one secondary/ghost action style in lists, with the primary reserved for the detail or
+     selected row. Row icon actions show on hover/focus/selection, and stay keyboard-reachable (Phase 33).
+  6. **Raw identifiers as primary content** ("too much"):
+     - UUIDs as row titles: `user-ui` Genehmigungen "Ordner 362adc2c-…", `reviewer-ui` Bezugsobjekt,
+       `admin-ui` reports Ordner-ID, `process-designer` names breaking mid-UUID.
+     - Raw enum values in German UI: `reviewer-ui` Aufgabe "manual", `migration-console` pills
+       `dry_run_completed`/`deleted`, `admin-ui` registry `healthy`.
+
+     Fix: resolve names where an API already returns them (e.g. via `usePrincipalNames`-style lookups),
+     otherwise show a shortened, monospaced ID as secondary text. Enum values go through i18n.
+  7. **`admin-ui` home duplicates the sidebar.** Six cards hold unstyled, underlined, bulleted link lists
+     that repeat the nav 1:1, under "Wähle einen Bereich aus der Navigation." ("say it once", and an
+     "inventory of cards"). Fix: drop the link cards, or replace them with something the sidebar can't
+     show (counts or status per area). Decide in the fix session; text-only is acceptable.
+  8. **Button labels wrap inside the button**: `reviewer-ui` "Details anzeigen", `process-designer`
+     "Versionen anzeigen", plus date cells wrapping. Fix: `whitespace-nowrap` on control labels and give
+     the column room ("fit the text before fixing the box").
+  9. **Leftover native-looking controls** missed by Phase 77: `user-ui` "Papierkorb anzeigen",
+     "Liste/Baum", "Standardanordnung", Papierkorb's "Eigene Löschmarkierungen". Fix: apply the
+     established secondary/segmented formula.
+  10. **`process-designer` has no shared app header.** Sprache/Design sit as stacked label-over-select in
+      the top-left, with no username/Abmelden, unlike the other five apps. Fix: same header cluster as
+      `reviewer-ui`/`migration-console`.
+  11. **Login pages say only "Anmelden"** (5 of 6; only `admin-ui` names the product): a lone card on an
+      empty ground, the "bland" failure mode. Fix: product name per app ("OG Doc", "OG Doc Freigaben", …)
+      in the card title. The ground is handled by the S2/S3 illustrations.
+  12. **Narrow widths (390px) are unusable in the real apps.** `admin-ui`'s sidebar and `user-ui`'s three
+      panes stay side by side (content ~100px, words breaking per character), tables run off the right
+      edge, and the tab bar collides with the Sprache select in `reviewer-ui`/`migration-console`
+      ("VorgängeSpra…"). **Scope question, not a craft fix**: no concept section names phone support for
+      these back-office apps, and Phase 81 used 700px as its narrow floor. Recorded here, **not
+      scheduled**; it needs a user decision before any session.
+  13. Low: `office-addin` outside Word throws "Application error: a client-side exception" instead of
+      `OfficeGate`'s intended loading/hint state (its own comment says it "would hang on its loading
+      state"). Fix: a plain "Nur in Word verfügbar" hint when `window.Office` is absent.
+
+  **Plan amendments from this assessment**: onboarding is dropped from P83-S4, because no first-run
+  mechanism exists to host it (ADR 0237, Decision 4). S4's empty states are exactly two: the `user-ui`
+  preview pane and Vorlagen. The other empty states get text fixes only. The DoD's "film at 390" applies
+  to every width an illustration actually renders at. Login illustrations render only at ≥ 1024px, so
+  they need no `compact` design. P83-S5+ is the punch list above, grouped:
+  - S5: items 1 + 8 + 11 + 13, all apps (strings and small fixes).
+  - S6: `user-ui` items 2–5 + 9.
+  - S7: items 5–7 + 10 in `admin-ui`/`reviewer-ui`/`process-designer`/`migration-console`.
+  - Item 12 waits for the user.
 - **P83-S2 — Kit integration + `--dms-*` look mapping + first illustration (`user-ui` login hero)**: copy
   the kit to the location ADR 0237 chose; map Stageshow's look tokens onto `libs/dms-ui/tokens.css` per
   `references/looks.md` so illustrations follow light/dark/high-contrast (high-contrast: decide in S1
