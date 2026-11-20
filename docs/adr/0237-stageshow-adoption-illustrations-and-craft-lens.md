@@ -72,6 +72,19 @@ contain none, and five copies of a ~700 KB kit would drift.
   - `--ss-radius-*` → `--dms-radius-*`
 
   The `Stage` theme follows the app's resolved `data-theme` (`light`/`dark`).
+
+  **Amended in P83-S2 (as built):**
+  - There is no separate `look-ogdoc.css` yet. With one illustration, its look block sits at the top of
+    its own CSS; it moves to a shared file once a second illustration needs it.
+  - The mapping is narrower than listed above: `--ss-accent`, `--ss-accent-soft`, `--ss-font` and the
+    radii only. The kit's text inks and grays are left alone, as `looks.md` advises.
+  - Two additions came from live review. A pane drawn as product UI takes the login card's own material
+    (`--dms-surface`, `--dms-border`), so both read as one figure language. Text on an accent fill takes
+    `--dms-accent-fg` (ADR 0219), overriding the kit's fixed white with a plain class, which beats the
+    kit's `@layer stageshow`.
+  - Every `--dms-*` reference falls back to the kit's own theme token (`var(--dms-surface,
+    var(--ss-surface))`), never to a light-only literal. Otherwise a dark stage in the playground renders
+    light ink on a white pane, which the gate does not catch (contrast is not one of its checks).
 - **High-contrast theme: illustrations are not rendered at all.** A faux UI carries no information the
   real form doesn't. A kit look tuned for high contrast would be a second design system for decoration.
 - **`prefers-reduced-motion`:** the `poster` frame is shown, still.
@@ -83,7 +96,7 @@ contain none, and five copies of a ~700 KB kit would drift.
 
 | Slot | Medium | Layout / closest gold | Story (real strings only on this) |
 |---|---|---|---|
-| `user-ui` login | Loop, plays once in view, then holds the poster | Corner bleed / `upload` (+ `hero-demo` for the cursor) | A PDF dragged into a folder → upload row settles → class chip assigned → status "Freigegeben". Poster: the released row. |
+| `user-ui` login (**built P83-S2**, see its `REHEARSAL.md`) | Plays once, then holds the poster | ~~Corner bleed~~ **Fade crop**, OG Doc's own Explorer pane instead of an OS window / `upload` motion | ~~… class chip … "Freigegeben"~~ A PDF is dropped into "Eingangsrechnungen" → the upload row settles → the server-assigned Kennzeichen "2026-114" grows in before the filename, after real rows 2026-113/112. Changed during the build: a status pill or virus-scan step would have shown things the product's explorer does not display. The Kennzeichen is real and shown exactly this way (`lib/kennzeichen.ts`). |
 | `admin-ui` login | Still | Panel over product / `panel-annotation` | A retention setting ("Aufbewahrung 10 Jahre") with one leader to the folder it governs |
 | `reviewer-ui` login | Short loop | Pinned bottom bleed / `form-error` + `dark-hero` (status changes on its own pill) | A four-eyes request: "Freigeben" pressed → pill "Offen" → "Freigegeben" |
 | `process-designer` login | Still | Pinned bottom bleed / `annotations` | Three BPMN shapes, one signature task in focus with its "AES" level |
@@ -101,7 +114,9 @@ contain none, and five copies of a ~700 KB kit would drift.
 - **The remaining empty states** (Papierkorb, Favoriten, Team-Aufgaben, Umlaufmappen filters): text fixes
   from the punch list only. Illustrating every empty state is the "too much" failure mode at page level.
 
-**Breakpoint:** login illustrations render side-by-side with the form only at ≥ 1024 px. Below that the form
+**Breakpoint:** login illustrations render side-by-side with the form only at ≥ ~~1024~~ **1200** px. That
+is amended in P83-S2: a 720px stage, a 48px gap and the 384px card fit at 1:1 only from 1200px, and below
+that the stage would be scaled down. Below that the form
 stands alone. Every illustration that renders below 600 px ships a `compact` design at 358 px
 (`framing.md`). The two in-pane empty-state stills do, because the pane can be narrow.
 
@@ -110,7 +125,13 @@ stands alone. Every illustration that renders below 600 px ships a `compact` des
 Running the tool here takes two things:
 
 - Node from nvm: `~/.nvm/versions/node/v24.14.1/bin` (not on the default `PATH`).
-- `CHROME_PATH=~/.cache/ms-playwright/chromium-1140/chrome-linux/chrome`.
+- ~~`CHROME_PATH=~/.cache/ms-playwright/chromium-1140/chrome-linux/chrome`~~. **Corrected in P83-S2:** use
+  `CHROME_PATH=~/.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell`
+  (Chrome for Testing 153).
+  - The 1140 build is Chromium 130, which lacks `text-box: trim-both`. The kit uses it on every `Button`
+    label, so the old browser reports a false `layout: span.ss-button__label is … high but … needs …`
+    line on every button. The unmodified `buttons` specimen shows it too, and it disappears with 153.
+  - The gold calibration below was re-run with 153. The results are the same, apart from that line.
 
 Unmodified gold examples, filmed with `--gate` at their own width and at 390:
 

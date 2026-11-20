@@ -6,6 +6,7 @@ import { useI18n } from "@/i18n";
 import { ApiError, useAuth } from "@/lib/auth-context";
 import { getSsoConfig, oidcAuthorize } from "@/lib/api";
 import { useBranding } from "@/lib/branding-context";
+import { LoginIllustration } from "@/components/LoginIllustration";
 
 // SSO/automatic login (post-roadmap feature): the storage key for
 // the `state` value that `login/callback/page.tsx` checks against the
@@ -117,51 +118,58 @@ export default function LoginPage() {
 
   return (
     <main className="flex min-h-screen items-center justify-center p-6">
-      <div className="box-border w-full max-w-sm rounded-lg border border-border bg-surface p-8 shadow-lg">
-        <h1 className="text-xl font-bold text-surface-fg">{productName ?? t("login.heading")}</h1>
-        <form className="mt-6 flex flex-col gap-4" onSubmit={handleSubmit}>
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="username" className="text-sm font-medium text-surface-fg">
-              {t("login.username")}
-            </label>
-            <input
-              id="username"
-              name="username"
-              autoComplete="username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              required
-              className="box-border w-full rounded-md border border-border bg-bg px-3 py-2 text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg"
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="password" className="text-sm font-medium text-surface-fg">
-              {t("login.password")}
-            </label>
-            <input
-              id="password"
-              name="password"
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              className="box-border w-full rounded-md border border-border bg-bg px-3 py-2 text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg"
-            />
-          </div>
-          {error && (
-            <p className="rounded-md bg-danger-bg px-3 py-2 text-sm text-danger" role="alert">
-              {error}
-            </p>
-          )}
-          <button
-            type="submit"
-            disabled={submitting}
-            className="mt-2 box-border w-full rounded-md border-0 bg-accent px-4 py-2.5 font-medium text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {submitting ? t("login.submitting") : t("login.submit")}
-          </button>
-        </form>
+      {/* The illustration renders nothing below 1200px or in high contrast
+          (ADR 0237) - the card then stands alone, centered, exactly as before.
+          Beside it, the card's top edge lines up exactly with the stage's
+          (items-start): centered, their edges would sit a near-miss apart. */}
+      <div className="flex w-full items-start justify-center gap-12">
+        <LoginIllustration />
+        <div className="box-border w-full max-w-sm rounded-lg border border-border bg-surface p-8 shadow-lg">
+          <h1 className="text-xl font-bold text-surface-fg">{productName ?? t("login.heading")}</h1>
+          <form className="mt-6 flex flex-col gap-4" onSubmit={handleSubmit}>
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="username" className="text-sm font-medium text-surface-fg">
+                {t("login.username")}
+              </label>
+              <input
+                id="username"
+                name="username"
+                autoComplete="username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                required
+                className="box-border w-full rounded-md border border-border bg-bg px-3 py-2 text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="password" className="text-sm font-medium text-surface-fg">
+                {t("login.password")}
+              </label>
+              <input
+                id="password"
+                name="password"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                className="box-border w-full rounded-md border border-border bg-bg px-3 py-2 text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg"
+              />
+            </div>
+            {error && (
+              <p className="rounded-md bg-danger-bg px-3 py-2 text-sm text-danger" role="alert">
+                {error}
+              </p>
+            )}
+            <button
+              type="submit"
+              disabled={submitting}
+              className="mt-2 box-border w-full rounded-md border-0 bg-accent px-4 py-2.5 font-medium text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {submitting ? t("login.submitting") : t("login.submit")}
+            </button>
+          </form>
+        </div>
       </div>
     </main>
   );

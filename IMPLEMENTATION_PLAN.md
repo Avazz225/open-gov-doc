@@ -2940,7 +2940,7 @@ work has to be read against that baseline (see DoD).
   - S6: `user-ui` items 2–5 + 9.
   - S7: items 5–7 + 10 in `admin-ui`/`reviewer-ui`/`process-designer`/`migration-console`.
   - Item 12 waits for the user.
-- **P83-S2 — Kit integration + `--dms-*` look mapping + first illustration (`user-ui` login hero)**: copy
+- **P83-S2 — Kit integration + `--dms-*` look mapping + first illustration (`user-ui` login hero)**: ✅ ~~copy
   the kit to the location ADR 0237 chose; map Stageshow's look tokens onto `libs/dms-ui/tokens.css` per
   `references/looks.md` so illustrations follow light/dark/high-contrast (high-contrast: decide in S1
   whether the illustration renders at all or falls back to its poster). Build the `user-ui` login hero
@@ -2948,7 +2948,51 @@ work has to be read against that baseline (see DoD).
   (e.g. a document uploaded → classified → released), 3–7 real strings, a `compact` design for phone
   width, a `poster` frame that tells the story on its own (also shown under `prefers-reduced-motion`),
   DE/EN strings following the app's existing language switch, `aria-hidden` + a short text alternative
-  (Phase 33 accessibility standard). Full skill workflow including `REHEARSAL.md` beside the component.
+  (Phase 33 accessibility standard). Full skill workflow including `REHEARSAL.md` beside the component.~~
+  **Done.** Full detail is in `libs/dms-showcase/user-ui-login/REHEARSAL.md` and in ADR 0237's
+  P83-S2 amendments.
+
+  **What was built:**
+  - `libs/dms-showcase/` holds the kit vendored from the pinned commit, without `brands/`/`BrandMark`,
+    plus `LICENSE` and `NOTICE`.
+  - `user-ui` got the four build additions: `lucide-react@0.468.0`, `resolve.modules`, tsconfig `paths`
+    and the Dockerfile `COPY`.
+  - `src/components/LoginIllustration.tsx`:
+    - Rendered only at ≥ 1200px (the module is not even loaded below that) and never in high contrast.
+    - Follows `data-theme` at runtime, and shows the poster under reduced motion.
+    - Has one DE/EN text alternative, with the content `aria-hidden`.
+  - The login page is a top-aligned two-column layout, unchanged when the illustration is absent.
+
+  **The story:** a PDF dropped into "Eingangsrechnungen" → the upload row settles → the server-assigned
+  Kennzeichen "2026-114" grows in after real rows 2026-113/112. It plays once and holds.
+
+  **Deviations from this plan text:**
+  - "Uploaded → classified → released" became the Kennzeichen story: a classification chip or release
+    pill is not something the real explorer shows, the Kennzeichen is.
+  - There is no `compact` design: nothing renders below 1200px, and ADR 0237's breakpoint was amended
+    from 1024 to 1200.
+  - There is no separate look file yet.
+
+  **How it was verified:**
+  - A fresh-eye subagent review (`references/review.md`) of the first version found 13 faults. All were
+    addressed: no plate, OG Doc's own pane chrome instead of macOS traffic lights, the Kennzeichen as
+    plain text the way `lib/kennzeichen.ts` renders it, two real neighbour rows, the drop aimed at the
+    new row, and others.
+  - Final gate: `rehearsal passed` in light and dark, with no excused lines. The stills are clean.
+  - Live in the rebuilt image: the pane top is exactly level with the card top (y=286). All gating rules
+    were confirmed at 1400/1200/1199/390, in dark, high contrast, reduced motion and EN. A real login
+    afterwards still works.
+  - `tsc`/`eslint` clean, `vitest` 298/298 (+5 new gating tests), `next build` via the Docker image.
+
+  **Found along the way:**
+  - The S1 `CHROME_PATH` (Chromium 130) lacks `text-box` and reports false button-label layout lines.
+    Switched to Chrome for Testing 153 (`chromium_headless_shell-1243`), and the gold calibration was
+    re-run with the same results.
+  - Light-only `--dms-*` fallbacks made the playground's dark film white-on-white, and the gate does not
+    check contrast. The fallbacks now follow kit theme tokens.
+  - The root `pyproject.toml` `libs/*` workspace glob would have broken every `uv run`, exactly like
+    `libs/dms-ui` did in Phase 50. `libs/dms-showcase` was added to `tool.uv.workspace.exclude` before it
+    broke anything, and `uv lock --check`/`uv run` were verified.
 - **P83-S3 — Login illustrations for the remaining apps**: `admin-ui`, `reviewer-ui`, `process-designer`,
   `migration-console` (and `office-addin` only if S1 kept it) — one story per app that shows *that* app's
   job (e.g. reviewer: a task approved; process designer: a BPMN step connected), stills where an

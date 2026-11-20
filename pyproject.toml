@@ -12,8 +12,10 @@ members = ["libs/*", "services/*", "tools/*"]
 # with "missing a pyproject.toml". Found live during Phase 50 Session 1
 # (this glob had silently broken every `uv run` invocation since it was
 # added - unnoticed because no session between P48-S1 and P50-S1 needed to
-# run a backend Python test).
-exclude = ["libs/dms-ui"]
+# run a backend Python test). `libs/dms-showcase` (Phase 83 Session 2,
+# ADR 0237: vendored React kit + illustrations, no Python) is excluded for the
+# same reason - caught before it broke anything this time.
+exclude = ["libs/dms-ui", "libs/dms-showcase"]
 
 [tool.uv]
 package = false

@@ -13,3 +13,8 @@ Created in P0-S2:
 - `dms-permission-client/` — HTTP client against `permission-service` (RBAC checks, role assignment), consolidates the `PermissionServiceClient` class previously duplicated per service (Post-Roadmap Phase 19 Session 1)
 - `dms-retry/` — shared backoff/jitter math (Full Jitter, AWS standard formula) for retry poll loops, **no** shared poll-loop framework (Post-Roadmap Phase 20 Session 1)
 - `dms-ui/` — **not Python**: a plain shared CSS file (design tokens) consumed by all six frontend apps under `apps/` (Phase 48 Session 1, [ADR 0168](../docs/adr/0168-shared-design-tokens-and-scales.md)) — the one deliberate exception to ADR 0006's "no shared code between frontend apps" stance, everything else about each app stays independently duplicated. **Found and fixed in Phase 50 Session 1**: since this directory has no `pyproject.toml`, the root `pyproject.toml`'s `tool.uv.workspace.members = ["libs/*", ...]` glob matched it anyway and every `uv run`/unfrozen `uv sync` failed with "missing a pyproject.toml" — unnoticed for the whole of Phase 48-49 since no session between P48-S1 and P50-S1 needed to run a backend Python test. Fixed via an explicit `tool.uv.workspace.exclude = ["libs/dms-ui"]` in the root `pyproject.toml`.
+- `dms-showcase/` is **not Python** either. It holds faux-UI illustrations (login pages, empty states,
+  docs hero) built with the vendored Stageshow React kit (Phase 83 Session 2,
+  [ADR 0237](../docs/adr/0237-stageshow-adoption-illustrations-and-craft-lens.md)). Apps import it by
+  relative path like `dms-ui`; see its own [README](dms-showcase/README.md). It was added to the same
+  `tool.uv.workspace.exclude` list in the same session it was created.

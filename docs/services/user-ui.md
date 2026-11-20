@@ -103,6 +103,48 @@ New `app/login/callback/page.tsx`: reads `code`/`state` from the URL, compares `
 
 **Not verifiable in this sandbox**: the actual automatic login via a real Kerberos ticket (no domain controller available here). The existing password form remains fully available as a fallback — no user is locked out by the configuration.
 
+## Login illustration (Phase 83 Session 2, [ADR 0237](../adr/0237-stageshow-adoption-illustrations-and-craft-lens.md))
+
+At viewport widths of 1200px and above, `/login/` shows a 720×400 faux-UI illustration to the left of
+the login card, with their top edges aligned. The illustration plays once and then holds its final frame:
+
+1. A PDF is carried into the folder "Eingangsrechnungen".
+2. An upload row fills.
+3. The row settles.
+4. The server-assigned reference number ("Kennzeichen", see "File-reference-number display" below)
+   grows in before the filename.
+
+It shows only what the product really does. It is built with the vendored Stageshow kit in
+[`libs/dms-showcase`](../../libs/dms-showcase/README.md), and its rehearsal notes are in
+`libs/dms-showcase/user-ui-login/REHEARSAL.md`.
+
+`src/components/LoginIllustration.tsx` is the only host:
+- Below 1200px it renders nothing, and the module is never loaded (`next/dynamic`, `ssr: false`, behind a
+  `matchMedia` gate). The card then stands alone, centered, exactly as before.
+- In the high-contrast theme it renders nothing. It follows `<html data-theme>` via a `MutationObserver`,
+  so a theme switch applies at runtime.
+- Light and dark map onto the kit's themes. The OG Doc accent, font and radii come from `--dms-*`.
+- Under `prefers-reduced-motion` it shows the final frame immediately, still (the kit's `poster`).
+- The whole picture has one German/English text alternative (`login.illustration.alt`, `role="img"`),
+  and its content is `aria-hidden`.
+
+The illustration draws OG Doc's own Explorer pane, in the login card's material, fading out at its
+foot. It is not an OS window. Its pane, breadcrumb-root and upload labels come from the same i18n keys
+the real Explorer uses: `workspace.explorerPanelTitle`, `folderBrowser.rootLabel` and
+`explorer.toggleUpload`. Only the folder name, the three file names and the text alternative live under
+`login.illustration.*`. The reference numbers `2026-114`/`-113`/`-112` are deliberately
+language-independent.
+
+Build wiring for code outside the app dir (ADR 0237, Decision 2):
+- `lucide-react` `0.468.0`.
+- `webpack.resolve.modules` in `next.config.mjs`.
+- `react`/`react-dom`/`lucide-react` tsconfig `paths`.
+- `COPY libs/dms-showcase/` in the Dockerfile.
+
+Tests: `tests/login-illustration.test.tsx` covers the gating rules (narrow, no `matchMedia`, wide light,
+dark, a runtime switch to high contrast), with `next/dynamic` stubbed. The illustration's own motion
+and framing are verified with Stageshow's `film.mjs --gate`, not Vitest.
+
 ## Preview (2.4/3.9, connected to the Rendering Service since P5-S2, additionally to the OCR Service since P5-S3, additionally client-side direct text display since P5d-S2, additionally `substitute_text` rendition display + multi-page navigation since a bugfixing pass after P7-S0, additionally native image/PDF/HTML preview + Word-like view for Office documents since a further user-feedback pass, additionally engine-dependent PDF branching + separate image text extract since an OCR user-feedback pass)
 
 `components/PreviewPane.tsx` first loads the version list (`listDocumentVersions()`) when a document is opened (`useEffect`, dependency `activeDocument?.id`) and sets the selection to `current_version_number`; a second effect (dependency `[activeDocument?.id, selectedVersion, versions]`) decides based on the `content_type` of the selected version (from the same version list, a server-side-sniffed value since P5d-S1 instead of a client header):

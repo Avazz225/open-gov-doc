@@ -25,7 +25,14 @@
     "submitting": "Melde an...",
     "error": "Anmeldung fehlgeschlagen",
     "ssoRedirecting": "Weiterleitung zur Anmeldung...",
-    "ssoError": "Automatische Anmeldung fehlgeschlagen - bitte mit Benutzername/Passwort anmelden."
+    "ssoError": "Automatische Anmeldung fehlgeschlagen - bitte mit Benutzername/Passwort anmelden.",
+    "illustration": {
+      "alt": "Illustration: Eine PDF-Datei wird in den Ordner Eingangsrechnungen gezogen und erhält beim Ablegen automatisch das nächste Kennzeichen.",
+      "folder": "Eingangsrechnungen",
+      "file": "Rechnung_Mai.pdf",
+      "previousFile": "Rechnung_April.pdf",
+      "olderFile": "Rechnung_März.pdf"
+    }
   },
   "share": {
     "heading": "Freigegebenes Dokument",

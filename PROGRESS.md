@@ -2,7 +2,54 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P83-S1 (first session of Phase 83 — UI rework with the Stageshow skill,
+**Last completed:** P83-S2 (second session of Phase 83). It set up `libs/dms-showcase` and built the
+first illustration, on the `user-ui` login page. Full record: `IMPLEMENTATION_PLAN.md`'s P83-S2 entry,
+`libs/dms-showcase/user-ui-login/REHEARSAL.md`, and ADR 0237's P83-S2 amendments.
+
+**What users see:**
+- At ≥ 1200px, OG Doc's own Explorer pane sits left of the login card, in the card's material, its top
+  edge level with the card's, fading out at its foot.
+- A PDF is dropped into "Eingangsrechnungen", the upload row settles, and the server-assigned
+  Kennzeichen "2026-114" grows in before the filename, after the real rows 2026-113/112. It plays once
+  and holds.
+- Below 1200px and in high contrast nothing changes. Reduced motion shows the final frame.
+  Light/dark/DE/EN all work.
+
+**Process:**
+- Developed in the stageshow playground, then moved into `libs/`. The playground copy was deleted, so
+  `libs/dms-showcase` is the only source.
+- A fresh-eye subagent review of the first version found 13 faults, and all were addressed. The largest:
+  a gray plate under the window (a black hole in dark mode), macOS traffic lights on a web product, and a
+  Kennzeichen pill the product doesn't have (the real app renders plain text).
+- Final gate `rehearsal passed`, light and dark, with no excused lines.
+
+**Checks:** `tsc`/`eslint` clean, `vitest` 298/298 (+5 new gating tests in
+`tests/login-illustration.test.tsx`), `next build` via the Docker image. Live in the rebuilt image the
+pane top and card top are both at y=286, every gating rule holds at 1400/1200/1199/390, in
+dark/high-contrast/reduced/EN, and a real login afterwards still works.
+
+**Three things worth knowing for the next sessions:**
+1. **Use `CHROME_PATH=~/.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell`**
+   (Chrome 153), not the `chromium-1140` path from S1. Chromium 130 lacks `text-box` and reports false
+   `ss-button__label` layout lines. The gold calibration was re-run with 153 and gave the same results.
+2. **The gate does not check contrast.** Always film `--dark` and `--still --reduced` and look at the
+   frames. Every `--dms-*` reference in illustration CSS falls back to a kit theme token, never a
+   light-only literal.
+3. **`pyproject.toml`'s `libs/*` uv workspace glob** catches every new folder under `libs/`.
+   `libs/dms-showcase` was added to `tool.uv.workspace.exclude` in this session, before it broke anything
+   (`uv lock --check`/`uv run` verified).
+
+The stack and the playground were stopped afterwards.
+
+**Next session:** **P83-S3** — login illustrations for `admin-ui`, `reviewer-ui`, `process-designer` and
+`migration-console`, per ADR 0237's slot table. Each app needs the same four build additions as
+`user-ui`. Once the second illustration exists, move the shared look block into
+`libs/dms-showcase/look-ogdoc.css`. Reuse each app's own i18n keys for labels the real UI already has.
+The session may split in two if it runs long.
+
+---
+
+**Immediately before:** P83-S1 (first session of Phase 83 — UI rework with the Stageshow skill,
 user-requested). This was an assessment-only session: no app code was changed. Its outputs are
 [ADR 0237](docs/adr/0237-stageshow-adoption-illustrations-and-craft-lens.md) and the 13-item punch list in
 `IMPLEMENTATION_PLAN.md`'s P83-S1 entry.
@@ -56,12 +103,7 @@ apps, so this is recorded but **not scheduled** until the user decides whether p
 
 The audit stack was stopped again afterwards. No tests were run, because no code changed.
 
-**Next session:** **P83-S2** — create `libs/dms-showcase/` (vendored kit from the pinned commit without
-`kit/brands/`, `look-ogdoc.css` token mapping) and wire it into `user-ui` (the four additions from
-ADR 0237). Then build the `user-ui` login illustration: corner bleed; story upload → class chip →
-"Freigegeben"; ≥ 1024px only; hidden in high-contrast; poster under reduced motion. Develop it via the
-stageshow playground (`examples/<name>/`, `?capture=`), gate it per ADR 0237, and put `REHEARSAL.md`
-beside it.
+**Next session (at the time):** P83-S2. It was done next; see the entry above.
 
 ---
 

@@ -11,6 +11,9 @@ COPY apps/user-ui/package.json apps/user-ui/package-lock.json* apps/user-ui/
 RUN npm install --prefix apps/user-ui
 COPY apps/user-ui/ apps/user-ui/
 COPY libs/dms-ui/ libs/dms-ui/
+# Login illustration (P83-S2, ADR 0237): same mirrored-layout principle, the
+# relative import in src/components/LoginIllustration.tsx resolves unchanged.
+COPY libs/dms-showcase/ libs/dms-showcase/
 # Gateway-Adresse zur Build-Zeit fest einbrennen (kein Server, der es später
 # nachladen könnte) - überschreibbar über einen Build-Arg.
 ARG NEXT_PUBLIC_GATEWAY_BASE_URL=http://localhost:8009

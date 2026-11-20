@@ -1,0 +1,278 @@
+/* OG Doc's Explorer pane on the page itself. Fade crop: no plate (the page is
+   the ground), the pane whole at the top and sides, dissolving at its foot
+   through a mask on a wrapper that leaves room for the pane's shadow.
+
+   The look maps the kit's tokens and the pane's material onto OG Doc's
+   --dms-* tokens, so the pane is the same material as the login card beside
+   it in every theme. Fallbacks = OG Doc's light theme, for the playground,
+   where --dms-* is undefined. */
+
+.og-login .ss-stage {
+  --ss-accent: var(--dms-accent, #2563eb);
+  --ss-accent-soft: var(--dms-accent-bg, rgba(37, 99, 235, 0.15));
+  --ss-font: var(--dms-font-family, system-ui, -apple-system, 'Segoe UI', sans-serif);
+  --ss-radius-sm: 4px;
+  --ss-radius-md: 6px;
+  --ss-radius-lg: 8px;
+  /* Fallbacks follow the kit's own theme tokens, so a dark stage in the
+     playground (no --dms-* there) is dark too, never white under light ink */
+  --og-surface: var(--dms-surface, var(--ss-surface));
+  --og-border: var(--dms-border, var(--ss-line));
+  overflow: hidden;
+  background: transparent;
+}
+
+.og-login .og-mask {
+  position: absolute;
+  inset: 0;
+  padding: 24px 24px 0;
+  mask-image: linear-gradient(to bottom, #000 60%, transparent 97%);
+}
+
+.og-login .og-pane {
+  height: 460px;
+  overflow: hidden;
+  border: 1px solid var(--og-border);
+  border-radius: 8px;
+  background: var(--og-surface);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+/* ---- The pane's tab strip and its bar: breadcrumb and upload ---- */
+
+.og-login .og-tabs {
+  display: flex;
+  height: 34px;
+  /* The tab's text shares the breadcrumb's 16px left edge */
+  padding: 0 16px;
+  border-bottom: 1px solid var(--og-border);
+}
+
+.og-login .og-tab {
+  display: flex;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ss-text-strong);
+  box-shadow: inset 0 -2px 0 var(--ss-accent);
+}
+
+/* Text on a solid accent fill takes OG Doc's own --dms-accent-fg (ADR 0219:
+   white on dark theme's #60a5fa fails contrast), not the kit's fixed white */
+.og-login .ss-button[data-variant="primary"],
+.og-login .og-drag__name {
+  color: var(--dms-accent-fg, #fff);
+}
+
+.og-login .og-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px 8px;
+}
+
+.og-login .og-crumbs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.og-login .og-crumb {
+  color: var(--ss-text);
+}
+
+.og-login .og-crumb-sep {
+  flex: none;
+  color: var(--ss-icon-faint);
+}
+
+.og-login .og-heading {
+  font-weight: 600;
+  color: var(--ss-text-strong);
+}
+
+/* ---- List ---- */
+
+.og-login .og-rows {
+  position: relative;
+  min-height: 600px;
+  margin: 0 8px;
+  border-radius: 6px;
+  transition: box-shadow 0.15s ease, background-color 0.15s ease;
+}
+
+/* The list lights up while the file is carried over it */
+.og-login .og-rows[data-over] {
+  background: color-mix(in srgb, var(--ss-accent) 5%, transparent);
+  box-shadow: inset 0 0 0 2px var(--ss-accent);
+}
+
+.og-login .og-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: 40px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+.og-login .og-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.og-login .og-name__text {
+  white-space: nowrap;
+  color: var(--ss-text-strong);
+}
+
+.og-login .og-doc {
+  flex: none;
+  color: var(--ss-icon-faint);
+}
+
+/* The new document's icon at full strength: the one row the story is about */
+.og-login .og-doc--new {
+  color: var(--ss-icon);
+}
+
+.og-login .og-kz-static {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: var(--ss-text);
+}
+
+/* The new reference number: plain text as the product shows it, in the
+   accent and one weight up, opening its own width (0fr -> 1fr) so the
+   filename slides aside while it fades in */
+.og-login .og-kz {
+  display: inline-grid;
+  grid-template-columns: 0fr;
+  opacity: 0;
+  transition: grid-template-columns 0.45s cubic-bezier(0.3, 0.6, 0.3, 1), opacity 0.3s ease 0.12s;
+}
+
+.og-login .og-kz[data-show] {
+  grid-template-columns: 1fr;
+  opacity: 1;
+}
+
+.og-login .og-kz__inner {
+  overflow: hidden;
+  white-space: nowrap;
+  /* The 8px gap lives inside, so a closed number takes no space at all */
+  padding-right: 0;
+  margin-right: -8px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--ss-accent);
+}
+
+.og-login .og-kz[data-show] .og-kz__inner {
+  margin-right: 0;
+}
+
+.og-login .og-actions {
+  display: flex;
+  gap: 8px;
+  flex: none;
+}
+
+/* ---- The upload row: tinted while it uploads, plain once it lands ---- */
+
+.og-login .og-new {
+  background: color-mix(in srgb, var(--ss-accent) 7%, var(--og-surface));
+  transition: background-color 0.6s ease;
+}
+
+.og-login .og-new[data-done] {
+  background: transparent;
+}
+
+.og-login .og-track {
+  width: 76px;
+  background: color-mix(in srgb, var(--ss-accent) 18%, var(--og-surface));
+}
+
+.og-login .og-track .ss-meter__fill {
+  background: var(--ss-accent);
+  transition-duration: 0.5s;
+  transition-timing-function: cubic-bezier(0.3, 0.6, 0.3, 1);
+}
+
+/* ---- The drag image: a small PDF page and its name on a selection pill ---- */
+
+.og-login .og-drag {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 30;
+  pointer-events: none;
+  opacity: 0;
+  will-change: transform;
+}
+
+/* Opaque: nothing translucent overlaps (craft.md, Color) */
+.og-login .og-drag[data-show] {
+  opacity: 1;
+  transition: opacity 0.18s ease-out;
+}
+
+.og-login .og-drag__inner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  will-change: transform;
+}
+
+.og-login .og-drag[data-dropped] {
+  opacity: 0;
+  transition: opacity 0.22s ease-in;
+}
+
+.og-login .og-drag[data-dropped] .og-drag__inner {
+  transform: scale(0.6);
+  transform-origin: 22px 20px;
+  transition: transform 0.24s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.og-login .og-pdf {
+  position: relative;
+  display: block;
+  flex: none;
+  width: 30px;
+  height: 38px;
+  border-radius: 3px;
+  background: #fff;
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.16), 0 2px 6px -2px rgba(0, 0, 0, 0.22);
+}
+
+.og-login .og-pdf__band {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 7px;
+  background: #e5484d;
+  color: #fff;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 11px;
+  text-align: center;
+}
+
+.og-login .og-drag__name {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--ss-accent);
+  white-space: nowrap;
+  line-height: 1.35;
+}

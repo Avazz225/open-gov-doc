@@ -25,7 +25,14 @@
     "submitting": "Logging in...",
     "error": "Login failed",
     "ssoRedirecting": "Redirecting to sign-in...",
-    "ssoError": "Automatic login failed - please log in with username/password."
+    "ssoError": "Automatic login failed - please log in with username/password.",
+    "illustration": {
+      "alt": "Illustration: a PDF file is dragged into the Incoming invoices folder and is automatically given the next reference number when it is filed.",
+      "folder": "Incoming invoices",
+      "file": "Invoice_May.pdf",
+      "previousFile": "Invoice_April.pdf",
+      "olderFile": "Invoice_March.pdf"
+    }
   },
   "share": {
     "heading": "Shared document",
