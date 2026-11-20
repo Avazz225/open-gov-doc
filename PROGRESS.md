@@ -2,7 +2,37 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P83-S8 (eighth session of Phase 83): the stale Playwright e2e specs are repaired.
+**Last completed:** P83-S9 (ninth session of Phase 83): narrow-width assessment and
+[ADR 0238](docs/adr/0238-narrow-width-patterns-for-all-apps.md). No code changed.
+
+**Measured:** 34 main views of all six apps at 390 and 768 px. 22 scroll the whole page sideways
+(admin-ui 7/7 at 390, reviewer-ui 4/4 even at 768, migration-console 2/2 at 390, process-designer's list
+at both). user-ui doesn't overflow, but dockview squeezes three panes into 390 px. office-addin and every
+login are fine.
+
+**Decided (ADR 0238):**
+- Narrow means below 768 px.
+- The header cluster becomes an account menu, and tabs get their own scrolling strip.
+- admin-ui's sidebar becomes a drawer; user-ui keeps its icon rail.
+- Tables sit in a shared scroll container. They stack into cards only for reviewer-ui tasks/approvals and
+  user-ui approvals.
+- user-ui switches to a single-pane mode, and process-designer's properties panel becomes a toggle.
+- Forms go to one column; targets are ≥ 40 px.
+- No compact login illustration.
+
+**Found (→ S11):** reviewer-ui's approval inbox shows raw action types, and its task list shows full
+UUIDs.
+
+**Open:** the suspected permission-cache race from S8 and reviewer-ui's principal-name lookup. The stack
+was stopped afterwards.
+
+**Next session:** **P83-S10**, shared foundation (scroll container in `libs/dms-ui`) plus
+migration-console and process-designer at narrow widths (account menu, tab strip, properties toggle).
+Then S11 reviewer-ui, S12 admin-ui, S13 user-ui, S14 hero + phase close.
+
+---
+
+Earlier P83-S8 summary, kept for context (eighth session of Phase 83): the stale Playwright e2e specs are repaired.
 All six suites pass against the stack, 27/27 (user-ui 3, admin-ui 7, process-designer 6,
 migration-console 4, reviewer-ui 5, office-addin 2). Full record: `IMPLEMENTATION_PLAN.md`'s P83-S8
 entry.
@@ -22,7 +52,7 @@ fresh role grant intermittently did not apply, probably because a concurrent log
 cache row after the invalidation. Backend issue, recorded for the next gap replan. reviewer-ui's
 principal-name lookup is still open from S7. The stack was stopped afterwards.
 
-**Next session:** **P83-S9**, narrow-width/mobile assessment + ADR (ADR 0237 Decision 6): screenshot every
+**Next session (at the time):** P83-S9. It was done next; see the entry above. Original note:, narrow-width/mobile assessment + ADR (ADR 0237 Decision 6): screenshot every
 app at 390/768px and decide the shared patterns (sidebar → drawer, dockview panes → stacked/tabbed,
 tables → scroll vs stacked rows).
 

@@ -3205,18 +3205,36 @@ work has to be read against that baseline (see DoD).
   - **Found and recorded, not fixed here:** the suspected effective-permission cache race in
     permission-service (an invalidation can be overwritten by a concurrent recompute). It is a backend
     correctness issue outside a UI phase; candidate for the next gap replan.
-- **P83-S9 — Narrow-width/mobile assessment + ADR (user decision 2026-11-20)**: screenshot every app at
-  390/768px and decide the patterns once, for all apps:
-  - sidebar → drawer/top navigation;
-  - `user-ui`'s dockview three-pane layout → stacked or tabbed panes on narrow screens;
-  - tables → scroll container vs stacked rows;
-  - the shared header cluster.
+- **P83-S9 — Narrow-width/mobile assessment + ADR (user decision 2026-11-20)**: ✅ **Done.**
+  → [ADR 0238](docs/adr/0238-narrow-width-patterns-for-all-apps.md).
+  - **Measured:** 34 main views of all six apps at 390 × 844 and 768 × 1024, page overflow
+    (`scrollWidth` vs. viewport). 22 scroll sideways: admin-ui 7/7 at 390 (sidebar keeps 245 px),
+    reviewer-ui 4/4 at both widths (header cluster on the tab row, tables with row buttons),
+    migration-console 2/2 at 390, process-designer's list at both widths. user-ui doesn't overflow but
+    dockview squeezes three panes into 390 px. office-addin and all logins are fine.
+  - **Decided:** narrow = below 768 px (`md`); the header cluster becomes an account menu, tabs get
+    their own scrolling strip; admin-ui's sidebar becomes a drawer, user-ui keeps its rail; tables sit in
+    a shared scroll container (`libs/dms-ui` CSS) and stack into cards only where the phone task is the
+    row (reviewer-ui tasks/approvals, user-ui approvals); user-ui gets a single-pane mode instead of
+    dockview; process-designer's properties panel becomes a toggled sheet; forms go one column below
+    640 px; ≥ 40 px targets narrow. **No compact login illustration** (ADR 0238 Decision 8).
+  - **Found on the way (→ S11):** reviewer-ui's approval inbox shows raw action types
+    (`auth.ad_group_mapping.default_role_set`), missed by S7's item 6, and the task list shows full UUIDs
+    as the related object.
+  - No code changed in this session.
+- **P83-S10 — Narrow widths: shared foundation + `migration-console` + `process-designer`** (ADR 0238):
+  the scroll-container class in `libs/dms-ui`; account-menu header and tab strip in both apps;
+  process-designer's properties-panel toggle.
+- **P83-S11 — Narrow widths: `reviewer-ui`**: account menu, stacked task/approval rows, translated action
+  types, short related-object ids.
+- **P83-S12 — Narrow widths: `admin-ui`**: sidebar drawer, account menu, scroll containers on all tables,
+  one-column forms.
+- **P83-S13 — Narrow widths: `user-ui`**: single-pane mode instead of dockview below 768 px, narrow header,
+  stacked approval rows.
 
-  Also decide whether the login illustrations' ≥ 1200px rule needs a compact variant then. The result
-  is an ADR and a per-app session list.
-- **P83-S10+ — Narrow-width/mobile implementation**: per the S9 ADR, small apps first, then `user-ui` and
-  `admin-ui` in their own sessions. Each session gets live screenshots at 390/768/1400px.
-- **P83-Sn (last) — Docs/README hero + phase close**: an OG Doc hero still (and optionally a loop) for
+  Each of S10–S13: live screenshots at 390/768/1400 px before and after, the overflow measurement re-run
+  with no page overflow left in that app, and one narrow-viewport e2e check.
+- **P83-S14 (last) — Docs/README hero + phase close**: an OG Doc hero still (and optionally a loop) for
   `README.md`/docs, exported via `film.mjs --still`; then the phase-close regression and the whole-plan
   `graphify update .`.
 
