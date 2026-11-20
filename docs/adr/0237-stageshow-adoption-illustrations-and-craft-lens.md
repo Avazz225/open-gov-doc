@@ -195,6 +195,8 @@ What this means here:
 - The illustrations keep their current rules until S9 decides otherwise. Logins render only at ≥ 1200px,
   so the card stands alone on small screens; empty-state stills are gated by pane width. S9 re-checks
   whether a narrow login should get a `compact` illustration.
+- **Docs hero built in P83-S14** (`libs/dms-showcase/readme-hero/`, PNGs in `docs/assets/`, shown in
+  `README.md`), with a real compact design. That closes Decision 4's slot list.
 - **Settled in P83-S9 by [ADR 0238](0238-narrow-width-patterns-for-all-apps.md):** the narrow-width
   patterns for all apps and their sessions (P83-S10–S13); no compact login illustration.
 

@@ -2,7 +2,42 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P83-S13 (thirteenth session of Phase 83): user-ui at narrow widths. This completes
+**Last completed:** P83-S14, the last session of Phase 83. **Phase 83 is closed.** Full record:
+`IMPLEMENTATION_PLAN.md`'s P83-S14 entry and "Phase 83 result".
+
+**What changed:**
+- **README hero.** A still of the documents workspace (selected invoice with Kennzeichen, preview,
+  "Signatur gültig · SES") in `libs/dms-showcase/readme-hero/`. It is exported light/dark ×
+  wide/compact into `docs/assets/` and shown through a `<picture>` at the top of `README.md`. All four
+  pass the gate, and the fresh-eye review's 7 points are addressed (`REHEARSAL.md`).
+
+**Phase-close checks:**
+- **Backend regression** (`scripts/run-tests.sh`, once): 31/32 OK.
+  - workflow-service had 1 flaky failure in the full run and is 238/238 alone. Phase 83 changed no
+    backend code.
+  - ruff: the same pre-existing files as at every phase close.
+- **e2e:** all six suites, 32/32.
+- **`graphify update .`:** done (21,214 nodes).
+
+**Environment notes:**
+- `~/.local/bin` (uv, graphify) is not on this shell's PATH, so prefix it when running
+  `scripts/run-tests.sh`.
+- graphify's uv venv broke after the system Python upgrade and was reinstalled at 0.9.6.
+
+**Open (carried over):**
+- The suspected effective-permission cache race in permission-service (S8).
+- reviewer-ui's principal-name lookup ("Beantragt von").
+- The flaky workflow-service federation test in full runs.
+- Whether GitHub honors the `<picture>` width query. The wide light image is the fallback.
+
+The stack was stopped afterwards.
+
+**Next session:** none planned. Phase 83 was the last phase in `IMPLEMENTATION_PLAN.md`. A next step needs
+a new phase or a gap replan, for which the open points above are candidates.
+
+---
+
+Earlier P83-S13 summary, kept for context (thirteenth session of Phase 83): user-ui at narrow widths. This completes
 ADR 0238's implementation for all apps. Full record: `IMPLEMENTATION_PLAN.md`'s P83-S13 entry and the
 matching section in `docs/services/user-ui.md`.
 
@@ -27,7 +62,7 @@ matching section in `docs/services/user-ui.md`.
 
 The stack was stopped afterwards.
 
-**Next session:** **P83-S14 (last)**, the README hero and phase close:
+**Next session (at the time):** P83-S14. It was done next; see the entry above. Original note:, the README hero and phase close:
 - an OG Doc hero still for `README.md`/docs via `film.mjs --still` (optionally a loop);
 - the phase-close full regression (`scripts/run-tests.sh`, unfiltered, once);
 - all six e2e suites;

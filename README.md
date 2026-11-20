@@ -2,6 +2,15 @@
 
 This repository contains the implementation of the following system: an audit-proof, distributed DMS built as a microservice architecture (Python/FastAPI-first, Postgres with schema-per-service, event bus, plugin/connector extensibility).
 
+<picture>
+  <source media="(max-width: 600px) and (prefers-color-scheme: dark)" srcset="docs/assets/og-doc-hero-compact-dark.png">
+  <source media="(max-width: 600px)" srcset="docs/assets/og-doc-hero-compact-light.png">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/og-doc-hero-dark.png">
+  <img src="docs/assets/og-doc-hero-light.png" width="960" alt="OG Doc's documents workspace: an invoice folder in the Explorer with the selected document 2026-114 Rechnung_Mai.pdf, its preview beside it, and a card confirming its electronic signature is valid (SES).">
+</picture>
+
+<sub>OG Doc's documents workspace, an illustration: filed, numbered, previewed, signed. Built with <a href="libs/dms-showcase/README.md"><code>libs/dms-showcase</code></a>.</sub>
+
 ## Entry points
 
 | Document | Purpose |

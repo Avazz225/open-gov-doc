@@ -24,6 +24,7 @@ package, no workspace tooling.
 | `migration-console-login/` | `migration-console` login illustration (P83-S3): a finished transfer and its timeline |
 | `user-ui-empty-preview/` | `user-ui` empty preview pane still (P83-S4): a selected row and the page it opens; wordless, unframed |
 | `user-ui-empty-vorlagen/` | `user-ui` empty Vorlagen still (P83-S4): a folder subtree and the template captured from it; wordless, unframed |
+| `readme-hero/` | README/docs hero still (P83-S14): the documents workspace with a selected, numbered invoice, its preview and a valid signature; wide and compact, exported as PNGs to `docs/assets/` |
 
 Every Stage sets `className="og og-<name>"`. **`look-ogdoc.css`** (scope `.og`) holds what all
 illustrations share (ADR 0237, Decision 3 as amended):

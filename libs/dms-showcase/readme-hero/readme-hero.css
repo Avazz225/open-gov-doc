@@ -1,0 +1,264 @@
+/* README/docs hero still (P83-S14). Token mapping, fade-crop frame, pane
+   chrome, rows and the satellite card come from ../look-ogdoc.css (the
+   Stage carries className="og og-hero"); this file holds the workspace's
+   two groups, the invoice page and the signature card. */
+
+/* The workspace: two dockview groups side by side, a rule between. It runs
+   ~120px past the stage's right edge (the mask is widened there), so only
+   the preview's well bleeds and no empty corner is left. */
+.og-hero .og-mask {
+  right: -120px;
+}
+
+.og-hero .og-hero__workspace {
+  display: flex;
+}
+
+.og-hero .og-hero__group {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.og-hero .og-hero__explorer {
+  width: 400px;
+  flex: none;
+  border-right: 1px solid var(--og-border);
+}
+
+.og-hero .og-hero__preview {
+  flex: 1;
+}
+
+/* The selected row, on the accent's soft fill as in the product */
+.og-hero .og-hero__selected {
+  background: var(--ss-accent-soft);
+}
+
+/* Reference numbers in plain text before the filename (lib/kennzeichen.ts) */
+.og-hero .og-hero__kz {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: var(--ss-text);
+}
+
+.og-hero .og-hero__kz--on {
+  font-weight: 600;
+  color: var(--ss-accent);
+}
+
+.og-hero .og-tab {
+  gap: 8px;
+}
+
+.og-hero .og-hero__close {
+  flex: none;
+  color: var(--ss-icon-faint);
+}
+
+.og-hero .og-hero__preview-head {
+  border-bottom: 1px solid var(--og-border);
+  padding-bottom: 12px;
+}
+
+.og-hero .og-hero__version {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+/* A select in the product's field material */
+.og-hero .og-hero__select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px 0 10px;
+  border: 1px solid var(--og-border);
+  border-radius: 6px;
+  color: var(--ss-text-strong);
+}
+
+.og-hero .og-hero__vendor {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ss-text-strong);
+}
+
+.og-hero .og-hero__invoice-no {
+  font-size: 11px;
+  color: var(--ss-text);
+}
+
+.og-hero .og-hero__amount {
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--ss-text-strong);
+}
+
+/* The preview: a page on the pane's well, one gutter at the left and top,
+   running off the bottom into the fade */
+.og-hero .og-hero__stage {
+  flex: 1;
+  overflow: hidden;
+  padding: 24px 0 0 24px;
+  background: var(--ss-canvas);
+}
+
+.og-hero .og-hero__page {
+  display: flex;
+  width: 224px;
+  flex-direction: column;
+  gap: 8px;
+  padding: 22px 20px;
+  border-radius: 4px;
+  background: var(--og-surface);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08), 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+
+.og-hero .og-hero__letterhead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.og-hero .og-hero__rule {
+  height: 1px;
+  margin: 12px 0 4px;
+  background: var(--og-border);
+}
+
+/* Label and amount: the amount at the page's right edge */
+.og-hero .og-hero__item {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+}
+
+/* The satellite: over the preview's well beside the page, a gutter from the
+   page and from the stage's right edge, below the head - it covers only the
+   empty well, never the page or the selection */
+.og-hero .og-hero__card {
+  top: 196px;
+  right: 24px;
+  width: 248px;
+  padding: 14px 16px 12px;
+}
+
+.og-hero .og-hero__card-head {
+  margin-bottom: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ss-text);
+}
+
+.og-hero .og-hero__verdict {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.og-hero .og-hero__shield {
+  flex: none;
+  color: var(--dms-success, #16a34a);
+}
+
+.og-hero .og-hero__valid {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ss-text-strong);
+}
+
+/* The signature level as a quiet pill after the verdict */
+.og-hero .og-hero__level {
+  margin-left: auto;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--ss-accent-soft);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ss-accent);
+}
+
+.og-hero .og-hero__card-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-top: 1px solid var(--og-border);
+}
+
+/* The README is the host page (ADR 0237: the page is the ground). The hero
+   is exported as a PNG per color scheme and never mounted in an app, so it
+   carries the README's ground itself - GitHub's page colors - and OG Doc's
+   own token values from libs/dms-ui/tokens.css (the playground it is filmed
+   in defines no --dms-* at all, which would leave the dark render on the
+   light accent). */
+.og-hero .ss-stage {
+  --dms-accent: #2563eb;
+  --dms-accent-bg: rgba(37, 99, 235, 0.15);
+  --dms-accent-fg: #ffffff;
+  --dms-success: #16a34a;
+  background: #ffffff;
+}
+
+.og-hero .ss-stage[data-theme="dark"] {
+  --dms-accent: #60a5fa;
+  --dms-accent-bg: rgba(96, 165, 250, 0.2);
+  --dms-accent-fg: #0b1220;
+  --dms-success: #4ade80;
+  background: #0d1117;
+}
+
+/* ---- Compact (358 x 420): the Explorer group alone, the card on its right
+   edge over the filler rows. One 16px gutter at the left and top; the mask
+   keeps 56px free on the right for the card to straddle. ---- */
+.og-hero [data-layout="compact"] .og-mask {
+  right: 0;
+  padding: 16px 80px 0 16px;
+}
+
+.og-hero [data-layout="compact"] .og-hero__preview,
+.og-hero [data-layout="compact"] .og-hero__root {
+  display: none;
+}
+
+.og-hero [data-layout="compact"] .og-hero__explorer {
+  width: auto;
+  flex: 1;
+  border-right: 0;
+}
+
+.og-hero [data-layout="compact"] .og-hero__card {
+  top: 272px;
+  right: 16px;
+  width: 208px;
+}
+
+/* The folder name and a labelled button don't fit 286px together; compact
+   keeps the button as its icon (the product's upload glyph reads alone) */
+.og-hero [data-layout="compact"] .og-bar .ss-button__label {
+  display: none;
+}
+
+.og-hero .og-hero__total {
+  margin-top: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--og-border);
+}
+
+.og-hero .og-hero__footer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 22px;
+}
+
+/* Labels on the page at the page's own small size, not the row size */
+.og-hero .og-hero__page .og-meta {
+  font-size: 12px;
+}

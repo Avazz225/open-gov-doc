@@ -3326,9 +3326,43 @@ work has to be read against that baseline (see DoD).
 
   Each of S10–S13: live screenshots at 390/768/1400 px before and after, the overflow measurement re-run
   with no page overflow left in that app, and one narrow-viewport e2e check.
-- **P83-S14 (last) — Docs/README hero + phase close**: an OG Doc hero still (and optionally a loop) for
-  `README.md`/docs, exported via `film.mjs --still`; then the phase-close regression and the whole-plan
-  `graphify update .`.
+- **P83-S14 (last) — Docs/README hero + phase close**: ✅ **Done. Closes Phase 83.**
+  - **Hero still** (`libs/dms-showcase/readme-hero/`, `REHEARSAL.md` beside it). It shows the documents
+    workspace: the selected, numbered invoice in the Explorer, its preview with vendor, number and total,
+    and a "Signatur gültig · SES" card over the preview's well.
+    - Wide 960 × 440 (gold `static-card`, wide-hero framing, workspace off the right edge, fade at the
+      foot) and a real compact design at 358 × 420.
+    - Exported light/dark × wide/compact into `docs/assets/` (`film.mjs --still --pad 0`, 2×) and shown in
+      `README.md` through a `<picture>` (`prefers-color-scheme` plus `max-width: 600px`).
+    - The stage carries GitHub's page colors and OG Doc's `--dms-*` values, because the playground has
+      none.
+  - **Hero checks:**
+    - all four captures end `rehearsal passed`;
+    - the gate drove the fixes for a floating page, a tangent tab, a container-like block and a shrunk
+      wide design at 390;
+    - a fresh-eye review found 7 points, all addressed (see `REHEARSAL.md`);
+    - typechecks clean against user-ui's React types.
+  - **Phase-close regression** (`scripts/run-tests.sh`, unfiltered, once): 31/32 services OK.
+    - workflow-service had 1 of 238 failing in the full run
+      (`test_dispatch_records_delivery_failed_for_unreachable_target`, "unknown target"). Re-run alone it
+      is 238/238, so it is order/state-dependent and flaky, not a regression; Phase 83 changed no backend
+      code (empty diff under `services/`).
+    - ruff/ruff format fail on the same pre-existing files noted at every phase close (`libreoffice-addin`,
+      the loadtest notebook, a few `logger.warning` line lengths), untouched by this phase.
+  - **e2e, all six suites:** user-ui 4, admin-ui 8, process-designer 7, migration-console 5, reviewer-ui 6,
+    office-addin 2 (32/32).
+  - **`graphify update .`** run once, at the end of the whole plan: 21,214 nodes, 33,991 edges, 4,501
+    communities. The graphify `uv` tool venv had broken after a system Python upgrade (3.12 venv, 3.14
+    interpreter), so it was reinstalled at the same version (`uv tool install --reinstall
+    graphifyy==0.9.6`).
+
+**Phase 83 result:**
+- Five login illustrations and two empty-state stills.
+- The craft-lens punch list applied across all six apps.
+- Stale e2e specs repaired, with temporary role grants instead of manual ones.
+- Narrow widths supported in all apps (ADR 0238): no page overflow at 390/768px anywhere, a drawer in
+  admin-ui, a single-pane workspace in user-ui, stacked rows in reviewer-ui.
+- A README hero.
 
 **Definition of Done for Phase 83**: standing rules from `CONTRIBUTING.md` (frontend `tsc`/`eslint`/
 `vitest`/`next build` per touched app; `PROGRESS.md` per session; `docs/` current). In addition:
