@@ -77,7 +77,9 @@
     "savePendingApproval": "Submitted for approval - a second admin must confirm the import before the process definition becomes active.",
     "saveError": "Failed to save",
     "importError": "Import failed - BPMN file could not be read",
-    "loadError": "Process definition could not be loaded"
+    "loadError": "Process definition could not be loaded",
+    "showProperties": "Show properties",
+    "hideProperties": "Hide properties"
   },
   "dmnList": {
     "heading": "DMN decision tables",
@@ -104,5 +106,8 @@
     "levelSes": "SES",
     "levelAes": "AES",
     "levelQes": "QES"
+  },
+  "account": {
+    "menuLabel": "Account: {name}"
   }
 }

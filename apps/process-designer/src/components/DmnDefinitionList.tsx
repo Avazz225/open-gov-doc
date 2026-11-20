@@ -103,8 +103,8 @@ export function DmnDefinitionList() {
   const td = "border-b border-border px-2 py-2 text-left";
 
   return (
-    <section className="mx-auto max-w-[1100px] p-6">
-      <div className="flex items-center justify-between border-b border-border px-6 py-3">
+    <section className="mx-auto max-w-[1100px] p-4 md:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border py-3 md:px-6">
         <h1>{t("dmnList.heading")}</h1>
         <Link href="/dmn-designer/">
           <button type="button" className={secondaryBtn}>
@@ -123,128 +123,131 @@ export function DmnDefinitionList() {
       {definitions.length === 0 ? (
         <p className="italic opacity-70">{t("dmnList.empty")}</p>
       ) : (
-        <table className="mb-6 w-full border-collapse">
-          <thead>
-            <tr>
-              <th className={th}>{t("processList.nameColumn")}</th>
-              <th className={th}>{t("processList.versionColumn")}</th>
-              <th className={th}>{t("dmnList.decisionIdColumn")}</th>
-              <th className={th}>{t("processList.updatedColumn")}</th>
-              <th className={th}>{t("processList.actionsColumn")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {definitions.map((definition) => (
-              <Fragment key={definition.id}>
-                <tr>
-                  <td className={td}>{definition.name}</td>
-                  <td className={td}>{definition.version}</td>
-                  <td className={td}>{definition.decision_id}</td>
-                  <td className={`${td} whitespace-nowrap`}>{new Date(definition.updated_at).toLocaleString()}</td>
-                  <td className={`${td} flex flex-wrap gap-3`}>
-                    <Link href={`/dmn-designer/?id=${definition.id}`}>
-                      <button type="button" className={secondaryBtn}>
-                        {t("common.open")}
-                      </button>
-                    </Link>
-                    <button
-                      type="button"
-                      onClick={() => toggleHistory(definition.name)}
-                      className={secondaryBtn}
-                    >
-                      {expandedName === definition.name
-                        ? t("processList.historyToggleHide")
-                        : t("processList.historyToggleShow")}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => toggleReferences(definition.id)}
-                      className={secondaryBtn}
-                    >
-                      {expandedReferencesId === definition.id
-                        ? t("dmnList.referencesToggleHide")
-                        : t("dmnList.referencesToggleShow")}
-                    </button>
-                    {canManage && (
+        <div className="dms-scroll-x mb-6">
+          {/* Contained scroll, the page never scrolls sideways (P83-S10, ADR 0238 Decision 4) */}
+          <table className="w-full border-collapse">
+            <thead>
+              <tr>
+                <th className={th}>{t("processList.nameColumn")}</th>
+                <th className={th}>{t("processList.versionColumn")}</th>
+                <th className={th}>{t("dmnList.decisionIdColumn")}</th>
+                <th className={th}>{t("processList.updatedColumn")}</th>
+                <th className={th}>{t("processList.actionsColumn")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {definitions.map((definition) => (
+                <Fragment key={definition.id}>
+                  <tr>
+                    <td className={td}>{definition.name}</td>
+                    <td className={td}>{definition.version}</td>
+                    <td className={td}>{definition.decision_id}</td>
+                    <td className={`${td} whitespace-nowrap`}>{new Date(definition.updated_at).toLocaleString()}</td>
+                    <td className={`${td} flex flex-wrap gap-3`}>
+                      <Link href={`/dmn-designer/?id=${definition.id}`}>
+                        <button type="button" className={secondaryBtn}>
+                          {t("common.open")}
+                        </button>
+                      </Link>
                       <button
                         type="button"
-                        onClick={() => handleDelete(definition.id)}
+                        onClick={() => toggleHistory(definition.name)}
                         className={secondaryBtn}
                       >
-                        {t("common.delete")}
+                        {expandedName === definition.name
+                          ? t("processList.historyToggleHide")
+                          : t("processList.historyToggleShow")}
                       </button>
-                    )}
-                  </td>
-                </tr>
-                {expandedReferencesId === definition.id && (
-                  <tr key={`${definition.id}-references`}>
-                    <td colSpan={5} className="px-2 py-2">
-                      <strong>{t("dmnList.referencesHeading")}</strong>
-                      {references.length === 0 ? (
-                        <p className="italic opacity-70">{t("dmnList.referencesEmpty")}</p>
-                      ) : (
+                      <button
+                        type="button"
+                        onClick={() => toggleReferences(definition.id)}
+                        className={secondaryBtn}
+                      >
+                        {expandedReferencesId === definition.id
+                          ? t("dmnList.referencesToggleHide")
+                          : t("dmnList.referencesToggleShow")}
+                      </button>
+                      {canManage && (
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(definition.id)}
+                          className={secondaryBtn}
+                        >
+                          {t("common.delete")}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                  {expandedReferencesId === definition.id && (
+                    <tr key={`${definition.id}-references`}>
+                      <td colSpan={5} className="px-2 py-2">
+                        <strong>{t("dmnList.referencesHeading")}</strong>
+                        {references.length === 0 ? (
+                          <p className="italic opacity-70">{t("dmnList.referencesEmpty")}</p>
+                        ) : (
+                          <ul className="m-0 mt-2 list-none p-0">
+                            {references.map((processDefinition) => (
+                              <li
+                                className="flex items-center justify-between gap-2 border-b border-border py-2"
+                                key={processDefinition.id}
+                              >
+                                <span>
+                                  {processDefinition.name} (v{processDefinition.version})
+                                </span>
+                                <span className="flex gap-2">
+                                  <Link href={`/designer/?id=${processDefinition.id}`}>
+                                    <button type="button" className={secondaryBtn}>
+                                      {t("common.open")}
+                                    </button>
+                                  </Link>
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                  {expandedName === definition.name && (
+                    <tr key={`${definition.id}-history`}>
+                      <td colSpan={5} className="px-2 py-2">
+                        <strong>{t("processList.history")}</strong>
                         <ul className="m-0 mt-2 list-none p-0">
-                          {references.map((processDefinition) => (
+                          {history.map((version) => (
                             <li
                               className="flex items-center justify-between gap-2 border-b border-border py-2"
-                              key={processDefinition.id}
+                              key={version.id}
                             >
                               <span>
-                                {processDefinition.name} (v{processDefinition.version})
+                                v{version.version} — {new Date(version.created_at).toLocaleString()}
                               </span>
-                              <span className="flex gap-2">
-                                <Link href={`/designer/?id=${processDefinition.id}`}>
+                              <span className="flex gap-3">
+                                <Link href={`/dmn-designer/?id=${version.id}`}>
                                   <button type="button" className={secondaryBtn}>
                                     {t("common.open")}
                                   </button>
                                 </Link>
+                                {canManage && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDelete(version.id)}
+                                    className={secondaryBtn}
+                                  >
+                                    {t("common.delete")}
+                                  </button>
+                                )}
                               </span>
                             </li>
                           ))}
                         </ul>
-                      )}
-                    </td>
-                  </tr>
-                )}
-                {expandedName === definition.name && (
-                  <tr key={`${definition.id}-history`}>
-                    <td colSpan={5} className="px-2 py-2">
-                      <strong>{t("processList.history")}</strong>
-                      <ul className="m-0 mt-2 list-none p-0">
-                        {history.map((version) => (
-                          <li
-                            className="flex items-center justify-between gap-2 border-b border-border py-2"
-                            key={version.id}
-                          >
-                            <span>
-                              v{version.version} — {new Date(version.created_at).toLocaleString()}
-                            </span>
-                            <span className="flex gap-3">
-                              <Link href={`/dmn-designer/?id=${version.id}`}>
-                                <button type="button" className={secondaryBtn}>
-                                  {t("common.open")}
-                                </button>
-                              </Link>
-                              {canManage && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleDelete(version.id)}
-                                  className={secondaryBtn}
-                                >
-                                  {t("common.delete")}
-                                </button>
-                              )}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    </td>
-                  </tr>
-                )}
-              </Fragment>
-            ))}
-          </tbody>
-        </table>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </section>
   );

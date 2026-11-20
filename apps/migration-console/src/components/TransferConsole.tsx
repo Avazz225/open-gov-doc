@@ -250,86 +250,89 @@ export function TransferConsole() {
       {transfers.length === 0 ? (
         <p className="italic opacity-70">{t("transfers.empty")}</p>
       ) : (
-        <table className="mb-6 w-full border-collapse">
-          <thead>
-            <tr>
-              <th className={th}>{t("transfers.idColumn")}</th>
-              <th className={th}>{t("transfers.sourceColumn")}</th>
-              <th className={th}>{t("transfers.targetColumn")}</th>
-              <th className={th}>{t("transfers.statusColumn")}</th>
-              <th className={th}>{t("transfers.progressColumn")}</th>
-              <th className={th}>{t("transfers.actionsColumn")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {transfers.map((transfer) => (
-              <Fragment key={transfer.id}>
-                <tr>
-                  <td className={td}>{transfer.id.slice(0, 8)}</td>
-                  {/* P83-S7 (item 6): short and monospaced like the id column, the
-                      full folder id on hover - not a raw UUID as content */}
-                  <td className={td}>
-                    <code className="font-mono text-xs opacity-80" title={transfer.source_folder_id}>
-                      {transfer.source_folder_id.slice(0, 8)}
-                    </code>
-                  </td>
-                  <td className={td}>{installationName(transfer.target_installation_id)}</td>
-                  <td className={td}>
-                    <span className={statusBadgeClass(transfer.status)}>{statusLabel(transfer.status)}</span>
-                    {transfer.dry_run && (
-                      <>
-                        {" "}
-                        <span className={`${BADGE_BASE} bg-accent-bg text-accent`}>
-                          {t("transfers.dryRunBadge")}
-                        </span>
-                      </>
-                    )}
-                  </td>
-                  <td className={td}>
-                    {t("transfers.documentsProgress", {
-                      copied: transfer.documents_copied,
-                      total: transfer.documents_total,
-                      verified: transfer.documents_verified,
-                    })}
-                  </td>
-                  <td className={td}>
-                    <button
-                      type="button"
-                      onClick={() => setExpandedId(expandedId === transfer.id ? null : transfer.id)}
-                      className={secondaryBtn}
-                    >
-                      {t("transfers.detailButton")}
-                    </button>
-                  </td>
-                </tr>
-                {expandedId === transfer.id && (
-                  <tr className="bg-hover-bg">
-                    <td colSpan={6} className="px-2 py-2">
-                      <h2 className="text-sm opacity-80">{t("transfers.detailHeading")}</h2>
-                      {transfer.error_message && (
-                        <p className="text-danger">
-                          <strong>{t("transfers.errorLabel")}:</strong> {transfer.error_message}
-                        </p>
+        <div className="dms-scroll-x mb-6">
+          {/* Contained scroll, the page never scrolls sideways (P83-S10, ADR 0238 Decision 4) */}
+          <table className="w-full border-collapse">
+            <thead>
+              <tr>
+                <th className={th}>{t("transfers.idColumn")}</th>
+                <th className={th}>{t("transfers.sourceColumn")}</th>
+                <th className={th}>{t("transfers.targetColumn")}</th>
+                <th className={th}>{t("transfers.statusColumn")}</th>
+                <th className={th}>{t("transfers.progressColumn")}</th>
+                <th className={th}>{t("transfers.actionsColumn")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {transfers.map((transfer) => (
+                <Fragment key={transfer.id}>
+                  <tr>
+                    <td className={td}>{transfer.id.slice(0, 8)}</td>
+                    {/* P83-S7 (item 6): short and monospaced like the id column, the
+                        full folder id on hover - not a raw UUID as content */}
+                    <td className={td}>
+                      <code className="font-mono text-xs opacity-80" title={transfer.source_folder_id}>
+                        {transfer.source_folder_id.slice(0, 8)}
+                      </code>
+                    </td>
+                    <td className={td}>{installationName(transfer.target_installation_id)}</td>
+                    <td className={td}>
+                      <span className={statusBadgeClass(transfer.status)}>{statusLabel(transfer.status)}</span>
+                      {transfer.dry_run && (
+                        <>
+                          {" "}
+                          <span className={`${BADGE_BASE} bg-accent-bg text-accent`}>
+                            {t("transfers.dryRunBadge")}
+                          </span>
+                        </>
                       )}
-                      <h3 className="text-sm opacity-80">{t("transfers.phasesHeading")}</h3>
-                      <ul>
-                        {PHASE_FIELDS.map(({ key, labelKey }) => {
-                          const value = transfer[key];
-                          if (!value) return null;
-                          return (
-                            <li key={key}>
-                              {t(labelKey)}: {new Date(value as string).toLocaleString(locale)}
-                            </li>
-                          );
-                        })}
-                      </ul>
+                    </td>
+                    <td className={td}>
+                      {t("transfers.documentsProgress", {
+                        copied: transfer.documents_copied,
+                        total: transfer.documents_total,
+                        verified: transfer.documents_verified,
+                      })}
+                    </td>
+                    <td className={td}>
+                      <button
+                        type="button"
+                        onClick={() => setExpandedId(expandedId === transfer.id ? null : transfer.id)}
+                        className={secondaryBtn}
+                      >
+                        {t("transfers.detailButton")}
+                      </button>
                     </td>
                   </tr>
-                )}
-              </Fragment>
-            ))}
-          </tbody>
-        </table>
+                  {expandedId === transfer.id && (
+                    <tr className="bg-hover-bg">
+                      <td colSpan={6} className="px-2 py-2">
+                        <h2 className="text-sm opacity-80">{t("transfers.detailHeading")}</h2>
+                        {transfer.error_message && (
+                          <p className="text-danger">
+                            <strong>{t("transfers.errorLabel")}:</strong> {transfer.error_message}
+                          </p>
+                        )}
+                        <h3 className="text-sm opacity-80">{t("transfers.phasesHeading")}</h3>
+                        <ul>
+                          {PHASE_FIELDS.map(({ key, labelKey }) => {
+                            const value = transfer[key];
+                            if (!value) return null;
+                            return (
+                              <li key={key}>
+                                {t(labelKey)}: {new Date(value as string).toLocaleString(locale)}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </section>
   );

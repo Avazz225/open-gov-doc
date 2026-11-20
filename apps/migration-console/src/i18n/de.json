@@ -108,5 +108,8 @@
       "dry_run_completed": "Testlauf abgeschlossen",
       "failed": "Fehlgeschlagen"
     }
+  },
+  "account": {
+    "menuLabel": "Konto: {name}"
   }
 }

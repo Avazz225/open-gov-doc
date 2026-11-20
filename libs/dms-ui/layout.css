@@ -1,0 +1,41 @@
+/* Shared layout helpers for narrow widths (P83-S10, ADR 0238).
+   Same plain-@import convention as tokens.css; no shared JS (ADR 0006).
+   Imported after tokens.css into the `components` layer, so Tailwind
+   utilities on the same element still win:
+
+     @import "../../../../libs/dms-ui/layout.css" layer(components);
+*/
+
+/* Horizontal scroll container (ADR 0238 Decision 4): wraps every data
+   table and every tab strip, so the page itself never scrolls sideways.
+   The edge shadows show only on the side that has more content - pure CSS
+   "scroll shadows": the two cover gradients scroll with the content
+   (`local`) and hide the shadows (`scroll`) once an edge is reached.
+   The shadows are backgrounds, so content painted on top (text, pills)
+   covers them; they read in the gaps between cells, which is enough.
+   A container on a surface other than the page sets --dms-scroll-cover to
+   that surface's color so the covers match. */
+.dms-scroll-x {
+  --dms-scroll-cover: var(--dms-bg);
+  --dms-scroll-shadow: color-mix(in srgb, var(--dms-fg) 16%, transparent);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  background:
+    linear-gradient(to right, var(--dms-scroll-cover) 40%, transparent) left / 32px 100% no-repeat local,
+    linear-gradient(to left, var(--dms-scroll-cover) 40%, transparent) right / 32px 100% no-repeat local,
+    linear-gradient(to right, var(--dms-scroll-shadow), transparent) left / 14px 100% no-repeat scroll,
+    linear-gradient(to left, var(--dms-scroll-shadow), transparent) right / 14px 100% no-repeat scroll;
+}
+
+/* A tab strip: one row that never wraps; it scrolls inside .dms-scroll-x
+   when the tabs don't fit (ADR 0238 Decision 2). No visible scrollbar -
+   the edge shadow says there is more. */
+.dms-tab-strip {
+  display: flex;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  scrollbar-width: none;
+}
+.dms-tab-strip::-webkit-scrollbar {
+  display: none;
+}

@@ -28,3 +28,21 @@ Wired into all six apps' build pipelines (`tailwindcss`/`@tailwindcss/postcss`/`
 **`--dms-accent-fg`** (Post-Roadmap Phase 75 Session 2, [ADR 0219](../../docs/adr/0219-login-page-tailwind-redesign-accent-fg-token-cascade-fix.md)): added to `tokens.css` (light `#ffffff`, dark `#0b1220`, high-contrast `#000000`) and mapped here as `--color-accent-fg`, after a hardcoded `text-white` on an accent-colored button was found to fail WCAG AA contrast in the dark and high-contrast themes. Use this token, not a hardcoded text color, for any foreground content placed on a `bg-accent`/`accent` background.
 
 **Apps consuming Tailwind utilities for real UI (not just tooling)**: `user-ui`, `admin-ui`, `reviewer-ui`, `process-designer`, `migration-console`, `office-addin` — all six, since P75-S2's login-page redesign.
+
+## `layout.css` (Phase 83 Session 10, [ADR 0238](../../docs/adr/0238-narrow-width-patterns-for-all-apps.md))
+
+The third shared file, with the same plain-`@import` convention. It holds narrow-width helpers, imported
+into the `components` layer so Tailwind utilities on the same element still win:
+
+```css
+@import "../../../../libs/dms-ui/layout.css" layer(components);
+```
+
+- **`.dms-scroll-x`**: horizontal scroll container for data tables and tab strips. The page itself never
+  scrolls sideways. Pure-CSS scroll shadows show only on the side that has more. A container on a surface
+  other than the page sets `--dms-scroll-cover` to that surface's color.
+- **`.dms-tab-strip`**: one row of tabs that never wraps, scrollbar hidden. Combine it with
+  `.dms-scroll-x`.
+
+Consumed by `migration-console` and `process-designer` since P83-S10. reviewer-ui, admin-ui and user-ui
+follow in P83-S11–S13.

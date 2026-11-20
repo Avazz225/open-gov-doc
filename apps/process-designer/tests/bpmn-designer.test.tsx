@@ -1,6 +1,10 @@
-import { act, render, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BpmnDesigner, type BpmnDesignerHandle } from "@/components/BpmnDesigner";
+import { I18nProvider } from "@/i18n";
+
+// The designer reads translations since P83-S10 (properties toggle label).
+const wrapper = I18nProvider;
 
 // jsdom has no real canvas/SVG layout engine (see plan, "No browser
 // in this development environment") - `bpmn-js` itself is therefore mocked;
@@ -52,7 +56,8 @@ describe("BpmnDesigner", () => {
 
   it("instantiates the modeler with the properties panel modules and imports the initial XML", async () => {
     render(
-      <BpmnDesigner initialXml={STARTER_XML} federationInstallations={[]} knownDecisionIds={[]} />
+      <BpmnDesigner initialXml={STARTER_XML} federationInstallations={[]} knownDecisionIds={[]} />,
+      { wrapper }
     );
 
     expect(modelerConstructorMock).toHaveBeenCalledTimes(1);
@@ -77,7 +82,8 @@ describe("BpmnDesigner", () => {
         federationInstallations={[]}
         knownDecisionIds={[]}
         onImportError={onImportError}
-      />
+      />,
+      { wrapper }
     );
 
     await waitFor(() => expect(onImportError).toHaveBeenCalledWith("kaputte Datei"));
@@ -93,7 +99,8 @@ describe("BpmnDesigner", () => {
         onReady={(h) => {
           handle = h;
         }}
-      />
+      />,
+      { wrapper }
     );
 
     await waitFor(() => expect(handle).not.toBeNull());
@@ -112,12 +119,32 @@ describe("BpmnDesigner", () => {
 
   it("destroys the modeler on unmount", async () => {
     const { unmount } = render(
-      <BpmnDesigner initialXml={STARTER_XML} federationInstallations={[]} knownDecisionIds={[]} />
+      <BpmnDesigner initialXml={STARTER_XML} federationInstallations={[]} knownDecisionIds={[]} />,
+      { wrapper }
     );
     await waitFor(() => expect(modelerConstructorMock).toHaveBeenCalledTimes(1));
 
     unmount();
 
     expect(destroyMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides the properties panel behind a toggle below 768px (P83-S10, ADR 0238 Decision 6)", () => {
+    const { container } = render(
+      <BpmnDesigner initialXml={STARTER_XML} federationInstallations={[]} knownDecisionIds={[]} />,
+      { wrapper }
+    );
+    const toggle = screen.getByRole("button", { name: "Eigenschaften anzeigen" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    // The panel stays mounted (bpmn-js renders into it); only its narrow-width class changes.
+    const panel = container.querySelector(".overflow-y-auto") as HTMLElement;
+    expect(panel.className).toContain("max-md:hidden");
+
+    fireEvent.click(toggle);
+    expect(screen.getByRole("button", { name: "Eigenschaften ausblenden" })).toHaveAttribute(
+      "aria-expanded",
+      "true"
+    );
+    expect(panel.className).not.toContain("max-md:hidden");
   });
 });

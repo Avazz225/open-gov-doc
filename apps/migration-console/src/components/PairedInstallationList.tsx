@@ -158,34 +158,37 @@ export function PairedInstallationList() {
       {installations.length === 0 ? (
         <p className="italic opacity-70">{t("pairedInstallations.empty")}</p>
       ) : (
-        <table className="mb-6 w-full border-collapse">
-          <thead>
-            <tr>
-              <th className={th}>{t("pairedInstallations.nameColumn")}</th>
-              <th className={th}>{t("pairedInstallations.baseUrlColumn")}</th>
-              <th className={th}>{t("pairedInstallations.createdColumn")}</th>
-              <th className={th}>{t("pairedInstallations.actionsColumn")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {installations.map((installation) => (
-              <tr key={installation.id}>
-                <td className={td}>{installation.display_name}</td>
-                <td className={td}>{installation.base_url}</td>
-                <td className={`${td} whitespace-nowrap`}>{new Date(installation.created_at).toLocaleString(locale)}</td>
-                <td className={td}>
-                  <button
-                    type="button"
-                    onClick={() => handleDelete(installation.id)}
-                    className={secondaryBtn}
-                  >
-                    {t("common.delete")}
-                  </button>
-                </td>
+        <div className="dms-scroll-x mb-6">
+          {/* Contained scroll, the page never scrolls sideways (P83-S10, ADR 0238 Decision 4) */}
+          <table className="w-full border-collapse">
+            <thead>
+              <tr>
+                <th className={th}>{t("pairedInstallations.nameColumn")}</th>
+                <th className={th}>{t("pairedInstallations.baseUrlColumn")}</th>
+                <th className={th}>{t("pairedInstallations.createdColumn")}</th>
+                <th className={th}>{t("pairedInstallations.actionsColumn")}</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {installations.map((installation) => (
+                <tr key={installation.id}>
+                  <td className={td}>{installation.display_name}</td>
+                  <td className={td}>{installation.base_url}</td>
+                  <td className={`${td} whitespace-nowrap`}>{new Date(installation.created_at).toLocaleString(locale)}</td>
+                  <td className={td}>
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(installation.id)}
+                      className={secondaryBtn}
+                    >
+                      {t("common.delete")}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </section>
   );

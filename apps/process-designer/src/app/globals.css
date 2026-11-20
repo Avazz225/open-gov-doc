@@ -23,6 +23,8 @@
    come after tokens.css (references its variables) - see that file's own
    header comment. */
 @import "../../../../libs/dms-ui/tailwind-preset.css";
+/* Narrow-width helpers: scroll container, tab strip (P83-S10, ADR 0238) */
+@import "../../../../libs/dms-ui/layout.css" layer(components);
 
 /* Post-Roadmap Phase 75 Session 4 (found live via computed-style probing
    while verifying office-addin's rollout, not just a screenshot check -

@@ -3223,8 +3223,33 @@ work has to be read against that baseline (see DoD).
     as the related object.
   - No code changed in this session.
 - **P83-S10 — Narrow widths: shared foundation + `migration-console` + `process-designer`** (ADR 0238):
-  the scroll-container class in `libs/dms-ui`; account-menu header and tab strip in both apps;
-  process-designer's properties-panel toggle.
+  ✅ **Done.**
+  - **Shared:** `libs/dms-ui/layout.css` (new, plain `@import` into the `components` layer).
+    - `.dms-scroll-x` is a horizontal scroll container with pure-CSS scroll shadows on the side that has
+      more. `--dms-scroll-cover` handles containers on a surface.
+    - `.dms-tab-strip` is a non-wrapping tab row without a scrollbar.
+  - **Account menu** (`components/AccountMenu.tsx`, the same file in both apps per ADR 0006):
+    - below 768px, one 40px button ("Konto: <user>") that opens a popover with language, theme, user and
+      log out stacked; Escape/outside click close it, Escape returns focus;
+    - from 768px, the inline cluster as before.
+
+    The switchers got a `touch` form (≥ 40px select). Without preflight, a bare `<button>` showed the
+    browser's border; it is reset explicitly.
+  - **Tabs** in both apps sit in a scrolling strip; **all four tables** sit in `dms-scroll-x`; narrow page
+    padding is 16px.
+  - **process-designer's properties panel** below 768px is hidden behind a toggle at the canvas's top
+    right and opens as a sheet over the right edge. The element stays mounted because bpmn-js renders
+    into it.
+  - **Measured:** migration-console was 740px wide at 390px and process-designer's lists 948px at 390
+    and 768px. Now there is no page overflow in any of the 12 views at 390/768/1400px. At 1400px,
+    before/after screenshots are pixel-identical, apart from 1/255 gradient dithering.
+  - **Checks:**
+    - `tsc`/`eslint` clean.
+    - vitest: process-designer 61 (+1 toggle test; the `BpmnDesigner` tests now render inside
+      `I18nProvider`), migration-console 25.
+    - Both images rebuilt (`next build` inside).
+    - e2e: migration-console 5/5, process-designer 7/7, each with a new `narrow.spec.ts` (390px: no page
+      overflow, account menu, properties toggle).
 - **P83-S11 — Narrow widths: `reviewer-ui`**: account menu, stacked task/approval rows, translated action
   types, short related-object ids.
 - **P83-S12 — Narrow widths: `admin-ui`**: sidebar drawer, account menu, scroll containers on all tables,

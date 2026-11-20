@@ -24,7 +24,8 @@ function HomePageInner() {
 
   return (
     <>
-      <div className="flex gap-2 px-6 pt-3">
+      {/* One row that scrolls on its own when narrow (P83-S10, ADR 0238 Decision 2) */}
+      <div className="dms-scroll-x dms-tab-strip gap-2 px-4 pt-3 md:px-6">
         <button type="button" className={tabClass(tab === "processes")} onClick={() => setTab("processes")}>
           {t("nav.processesTab")}
         </button>

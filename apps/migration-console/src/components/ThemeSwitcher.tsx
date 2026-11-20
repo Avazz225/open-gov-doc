@@ -10,17 +10,18 @@ function labelKey(option: ThemeName): string {
   return option === "high-contrast" ? "highContrast" : option;
 }
 
-export function ThemeSwitcher() {
+// `touch` (P83-S10): see LocaleSwitcher.
+export function ThemeSwitcher({ touch = false }: { touch?: boolean }) {
   const { t } = useI18n();
   const { theme, setTheme } = useTheme();
 
   return (
-    <label className="flex items-center gap-1 text-sm text-fg">
+    <label className={`flex items-center gap-1 text-sm text-fg${touch ? " justify-between" : ""}`}>
       {t("theme.label")}
       <select
         value={theme}
         onChange={(event) => setTheme(event.target.value as ThemeName)}
-        className="rounded-md border border-border bg-bg px-1 py-0.5 text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg"
+        className={`rounded-md border border-border bg-bg text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg ${touch ? "min-h-10 px-2" : "px-1 py-0.5"}`}
       >
         {OPTIONS.map((option) => (
           <option key={option} value={option}>

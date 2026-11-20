@@ -39,6 +39,24 @@ the signed-in user and log out, right-aligned over a rule. It wraps as a group o
 only the two selects showed, stacked label-over-select, with no user or log out. The switchers' labels
 now sit inline like in the other apps.
 
+## Narrow widths (Phase 83 Session 10, [ADR 0238](../adr/0238-narrow-width-patterns-for-all-apps.md))
+
+Below 768px:
+- **Account menu.** The header cluster collapses into one account button (`components/AccountMenu.tsx`,
+  the same component as migration-console's), which opens a popover with language, theme, user and log
+  out stacked, each at least 40px tall.
+- **Tabs** (Prozessdefinitionen / DMN) sit in a strip that scrolls instead of wrapping.
+- **Both definition tables** sit in a `dms-scroll-x` container (`libs/dms-ui/layout.css`). Before, the
+  page was 948px wide at both 390 and 768px.
+- **Designer properties panel.** The 300px panel left the canvas about 70px. It is now hidden behind a
+  toggle button (top right of the canvas, "Eigenschaften anzeigen/ausblenden") and opens as a sheet
+  over the canvas's right edge. The panel element stays mounted, because bpmn-js-properties-panel
+  renders into it; only CSS classes change. From 768px it is the fixed column it always was. BPMN
+  authoring on a phone is not a goal (ADR 0238 Decision 6).
+
+`e2e/narrow.spec.ts` covers no page overflow on both lists and the designer, the account menu, and the
+properties toggle. A unit test covers the toggle's state and classes.
+
 ## Pages
 
 | Route | Purpose |

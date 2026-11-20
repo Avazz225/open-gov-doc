@@ -4,9 +4,8 @@ import { useRouter } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
 import { useI18n } from "@/i18n";
 import { useAuth } from "@/lib/auth-context";
-import { LocaleSwitcher } from "./LocaleSwitcher";
+import { AccountMenu } from "./AccountMenu";
 import { MaintenanceBanner } from "./MaintenanceBanner";
-import { ThemeSwitcher } from "./ThemeSwitcher";
 
 // A static export has no server that could perform redirects before
 // rendering (no middleware equivalent) - protection therefore kicks in
@@ -16,7 +15,7 @@ import { ThemeSwitcher } from "./ThemeSwitcher";
 // ungated) - only saving/deleting are additionally hidden behind
 // `RequireCapability`, see there.
 export function RequireAuth({ children }: { children: ReactNode }) {
-  const { user, isLoading, logout } = useAuth();
+  const { user, isLoading } = useAuth();
   const router = useRouter();
   const { t } = useI18n();
 
@@ -42,18 +41,10 @@ export function RequireAuth({ children }: { children: ReactNode }) {
       <MaintenanceBanner />
       {/* P83-S7 (punch list item 10): the same header cluster as reviewer-ui/
           migration-console - language, theme, the signed-in user and log out,
-          right-aligned over a rule. It wraps as a group on narrow screens. */}
-      <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2 border-b border-border px-6 py-3">
-        <LocaleSwitcher />
-        <ThemeSwitcher />
-        {user && <span className="whitespace-nowrap">{user.username}</span>}
-        <button
-          type="button"
-          onClick={logout}
-          className="whitespace-nowrap rounded-md border border-border bg-hover-bg px-3 py-1 text-fg transition-colors hover:bg-accent-bg"
-        >
-          {t("common.logout")}
-        </button>
+          right-aligned over a rule. Below 768px it collapses into AccountMenu's
+          button (P83-S10, ADR 0238 Decision 2). */}
+      <div className="flex items-center justify-end border-b border-border px-4 py-2 md:px-6 md:py-3">
+        <AccountMenu />
       </div>
       {children}
     </>

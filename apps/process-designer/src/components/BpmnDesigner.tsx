@@ -7,7 +7,9 @@ import {
   CamundaPlatformPropertiesProviderModule,
 } from "bpmn-js-properties-panel";
 import camundaModdleDescriptor from "camunda-bpmn-moddle/resources/camunda.json";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { SlidersHorizontal, X } from "lucide-react";
+import { useI18n } from "@/i18n";
 import type { FederationInstallation } from "./FederatedStepPropertiesProvider";
 import { FederatedStepPropertiesProviderModule } from "./FederatedStepPropertiesProvider";
 import { SignatureTaskPropertiesProviderModule } from "./SignatureTaskPropertiesProvider";
@@ -62,6 +64,7 @@ export function BpmnDesigner({
 }: BpmnDesignerProps) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const propertiesPanelRef = useRef<HTMLDivElement>(null);
+  const { t } = useI18n();
 
   useEffect(() => {
     if (!canvasRef.current || !propertiesPanelRef.current) return;
@@ -107,11 +110,33 @@ export function BpmnDesigner({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Below 768px the 300px properties panel left the canvas ~70px (P83-S10,
+  // ADR 0238 Decision 6). There it is hidden behind a toggle and opens as a
+  // sheet over the canvas's right edge; from 768px it is the fixed column it
+  // always was. The panel element stays mounted either way (only CSS
+  // changes), because bpmn-js-properties-panel renders into it.
+  const [propertiesOpen, setPropertiesOpen] = useState(false);
+
   return (
-    <div className="flex min-h-0 flex-1">
+    <div className="relative flex min-h-0 flex-1">
       <div className="min-w-0 flex-1" ref={canvasRef} />
+      <button
+        type="button"
+        aria-expanded={propertiesOpen}
+        aria-label={propertiesOpen ? t("designer.hideProperties") : t("designer.showProperties")}
+        onClick={() => setPropertiesOpen((value) => !value)}
+        className="absolute right-3 top-3 z-20 flex min-h-10 min-w-10 items-center justify-center rounded-md border border-border bg-bg text-fg shadow-sm transition-colors hover:bg-hover-bg md:hidden"
+      >
+        {propertiesOpen ? (
+          <X size={18} strokeWidth={1.75} aria-hidden="true" />
+        ) : (
+          <SlidersHorizontal size={18} strokeWidth={1.75} aria-hidden="true" />
+        )}
+      </button>
       <div
-        className="w-[300px] flex-shrink-0 overflow-y-auto border-l border-border"
+        className={`overflow-y-auto border-l border-border bg-bg max-md:absolute max-md:inset-y-0 max-md:right-0 max-md:z-10 max-md:w-[min(300px,85%)] max-md:shadow-lg md:w-[300px] md:flex-shrink-0 ${
+          propertiesOpen ? "" : "max-md:hidden"
+        }`}
         ref={propertiesPanelRef}
       />
     </div>
