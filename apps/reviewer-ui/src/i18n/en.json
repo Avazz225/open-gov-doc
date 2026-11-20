@@ -96,7 +96,8 @@
     "reassignFormLabel": "Reassign",
     "reassignPrincipalIdLabel": "Reassign to (username/principal ID)",
     "reassignButton": "Reassign",
-    "reassignError": "Failed to reassign"
+    "reassignError": "Failed to reassign",
+    "unknownUser": "No person with the username \"{name}\" found"
   },
   "instanceDetail": {
     "paneLabel": "Instance",

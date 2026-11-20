@@ -73,7 +73,29 @@ tests in `document-workspace.test.tsx` cover the switcher, the chips and closing
 
 The client no longer sends who is acting (`created_by`, `deleted_by`, `approved_by`, `locked_by`, …):
 the services take it from the verified token. The API helpers lost those parameters, and the
-components no longer pass the user name into them. Recorded actors in responses (lock holder, creator, deleter, approver) are principals now (a user's `sub`); showing names is P86-S2. The favorites calls keep sending the user name, which favorite-service checks against the verified `X-DMS-Username`.
+components no longer pass the user name into them. Recorded actors in responses (lock holder, creator, deleter, approver) are principals now (a user's `sub`); P86-S2 shows them as names (next section). The favorites calls keep sending the user name, which favorite-service checks against the verified `X-DMS-Username`.
+
+## Names Instead of Principals (P86-S2)
+
+`src/lib/usePrincipalNames.ts` (copied to reviewer-ui and admin-ui) resolves recorded actors to
+usernames through `GET /auth-service/users/{id}`.
+- **What is looked up:** only principal-shaped values, i.e. a Keycloak UUID or a technical account's
+  integer id (`users-admin` is `2`). Older usernames, services and `peer:` actors show as recorded.
+- **Cache:** one module-wide cache, so many rows by one person cost one request; failures stay cached
+  as the raw id.
+- **Hover:** `principalName`/`principalTitle` keep the raw id on hover.
+- **Where:** the approval inbox's "beantragt von", "gesetzt von" for legal holds and records quarantine
+  (document, folder and overview), the Postbuch/routing log's "von", the hand-folder overview's "added by"
+  and "created by", plus the existing delegations and teamspace members.
+- **Not shown anywhere:** lock holders, the trash's deleter and the document creator are not displayed
+  in user-ui, so nothing changed there.
+
+**Approval inbox:**
+- "Cannot approve one's own request" compares `initiated_by` with `user.sub`. It had compared the
+  username, which no longer matched after P85, so only the server's four-eyes check still stopped it.
+- "Ablehnen" opens an inline form with an optional reason, sent to `POST /approval-requests/{id}/reject`.
+- The `ExplorerPane` prop `createdBy` is now `favoritesUser`: it only ever fed the favorites calls,
+  which stay bound to the username.
 
 ## Backend connection
 

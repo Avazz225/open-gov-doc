@@ -299,7 +299,10 @@
     "requestedBy": "beantragt von {name}",
     "approve": "Genehmigen",
     "reject": "Ablehnen",
-    "cannotApproveOwn": "Eigene Anträge können nicht selbst genehmigt werden"
+    "cannotApproveOwn": "Eigene Anträge können nicht selbst genehmigt werden",
+    "rejectReasonLabel": "Begründung (optional)",
+    "rejectReasonPlaceholder": "Warum wird der Antrag abgelehnt?",
+    "rejectConfirm": "Ablehnung senden"
   },
   "favorites": {
     "paneLabel": "Favoriten",

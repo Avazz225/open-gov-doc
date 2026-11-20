@@ -77,7 +77,7 @@ interface WorkspaceContextValue {
   onDeleteFolder: (folderId: string) => Promise<"trashed" | "pending_approval" | false>;
   onDeleteDocument: (documentId: string) => Promise<"trashed" | "pending_approval" | false>;
   token: string;
-  createdBy: string;
+  favoritesUser: string;
   currentFolderId: string;
   onUploaded: () => void;
   openDocumentsById: Map<string, DocumentSummary>;
@@ -117,7 +117,7 @@ function ExplorerPanelContent() {
       onDeleteFolder={ctx.onDeleteFolder}
       onDeleteDocument={ctx.onDeleteDocument}
       token={ctx.token}
-      createdBy={ctx.createdBy}
+      favoritesUser={ctx.favoritesUser}
       currentFolderId={ctx.currentFolderId}
       onUploaded={ctx.onUploaded}
     />
@@ -282,7 +282,7 @@ export interface DockableDocumentAreaProps {
   onDeleteFolder: (folderId: string) => Promise<"trashed" | "pending_approval" | false>;
   onDeleteDocument: (documentId: string) => Promise<"trashed" | "pending_approval" | false>;
   token: string;
-  createdBy: string;
+  favoritesUser: string;
   currentFolderId: string;
   onUploaded: () => void;
   openDocuments: DocumentSummary[];
@@ -311,7 +311,7 @@ export const DockableDocumentArea = forwardRef<DockableDocumentAreaHandle, Docka
       onDeleteFolder,
       onDeleteDocument,
       token,
-      createdBy,
+      favoritesUser,
       currentFolderId,
       onUploaded,
       openDocuments,
@@ -645,7 +645,7 @@ export const DockableDocumentArea = forwardRef<DockableDocumentAreaHandle, Docka
       onDeleteFolder,
       onDeleteDocument,
       token,
-      createdBy,
+      favoritesUser,
       currentFolderId,
       onUploaded,
       openDocumentsById,

@@ -50,3 +50,10 @@ Found afterwards in my own pass: the card over the page's amount column and, in 
   image is the `<img>` fallback.
 - The playground's own fonts are system-ui, because the playground has no `--dms-font-family`. The PNGs
   therefore use the capture machine's sans-serif, not necessarily the apps' font.
+
+**Fix (P86-S2):** the `<picture>` check on GitHub at 390px (light and dark) confirmed that GitHub honors
+the width query: the compact PNGs are served below 600px and the wide one at 1280. It also showed that
+`og-doc-hero-compact-dark.png` carried the playground page's 16px side gutters in white (32px at 2×).
+The two bands were recolored to GitHub's dark page color (#0d1117), after checking that they were pure
+white and that the first column inside was already #0d1117. A re-film should give the film page the dark
+background for `--dark --width 390`.

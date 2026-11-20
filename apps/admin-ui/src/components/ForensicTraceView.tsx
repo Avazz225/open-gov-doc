@@ -11,6 +11,7 @@ import {
   type ForensicTraceFilters,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { PrincipalName, resolveActorFilter } from "./PrincipalName";
 
 function triggerBrowserDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
@@ -26,10 +27,11 @@ function triggerBrowserDownload(blob: Blob, filename: string): void {
 // Forensik-Trace (5.4b, seit P7-S2c) - objektbezogene Nachverfolgung
 // ("alle Aktionen von Nutzer X"/"alle Nutzer auf Dokument Y"), zentraler
 // Anwendungsfall: kompromittierter Account. Jede Abfrage wird selbst wieder
-// auditiert (reporting.forensic_trace.queried, seit dieser Session), daher
-// braucht jeder Aufruf den aktuell angemeldeten Principal als `queried_by`.
+// auditiert (reporting.forensic_trace.queried, seit dieser Session); the
+// querying principal comes from the verified token (ADR 0240), so the
+// client no longer sends `queried_by` (P86-S2).
 export function ForensicTraceView() {
-  const { accessToken, user } = useAuth();
+  const { accessToken } = useAuth();
   const { t } = useI18n();
 
   const [actor, setActor] = useState("");
@@ -47,23 +49,24 @@ export function ForensicTraceView() {
   const [error, setError] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
 
-  const currentFilters = useCallback((): ForensicTraceFilters => {
+  // The actor filter accepts a username (P86-S2, see resolveActorFilter).
+  const currentFilters = useCallback(async (): Promise<ForensicTraceFilters> => {
     const filters: ForensicTraceFilters = {};
-    if (actor.trim()) filters.actor = actor.trim();
+    if (actor.trim()) filters.actor = await resolveActorFilter(accessToken ?? "", actor.trim());
     if (subject.trim()) filters.subject = subject.trim();
     if (category) filters.category = category;
     if (since) filters.since = new Date(since).toISOString();
     if (until) filters.until = new Date(until).toISOString();
     return filters;
-  }, [actor, subject, category, since, until]);
+  }, [accessToken, actor, subject, category, since, until]);
 
   async function handleQuery(event: FormEvent) {
     event.preventDefault();
-    if (!accessToken || !user) return;
+    if (!accessToken) return;
     setIsLoading(true);
     setError(null);
     try {
-      const result = await getForensicTrace(accessToken, user.username, currentFilters());
+      const result = await getForensicTrace(accessToken, await currentFilters());
       setEntries(result.entries);
       setAnomalies(result.anomalies);
       setTotalBeforeFilter(result.total_before_filter);
@@ -77,10 +80,10 @@ export function ForensicTraceView() {
   }
 
   async function handleExport(format: "csv" | "pdf") {
-    if (!accessToken || !user) return;
+    if (!accessToken) return;
     setExportError(null);
     try {
-      const blob = await exportForensicTrace(accessToken, user.username, format, currentFilters());
+      const blob = await exportForensicTrace(accessToken, format, await currentFilters());
       triggerBrowserDownload(blob, `forensic-trace.${format}`);
     } catch (err) {
       setExportError(err instanceof ApiError ? err.message : t("forensicTrace.exportError"));
@@ -227,7 +230,9 @@ export function ForensicTraceView() {
                     <td className="whitespace-nowrap">{new Date(entry.occurred_at).toLocaleString()}</td>
                     <td>{entry.event_type}</td>
                     <td>{t(`forensicTrace.category${capitalize(entry.category)}`)}</td>
-                    <td>{entry.actor ?? "—"}</td>
+                    <td>
+                      <PrincipalName value={entry.actor} />
+                    </td>
                     <td>{entry.subject ?? "—"}</td>
                     <td>{entry.service_name}</td>
                   </tr>

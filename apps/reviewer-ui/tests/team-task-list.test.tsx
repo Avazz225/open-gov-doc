@@ -7,12 +7,20 @@ const listDirectReportsMock = vi.fn();
 const listReadyTasksMock = vi.fn();
 const claimTaskMock = vi.fn();
 const reassignTaskMock = vi.fn();
+const releaseTaskClaimMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   listDirectReports: (...args: unknown[]) => listDirectReportsMock(...args),
   listReadyTasks: (...args: unknown[]) => listReadyTasksMock(...args),
   claimTask: (...args: unknown[]) => claimTaskMock(...args),
   reassignTask: (...args: unknown[]) => reassignTaskMock(...args),
+  releaseTaskClaim: (...args: unknown[]) => releaseTaskClaimMock(...args),
+  lookupUserById: async (_token: string, id: string) => ({ id, username: id }),
+  // The assign field takes a username and stores its principal (P86-S2).
+  lookupUserByUsername: async (_token: string, username: string) => ({
+    id: username === "dora-assignee" ? "00000000-0000-4000-8000-00000000d0a4" : "00000000-0000-4000-8000-0000000e41c0",
+    username,
+  }),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {
@@ -88,6 +96,7 @@ describe("TeamTaskList", () => {
     listReadyTasksMock.mockReset();
     claimTaskMock.mockReset();
     reassignTaskMock.mockReset();
+    releaseTaskClaimMock.mockReset();
     onOpenInstanceMock.mockReset();
   });
 
@@ -152,12 +161,13 @@ describe("TeamTaskList", () => {
     expect(onOpenInstanceMock).toHaveBeenCalledWith("instance-1");
   });
 
-  it("assigns an unclaimed team task to a chosen principal", async () => {
+  it("assigns an unclaimed team task: claims it, then hands it to the named person's principal (P86-S2)", async () => {
     listDirectReportsMock.mockResolvedValue([
       { id: 1, principal_id: "bob", supervisor_principal_id: "supervisor-sub", created_at: "2026-01-01T00:00:00Z" },
     ]);
     listReadyTasksMock.mockResolvedValue([UNCLAIMED_REPORT_TASK]);
     claimTaskMock.mockResolvedValue(undefined);
+    reassignTaskMock.mockResolvedValue(undefined);
     renderList();
 
     await screen.findByText("Antrag sichten");
@@ -168,12 +178,14 @@ describe("TeamTaskList", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Zuweisen" })[1]);
 
     await waitFor(() =>
-      expect(claimTaskMock).toHaveBeenCalledWith("token-123", {
+      expect(reassignTaskMock).toHaveBeenCalledWith("token-123", {
         instanceId: "instance-1",
         taskId: "task-4",
-        principalId: "dora-assignee",
+        newPrincipalId: "00000000-0000-4000-8000-00000000d0a4",
       })
     );
+    expect(claimTaskMock).toHaveBeenCalledWith("token-123", { instanceId: "instance-1", taskId: "task-4" });
+    expect(releaseTaskClaimMock).not.toHaveBeenCalled();
   });
 
   it("reassigns a claimed team task to a chosen principal", async () => {
@@ -195,8 +207,31 @@ describe("TeamTaskList", () => {
       expect(reassignTaskMock).toHaveBeenCalledWith("token-123", {
         instanceId: "instance-1",
         taskId: "task-1",
-        newPrincipalId: "erik-new",
+        newPrincipalId: "00000000-0000-4000-8000-0000000e41c0",
       })
     );
+  });
+
+  it("releases the supervisor's own claim again when the handover fails (P86-S2)", async () => {
+    listDirectReportsMock.mockResolvedValue([
+      { id: 1, principal_id: "bob", supervisor_principal_id: "supervisor-sub", created_at: "2026-01-01T00:00:00Z" },
+    ]);
+    listReadyTasksMock.mockResolvedValue([UNCLAIMED_REPORT_TASK]);
+    claimTaskMock.mockResolvedValue(undefined);
+    reassignTaskMock.mockRejectedValue(new Error("forbidden"));
+    releaseTaskClaimMock.mockResolvedValue(undefined);
+    renderList();
+
+    await screen.findByText("Antrag sichten");
+    fireEvent.click(screen.getByRole("button", { name: "Zuweisen" }));
+    fireEvent.change(screen.getByLabelText("Zuweisen an (Nutzername/Principal-ID)"), {
+      target: { value: "dora-assignee" },
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "Zuweisen" })[1]);
+
+    await waitFor(() =>
+      expect(releaseTaskClaimMock).toHaveBeenCalledWith("token-123", { instanceId: "instance-1", taskId: "task-4" })
+    );
+    expect(await screen.findByText("Zuweisen fehlgeschlagen")).toBeInTheDocument();
   });
 });

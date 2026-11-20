@@ -14,6 +14,7 @@ import {
   type SuperuserStatus,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { PrincipalName } from "./PrincipalName";
 
 // Superuser break-glass (4.6, P6-S5): activation itself runs through the
 // already-existing generic four-eyes principle mechanism of the Permission
@@ -169,7 +170,8 @@ export function SuperuserBreakGlass() {
             {maintenance?.active ? t("notShutdown.statusActive") : t("notShutdown.statusInactive")}
           </strong>
           {maintenance?.active && maintenance.triggered_by && (
-            <> — {t("notShutdown.triggeredBy")}: {maintenance.triggered_by}</>
+            <> — {t("notShutdown.triggeredBy")}: <PrincipalName value={maintenance.triggered_by} />
+            </>
           )}
         </p>
         {permissions.includes("system.not_shutdown.trigger") && !maintenance?.active && (

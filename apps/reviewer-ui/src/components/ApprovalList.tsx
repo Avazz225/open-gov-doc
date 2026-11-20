@@ -10,6 +10,7 @@ import {
   type ApprovalRequest,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { principalName, principalTitle, usePrincipalNames } from "@/lib/usePrincipalNames";
 import { actionTypeLabel } from "@/lib/display";
 
 type StatusFilter = "" | "pending" | "approved" | "rejected";
@@ -55,6 +56,8 @@ export function ApprovalList() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // "Beantragt von" as a name (P86-S2): initiators are principals (ADR 0240).
+  const names = usePrincipalNames(accessToken ?? "", requests.map((r) => r.initiated_by));
   // Post-roadmap Phase 22 Session 4: replaced `window.prompt` with an inline
   // form (no native browser popup, consistent with the rest of this app's
   // form style, testable with Testing Library).
@@ -177,7 +180,13 @@ export function ApprovalList() {
                     <td className={td} data-stack="title">
                       <ActionType type={request.action_type} />
                     </td>
-                    <td className={td} data-label={t("approvalList.initiatedByColumn")}>{request.initiated_by}</td>
+                    <td
+                      className={td}
+                      data-label={t("approvalList.initiatedByColumn")}
+                      title={principalTitle(names, request.initiated_by)}
+                    >
+                      {principalName(names, request.initiated_by)}
+                    </td>
                     <td className={`${td} whitespace-nowrap`} data-label={t("approvalList.createdColumn")}>
                       {new Date(request.created_at).toLocaleString(locale)}
                     </td>

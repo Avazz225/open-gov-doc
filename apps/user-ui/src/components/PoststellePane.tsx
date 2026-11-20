@@ -18,6 +18,7 @@ import {
   type OutboundMessage,
   type RoutingLogEntryWithMessage,
 } from "@/lib/api";
+import { principalName, principalTitle, usePrincipalNames } from "@/lib/usePrincipalNames";
 
 // Inbox/outbox (2.5/3.3, P15-S3) - external correspondence not yet
 // assigned to a case. Unlike the trash, the concept specifies NO
@@ -60,6 +61,10 @@ export function PoststellePane({ token }: { token: string }) {
   // Searchable "Postbuch" register (14.2, post-roadmap phase 31 session
   // 12c).
   const [postbuch, setPostbuch] = useState<RoutingLogEntryWithMessage[]>([]);
+  const routedByNames = usePrincipalNames(token, [
+    ...inbound.flatMap((message) => message.routing_log.map((entry) => entry.routed_by)),
+    ...postbuch.map((entry) => entry.routed_by),
+  ]);
   const [postbuchMailboxFilter, setPostbuchMailboxFilter] = useState("");
   const [postbuchQuery, setPostbuchQuery] = useState("");
 
@@ -469,11 +474,11 @@ export function PoststellePane({ token }: { token: string }) {
                   <ul className="poststelle-routing-log">
                     {message.routing_log.map((entry) => (
                       <li key={entry.id}>
-                        <span>
+                        <span title={principalTitle(routedByNames, entry.routed_by)}>
                           {t("poststelle.routeLogEntry", {
                             from: mailboxName(entry.from_mailbox_id),
                             to: mailboxName(entry.to_mailbox_id),
-                            by: entry.routed_by,
+                            by: principalName(routedByNames, entry.routed_by),
                           })}
                         </span>
                         {entry.reason && ` — ${entry.reason}`}
@@ -549,11 +554,11 @@ export function PoststellePane({ token }: { token: string }) {
           {postbuch.map((entry) => (
             <li className="entry-row" key={entry.id}>
               <span className="entry-name">{entry.message_subject}</span>
-              <span className="entry-meta">
+              <span className="entry-meta" title={principalTitle(routedByNames, entry.routed_by)}>
                 {t("poststelle.postbuchEntry", {
                   from: mailboxName(entry.from_mailbox_id),
                   to: mailboxName(entry.to_mailbox_id),
-                  by: entry.routed_by,
+                  by: principalName(routedByNames, entry.routed_by),
                 })}
                 {entry.reason && ` — ${entry.reason}`}
                 {" · "}

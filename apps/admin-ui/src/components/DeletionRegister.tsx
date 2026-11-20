@@ -10,6 +10,7 @@ import {
   type FolderDeletionRegisterEntry,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { PrincipalName } from "./PrincipalName";
 
 interface MergedEntry {
   key: string;
@@ -128,7 +129,9 @@ export function DeletionRegister() {
                       : t("deletionRegister.triggerTrashExpiry")}
                   </td>
                   <td>{entry.reason ?? "—"}</td>
-                  <td>{entry.triggeredBy ?? "—"}</td>
+                  <td>
+                    <PrincipalName value={entry.triggeredBy} />
+                  </td>
                   <td className="whitespace-nowrap">{new Date(entry.occurredAt).toLocaleString()}</td>
                 </tr>
               ))}

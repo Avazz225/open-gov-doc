@@ -111,6 +111,38 @@ def test_get_user_by_id_works_for_a_regular_authenticated_user(client, domain_ad
     client.delete(f"/users/{target['id']}", headers=domain_admin_auth_headers)
 
 
+def test_get_user_by_id_resolves_a_technical_account(client, domain_admin_auth_headers):
+    """P86-S2: a technical account's principal is its integer row id (no
+    Keycloak user); since P85 (ADR 0240) it is recorded as an actor, so the
+    reverse lookup resolves it too."""
+    me = client.get("/me", headers=domain_admin_auth_headers).json()
+    assert me["sub"].isdigit()
+
+    response = client.get(f"/users/{me['sub']}", headers=domain_admin_auth_headers)
+
+    assert response.status_code == 200
+    assert response.json() == {"id": me["sub"], "username": me["username"]}
+
+
+def test_lookup_by_username_resolves_a_technical_account(client, domain_admin_auth_headers):
+    """P86-S2: the forward lookup finds technical accounts too, so an audit
+    filter typed as `users-admin` matches the integer principal its events
+    carry."""
+    me = client.get("/me", headers=domain_admin_auth_headers).json()
+
+    response = client.get(
+        "/users/lookup", params={"username": me["username"]}, headers=domain_admin_auth_headers
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"id": me["sub"], "username": me["username"]}
+
+
+def test_get_user_by_id_returns_404_for_an_unknown_integer_id(client, domain_admin_auth_headers):
+    response = client.get("/users/987654321", headers=domain_admin_auth_headers)
+    assert response.status_code == 404
+
+
 def test_get_user_by_id_returns_404_for_unknown_id(client, domain_admin_auth_headers):
     response = client.get(
         f"/users/{uuid.uuid4()}",

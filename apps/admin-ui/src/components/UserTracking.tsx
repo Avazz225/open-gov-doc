@@ -14,6 +14,7 @@ import {
   setUserTrackingRetentionConfig,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { usePrincipalName } from "./PrincipalName";
 
 // Fine-grained user tracking (5.5, ADR 0157, Phase 52 Session 1) - has
 // always been API-only until this session. Unlike every other admin page
@@ -37,6 +38,9 @@ export function UserTracking() {
   // Per-principal config lookup.
   const [lookupPrincipalId, setLookupPrincipalId] = useState("");
   const [config, setConfig] = useState<UserTrackingConfig | null>(null);
+  // The tracked person and who last changed the config, as names (P86-S2).
+  const trackedPrincipal = usePrincipalName(config?.principal_id);
+  const configChangedBy = usePrincipalName(config?.updated_by);
   const [configSaving, setConfigSaving] = useState(false);
   // Four-eyes principle (Post-Roadmap Phase 74 Session 2, ADR 0157's own
   // named gap) - same "don't reload, the toggle wasn't applied yet" idiom
@@ -180,15 +184,15 @@ export function UserTracking() {
           {config && (
             <div className="form-grid">
               <p>
-                <strong>{config.principal_id}</strong>
+                <strong title={trackedPrincipal.title}>{trackedPrincipal.name}</strong>
                 {config.updated_by && (
-                  <>
+                  <span title={configChangedBy.title}>
                     {" - "}
                     {t("userTracking.configLastChangedBy", {
-                      username: config.updated_by,
+                      username: configChangedBy.name,
                       date: new Date(config.updated_at).toLocaleString(),
                     })}
-                  </>
+                  </span>
                 )}
               </p>
               <label className="checkbox-label">

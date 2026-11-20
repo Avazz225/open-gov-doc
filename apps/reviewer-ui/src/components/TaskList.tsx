@@ -14,6 +14,7 @@ import {
   type ReadyTaskWithInstance,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { principalName, principalTitle, usePrincipalNames } from "@/lib/usePrincipalNames";
 import { ShortKey } from "@/lib/display";
 
 // Approval task inbox (8, P14-S2) - consumes `GET /tasks` (workflow-service,
@@ -27,7 +28,6 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
   const [tasks, setTasks] = useState<ReadyTaskWithInstance[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
-  const [completedBy, setCompletedBy] = useState("");
   const [signatureId, setSignatureId] = useState("");
   const [dataJson, setDataJson] = useState("");
   const [onBehalfOf, setOnBehalfOf] = useState("");
@@ -49,6 +49,13 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
   );
   const [grantOrgUnitOf, setGrantOrgUnitOf] = useState<"assignee" | "creator">("assignee");
   const [grantResultByTaskId, setGrantResultByTaskId] = useState<Record<string, string[]>>({});
+  // Recorded principals shown as names (P86-S2): claimants, delegators and
+  // the deputies a grant went to.
+  const names = usePrincipalNames(accessToken ?? "", [
+    ...tasks.map((task) => task.claimed_by),
+    ...delegations.map((delegation) => delegation.delegator_principal_id),
+    ...Object.values(grantResultByTaskId).flat(),
+  ]);
 
   const reload = () => {
     if (!accessToken) return;
@@ -72,7 +79,6 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
       return;
     }
     setExpandedTaskId(task.id);
-    setCompletedBy(user?.username ?? "");
     setSignatureId("");
     setDataJson("");
     setOnBehalfOf("");
@@ -119,7 +125,6 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
       await claimTask(accessToken, {
         instanceId: task.instance_id,
         taskId: task.id,
-        principalId: user?.username ?? "",
       });
       reload();
     } catch (err) {
@@ -212,7 +217,8 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
             <tbody>
               {tasks.map((task) => {
                 const isSignature = task.extensions.taskType === "signature";
-                const isClaimedByMe = task.claimed_by !== null && task.claimed_by === user?.username;
+                // Since P85 (ADR 0240) a claim records the principal, the user's `sub`.
+                const isClaimedByMe = task.claimed_by !== null && task.claimed_by === user?.sub;
                 return (
                   <Fragment key={task.id}>
                     <tr>
@@ -240,7 +246,9 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
                           </button>
                         ) : (
                           <>
-                            <span>{t("taskList.claimedByLabel", { principalId: task.claimed_by })}</span>
+                            <span title={principalTitle(names, task.claimed_by)}>
+                              {t("taskList.claimedByLabel", { principalId: principalName(names, task.claimed_by) })}
+                            </span>
                             {isClaimedByMe && (
                               <>
                                 {" "}
@@ -336,7 +344,9 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
                                   {grantResultByTaskId[task.id].length === 0
                                     ? t("taskList.grantEmptyResult")
                                     : t("taskList.grantResult", {
-                                        deputies: grantResultByTaskId[task.id].join(", "),
+                                        deputies: grantResultByTaskId[task.id]
+                                          .map((id) => principalName(names, id))
+                                          .join(", "),
                                       })}
                                 </p>
                               )}
@@ -344,16 +354,6 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
                           )}
                           <form className={inlineForm} onSubmit={(event) => handleComplete(task, event)}>
                             <h2 className="text-sm opacity-80">{t("taskList.completeHeading")}</h2>
-                            <label htmlFor={`completed-by-${task.id}`} className={fieldLabel}>
-                              {t("taskList.completedByLabel")}
-                            </label>
-                            <input
-                              id={`completed-by-${task.id}`}
-                              value={completedBy}
-                              onChange={(e) => setCompletedBy(e.target.value)}
-                              required
-                              className={fieldInput}
-                            />
                             {delegations.length > 0 && (
                               <>
                                 <label htmlFor={`on-behalf-of-${task.id}`} className={fieldLabel}>
@@ -371,7 +371,7 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
                                       key={delegation.id}
                                       value={delegation.delegator_principal_id}
                                     >
-                                      {delegation.delegator_principal_id}
+                                      {principalName(names, delegation.delegator_principal_id)}
                                     </option>
                                   ))}
                                 </select>

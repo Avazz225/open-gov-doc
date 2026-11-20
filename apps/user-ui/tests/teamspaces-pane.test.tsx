@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TeamspacesPane } from "@/components/TeamspacesPane";
 import { I18nProvider } from "@/i18n";
+import { clearPrincipalNameCache } from "@/lib/usePrincipalNames";
 
 const listTeamspacesMock = vi.fn();
 const createTeamspaceMock = vi.fn();
@@ -61,9 +62,9 @@ const TEAMSPACE = {
 const ALICE_MEMBER = {
   id: 1,
   teamspace_id: "ts-1",
-  principal_id: "alice-sub",
+  principal_id: "00000000-0000-4000-8000-0000000a11ce",
   can_manage_members: true,
-  invited_by: "alice-sub",
+  invited_by: "00000000-0000-4000-8000-0000000a11ce",
   invited_at: "2026-01-01T00:00:00Z",
   source_ad_group_name: null,
 };
@@ -71,13 +72,14 @@ const ALICE_MEMBER = {
 function renderPane(onOpenFolder = vi.fn()) {
   return render(
     <I18nProvider>
-      <TeamspacesPane token="token-123" currentPrincipalId="alice-sub" onOpenFolder={onOpenFolder} />
+      <TeamspacesPane token="token-123" currentPrincipalId="00000000-0000-4000-8000-0000000a11ce" onOpenFolder={onOpenFolder} />
     </I18nProvider>
   );
 }
 
 describe("TeamspacesPane", () => {
   beforeEach(() => {
+    clearPrincipalNameCache();
     listTeamspacesMock.mockReset();
     createTeamspaceMock.mockReset();
     deleteTeamspaceMock.mockReset();
@@ -155,7 +157,7 @@ describe("TeamspacesPane", () => {
     await user.click(screen.getByText("Öffnen"));
 
     await waitFor(() => expect(listTeamspaceMembersMock).toHaveBeenCalledWith("token-123", "ts-1"));
-    expect(await screen.findByText("alice-sub (Verwaltung)")).toBeInTheDocument();
+    expect(await screen.findByText("00000000-0000-4000-8000-0000000a11ce (Verwaltung)")).toBeInTheDocument();
   });
 
   it("calls onOpenFolder with the teamspace root folder id", async () => {
@@ -175,13 +177,13 @@ describe("TeamspacesPane", () => {
 
   it("invites a member by resolving the username first", async () => {
     listTeamspacesMock.mockResolvedValue([TEAMSPACE]);
-    lookupUserByUsernameMock.mockResolvedValue({ id: "bob-sub", username: "bob" });
+    lookupUserByUsernameMock.mockResolvedValue({ id: "00000000-0000-4000-8000-000000000b0b", username: "bob" });
     inviteTeamspaceMemberMock.mockResolvedValue({
       id: 2,
       teamspace_id: "ts-1",
-      principal_id: "bob-sub",
+      principal_id: "00000000-0000-4000-8000-000000000b0b",
       can_manage_members: false,
-      invited_by: "alice-sub",
+      invited_by: "00000000-0000-4000-8000-0000000a11ce",
       invited_at: "2026-01-02T00:00:00Z",
       source_ad_group_name: null,
     });
@@ -198,7 +200,7 @@ describe("TeamspacesPane", () => {
     await waitFor(() => expect(lookupUserByUsernameMock).toHaveBeenCalledWith("token-123", "bob"));
     await waitFor(() =>
       expect(inviteTeamspaceMemberMock).toHaveBeenCalledWith("token-123", "ts-1", {
-        principalId: "bob-sub",
+        principalId: "00000000-0000-4000-8000-000000000b0b",
       })
     );
   });
@@ -243,13 +245,13 @@ describe("TeamspacesPane", () => {
   it("hides management actions for a non-manager member", async () => {
     listTeamspacesMock.mockResolvedValue([TEAMSPACE]);
     listTeamspaceMembersMock.mockResolvedValue([
-      { ...ALICE_MEMBER, principal_id: "bob-sub", can_manage_members: false },
+      { ...ALICE_MEMBER, principal_id: "00000000-0000-4000-8000-000000000b0b", can_manage_members: false },
     ]);
 
     const user = userEvent.setup();
     render(
       <I18nProvider>
-        <TeamspacesPane token="token-123" currentPrincipalId="bob-sub" onOpenFolder={vi.fn()} />
+        <TeamspacesPane token="token-123" currentPrincipalId="00000000-0000-4000-8000-000000000b0b" onOpenFolder={vi.fn()} />
       </I18nProvider>
     );
 
@@ -263,7 +265,7 @@ describe("TeamspacesPane", () => {
 
   it("resolves a raw principal_id to a username (P19-S4)", async () => {
     listTeamspacesMock.mockResolvedValue([TEAMSPACE]);
-    lookupUserByIdMock.mockResolvedValue({ id: "alice-sub", username: "alice" });
+    lookupUserByIdMock.mockResolvedValue({ id: "00000000-0000-4000-8000-0000000a11ce", username: "alice" });
 
     const user = userEvent.setup();
     renderPane();
@@ -272,13 +274,13 @@ describe("TeamspacesPane", () => {
     await user.click(screen.getByText("Öffnen"));
 
     expect(await screen.findByText("alice (Verwaltung)")).toBeInTheDocument();
-    expect(screen.queryByText("alice-sub (Verwaltung)")).not.toBeInTheDocument();
+    expect(screen.queryByText("00000000-0000-4000-8000-0000000a11ce (Verwaltung)")).not.toBeInTheDocument();
   });
 
   it("shows bound AD groups and lets a manager unbind one (Post-Roadmap Phase 74 Session 3, ADR 0160/ADR 0217)", async () => {
     listTeamspacesMock.mockResolvedValue([TEAMSPACE]);
     listAdGroupBindingsMock
-      .mockResolvedValueOnce([{ id: 1, teamspace_id: "ts-1", ad_group_name: "Vertrieb", invited_by: "alice-sub", invited_at: "2026-01-01T00:00:00Z" }])
+      .mockResolvedValueOnce([{ id: 1, teamspace_id: "ts-1", ad_group_name: "Vertrieb", invited_by: "00000000-0000-4000-8000-0000000a11ce", invited_at: "2026-01-01T00:00:00Z" }])
       .mockResolvedValueOnce([]);
     unbindAdGroupFromTeamspaceMock.mockResolvedValue(undefined);
 
@@ -323,7 +325,7 @@ describe("TeamspacesPane", () => {
       id: 1,
       teamspace_id: "ts-1",
       ad_group_name: "Vertrieb",
-      invited_by: "alice-sub",
+      invited_by: "00000000-0000-4000-8000-0000000a11ce",
       invited_at: "2026-01-01T00:00:00Z",
     });
 
@@ -371,13 +373,13 @@ describe("TeamspacesPane", () => {
   it("does not show the AD-group form for a non-manager member", async () => {
     listTeamspacesMock.mockResolvedValue([TEAMSPACE]);
     listTeamspaceMembersMock.mockResolvedValue([
-      { ...ALICE_MEMBER, principal_id: "bob-sub", can_manage_members: false },
+      { ...ALICE_MEMBER, principal_id: "00000000-0000-4000-8000-000000000b0b", can_manage_members: false },
     ]);
 
     const user = userEvent.setup();
     render(
       <I18nProvider>
-        <TeamspacesPane token="token-123" currentPrincipalId="bob-sub" onOpenFolder={vi.fn()} />
+        <TeamspacesPane token="token-123" currentPrincipalId="00000000-0000-4000-8000-000000000b0b" onOpenFolder={vi.fn()} />
       </I18nProvider>
     );
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useI18n } from "@/i18n";
 import {
   ApiError,
@@ -11,6 +11,7 @@ import {
   rejectApprovalRequest,
   type ApprovalRequest,
 } from "@/lib/api";
+import { principalName, principalTitle, usePrincipalNames } from "@/lib/usePrincipalNames";
 
 function objectId(request: ApprovalRequest): string {
   return String(request.payload.document_id ?? request.payload.folder_id ?? "?");
@@ -22,12 +23,16 @@ function objectId(request: ApprovalRequest): string {
 // "administrative trash", see PROGRESS.md). Lives in the user UI instead
 // of the admin UI, since here regular users approve each other's requests,
 // not an administrative process.
+// Since P86-S2 `initiated_by` is shown as a name (it is the initiator's
+// principal since P85, ADR 0240) and compared with `currentPrincipalId`
+// (the user's `sub`) for "cannot approve one's own request". Rejecting asks
+// for an optional reason, which the initiator sees on the request.
 export function ApprovalsPane({
   token,
-  currentUsername,
+  currentPrincipalId,
 }: {
   token: string;
-  currentUsername: string;
+  currentPrincipalId: string;
 }) {
   const { t } = useI18n();
   const [requests, setRequests] = useState<ApprovalRequest[]>([]);
@@ -38,6 +43,13 @@ export function ApprovalsPane({
   // the row title. Resolved once per object; null = could not be resolved
   // (e.g. no read permission), which falls back to a short monospaced id.
   const [names, setNames] = useState<Record<string, string | null>>({});
+  // The row whose reject form is open, and its reason draft.
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const initiatorNames = usePrincipalNames(
+    token,
+    requests.map((r) => r.initiated_by)
+  );
 
   const reload = useCallback(async () => {
     if (!token) return;
@@ -102,11 +114,18 @@ export function ApprovalsPane({
     }
   }
 
-  async function handleReject(request: ApprovalRequest) {
+  function openReject(request: ApprovalRequest) {
+    setRejectingId(request.id);
+    setRejectReason("");
+  }
+
+  async function handleReject(request: ApprovalRequest, event: FormEvent) {
+    event.preventDefault();
     setBusyId(request.id);
     setError(null);
     try {
-      await rejectApprovalRequest(token, request.id);
+      await rejectApprovalRequest(token, request.id, rejectReason.trim() || null);
+      setRejectingId(null);
       await reload();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("approvals.decisionError"));
@@ -136,7 +155,8 @@ export function ApprovalsPane({
       ) : (
         <ul className="entry-list">
           {requests.map((request) => {
-            const isOwnRequest = request.initiated_by === currentUsername;
+            const isOwnRequest = !!currentPrincipalId && request.initiated_by === currentPrincipalId;
+            const isRejecting = rejectingId === request.id;
             return (
               <li className="entry-row" key={request.id}>
                 <span className="entry-name">
@@ -150,11 +170,16 @@ export function ApprovalsPane({
                       {objectId(request).slice(0, 8)}
                     </code>
                   )}{" "}
-                  — {t("approvals.requestedBy", { name: request.initiated_by })}
+                  —{" "}
+                  <span title={principalTitle(initiatorNames, request.initiated_by)}>
+                    {t("approvals.requestedBy", {
+                      name: principalName(initiatorNames, request.initiated_by),
+                    })}
+                  </span>
                 </span>
                 {/* P83-S6 (item 5): row actions are secondary - a filled primary on
                     every row left the eye nowhere to land */}
-                <span className="flex gap-3">
+                <span className="approval-actions flex gap-3">
                   <button
                     type="button"
                     className={secondaryBtn}
@@ -167,12 +192,42 @@ export function ApprovalsPane({
                   <button
                     type="button"
                     className={secondaryBtn}
-                    onClick={() => handleReject(request)}
-                    disabled={busyId === request.id}
+                    onClick={() => openReject(request)}
+                    disabled={busyId === request.id || isRejecting}
+                    aria-expanded={isRejecting}
                   >
                     {t("approvals.reject")}
                   </button>
                 </span>
+                {isRejecting && (
+                  <form
+                    className="approval-reject flex flex-wrap items-end gap-3"
+                    onSubmit={(event) => handleReject(request, event)}
+                  >
+                    <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm">
+                      {t("approvals.rejectReasonLabel")}
+                      <input
+                        value={rejectReason}
+                        onChange={(event) => setRejectReason(event.target.value)}
+                        placeholder={t("approvals.rejectReasonPlaceholder")}
+                        autoFocus
+                        className="min-h-10 rounded-md border border-border bg-bg px-2 text-fg outline-none focus:border-accent focus:ring-2 focus:ring-accent-bg"
+                      />
+                    </label>
+                    <span className="flex gap-3">
+                      <button type="submit" className={secondaryBtn} disabled={busyId === request.id}>
+                        {t("approvals.rejectConfirm")}
+                      </button>
+                      <button
+                        type="button"
+                        className={secondaryBtn}
+                        onClick={() => setRejectingId(null)}
+                      >
+                        {t("common.cancel")}
+                      </button>
+                    </span>
+                  </form>
+                )}
               </li>
             );
           })}

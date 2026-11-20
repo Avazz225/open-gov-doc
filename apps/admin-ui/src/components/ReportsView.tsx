@@ -22,6 +22,7 @@ import {
   type UserActivityEntry,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { PrincipalName } from "./PrincipalName";
 
 const primaryBtn =
   "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap";
@@ -406,7 +407,9 @@ function UserActivitySection({ token }: { token: string }) {
             <tbody>
               {entries.map((entry) => (
                 <tr key={`${entry.actor}-${entry.event_type}`}>
-                  <td>{entry.actor}</td>
+                  <td>
+                    <PrincipalName value={entry.actor} />
+                  </td>
                   <td>{entry.event_type}</td>
                   <td>{entry.count}</td>
                 </tr>

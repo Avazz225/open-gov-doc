@@ -10,6 +10,7 @@ import {
   type DocumentSummary,
   type RecordsQuarantine,
 } from "@/lib/api";
+import { principalName, principalTitle, usePrincipalNames } from "@/lib/usePrincipalNames";
 import { useAuth } from "@/lib/auth-context";
 
 interface Row {
@@ -43,6 +44,7 @@ export function RecordsQuarantineOverviewPane({
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const setByNames = usePrincipalNames(token, rows.map((row) => row.entry.set_by));
 
   const reload = useCallback(async () => {
     if (!token) return;
@@ -127,7 +129,9 @@ export function RecordsQuarantineOverviewPane({
                 </button>
               )}
               <span className="entry-meta">
-                {t("recordsQuarantineOverview.setBy", { setBy: row.entry.set_by })}
+                <span title={principalTitle(setByNames, row.entry.set_by)}>
+                  {t("recordsQuarantineOverview.setBy", { setBy: principalName(setByNames, row.entry.set_by) })}
+                </span>
                 {row.entry.reason ? ` — ${row.entry.reason}` : ""}
                 {row.entry.auto_delete_at
                   ? ` — ${t("recordsQuarantineOverview.autoDeleteAt", {

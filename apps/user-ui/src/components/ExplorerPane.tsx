@@ -94,7 +94,7 @@ export function ExplorerPane({
   onDeleteFolder,
   onDeleteDocument,
   token,
-  createdBy,
+  favoritesUser,
   currentFolderId,
   onUploaded,
 }: {
@@ -113,7 +113,7 @@ export function ExplorerPane({
   onDeleteFolder: (folderId: string) => Promise<"trashed" | "pending_approval" | false>;
   onDeleteDocument: (documentId: string) => Promise<"trashed" | "pending_approval" | false>;
   token: string;
-  createdBy: string;
+  favoritesUser: string;
   currentFolderId: string;
   onUploaded: () => void;
 }) {
@@ -317,27 +317,27 @@ export function ExplorerPane({
   // Reloaded after every change instead of optimistically updated, the same
   // "server remains the source of truth" principle as with the trash.
   const reloadFavorites = useCallback(() => {
-    if (!token || !createdBy) return;
-    listFavorites(token, createdBy)
+    if (!token || !favoritesUser) return;
+    listFavorites(token, favoritesUser)
       .then((favorites) =>
         setFavoriteKeys(new Set(favorites.map((f) => `${f.object_type}:${f.object_id}`)))
       )
       .catch(() => {});
-  }, [token, createdBy]);
+  }, [token, favoritesUser]);
 
   useEffect(() => {
     reloadFavorites();
   }, [reloadFavorites]);
 
   async function toggleFavorite(objectType: "document" | "folder", objectId: string) {
-    if (!token || !createdBy) return;
+    if (!token || !favoritesUser) return;
     setFavoriteError(null);
     const key = `${objectType}:${objectId}`;
     try {
       if (favoriteKeys.has(key)) {
-        await removeFavorite(token, { user_id: createdBy, object_type: objectType, object_id: objectId });
+        await removeFavorite(token, { user_id: favoritesUser, object_type: objectType, object_id: objectId });
       } else {
-        await addFavorite(token, { user_id: createdBy, object_type: objectType, object_id: objectId });
+        await addFavorite(token, { user_id: favoritesUser, object_type: objectType, object_id: objectId });
       }
       reloadFavorites();
     } catch {

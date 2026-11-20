@@ -299,7 +299,10 @@
     "requestedBy": "requested by {name}",
     "approve": "Approve",
     "reject": "Reject",
-    "cannotApproveOwn": "You cannot approve your own requests"
+    "cannotApproveOwn": "You cannot approve your own requests",
+    "rejectReasonLabel": "Reason (optional)",
+    "rejectReasonPlaceholder": "Why is the request rejected?",
+    "rejectConfirm": "Send rejection"
   },
   "favorites": {
     "paneLabel": "Favorites",

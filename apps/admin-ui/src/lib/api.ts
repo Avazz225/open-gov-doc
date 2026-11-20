@@ -1853,11 +1853,10 @@ export interface ForensicTraceFilters {
   until?: string;
 }
 
-function forensicTraceQuery(
-  queriedBy: string,
-  filters: ForensicTraceFilters
-): URLSearchParams {
-  const query = new URLSearchParams({ queried_by: queriedBy });
+// The querying principal comes from the verified token (ADR 0240); the
+// former `queried_by` parameter was ignored by the server and is gone (P86-S2).
+function forensicTraceQuery(filters: ForensicTraceFilters): URLSearchParams {
+  const query = new URLSearchParams();
   if (filters.actor) query.set("actor", filters.actor);
   if (filters.subject) query.set("subject", filters.subject);
   if (filters.eventType) query.set("event_type", filters.eventType);
@@ -1869,10 +1868,9 @@ function forensicTraceQuery(
 
 export async function getForensicTrace(
   token: string,
-  queriedBy: string,
   filters: ForensicTraceFilters = {}
 ): Promise<ForensicTraceResult> {
-  const query = forensicTraceQuery(queriedBy, filters);
+  const query = forensicTraceQuery(filters);
   const response = await request(
     "reporting-service",
     `forensic-trace?${query.toString()}`,
@@ -1884,11 +1882,10 @@ export async function getForensicTrace(
 
 export async function exportForensicTrace(
   token: string,
-  queriedBy: string,
   format: ReportFormat,
   filters: ForensicTraceFilters = {}
 ): Promise<Blob> {
-  const query = forensicTraceQuery(queriedBy, filters);
+  const query = forensicTraceQuery(filters);
   query.set("format", format);
   const response = await request(
     "reporting-service",
@@ -2926,6 +2923,32 @@ export async function updateBrandingConfig(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     },
+    token
+  );
+  return response.json();
+}
+
+// Reverse identity lookup for display (P86-S2, same endpoint as user-ui's,
+// ADR 0069): since P85 (ADR 0240) recorded actors are principals - a user's
+// Keycloak `sub` - and `usePrincipalNames` turns them into usernames.
+export interface UserLookup {
+  id: string;
+  username: string;
+}
+
+export async function lookupUserById(token: string, userId: string): Promise<UserLookup> {
+  const response = await request("auth-service", `users/${encodeURIComponent(userId)}`, {}, token);
+  return response.json();
+}
+
+// Forward lookup (P86-S2): the audit views' actor filters accept a username
+// and query by the principal it names, because events record principals
+// since P85 (ADR 0240).
+export async function lookupUserByUsername(token: string, username: string): Promise<UserLookup> {
+  const response = await request(
+    "auth-service",
+    `users/lookup?username=${encodeURIComponent(username)}`,
+    {},
     token
   );
   return response.json();

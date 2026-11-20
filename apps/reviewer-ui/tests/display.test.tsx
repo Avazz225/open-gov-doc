@@ -13,6 +13,14 @@ describe("ShortKey", () => {
     expect(code).toHaveAttribute("title", uuid);
   });
 
+  it("keeps the suffix of a `<uuid>:<version>` key (P86-S2)", () => {
+    const key = "60ccb725-4261-40d2-a880-62e38802476a:2";
+    render(<ShortKey value={key} />);
+    const code = screen.getByText("60ccb725:2");
+    expect(code.tagName).toBe("CODE");
+    expect(code).toHaveAttribute("title", key);
+  });
+
   it("shows a readable business key unchanged and a missing one as a dash", () => {
     const { rerender } = render(<ShortKey value="case-42" />);
     expect(screen.getByText("case-42").tagName).not.toBe("CODE");

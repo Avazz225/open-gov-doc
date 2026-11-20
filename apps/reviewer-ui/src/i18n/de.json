@@ -96,7 +96,8 @@
     "reassignFormLabel": "Neu zuweisen",
     "reassignPrincipalIdLabel": "Neu zuweisen an (Nutzername/Principal-ID)",
     "reassignButton": "Neu zuweisen",
-    "reassignError": "Neu-Zuweisen fehlgeschlagen"
+    "reassignError": "Neu-Zuweisen fehlgeschlagen",
+    "unknownUser": "Keine Person mit dem Nutzernamen \"{name}\" gefunden"
   },
   "instanceDetail": {
     "paneLabel": "Vorgang",

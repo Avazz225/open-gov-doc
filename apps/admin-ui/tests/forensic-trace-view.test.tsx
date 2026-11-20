@@ -18,6 +18,12 @@ const exportForensicTraceMock = vi.fn();
 vi.mock("@/lib/api", () => ({
   getForensicTrace: (...args: unknown[]) => getForensicTraceMock(...args),
   exportForensicTrace: (...args: unknown[]) => exportForensicTraceMock(...args),
+  // P86-S2: the actor filter resolves a username, the table shows names.
+  lookupUserByUsername: async (_token: string, username: string) => {
+    if (username !== "alice") throw new Error("unknown");
+    return { id: "00000000-0000-4000-8000-0000000a11ce", username };
+  },
+  lookupUserById: async (_token: string, id: string) => ({ id, username: id === "00000000-0000-4000-8000-0000000a11ce" ? "alice" : id }),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {
@@ -55,7 +61,7 @@ describe("ForensicTraceView", () => {
     expect(getForensicTraceMock).not.toHaveBeenCalled();
   });
 
-  it("queries the trace with the current user as queried_by and renders results", async () => {
+  it("queries by the principal behind a typed username and shows actors as names (P86-S2)", async () => {
     getForensicTraceMock.mockResolvedValue({
       entries: [
         {
@@ -65,7 +71,7 @@ describe("ForensicTraceView", () => {
           occurred_at: "2026-08-01T10:00:00Z",
           service_name: "document-service",
           subject: "doc-1",
-          actor: "alice",
+          actor: "00000000-0000-4000-8000-0000000a11ce",
           payload: { version_number: 1 },
         },
       ],
@@ -84,12 +90,11 @@ describe("ForensicTraceView", () => {
     await waitFor(() => expect(getForensicTraceMock).toHaveBeenCalled());
     expect(getForensicTraceMock).toHaveBeenCalledWith(
       "token-123",
-      "security-officer",
-      expect.objectContaining({ actor: "alice" })
+      expect.objectContaining({ actor: "00000000-0000-4000-8000-0000000a11ce" })
     );
 
     expect(await screen.findByText("document.downloaded")).toBeInTheDocument();
-    expect(screen.getByText("alice")).toBeInTheDocument();
+    expect(await screen.findByText("alice")).toHaveAttribute("title", "00000000-0000-4000-8000-0000000a11ce");
     expect(screen.getByText("doc-1")).toBeInTheDocument();
     expect(
       screen.getByText("1 von 1 Ereignissen sichtbar (Rest durch Ihre Berechtigungen ausgeblendet).")
@@ -186,7 +191,7 @@ describe("ForensicTraceView", () => {
     expect(await screen.findByText("Trace konnte nicht geladen werden")).toBeInTheDocument();
   });
 
-  it("triggers a CSV export with the current filters and queried_by", async () => {
+  it("triggers a CSV export with the current filters", async () => {
     const blob = new Blob(["a,b"], { type: "text/csv" });
     exportForensicTraceMock.mockResolvedValue(blob);
     const user = userEvent.setup();
@@ -201,7 +206,6 @@ describe("ForensicTraceView", () => {
     await waitFor(() => expect(exportForensicTraceMock).toHaveBeenCalled());
     expect(exportForensicTraceMock).toHaveBeenCalledWith(
       "token-123",
-      "security-officer",
       "csv",
       expect.objectContaining({ subject: "doc-1" })
     );

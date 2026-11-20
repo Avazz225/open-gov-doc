@@ -12,6 +12,7 @@ import {
   type FolderReference,
   type SearchResult,
 } from "@/lib/api";
+import { principalName, principalTitle, usePrincipalNames } from "@/lib/usePrincipalNames";
 
 // Installation-wide hand-folder/work-tray overview (14.2, Post-Roadmap
 // Phase 35 Session 4, ADR 0146) - closes the gap ADR 0118's own
@@ -42,6 +43,10 @@ export function HandFolderOverviewPane({
   const [workTrayDocs, setWorkTrayDocs] = useState<SearchResult[]>([]);
   const [workTrayLoading, setWorkTrayLoading] = useState(true);
   const [workTrayError, setWorkTrayError] = useState<string | null>(null);
+  const actorNames = usePrincipalNames(token, [
+    ...references.map((ref) => ref.added_by),
+    ...workTrayDocs.map((doc) => doc.created_by),
+  ]);
 
   const reloadReferences = useCallback(async () => {
     if (!token) return;
@@ -136,7 +141,7 @@ export function HandFolderOverviewPane({
                       {ref.document_title ?? ref.document_id}
                     </button>
                   </td>
-                  <td>{ref.added_by}</td>
+                  <td title={principalTitle(actorNames, ref.added_by)}>{principalName(actorNames, ref.added_by)}</td>
                   <td className="whitespace-nowrap">{new Date(ref.added_at).toLocaleString()}</td>
                 </tr>
               ))}
@@ -175,7 +180,7 @@ export function HandFolderOverviewPane({
                     </button>
                   </td>
                   <td>{doc.folder_name ?? "-"}</td>
-                  <td>{doc.created_by}</td>
+                  <td title={principalTitle(actorNames, doc.created_by)}>{principalName(actorNames, doc.created_by)}</td>
                 </tr>
               ))}
             </tbody>

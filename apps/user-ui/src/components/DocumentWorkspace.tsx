@@ -370,7 +370,7 @@ export function DocumentWorkspace() {
           onDeleteFolder={handleDeleteFolder}
           onDeleteDocument={handleDeleteDocument}
           token={accessToken ?? ""}
-          createdBy={user?.username ?? ""}
+          favoritesUser={user?.username ?? ""}
           currentFolderId={currentFolder.id}
           onUploaded={() => load(currentFolder.id)}
           openDocuments={openDocuments}
@@ -385,7 +385,7 @@ export function DocumentWorkspace() {
             {view === "search" ? (
               <SearchPane token={accessToken ?? ""} onOpenDocument={openDocumentTab} />
             ) : view === "approvals" ? (
-              <ApprovalsPane token={accessToken ?? ""} currentUsername={user?.username ?? ""} />
+              <ApprovalsPane token={accessToken ?? ""} currentPrincipalId={user?.sub ?? ""} />
             ) : view === "favorites" ? (
               <FavoritesPane
                 token={accessToken ?? ""}

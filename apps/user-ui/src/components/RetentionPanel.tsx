@@ -14,6 +14,7 @@ import {
   type RetentionConfig,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { principalName, principalTitle, usePrincipalNames } from "@/lib/usePrincipalNames";
 
 // Sentinel select value for "reason not in the admin-curated catalog" -
 // never sent to the server, only used to switch the UI to the free-text
@@ -96,6 +97,7 @@ export function RetentionPanel({ document: activeDocument }: { document: Documen
   }, [activeDocument.id, retentionConfig]);
 
   const activeHold = holds.find((h) => h.released_at === null) ?? null;
+  const setByNames = usePrincipalNames(accessToken ?? "", [activeHold?.set_by]);
 
   async function handleSubmit() {
     if (!accessToken) return;
@@ -163,7 +165,9 @@ export function RetentionPanel({ document: activeDocument }: { document: Documen
       {activeHold ? (
         <div className="legal-hold-active">
           <p className="text-sm opacity-80">
-            {t("retention.legalHoldActive", { setBy: activeHold.set_by })}
+            <span title={principalTitle(setByNames, activeHold.set_by)}>
+              {t("retention.legalHoldActive", { setBy: principalName(setByNames, activeHold.set_by) })}
+            </span>
             {activeHold.reason ? ` (${activeHold.reason})` : ""}
           </p>
           <button

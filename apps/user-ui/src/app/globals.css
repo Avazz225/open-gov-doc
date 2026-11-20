@@ -248,18 +248,22 @@ body {
 /* Approval rows below 768px (P83-S13, ADR 0238 Decision 4): the row's job
    on a phone is approving or rejecting it, so the title takes the full width
    and the two actions sit below it, full-width and 40px tall. */
+/* The reject form (P86-S2) opens under its row, across the full width. */
+.approvals-pane .entry-row {
+  flex-wrap: wrap;
+  gap: var(--dms-space-2);
+}
+.approvals-pane .entry-row > .approval-reject {
+  flex-basis: 100%;
+}
 @media (max-width: 767.98px) {
-  .approvals-pane .entry-row {
-    flex-wrap: wrap;
-    gap: var(--dms-space-2);
-  }
   .approvals-pane .entry-row > .entry-name {
     flex-basis: 100%;
   }
-  .approvals-pane .entry-row > span:last-child {
+  .approvals-pane .entry-row > .approval-actions {
     flex: 1;
   }
-  .approvals-pane .entry-row > span:last-child button {
+  .approvals-pane .entry-row button {
     flex: 1;
     min-height: 2.5rem;
   }

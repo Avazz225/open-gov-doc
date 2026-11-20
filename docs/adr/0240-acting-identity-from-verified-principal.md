@@ -239,3 +239,19 @@ every touched route, plus the service's suite and ruff.
     - `signer_principal_id` stays, checked against the verified username;
     - migration's peer-to-peer `created_by` stays (the federated exception).
 
+- **Follow-up (P86-S2), display and leftovers:**
+  - **Principals have two shapes.** A Keycloak user's principal is its UUID `sub`. A technical account's
+    principal (`users-admin`, `config-admin`, …; ADR 0065) is its integer row id. auth-service's
+    `GET /users/{id}` and `GET /users/lookup` now fall back to technical accounts, so both shapes
+    resolve to a name in both directions. The UIs resolve UUID and all-digit values and show anything
+    else (older usernames, services, `peer:` actors) as recorded.
+  - **Three client spots still compared or sent user names after S5, now fixed:**
+    - reviewer-ui decided "claimed by me" by username, so a user's own claim offered no release;
+    - user-ui decided "my own request" by username;
+    - reviewer-ui's team "assign" used `claim` with someone else's id. Since S3 that claims for the
+      caller, so it now claims and then `reassign`s.
+  - **Dead parameters removed:** reviewer-ui's unused "Abgeschlossen von" field, the claim body's
+    `principal_id`, and admin-ui's forensic `queried_by`.
+  - **Still open:** the user-activity report's actor filter matches the value as recorded. A filter by
+    person across older (username) and newer (principal) events would need the reporting side to know
+    both.

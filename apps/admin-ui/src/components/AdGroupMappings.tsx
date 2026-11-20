@@ -19,6 +19,7 @@ import {
   setAdGroupMappingDefaultRole,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { usePrincipalName } from "./PrincipalName";
 
 // AD group -> role mapping admin UI (Phase 50 Session 5) - the backend
 // (1:1 mappings since P24-S2/ADR 0093, composite AND-rules + default role
@@ -38,6 +39,8 @@ export function AdGroupMappings() {
   const [compositeRules, setCompositeRules] = useState<AdGroupCompositeRule[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [defaultRole, setDefaultRole] = useState<AdGroupMappingDefaultRole | null>(null);
+  // `updated_by` is a principal since P85 (ADR 0240), shown as a name (P86-S2).
+  const defaultRoleChangedBy = usePrincipalName(defaultRole?.updated_by);
   const [error, setError] = useState<string | null>(null);
 
   const [mappingPending, setMappingPending] = useState(false);
@@ -367,8 +370,8 @@ export function AdGroupMappings() {
         </form>
         {defaultRolePending && <p className="text-sm opacity-80">{t("adGroupMappings.pendingApproval")}</p>}
         {defaultRole?.updated_by && (
-          <p className="text-sm opacity-80">
-            {t("adGroupMappings.defaultRoleLastChangedBy", { username: defaultRole.updated_by })}
+          <p className="text-sm opacity-80" title={defaultRoleChangedBy.title}>
+            {t("adGroupMappings.defaultRoleLastChangedBy", { username: defaultRoleChangedBy.name })}
           </p>
         )}
       </section>

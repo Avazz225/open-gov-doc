@@ -11,6 +11,7 @@ import {
   type ReadyTask,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { principalName, principalTitle, usePrincipalNames } from "@/lib/usePrincipalNames";
 
 // "Vorgang" direct-link detail view (post-roadmap phase 29, ADR 0109/0110) -
 // the first UI anywhere addressing a single process instance by ID
@@ -25,19 +26,22 @@ export function InstanceDetail({
   instanceId: string;
   onBack: () => void;
 }) {
-  const { accessToken, user } = useAuth();
+  const { accessToken } = useAuth();
   const { t } = useI18n();
 
   const [instance, setInstance] = useState<ProcessInstance | null>(null);
   const [tasks, setTasks] = useState<ReadyTask[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
-  const [completedBy, setCompletedBy] = useState("");
   const [signatureId, setSignatureId] = useState("");
   const [dataJson, setDataJson] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const names = usePrincipalNames(accessToken ?? "", [
+    instance?.created_by,
+    ...tasks.map((task) => task.claimed_by),
+  ]);
 
   const reload = () => {
     if (!accessToken) return;
@@ -61,7 +65,6 @@ export function InstanceDetail({
       return;
     }
     setExpandedTaskId(task.id);
-    setCompletedBy(user?.username ?? "");
     setSignatureId("");
     setDataJson("");
     setFormError(null);
@@ -135,7 +138,9 @@ export function InstanceDetail({
           <dt className="font-semibold opacity-80">{t("instanceDetail.businessKeyLabel")}</dt>
           <dd className="m-0">{instance.business_key ?? "-"}</dd>
           <dt className="font-semibold opacity-80">{t("instanceDetail.createdByLabel")}</dt>
-          <dd className="m-0">{instance.created_by}</dd>
+          <dd className="m-0" title={principalTitle(names, instance.created_by)}>
+            {principalName(names, instance.created_by)}
+          </dd>
           <dt className="font-semibold opacity-80">{t("instanceDetail.createdAtLabel")}</dt>
           <dd className="m-0">{new Date(instance.created_at).toLocaleString()}</dd>
         </dl>
@@ -180,7 +185,9 @@ export function InstanceDetail({
                           action, this view deliberately stays a lightweight
                           status display (ADR 0110), same precedent as omitting
                           the "on behalf of" delegation selector below. */}
-                      <td className={td}>{task.claimed_by ?? "-"}</td>
+                      <td className={td} title={principalTitle(names, task.claimed_by)}>
+                        {task.claimed_by ? principalName(names, task.claimed_by) : "-"}
+                      </td>
                       <td className={td}>
                         <button type="button" onClick={() => toggleExpand(task)} className={secondaryBtn}>
                           {t("taskList.completeButton")}
@@ -192,16 +199,6 @@ export function InstanceDetail({
                         <td colSpan={4} className="px-2 py-2">
                           <form className={inlineForm} onSubmit={(event) => handleComplete(task, event)}>
                             <h2 className="text-sm opacity-80">{t("taskList.completeHeading")}</h2>
-                            <label htmlFor={`completed-by-${task.id}`} className={fieldLabel}>
-                              {t("taskList.completedByLabel")}
-                            </label>
-                            <input
-                              id={`completed-by-${task.id}`}
-                              value={completedBy}
-                              onChange={(e) => setCompletedBy(e.target.value)}
-                              required
-                              className={fieldInput}
-                            />
                             {isSignature && (
                               <>
                                 <label htmlFor={`signature-id-${task.id}`} className={fieldLabel}>

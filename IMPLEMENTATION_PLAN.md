@@ -3746,6 +3746,32 @@ real capability, and signatures are never made on behalf.
   - user-ui `ApprovalsPane` gets a reject-reason field.
   - admin-ui `.form-grid`/layout gap polish (deferred since P81-S5).
   - A one-time check, in a narrow browser window, that GitHub honors the README `<picture>` width query.
+  - ✅ **Result:**
+    - **Names everywhere a principal is shown:** user-ui (approvals, "gesetzt von" ×4, Postbuch, hand
+      folders), reviewer-ui (approvals, claims, team, instance, delegators, deputies) and admin-ui (audit
+      views, deletion register, break-glass, teamspaces, AD-group default role, user tracking). Lock
+      badges, the trash's deleter and "erstellt von" aren't displayed in any UI, so there was nothing to
+      change there.
+    - **One plan assumption was wrong:** "UUID-shaped ids only". Technical accounts' principals are
+      integer row ids (`users-admin` = `2`), and auth-service's lookups only knew Keycloak users. Both
+      lookups now fall back to technical accounts (+2 tests), and the UIs resolve UUIDs and digits.
+    - **Found and fixed (P85 leftovers):**
+      - reviewer-ui "claimed by me" and user-ui "own request" compared usernames;
+      - the team "assign" would have claimed for the supervisor; it now claims and then reassigns, with
+        rollback;
+      - the dead "Abgeschlossen von" field, the claim body's `principal_id` and the forensic
+        `queried_by` are gone.
+    - **Reject reason** in user-ui.
+    - **Forms:** `.form-grid` gaps 16/12px, a 16px gap between a form and what follows it, layout
+      rows 12px.
+    - **README check:** GitHub honors the width query (390 → compact, 1280 → wide). The compact dark
+      PNG had white 16px gutters, which were recolored.
+    - **reviewer-ui:** `<uuid>:<version>` keys short (`60ccb725:2`).
+
+**Phase 86 result:** every app keeps its settings behind the user name, at every width, and every
+recorded actor appears as a person's name. That covers Keycloak users and technical accounts, with the
+raw principal on hover. The three places where P85 had left a UI comparing user names (own claim, own
+request, team assignment) work again.
 
 ## Phase 87 — Service Instances: Replacement, Scaling, Expected Replicas (user-requested)
 

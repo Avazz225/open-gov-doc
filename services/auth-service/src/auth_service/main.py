@@ -794,7 +794,11 @@ async def list_users(user: dict = Depends(get_current_user)) -> list[dict]:
 
 
 @app.get("/users/lookup", response_model=UserLookupOut)
-async def lookup_user(username: str, user: dict = Depends(get_current_user)) -> dict:
+async def lookup_user(
+    username: str,
+    user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
     """Exact name resolution (2.5, P14-S6) - deliberately WITHOUT the
     `admin.user_management` gate like `GET /users` above, see
     `admin_users.find_user_by_username`. Since post-roadmap Phase 19
@@ -807,6 +811,17 @@ async def lookup_user(username: str, user: dict = Depends(get_current_user)) -> 
         user, "users.lookup", "Fehlende Berechtigung 'users.lookup' (everyone-Gruppe entzogen?)"
     )
     match = admin_users.find_user_by_username(app.state.keycloak_admin, username)
+    if match is None:
+        # Since P86-S2, the counterpart of `get_user`'s technical-account
+        # fallback: the audit views filter by a typed name, and a technical
+        # account's events carry its integer id (ADR 0240).
+        account = (
+            await session.execute(
+                select(TechnicalAccount).where(TechnicalAccount.username == username)
+            )
+        ).scalar_one_or_none()
+        if account is not None:
+            match = {"id": str(account.id), "username": account.username}
     if match is None:
         raise HTTPException(status_code=404, detail=f"Person {username!r} unbekannt")
     return match
@@ -1029,7 +1044,11 @@ async def create_user(payload: UserCreate, user: dict = Depends(get_current_user
 
 
 @app.get("/users/{user_id}", response_model=UserLookupOut)
-async def get_user(user_id: str, user: dict = Depends(get_current_user)) -> dict:
+async def get_user(
+    user_id: str,
+    user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
     """Reverse identity resolution (post-roadmap Phase 19 Session 4, ADR
     0069) - counterpart to `GET /users/lookup` above (name -> UUID):
     `teamspace-service`'s member lists and `permission-service`'s
@@ -1044,6 +1063,15 @@ async def get_user(user_id: str, user: dict = Depends(get_current_user)) -> dict
         user, "users.lookup", "Fehlende Berechtigung 'users.lookup' (everyone-Gruppe entzogen?)"
     )
     match = admin_users.find_user_by_id(app.state.keycloak_admin, user_id)
+    if match is None and user_id.isdigit():
+        # Since P86-S2: a technical account (`users-admin`, `config-admin`,
+        # ...; ADR 0065) has no Keycloak user - its principal is its own
+        # integer row id. Since P85 (ADR 0240) such ids are recorded as
+        # actors (creators, approvers, claimants), so the UIs resolve them
+        # here too, under the same `users.lookup` gate.
+        account = await session.get(TechnicalAccount, int(user_id))
+        if account is not None:
+            match = {"id": user_id, "username": account.username}
     if match is None:
         raise HTTPException(status_code=404, detail=f"Person {user_id!r} unbekannt")
     return match

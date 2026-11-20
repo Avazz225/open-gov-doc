@@ -283,15 +283,17 @@ export async function completeTask(
 // once, but requires an existing claim to resolve "the assignee" from.
 export async function claimTask(
   token: string,
-  params: { instanceId: string; taskId: string; principalId: string }
+  params: { instanceId: string; taskId: string }
 ): Promise<void> {
+  // Always claimed by and for the caller (ADR 0240): the server takes the
+  // principal from the verified token, so the body stays empty.
   await request(
     "workflow-service",
     `instances/${params.instanceId}/tasks/${params.taskId}/claim`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ principal_id: params.principalId }),
+      body: JSON.stringify({}),
     },
     token
   );
@@ -566,4 +568,30 @@ export async function downloadDocumentVersion(
     token
   );
   return response.blob();
+}
+
+// Reverse identity lookup for display (P86-S2, same endpoint as user-ui's,
+// ADR 0069): since P85 (ADR 0240) recorded actors are principals - a user's
+// Keycloak `sub` - and `usePrincipalNames` turns them into usernames.
+export interface UserLookup {
+  id: string;
+  username: string;
+}
+
+export async function lookupUserById(token: string, userId: string): Promise<UserLookup> {
+  const response = await request("auth-service", `users/${encodeURIComponent(userId)}`, {}, token);
+  return response.json();
+}
+
+// Forward lookup (P86-S2): the team view's assign/reassign field accepts a
+// username and stores the principal it names, so claims stay comparable
+// with `user.sub` (ADR 0240).
+export async function lookupUserByUsername(token: string, username: string): Promise<UserLookup> {
+  const response = await request(
+    "auth-service",
+    `users/lookup?username=${encodeURIComponent(username)}`,
+    {},
+    token
+  );
+  return response.json();
 }

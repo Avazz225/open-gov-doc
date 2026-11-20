@@ -96,11 +96,24 @@
   }
 }
 
+/* Gap one step up (P86-S2, deferred from P81-S1's punch list item 4): at
+   8px a row of labelled fields read as one block; 16px between rows and
+   12px between columns separate the fields without spreading the form. */
 .form-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: var(--dms-space-2);
+  gap: var(--dms-space-4) var(--dms-space-3);
   align-items: end;
+}
+
+/* What follows a form - mostly the table it fills - starts 16px below it;
+   before, a create form sat directly on its table's header row (P86-S2).
+   In the base layer (the classes here are unlayered), so an explicit
+   margin utility on that element still wins. */
+@layer base {
+  .form-grid + * {
+    margin-top: var(--dms-space-4);
+  }
 }
 
 /* One column below 640px (P83-S12, ADR 0238 Decision 7): auto-fit would
@@ -224,17 +237,17 @@
 .layout-row {
   border: 1px solid var(--dms-border);
   border-radius: var(--dms-radius-md);
-  padding: var(--dms-space-2) var(--dms-space-3);
+  padding: var(--dms-space-3);
   margin-bottom: var(--dms-space-3);
   display: flex;
   flex-direction: column;
-  gap: var(--dms-space-2);
+  gap: var(--dms-space-3);
 }
 
 .layout-field {
   display: flex;
   align-items: center;
-  gap: var(--dms-space-2);
+  gap: var(--dms-space-3);
   flex-wrap: wrap;
 }
 

@@ -18,6 +18,8 @@ vi.mock("@/lib/api", () => ({
   claimTask: (...args: unknown[]) => claimTaskMock(...args),
   releaseTaskClaim: (...args: unknown[]) => releaseTaskClaimMock(...args),
   createTaskOrgHierarchyGrant: (...args: unknown[]) => createTaskOrgHierarchyGrantMock(...args),
+  // Recorded principals resolve to names (P86-S2).
+  lookupUserById: async (_token: string, id: string) => ({ id, username: id === "00000000-0000-4000-8000-0000000a11ce" ? "alice" : id }),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {
@@ -29,7 +31,7 @@ vi.mock("@/lib/api", () => ({
 
 vi.mock("@/lib/auth-context", () => ({
   useAuth: () => ({
-    user: { sub: "u1", username: "alice", email: null, realm_roles: [] },
+    user: { sub: "00000000-0000-4000-8000-0000000a11ce", username: "alice", email: null, realm_roles: [] },
     permissions: [],
     accessToken: "token-123",
     isLoading: false,
@@ -178,7 +180,7 @@ describe("TaskList", () => {
       {
         id: "d1",
         delegator_principal_id: "carol-sub",
-        deputy_principal_id: "u1",
+        deputy_principal_id: "00000000-0000-4000-8000-0000000a11ce",
         starts_at: "2026-01-01T00:00:00Z",
         ends_at: "2026-12-31T00:00:00Z",
       },
@@ -186,7 +188,7 @@ describe("TaskList", () => {
     renderList();
 
     await waitFor(() =>
-      expect(listActiveDelegationsForDeputyMock).toHaveBeenCalledWith("token-123", "u1")
+      expect(listActiveDelegationsForDeputyMock).toHaveBeenCalledWith("token-123", "00000000-0000-4000-8000-0000000a11ce")
     );
     await waitFor(() => expect(screen.getByText("Rechnung prüfen")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "Bearbeiten" }));
@@ -202,7 +204,7 @@ describe("TaskList", () => {
       {
         id: "d1",
         delegator_principal_id: "carol-sub",
-        deputy_principal_id: "u1",
+        deputy_principal_id: "00000000-0000-4000-8000-0000000a11ce",
         starts_at: "2026-01-01T00:00:00Z",
         ends_at: "2026-12-31T00:00:00Z",
       },
@@ -232,7 +234,7 @@ describe("TaskList", () => {
   it("claims an unclaimed task as the logged-in user and reloads", async () => {
     listReadyTasksMock
       .mockResolvedValueOnce([MANUAL_TASK])
-      .mockResolvedValueOnce([{ ...MANUAL_TASK, claimed_by: "alice" }]);
+      .mockResolvedValueOnce([{ ...MANUAL_TASK, claimed_by: "00000000-0000-4000-8000-0000000a11ce" }]);
     claimTaskMock.mockResolvedValue(undefined);
     renderList();
 
@@ -243,7 +245,6 @@ describe("TaskList", () => {
       expect(claimTaskMock).toHaveBeenCalledWith("token-123", {
         instanceId: "instance-1",
         taskId: "task-1",
-        principalId: "alice",
       })
     );
     expect(await screen.findByText("Beansprucht von alice")).toBeInTheDocument();
@@ -259,7 +260,7 @@ describe("TaskList", () => {
 
   it("releases a task claim held by the logged-in user", async () => {
     listReadyTasksMock
-      .mockResolvedValueOnce([{ ...MANUAL_TASK, claimed_by: "alice" }])
+      .mockResolvedValueOnce([{ ...MANUAL_TASK, claimed_by: "00000000-0000-4000-8000-0000000a11ce" }])
       .mockResolvedValueOnce([MANUAL_TASK]);
     releaseTaskClaimMock.mockResolvedValue(undefined);
     renderList();
@@ -277,7 +278,7 @@ describe("TaskList", () => {
   });
 
   it("offers the org-hierarchy grant form only once claimed by the logged-in user, and reports the result", async () => {
-    listReadyTasksMock.mockResolvedValue([{ ...MANUAL_TASK, claimed_by: "alice" }]);
+    listReadyTasksMock.mockResolvedValue([{ ...MANUAL_TASK, claimed_by: "00000000-0000-4000-8000-0000000a11ce" }]);
     createTaskOrgHierarchyGrantMock.mockResolvedValue({
       grant_kind: "supervisor",
       deputy_principal_ids: ["petra-supervisor"],
@@ -315,7 +316,7 @@ describe("TaskList", () => {
   });
 
   it("sends org_unit_of only for grant_kind=org_unit", async () => {
-    listReadyTasksMock.mockResolvedValue([{ ...MANUAL_TASK, claimed_by: "alice" }]);
+    listReadyTasksMock.mockResolvedValue([{ ...MANUAL_TASK, claimed_by: "00000000-0000-4000-8000-0000000a11ce" }]);
     createTaskOrgHierarchyGrantMock.mockResolvedValue({
       grant_kind: "org_unit",
       deputy_principal_ids: [],

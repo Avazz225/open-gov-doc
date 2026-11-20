@@ -1,18 +1,23 @@
 // Display helpers for values that are data, not prose (P83-S11, craft-lens
 // punch list item 6 - "no raw values as content").
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// A UUID, optionally with a suffix: OCR/extraction tasks key their instance
+// as `<document id>:<version>` (seen at 768px in P86-S2, where the full key
+// wrapped over three lines).
+const UUID_KEY = /^([0-9a-f]{8})-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(:.+)?$/i;
 
 /** A related-object key: a UUID shows short and monospaced with the full
- *  value on hover (the same treatment migration-console gives its ids);
- *  anything else - a readable business key such as "Rechnung-2026-17" - is
- *  shown as it is. */
+ *  value on hover (the same treatment migration-console gives its ids), a
+ *  `<uuid>:<suffix>` key keeps its suffix (`60ccb725:2`); anything else - a
+ *  readable business key such as "Rechnung-2026-17" - is shown as it is. */
 export function ShortKey({ value }: { value: string | null }) {
   if (!value) return <>-</>;
-  if (!UUID.test(value)) return <>{value}</>;
+  const match = UUID_KEY.exec(value);
+  if (!match) return <>{value}</>;
   return (
-    <code className="font-mono text-xs opacity-80" title={value}>
-      {value.slice(0, 8)}
+    <code className="font-mono text-xs opacity-80 whitespace-nowrap" title={value}>
+      {match[1]}
+      {match[2] ?? ""}
     </code>
   );
 }

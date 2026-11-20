@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DelegationsPane } from "@/components/DelegationsPane";
 import { I18nProvider } from "@/i18n";
+import { clearPrincipalNameCache } from "@/lib/usePrincipalNames";
 
 const listMyDelegationsMock = vi.fn();
 const listActiveDelegationsForDeputyMock = vi.fn();
@@ -32,7 +33,7 @@ vi.mock("@/lib/api", async () => {
 function renderPane() {
   return render(
     <I18nProvider>
-      <DelegationsPane token="token-123" currentPrincipalId="alice-sub" />
+      <DelegationsPane token="token-123" currentPrincipalId="00000000-0000-4000-8000-0000000a11ce" />
     </I18nProvider>
   );
 }
@@ -42,6 +43,7 @@ const farFutureEnd = new Date(Date.now() + 86400_000).toISOString();
 
 describe("DelegationsPane", () => {
   beforeEach(() => {
+    clearPrincipalNameCache();
     listMyDelegationsMock.mockReset();
     listActiveDelegationsForDeputyMock.mockReset();
     createDelegationMock.mockReset();
@@ -72,8 +74,8 @@ describe("DelegationsPane", () => {
     listMyDelegationsMock.mockResolvedValue([
       {
         id: "d1",
-        delegator_principal_id: "alice-sub",
-        deputy_principal_id: "bob-sub",
+        delegator_principal_id: "00000000-0000-4000-8000-0000000a11ce",
+        deputy_principal_id: "00000000-0000-4000-8000-000000000b0b",
         starts_at: farFutureStart,
         ends_at: farFutureEnd,
         scope_object_type_ids: null,
@@ -87,7 +89,7 @@ describe("DelegationsPane", () => {
 
     renderPane();
 
-    expect(await screen.findByText(/bob-sub/)).toBeInTheDocument();
+    expect(await screen.findByText(/00000000-0000-4000-8000-000000000b0b/)).toBeInTheDocument();
     expect(screen.getByText("Widerrufen")).toBeInTheDocument();
   });
 
@@ -96,7 +98,7 @@ describe("DelegationsPane", () => {
       {
         id: "d2",
         delegator_principal_id: "carol-sub",
-        deputy_principal_id: "alice-sub",
+        deputy_principal_id: "00000000-0000-4000-8000-0000000a11ce",
         starts_at: farFutureStart,
         ends_at: farFutureEnd,
         scope_object_type_ids: null,
@@ -115,11 +117,11 @@ describe("DelegationsPane", () => {
   });
 
   it("creates a new delegation by resolving the deputy username first", async () => {
-    lookupUserByUsernameMock.mockResolvedValue({ id: "bob-sub", username: "bob" });
+    lookupUserByUsernameMock.mockResolvedValue({ id: "00000000-0000-4000-8000-000000000b0b", username: "bob" });
     createDelegationMock.mockResolvedValue({
       id: "d1",
-      delegator_principal_id: "alice-sub",
-      deputy_principal_id: "bob-sub",
+      delegator_principal_id: "00000000-0000-4000-8000-0000000a11ce",
+      deputy_principal_id: "00000000-0000-4000-8000-000000000b0b",
       starts_at: farFutureStart,
       ends_at: farFutureEnd,
       scope_object_type_ids: null,
@@ -143,7 +145,7 @@ describe("DelegationsPane", () => {
     await waitFor(() => expect(lookupUserByUsernameMock).toHaveBeenCalledWith("token-123", "bob"));
     await waitFor(() => expect(createDelegationMock).toHaveBeenCalled());
     expect(createDelegationMock.mock.calls[0][0]).toBe("token-123");
-    expect(createDelegationMock.mock.calls[0][1].deputyPrincipalId).toBe("bob-sub");
+    expect(createDelegationMock.mock.calls[0][1].deputyPrincipalId).toBe("00000000-0000-4000-8000-000000000b0b");
   });
 
   it("creates a scoped delegation with selected object types, folder IDs, and case IDs (P32-S2, case scope since Phase 53 Session 2/ADR 0154)", async () => {
@@ -151,11 +153,11 @@ describe("DelegationsPane", () => {
       { id: 1, name: "Rechnung", applies_to: "document", attributes: [], icon: null },
       { id: 2, name: "Vertrag", applies_to: "document", attributes: [], icon: null },
     ]);
-    lookupUserByUsernameMock.mockResolvedValue({ id: "bob-sub", username: "bob" });
+    lookupUserByUsernameMock.mockResolvedValue({ id: "00000000-0000-4000-8000-000000000b0b", username: "bob" });
     createDelegationMock.mockResolvedValue({
       id: "d1",
-      delegator_principal_id: "alice-sub",
-      deputy_principal_id: "bob-sub",
+      delegator_principal_id: "00000000-0000-4000-8000-0000000a11ce",
+      deputy_principal_id: "00000000-0000-4000-8000-000000000b0b",
       starts_at: farFutureStart,
       ends_at: farFutureEnd,
       scope_object_type_ids: [1],
@@ -199,11 +201,11 @@ describe("DelegationsPane", () => {
       { id: 1, name: "Rechnungsfreigabe", version: 1 },
       { id: 2, name: "Vertragsprüfung", version: 3 },
     ]);
-    lookupUserByUsernameMock.mockResolvedValue({ id: "bob-sub", username: "bob" });
+    lookupUserByUsernameMock.mockResolvedValue({ id: "00000000-0000-4000-8000-000000000b0b", username: "bob" });
     createDelegationMock.mockResolvedValue({
       id: "d1",
-      delegator_principal_id: "alice-sub",
-      deputy_principal_id: "bob-sub",
+      delegator_principal_id: "00000000-0000-4000-8000-0000000a11ce",
+      deputy_principal_id: "00000000-0000-4000-8000-000000000b0b",
       starts_at: farFutureStart,
       ends_at: farFutureEnd,
       scope_object_type_ids: null,
@@ -231,11 +233,11 @@ describe("DelegationsPane", () => {
   });
 
   it("trims and filters multiple comma-separated case IDs, same as the existing folder-ID field (Phase 53 Session 2)", async () => {
-    lookupUserByUsernameMock.mockResolvedValue({ id: "bob-sub", username: "bob" });
+    lookupUserByUsernameMock.mockResolvedValue({ id: "00000000-0000-4000-8000-000000000b0b", username: "bob" });
     createDelegationMock.mockResolvedValue({
       id: "d1",
-      delegator_principal_id: "alice-sub",
-      deputy_principal_id: "bob-sub",
+      delegator_principal_id: "00000000-0000-4000-8000-0000000a11ce",
+      deputy_principal_id: "00000000-0000-4000-8000-000000000b0b",
       starts_at: farFutureStart,
       ends_at: farFutureEnd,
       scope_object_type_ids: null,
@@ -284,8 +286,8 @@ describe("DelegationsPane", () => {
       .mockResolvedValueOnce([
         {
           id: "d1",
-          delegator_principal_id: "alice-sub",
-          deputy_principal_id: "bob-sub",
+          delegator_principal_id: "00000000-0000-4000-8000-0000000a11ce",
+          deputy_principal_id: "00000000-0000-4000-8000-000000000b0b",
           starts_at: farFutureStart,
           ends_at: farFutureEnd,
           scope_object_type_ids: null,
@@ -302,7 +304,7 @@ describe("DelegationsPane", () => {
     const user = userEvent.setup();
     renderPane();
 
-    await screen.findByText(/bob-sub/);
+    await screen.findByText(/00000000-0000-4000-8000-000000000b0b/);
     await user.click(screen.getByText("Widerrufen"));
 
     await waitFor(() => expect(revokeDelegationMock).toHaveBeenCalledWith("token-123", "d1"));
@@ -312,8 +314,8 @@ describe("DelegationsPane", () => {
     listMyDelegationsMock.mockResolvedValue([
       {
         id: "d1",
-        delegator_principal_id: "alice-sub",
-        deputy_principal_id: "bob-sub",
+        delegator_principal_id: "00000000-0000-4000-8000-0000000a11ce",
+        deputy_principal_id: "00000000-0000-4000-8000-000000000b0b",
         starts_at: farFutureStart,
         ends_at: farFutureEnd,
         scope_object_type_ids: null,
@@ -324,11 +326,11 @@ describe("DelegationsPane", () => {
         revoked_by: null,
       },
     ]);
-    lookupUserByIdMock.mockResolvedValue({ id: "bob-sub", username: "bob" });
+    lookupUserByIdMock.mockResolvedValue({ id: "00000000-0000-4000-8000-000000000b0b", username: "bob" });
 
     renderPane();
 
     expect(await screen.findByText(/^bob —/)).toBeInTheDocument();
-    expect(screen.queryByText(/bob-sub/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/00000000-0000-4000-8000-000000000b0b/)).not.toBeInTheDocument();
   });
 });

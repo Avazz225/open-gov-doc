@@ -11,6 +11,7 @@ vi.mock("@/lib/api", () => ({
   listApprovalRequests: (...args: unknown[]) => listApprovalRequestsMock(...args),
   approveRequest: (...args: unknown[]) => approveRequestMock(...args),
   rejectRequest: (...args: unknown[]) => rejectRequestMock(...args),
+  lookupUserById: async (_token: string, id: string) => ({ id, username: "bob" }),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {
@@ -69,6 +70,16 @@ describe("ApprovalList", () => {
     );
     expect(screen.getByText("Dokument löschen")).toBeInTheDocument();
     expect(screen.getByText("bob")).toBeInTheDocument();
+  });
+
+  // P86-S2: "Beantragt von" is a principal since P85 (ADR 0240) - shown as
+  // the person's name, the raw id on hover.
+  it("shows the initiator's name for a principal id", async () => {
+    listApprovalRequestsMock.mockResolvedValue([{ ...PENDING_REQUEST, initiated_by: "00000000-0000-4000-8000-000000000b0b" }]);
+    renderList();
+
+    const cell = await screen.findByText("bob");
+    expect(cell).toHaveAttribute("title", "00000000-0000-4000-8000-000000000b0b");
   });
 
   // P83-S11 (item 6): the action type shows as a translated name, the raw

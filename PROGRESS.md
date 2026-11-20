@@ -2,6 +2,68 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P86-S2, UX bundle. **Phase 86 is closed.**
+
+**What changed:**
+- **Names instead of principals** in all three apps that show recorded actors.
+  - `lib/usePrincipalNames.ts`, the same file in user-ui, reviewer-ui and admin-ui: a module-wide
+    cache, the raw id on hover, `clearPrincipalNameCache` on admin-ui's installation switch.
+  - admin-ui also got `components/PrincipalName.tsx`.
+  - user-ui: approvals, "gesetzt von" ×4, Postbuch/routing log, hand-folder overview.
+  - reviewer-ui: "Beantragt von", "Beansprucht von", team status, instance creator/claimant,
+    delegators, grant deputies.
+  - admin-ui: forensic trace, query console, user-activity report, deletion register, break-glass,
+    teamspaces, AD-group default role, user tracking.
+  - Lock badges, the trash's deleter and "erstellt von" aren't displayed in any UI.
+- **Plan assumption corrected:** the plan said to resolve "UUID-shaped ids only", but principals have
+  two shapes. A technical account (`users-admin`) is its integer row id `2`. auth-service's
+  `GET /users/{id}` and `GET /users/lookup` only knew Keycloak users; both now fall back to technical
+  accounts (+2 tests), and the UIs resolve UUIDs and digits.
+- **P85 leftovers fixed:**
+  - reviewer-ui decided "claimed by me" by username, so a user's own claim offered no release; it now
+    compares `sub`.
+  - user-ui decided "my own request" by username.
+  - reviewer-ui's team "assign" would have claimed for the supervisor. It now claims and then
+    reassigns, with rollback, and the field takes a username.
+  - Removed: the dead "Abgeschlossen von" field, the claim body's `principal_id`, the forensic
+    `queried_by`.
+- **user-ui ApprovalsPane:** an inline reject form with an optional reason.
+- **admin-ui audit filters** accept a username (`resolveActorFilter`). The user-activity report's
+  filter still matches only the value as recorded; this is recorded in ADR 0240.
+- **admin-ui forms:**
+  - `.form-grid` gaps are 16px between rows and 12px between columns;
+  - the element after a form starts 16px below it (before, it sat directly on its table);
+  - `.layout-row`/`.layout-field` 12px.
+- **reviewer-ui:** `<uuid>:<version>` keys show short (`60ccb725:2`).
+- **README `<picture>`:** GitHub honors the width query (390 → compact light/dark, 1280 → wide). The
+  compact dark PNG had white 16px gutters baked in; these were recolored to #0d1117 and noted in the
+  hero's REHEARSAL.md.
+- **Docs:** ADR 0240 follow-up; auth-service, user-ui, reviewer-ui and admin-ui docs.
+
+**Checks:**
+- vitest: user-ui 313, reviewer-ui 67, admin-ui 319. `tsc`/`eslint` clean.
+- auth-service 167/167.
+- e2e 37/37. One migration-console spec failed right after the stack restart and passed on rerun; the
+  app is unchanged.
+- Live:
+  - reviewer-ui at 768px shows "Beansprucht von users-admin" (hover: `2`), and "Freigeben" appears for
+    one's own claim;
+  - "Beantragt von" shows names;
+  - admin forms before/after.
+- **Phase-close regression 32/32 services green.** ruff shows only the 25 known pre-existing findings (→ P91-S3).
+
+The stack was stopped afterwards.
+
+**Next session:** **P87-S1**, scoping ADR 0241 for service instances:
+- successor semantics (same `service_name`; one new instance supersedes one unreachable old one, oldest
+  first);
+- forgetting on scale-down;
+- a type with zero reachable instances keeps its entries and is flagged;
+- whether the 7-day cleanup stays;
+- where expected replica counts come from.
+
+---
+
 **Last completed:** P86-S1, settings behind the user name in every app, at every width
 (ADR 0238 Decision 2 amendment).
 
@@ -30,7 +92,7 @@ the related object as a long id at 768px.
 
 The stack was stopped afterwards.
 
-**Next session:** **P86-S2**, UX bundle:
+**Next session (at the time):** P86-S2. It was done next; see the entry above. Original note:, UX bundle:
 - principal → name resolution everywhere (reviewer "Beantragt von", locks, creators, trash, approvals,
   audit views);
 - user-ui `ApprovalsPane` reject reason (plus the own-request check above);

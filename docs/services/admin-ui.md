@@ -511,6 +511,29 @@ The client no longer sends who is acting (`created_by`, `deleted_by`, `approved_
 the services take it from the verified token. The API helpers lost those parameters, and the
 components no longer pass the user name into them. Super-user activation, approve/reject, emergency shutdown and lift, and the user-tracking toggle no longer pass `user.sub`/`user.username`.
 
+## Names Instead of Principals (P86-S2)
+
+Since P85 (ADR 0240) recorded actors are principals: a Keycloak `sub`, or a technical account's integer
+id. `components/PrincipalName.tsx` (`<PrincipalName>` and `usePrincipalName`, built on
+`lib/usePrincipalNames.ts`, the same file as in user-ui and reviewer-ui) shows them as usernames with the
+raw id on hover. It is used for:
+- the forensic trace, query console and user-activity report (`actor`) and the query console's pending
+  approvals (`initiated_by`);
+- the deletion register (`triggered_by`) and the break-glass maintenance line;
+- teamspaces (`created_by`);
+- the AD-group default role and the user-tracking config (`updated_by`, plus the tracked person).
+- **Actor filters** in the forensic trace and query console accept a username: `resolveActorFilter`
+  looks it up (`GET /users/lookup`, which since P86-S2 also finds technical accounts) and queries by the
+  principal. An unknown name is sent as typed, so it still matches older events that carry usernames.
+  The user-activity report's filter still matches only the value as recorded.
+- **Installation switch:** the name cache is cleared, because integer ids repeat across installations.
+- **Forensic trace:** no longer sends `queried_by`, which the server ignored (it uses the verified token).
+
+**Form spacing (P86-S2, P81-S1 item 4):** `.form-grid` gaps are 16px between rows and 12px between
+columns (were 8px). The element after a form, usually its table, starts 16px below it; before, a create
+form sat directly on its table's header. `.layout-row`/`.layout-field` went to 12px. The new
+`.form-grid + *` rule is in `@layer base`, so a margin utility on that element still wins.
+
 ## Account Menu (P86-S1, [ADR 0238](../adr/0238-narrow-width-patterns-for-all-apps.md) Decision 2)
 
 The header's right side is one button: the signed-in user's name (from 640px; an icon below) with a

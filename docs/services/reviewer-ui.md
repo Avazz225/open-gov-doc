@@ -66,7 +66,25 @@ and monospaced. The app keeps working unadapted when a service adds a type.
 
 **Short related-object keys.** "Bezugsobjekt" in the task and team lists shows a UUID business key
 short and monospaced, with the full value on hover (`ShortKey` in `src/lib/display.tsx`). Readable keys
-show unchanged. The instance detail still shows the full key, because there it is the subject.
+show unchanged. The instance detail still shows the full key, because there it is the subject. Since P86-S2 a `<uuid>:<version>` key (OCR/extraction tasks) keeps its suffix (`60ccb725:2`); before,
+it didn't match and wrapped over three lines at 768px.
+
+**Names instead of principals (P86-S2).** Since P85 (ADR 0240) claimants, instance creators and
+four-eyes initiators are recorded as principals: a Keycloak `sub`, or a technical account's integer id.
+`src/lib/usePrincipalNames.ts` (the same file as in user-ui and admin-ui) resolves them through
+`GET /auth-service/users/{id}` with one shared cache: "Beansprucht von", "Beantragt von", the team list's
+status, the instance detail's creator and claimant, the delegator choice and a grant's deputies. The raw
+id stays on hover. Values that are not principal-shaped (older usernames, services, `peer:` actors) show
+as recorded.
+- **"Mine" by `sub`.** "Freigeben" and the grant form check `claimed_by === user.sub`. They had compared
+  the username, which no longer matched after P85, so a user's own claim offered no release.
+- **Claiming sends no body field.** The server has ignored `principal_id` since P85.
+- **Team assign/reassign.** Since P85 `claim` always claims for the caller, so the former "assign"
+  (claim with someone else's id) would have claimed for the supervisor. Assigning an unclaimed task now
+  claims it and hands it on through `reassign`; if that fails, the claim is released again. Both forms
+  take a username and resolve it to its principal (`GET /users/lookup`).
+- **"Abgeschlossen von" removed.** The field in the complete forms (task list and instance detail) has
+  not been sent since P85.
 
 `e2e/narrow.spec.ts` checks at 390px that no page overflows, that task rows are stacked, and that the
 account menu works. Unit tests cover the helpers and the translated names.

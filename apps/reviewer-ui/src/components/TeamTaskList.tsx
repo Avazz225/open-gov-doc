@@ -7,10 +7,13 @@ import {
   claimTask,
   listDirectReports,
   listReadyTasks,
+  lookupUserByUsername,
   reassignTask,
+  releaseTaskClaim,
   type ReadyTaskWithInstance,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { isPrincipalId, principalName, principalTitle, usePrincipalNames } from "@/lib/usePrincipalNames";
 import { ShortKey } from "@/lib/display";
 
 // Supervisor/team task oversight view (14.2, post-roadmap phase 31 session
@@ -70,23 +73,51 @@ export function TeamTaskList({
             (task.claimed_by === null && directReportIds.includes(task.created_by))
         );
 
+  // Claimants and instance creators are principals (ADR 0240), shown as
+  // names with the raw id on hover (P86-S2).
+  const names = usePrincipalNames(
+    accessToken ?? "",
+    teamTasks.map((task) => task.claimed_by ?? task.created_by)
+  );
+
   function openForm(taskId: string) {
     setOpenFormTaskId(taskId);
     setPrincipalIdInput("");
     setActionError(null);
   }
 
+  // The field takes a username or a principal id; claims record principals
+  // (ADR 0240), so a username is resolved first (P86-S2).
+  async function resolveTarget(input: string): Promise<string> {
+    if (isPrincipalId(input)) return input;
+    try {
+      return (await lookupUserByUsername(accessToken ?? "", input)).id;
+    } catch {
+      throw new ApiError(404, t("teamTaskList.unknownUser", { name: input }));
+    }
+  }
+
+  // Assigning an unclaimed task (P86-S2): since P85 a claim is always made
+  // for the caller, so the supervisor claims it and hands it on through
+  // `reassign` - the one call that may name someone else. If the handover
+  // fails, the supervisor's own claim is released again.
   async function handleAssign(task: ReadyTaskWithInstance, event: React.FormEvent) {
     event.preventDefault();
     if (!accessToken || !principalIdInput.trim()) return;
     setSubmitting(true);
     setActionError(null);
     try {
-      await claimTask(accessToken, {
-        instanceId: task.instance_id,
-        taskId: task.id,
-        principalId: principalIdInput.trim(),
-      });
+      const target = await resolveTarget(principalIdInput.trim());
+      const ids = { instanceId: task.instance_id, taskId: task.id };
+      await claimTask(accessToken, ids);
+      if (target !== user?.sub) {
+        try {
+          await reassignTask(accessToken, { ...ids, newPrincipalId: target });
+        } catch (err) {
+          await releaseTaskClaim(accessToken, ids).catch(() => undefined);
+          throw err;
+        }
+      }
       setOpenFormTaskId(null);
       reloadTasks();
     } catch (err) {
@@ -105,7 +136,7 @@ export function TeamTaskList({
       await reassignTask(accessToken, {
         instanceId: task.instance_id,
         taskId: task.id,
-        newPrincipalId: principalIdInput.trim(),
+        newPrincipalId: await resolveTarget(principalIdInput.trim()),
       });
       setOpenFormTaskId(null);
       reloadTasks();
@@ -165,10 +196,10 @@ export function TeamTaskList({
                     <td className={td}>
                       <ShortKey value={task.business_key} />
                     </td>
-                    <td className={td}>
+                    <td className={td} title={principalTitle(names, task.claimed_by ?? task.created_by)}>
                       {task.claimed_by !== null
-                        ? t("teamTaskList.statusClaimed", { principalId: task.claimed_by })
-                        : t("teamTaskList.statusUnclaimed", { createdBy: task.created_by })}
+                        ? t("teamTaskList.statusClaimed", { principalId: principalName(names, task.claimed_by) })
+                        : t("teamTaskList.statusUnclaimed", { createdBy: principalName(names, task.created_by) })}
                     </td>
                     <td className={td}>
                       <button

@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import { setGatewayBaseUrl } from "./api";
+import { clearPrincipalNameCache } from "./usePrincipalNames";
 import {
   type Installation,
   loadActiveInstallationId,
@@ -51,6 +52,9 @@ export function InstallationProvider({ children }: { children: ReactNode }) {
   setGatewayBaseUrl(activeInstallation.gatewayBaseUrl);
 
   const switchInstallation = useCallback((id: string) => {
+    // Principal ids are per installation (P86-S2): drop names resolved on
+    // the previous one.
+    clearPrincipalNameCache();
     setActiveInstallationId(id);
     saveActiveInstallationId(id);
   }, []);

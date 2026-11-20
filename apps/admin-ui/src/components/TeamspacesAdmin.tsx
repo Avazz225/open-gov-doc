@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "@/i18n";
 import { ApiError, listAllTeamspaces, type TeamspaceAdmin } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { PrincipalName } from "./PrincipalName";
 
 // Teamspaces admin overview (Post-Roadmap Phase 22 Session 5) - a plain
 // status table against the new `teamspace-service` endpoint
@@ -73,7 +74,9 @@ export function TeamspacesAdmin() {
                 <tr key={teamspace.id}>
                   <td>{teamspace.name}</td>
                   <td>{teamspace.description || "—"}</td>
-                  <td>{teamspace.created_by}</td>
+                  <td>
+                    <PrincipalName value={teamspace.created_by} />
+                  </td>
                   <td>{teamspace.member_count}</td>
                   <td className="whitespace-nowrap">{new Date(teamspace.created_at).toLocaleString()}</td>
                 </tr>

@@ -22,6 +22,7 @@ import {
   type QueryEventFilters,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { PrincipalName, resolveActorFilter } from "./PrincipalName";
 
 const primaryBtn =
   "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap";
@@ -63,15 +64,16 @@ function QueryEventsSection() {
   const [hasQueried, setHasQueried] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const currentFilters = useCallback((): QueryEventFilters => {
+  // The actor filter accepts a username (P86-S2, see resolveActorFilter).
+  const currentFilters = useCallback(async (): Promise<QueryEventFilters> => {
     const filters: QueryEventFilters = {};
-    if (actor.trim()) filters.actor = actor.trim();
+    if (actor.trim()) filters.actor = await resolveActorFilter(accessToken ?? "", actor.trim());
     if (subject.trim()) filters.subject = subject.trim();
     if (eventType.trim()) filters.eventType = eventType.trim();
     if (since) filters.since = new Date(since).toISOString();
     if (until) filters.until = new Date(until).toISOString();
     return filters;
-  }, [actor, subject, eventType, since, until]);
+  }, [accessToken, actor, subject, eventType, since, until]);
 
   async function handleQuery(event: FormEvent) {
     event.preventDefault();
@@ -79,7 +81,7 @@ function QueryEventsSection() {
     setIsLoading(true);
     setError(null);
     try {
-      const result = await listQueryEvents(accessToken, currentFilters());
+      const result = await listQueryEvents(accessToken, await currentFilters());
       setEvents(result.events);
       setTotalBeforeFilter(result.total_before_filter);
       setIsSuperuser(result.superuser);
@@ -189,7 +191,9 @@ function QueryEventsSection() {
                   <tr key={entry.id}>
                     <td className="whitespace-nowrap">{new Date(entry.occurred_at).toLocaleString()}</td>
                     <td>{entry.event_type}</td>
-                    <td>{entry.actor ?? "—"}</td>
+                    <td>
+                      <PrincipalName value={entry.actor} />
+                    </td>
                     <td>{entry.subject ?? "—"}</td>
                     <td>{entry.service_name}</td>
                   </tr>
@@ -607,7 +611,9 @@ function ManipulationSection() {
                   <Fragment key={approval.id}>
                     <tr>
                       <td>{approval.action_type}</td>
-                      <td>{approval.initiated_by}</td>
+                      <td>
+                        <PrincipalName value={approval.initiated_by} />
+                      </td>
                       <td className="whitespace-nowrap">{new Date(approval.created_at).toLocaleString()}</td>
                       <td>{JSON.stringify(approval.payload)}</td>
                       <td>

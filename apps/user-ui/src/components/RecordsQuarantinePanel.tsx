@@ -11,6 +11,7 @@ import {
   type RecordsQuarantine,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { principalName, principalTitle, usePrincipalNames } from "@/lib/usePrincipalNames";
 
 function toDateInputValue(iso: string | null): string {
   if (!iso) return "";
@@ -62,6 +63,7 @@ export function RecordsQuarantinePanel({ document: activeDocument }: { document:
   }, [accessToken, activeDocument.id, canManageQuarantine]);
 
   const activeEntry = entries.find((e) => e.released_at === null) ?? null;
+  const setByNames = usePrincipalNames(accessToken ?? "", [activeEntry?.set_by]);
 
   // Ungated per ADR 0116: viewers without `admin.records_quarantine` don't
   // see quarantine state at all (unlike legal hold's always-visible status,
@@ -117,7 +119,9 @@ export function RecordsQuarantinePanel({ document: activeDocument }: { document:
       {activeEntry ? (
         <div className="quarantine-active">
           <p className="text-sm opacity-80">
-            {t("recordsQuarantine.active", { setBy: activeEntry.set_by })}
+            <span title={principalTitle(setByNames, activeEntry.set_by)}>
+              {t("recordsQuarantine.active", { setBy: principalName(setByNames, activeEntry.set_by) })}
+            </span>
             {activeEntry.reason ? ` (${activeEntry.reason})` : ""}
             {activeEntry.auto_delete_at
               ? ` — ${t("recordsQuarantine.autoDeleteAt", {
