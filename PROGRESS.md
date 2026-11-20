@@ -2,7 +2,40 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P83-S12 (twelfth session of Phase 83): admin-ui at narrow widths. Full record:
+**Last completed:** P83-S13 (thirteenth session of Phase 83): user-ui at narrow widths. This completes
+ADR 0238's implementation for all apps. Full record: `IMPLEMENTATION_PLAN.md`'s P83-S13 entry and the
+matching section in `docs/services/user-ui.md`.
+
+**What changed:**
+- Below 768px the documents view shows one pane at a time: a switcher (Explorer · Vorschau (n) ·
+  Metadaten), a jump to Vorschau on opening, and chips for several documents.
+- Dockview stays mounted but hidden and untouched. Widening re-applies the saved layout and reconciles it
+  with the open documents.
+- Narrow header (truncated title, no user name); approval rows wrap with full-width actions.
+
+**Checks:**
+- No page overflow at 390/768/1400px. Desktop unchanged apart from a removed trailing space.
+- `tsc`/`eslint` clean.
+- vitest 308.
+- e2e user-ui 4/4, including the widen-back flow.
+
+**Open:**
+- The suspected permission-cache race (S8).
+- reviewer-ui's principal-name lookup.
+- `PreviewPane`'s PDF shows "Plug-in konnte nicht geladen werden" in headless Chrome. That is a
+  headless-only limitation, not a regression.
+
+The stack was stopped afterwards.
+
+**Next session:** **P83-S14 (last)**, the README hero and phase close:
+- an OG Doc hero still for `README.md`/docs via `film.mjs --still` (optionally a loop);
+- the phase-close full regression (`scripts/run-tests.sh`, unfiltered, once);
+- all six e2e suites;
+- the whole-plan `graphify update .`.
+
+---
+
+Earlier P83-S12 summary, kept for context (twelfth session of Phase 83): admin-ui at narrow widths. Full record:
 `IMPLEMENTATION_PLAN.md`'s P83-S12 entry and the matching section in `docs/services/admin-ui.md`.
 
 **What changed:**
@@ -22,7 +55,7 @@
 **Open:** the suspected permission-cache race (S8) and reviewer-ui's principal-name lookup. The stack was
 stopped afterwards.
 
-**Next session:** **P83-S13**, user-ui at narrow widths:
+**Next session (at the time):** P83-S13. It was done next; see the entry above. Original note:, user-ui at narrow widths:
 - single-pane mode instead of dockview below 768px (Explorer · Vorschau · Metadaten switcher; opening a
   document switches to Vorschau; saved layout untouched; "Standardanordnung" hidden);
 - the narrow header;

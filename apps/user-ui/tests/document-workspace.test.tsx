@@ -657,6 +657,71 @@ describe("DocumentWorkspace", () => {
     ).toBeInTheDocument();
   });
 
+  // P83-S13 (ADR 0238 Decision 5): below 768px one pane at a time instead of
+  // dockview's three. matchMedia is stubbed to report only the narrow query.
+  describe("single-pane mode below 768px (P83-S13)", () => {
+    const document2 = { ...document1, id: "d9", title: "Zweitdokument.pdf" };
+
+    function stubNarrow() {
+      const original = window.matchMedia;
+      window.matchMedia = ((query: string) => ({
+        ...original(query),
+        matches: query === "(max-width: 767.98px)",
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      })) as typeof window.matchMedia;
+      return () => {
+        window.matchMedia = original;
+      };
+    }
+
+    it("shows a pane switcher instead of dockview and hides the layout reset", async () => {
+      const restore = stubNarrow();
+      try {
+        listChildFoldersMock.mockResolvedValue([]);
+        listDocumentsInFolderMock.mockResolvedValue([document1]);
+        renderWorkspace();
+
+        const switcher = await screen.findByRole("group", { name: "Arbeitsbereich" });
+        expect(within(switcher).getByRole("button", { name: "Explorer" })).toHaveAttribute("aria-pressed", "true");
+        expect(screen.queryByRole("button", { name: "Standardanordnung" })).not.toBeInTheDocument();
+        // The hidden dockview panels render nothing, so the explorer exists once.
+        expect(await screen.findAllByText(/Rechnung.pdf/)).toHaveLength(1);
+      } finally {
+        restore();
+      }
+    });
+
+    it("jumps to Vorschau when a document is opened, with chips for several documents", async () => {
+      const restore = stubNarrow();
+      try {
+        listChildFoldersMock.mockResolvedValue([]);
+        listDocumentsInFolderMock.mockResolvedValue([document1, document2]);
+        listRenditionsMock.mockResolvedValue([]);
+        const user = userEvent.setup();
+        renderWorkspace();
+
+        await user.click(await screen.findByText(/Rechnung.pdf/));
+        const switcher = screen.getByRole("group", { name: "Arbeitsbereich" });
+        expect(within(switcher).getByRole("button", { name: "Vorschau (1)" })).toHaveAttribute("aria-pressed", "true");
+        expect(screen.getByLabelText("Vorschau: Rechnung.pdf")).toBeInTheDocument();
+
+        await user.click(within(switcher).getByRole("button", { name: "Explorer" }));
+        await user.click(await screen.findByText(/Zweitdokument.pdf/));
+        expect(screen.getByLabelText("Vorschau: Zweitdokument.pdf")).toBeInTheDocument();
+        const chips = screen.getByRole("group", { name: "Offene Dokumente" });
+        expect(within(chips).getByRole("button", { name: "Zweitdokument.pdf" })).toHaveAttribute("aria-pressed", "true");
+
+        // Closing the active document falls back to the remaining one.
+        await user.click(within(chips).getByRole("button", { name: "Zweitdokument.pdf schließen" }));
+        expect(screen.getByLabelText("Vorschau: Rechnung.pdf")).toBeInTheDocument();
+        expect(within(switcher).getByRole("button", { name: "Vorschau (1)" })).toBeInTheDocument();
+      } finally {
+        restore();
+      }
+    });
+  });
+
   describe("Dockbarer Arbeitsbereich (dockview, P16-S1)", () => {
     const document2 = { ...document1, id: "d9", title: "Zweitdokument.pdf" };
 

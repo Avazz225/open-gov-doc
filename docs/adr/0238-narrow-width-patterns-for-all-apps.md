@@ -81,6 +81,10 @@ Below 768 px the three-pane dockview layout is replaced by one pane at a time wi
 control returns to Explorer. The user's saved dockview layout is not touched, so returning to a wide
 window restores it. "Standardanordnung" is hidden in single-pane mode (there is nothing to arrange).
 
+*As built (P83-S13):* the segmented switcher itself is the back control, with no separate button.
+Dockview stays mounted but hidden and untouched, and its panels render nothing. Widening re-applies the
+saved layout and reconciles it with the documents opened or closed meanwhile.
+
 ## Decision 6 — process-designer: list works narrow, modelling stays a wide-screen task
 
 The definition lists get Decision 4's scroll container. The designer below 768 px hides the properties

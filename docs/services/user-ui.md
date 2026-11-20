@@ -41,6 +41,34 @@ Originally (P4-S4) replaced the earlier flat `FolderBrowser` view (P4-S2) with a
 
 Until P16-S1 all three content columns were resizable via `Splitter` drag handles (`dms.explorer.leftWidth`/`dms.explorer.topHeight` in `localStorage`) - superseded by dockview's own resizing/persistence (see above). `Splitter.tsx` remains in the repo as an unused but functioning component (no compelling reason to delete it, see ADR 0057).
 
+## Narrow widths: single-pane workspace (Phase 83 Session 13, [ADR 0238](../adr/0238-narrow-width-patterns-for-all-apps.md))
+
+Below 768px, dockview's three panes squeezed into 390px left the explorer about 170px wide. Now the
+documents view shows **one pane at a time** (`SinglePaneWorkspace` in `DockableDocumentArea.tsx`, with
+`useNarrow()` from `src/lib/use-narrow.ts`):
+- **Switcher.** A full-width segmented control switches Explorer · Vorschau (n) · Metadaten, with
+  segments ≥ 40px tall. Opening a document jumps to Vorschau, and the switcher is the way back.
+- **Several open documents** become a scrolling strip of chips above the preview, each with select and
+  close. Closing the active one falls back to the last remaining one.
+- **Dockview stays mounted but hidden** and is not touched in this mode.
+  - Its panels render nothing (`dockSuppressed`), so explorer and preview don't load twice.
+  - Opening and closing documents only changes the open-documents state.
+  - Layout changes are not persisted, because a hidden dockview would save a collapsed layout.
+- **Widening again** re-applies the saved layout and reconciles it with the open documents
+  (`restoreLayout`, also used on first mount): documents closed meanwhile lose their panel, and documents
+  opened meanwhile get one. Panels removed by the restore itself do not close their document
+  (`suppressCloseRef`).
+- **"Standardanordnung"** is hidden in this mode, because there is nothing to arrange.
+- **Header.** Smaller padding, and the title truncates in one line. The user name gives way below 768px;
+  it stays as the log-out button's tooltip. Language and theme already live in the icon rail's settings,
+  so no account menu is needed here.
+- **Approval rows** wrap: the title takes the full width, and approve/reject sit below it, full-width and
+  40px tall.
+
+The icon rail stays at every width (ADR 0238 Decision 3). `e2e/narrow.spec.ts` covers upload, open, the
+jump to Vorschau, the metadata pane, no page overflow, and widening back to a dockview tab. Two unit
+tests in `document-workspace.test.tsx` cover the switcher, the chips and closing.
+
 ## Backend connection
 
 Almost exclusively via the API gateway (3.5, `/api/{service_type}/{path}`) — **one exception since the ad-hoc post-roadmap Office feature**: the Office URI handler navigates directly to `webdav-connector` (own build-time address `NEXT_PUBLIC_WEBDAV_CONNECTOR_BASE_URL`, see "Direct Office editing" below), no WebDAV proxying via the gateway is planned:

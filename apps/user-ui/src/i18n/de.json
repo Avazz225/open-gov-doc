@@ -591,7 +591,10 @@
     "metadataPanelTitle": "Metadaten",
     "previewPanelTitle": "Vorschau",
     "resetLayout": "Standardanordnung",
-    "resetLayoutHint": "Setzt die Anordnung der Arbeitsbereich-Panels auf die Standardanordnung zurück"
+    "resetLayoutHint": "Setzt die Anordnung der Arbeitsbereich-Panels auf die Standardanordnung zurück",
+    "singlePaneLabel": "Arbeitsbereich",
+    "openDocumentsLabel": "Offene Dokumente",
+    "closeDocument": "{title} schließen"
   },
   "delegations": {
     "paneLabel": "Stellvertretung",

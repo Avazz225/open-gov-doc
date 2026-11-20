@@ -3296,8 +3296,33 @@ work has to be read against that baseline (see DoD).
     - Four images rebuilt.
     - e2e admin-ui 8/8 (new `narrow.spec.ts`), reviewer-ui 6/6, migration-console 5/5, process-designer
       7/7.
-- **P83-S13 — Narrow widths: `user-ui`**: single-pane mode instead of dockview below 768 px, narrow header,
-  stacked approval rows.
+- **P83-S13 — Narrow widths: `user-ui`**: ✅ **Done.**
+  - **Single-pane mode** below 768px (`SinglePaneWorkspace`, `useNarrow()`):
+    - a full-width segmented switcher (Explorer · Vorschau (n) · Metadaten, ≥ 40px); opening a document
+      jumps to Vorschau;
+    - several open documents become a scrolling chip strip (select/close);
+    - "Standardanordnung" is hidden.
+  - **Dockview stays mounted, hidden and untouched:**
+    - its panels render nothing (`dockSuppressed`, no double loading);
+    - layout changes aren't persisted while narrow;
+    - widening re-applies the saved layout via `restoreLayout` (factored out of `onReady`), reconciling
+      it with the documents opened or closed meanwhile;
+    - `suppressCloseRef` keeps the restore's own panel removals from closing documents.
+  - **Header:** narrow padding, truncated title, the user name hidden below 768px (still the log-out
+    tooltip). No account menu needed, because language/theme live in the icon rail. **Approval rows**
+    wrap with full-width 40px actions.
+  - **Found live:** the switcher was not full width because `.view-mode-toggle` (later in the file) sets
+    `margin-left: auto`/`inline-flex`; fixed with a doubled class.
+  - **Measured:** no page overflow at 390/768/1400px. Live: explorer → deep-linked documents → chips →
+    Metadaten, then widening to 1400px shows the document as a dockview tab with the saved arrangement.
+    At 1400px the only difference is the header user name, where a trailing space was removed.
+  - **Checks:**
+    - `tsc`/`eslint` clean (two pre-existing `<img>` warnings).
+    - vitest user-ui 308 (+2 single-pane tests).
+    - Image rebuilt.
+    - e2e user-ui 4/4 (new `narrow.spec.ts`: upload/open at 390px, jump to Vorschau, Metadaten, widen →
+      dockview tab).
+  - **All five apps with a narrow-width plan are done** (office-addin needs none, ADR 0238).
 
   Each of S10–S13: live screenshots at 390/768/1400 px before and after, the overflow measurement re-run
   with no page overflow left in that app, and one narrow-viewport e2e check.

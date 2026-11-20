@@ -591,7 +591,10 @@
     "metadataPanelTitle": "Metadata",
     "previewPanelTitle": "Preview",
     "resetLayout": "Default layout",
-    "resetLayoutHint": "Resets the workspace panel layout to the default arrangement"
+    "resetLayoutHint": "Resets the workspace panel layout to the default arrangement",
+    "singlePaneLabel": "Workspace",
+    "openDocumentsLabel": "Open documents",
+    "closeDocument": "Close {title}"
   },
   "delegations": {
     "paneLabel": "Delegation",

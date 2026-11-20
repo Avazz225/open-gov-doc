@@ -29,6 +29,8 @@
    come after tokens.css (references its variables) - see that file's own
    header comment. */
 @import "../../../../libs/dms-ui/tailwind-preset.css";
+/* Narrow-width helpers: scroll container, tab strip, stacked rows (P83-S13, ADR 0238) */
+@import "../../../../libs/dms-ui/layout.css" layer(components);
 
 /* Post-Roadmap Phase 75 Session 4 (found live via computed-style probing
    while verifying office-addin's rollout, not just a screenshot check -
@@ -163,6 +165,104 @@ body {
 .dockable-document-area-host {
   flex: 1;
   min-height: 0;
+}
+
+/* Single-pane workspace below 768px (P83-S13, ADR 0238 Decision 5): one
+   pane at a time instead of dockview's three, chosen with a full-width
+   segmented switcher whose segments are at least 40px tall. */
+.single-pane-workspace {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
+
+/* Doubled class: .view-mode-toggle (later in this file) sets inline-flex
+   and margin-left: auto, which would shrink the switcher to the right. */
+.view-mode-toggle.single-pane-switcher {
+  display: flex;
+  flex: none;
+  margin: var(--dms-space-2) var(--dms-space-3);
+}
+
+.view-mode-toggle.single-pane-switcher button {
+  flex: 1;
+  min-height: 2.5rem;
+}
+
+.single-pane-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+/* Open documents as chips above the preview: select + close per chip, the
+   strip scrolls sideways when they don't fit. */
+.single-pane-docs {
+  gap: var(--dms-space-2);
+  padding: 0 var(--dms-space-3) var(--dms-space-2);
+  flex-shrink: 0;
+}
+
+.single-pane-doc {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  border: 1px solid var(--dms-border);
+  border-radius: var(--dms-radius-full);
+  background: var(--dms-bg);
+}
+
+.single-pane-doc.is-active {
+  background: var(--dms-accent-bg);
+  font-weight: 600;
+}
+
+.single-pane-doc button {
+  min-height: 2.5rem;
+  border: 0;
+  background: transparent;
+  color: var(--dms-fg);
+  font: inherit;
+  font-size: var(--dms-font-size-sm);
+  cursor: pointer;
+}
+
+.single-pane-doc button:first-child {
+  max-width: 14rem;
+  overflow: hidden;
+  padding: 0 var(--dms-space-1) 0 var(--dms-space-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.single-pane-doc button:last-child {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--dms-space-2);
+  opacity: 0.7;
+}
+
+/* Approval rows below 768px (P83-S13, ADR 0238 Decision 4): the row's job
+   on a phone is approving or rejecting it, so the title takes the full width
+   and the two actions sit below it, full-width and 40px tall. */
+@media (max-width: 767.98px) {
+  .approvals-pane .entry-row {
+    flex-wrap: wrap;
+    gap: var(--dms-space-2);
+  }
+  .approvals-pane .entry-row > .entry-name {
+    flex-basis: 100%;
+  }
+  .approvals-pane .entry-row > span:last-child {
+    flex: 1;
+  }
+  .approvals-pane .entry-row > span:last-child button {
+    flex: 1;
+    min-height: 2.5rem;
+  }
 }
 
 /* Sonderbereiche außerhalb des dreigeteilten Haupt-Workspace (2.5) - füllen

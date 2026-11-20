@@ -7,6 +7,7 @@ import {
   useContext,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -19,9 +20,11 @@ import {
   type IDockviewPanelProps,
 } from "dockview-react";
 import "dockview-react/dist/styles/dockview.css";
+import { X } from "lucide-react";
 import { useI18n } from "@/i18n";
 import { getKennzeichenConfig, listObjectTypes, type DocumentSummary, type Folder, type ObjectType } from "@/lib/api";
 import { formatDocumentTitle } from "@/lib/kennzeichen";
+import { useNarrow } from "@/lib/use-narrow";
 import { ExplorerPane, type BreadcrumbEntry } from "./ExplorerPane";
 import { MetadataPanel } from "./MetadataPanel";
 import { PreviewPane } from "./PreviewPane";
@@ -82,6 +85,9 @@ interface WorkspaceContextValue {
   onMetadataSaved: (updated: DocumentSummary) => void;
   versionBumps: Record<string, number>;
   onDocumentVersionBump: (documentId: string) => void;
+  // True while the single-pane mode is shown (P83-S13): the hidden dockview
+  // panels then render nothing, so explorer and preview don't load twice.
+  dockSuppressed: boolean;
 }
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
@@ -140,12 +146,112 @@ function DocumentPreviewContent(props: IDockviewPanelProps<{ documentId: string 
   return <PreviewPane document={doc} versionBump={versionBump} onDocumentCreated={ctx.onUploaded} />;
 }
 
+// The dockview copies of the panels render nothing while the single-pane
+// mode is active (P83-S13) - dockview itself stays mounted underneath.
+function ExplorerDockPanel() {
+  return useWorkspaceContext().dockSuppressed ? null : <ExplorerPanelContent />;
+}
+function MetadataDockPanel() {
+  return useWorkspaceContext().dockSuppressed ? null : <MetadataPanelContent />;
+}
+function PreviewEmptyDockPanel() {
+  return useWorkspaceContext().dockSuppressed ? null : <PreviewEmptyContent />;
+}
+function DocumentPreviewDockPanel(props: IDockviewPanelProps<{ documentId: string }>) {
+  return useWorkspaceContext().dockSuppressed ? null : <DocumentPreviewContent {...props} />;
+}
+
 const PANEL_COMPONENTS = {
-  explorer: ExplorerPanelContent,
-  metadata: MetadataPanelContent,
-  previewEmpty: PreviewEmptyContent,
-  documentPreview: DocumentPreviewContent,
+  explorer: ExplorerDockPanel,
+  metadata: MetadataDockPanel,
+  previewEmpty: PreviewEmptyDockPanel,
+  documentPreview: DocumentPreviewDockPanel,
 };
+
+type SinglePaneView = "explorer" | "preview" | "metadata";
+
+// Single-pane mode below 768px (P83-S13, ADR 0238 Decision 5): dockview's
+// three panes squeezed into 390px left the explorer ~170px wide. Instead one
+// pane at a time, chosen with a segmented switcher; opening a document jumps
+// to Vorschau, and several open documents get a scrolling strip of chips
+// above the preview. The switcher is the way back to Explorer.
+function SinglePaneWorkspace({
+  view,
+  onViewChange,
+  activeDocument,
+  onSelectDocument,
+  onCloseDocument,
+  titleOf,
+}: {
+  view: SinglePaneView;
+  onViewChange: (view: SinglePaneView) => void;
+  activeDocument: DocumentSummary | null;
+  onSelectDocument: (documentId: string) => void;
+  onCloseDocument: (documentId: string) => void;
+  titleOf: (doc: DocumentSummary) => string;
+}) {
+  const ctx = useWorkspaceContext();
+  const { t } = useI18n();
+  const docs = Array.from(ctx.openDocumentsById.values());
+  const views: { id: SinglePaneView; label: string }[] = [
+    { id: "explorer", label: t("workspace.explorerPanelTitle") },
+    {
+      id: "preview",
+      label: docs.length > 0 ? `${t("workspace.previewPanelTitle")} (${docs.length})` : t("workspace.previewPanelTitle"),
+    },
+    { id: "metadata", label: t("workspace.metadataPanelTitle") },
+  ];
+  const versionBump = activeDocument ? (ctx.versionBumps[activeDocument.id] ?? 0) : 0;
+
+  return (
+    <div className="single-pane-workspace">
+      <div className="view-mode-toggle single-pane-switcher" role="group" aria-label={t("workspace.singlePaneLabel")}>
+        {views.map((entry) => (
+          <button
+            key={entry.id}
+            type="button"
+            className={view === entry.id ? "view-mode-active" : undefined}
+            aria-pressed={view === entry.id}
+            onClick={() => onViewChange(entry.id)}
+          >
+            {entry.label}
+          </button>
+        ))}
+      </div>
+      <div className="single-pane-body">
+        {view === "explorer" && <ExplorerPanelContent />}
+        {view === "preview" && (
+          <>
+            {docs.length > 1 && (
+              <div className="dms-scroll-x dms-tab-strip single-pane-docs" role="group" aria-label={t("workspace.openDocumentsLabel")}>
+                {docs.map((doc) => (
+                  <span key={doc.id} className={`single-pane-doc${doc.id === activeDocument?.id ? " is-active" : ""}`}>
+                    <button
+                      type="button"
+                      aria-pressed={doc.id === activeDocument?.id}
+                      onClick={() => onSelectDocument(doc.id)}
+                    >
+                      {titleOf(doc)}
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={t("workspace.closeDocument", { title: titleOf(doc) })}
+                      onClick={() => onCloseDocument(doc.id)}
+                    >
+                      <X size={14} strokeWidth={1.75} aria-hidden="true" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <PreviewPane document={activeDocument} versionBump={versionBump} onDocumentCreated={ctx.onUploaded} />
+          </>
+        )}
+        {view === "metadata" && <MetadataPanelContent />}
+      </div>
+    </div>
+  );
+}
 
 // Without its own `theme`, dockview-core falls back to its built-in
 // `themeAbyss` preset, whose CSS class assigns the same `--dv-*` variables
@@ -220,11 +326,31 @@ export const DockableDocumentArea = forwardRef<DockableDocumentAreaHandle, Docka
     const apiRef = useRef<DockviewApi | null>(null);
     const [activeDocumentId, setActiveDocumentId] = useState<string | null>(null);
 
+    // Single-pane mode below 768px (P83-S13). While it is shown, dockview
+    // stays mounted but hidden and is not touched at all: documents opened or
+    // closed meanwhile only change `openDocuments`, and layout changes are
+    // not persisted (a hidden dockview would save a collapsed layout). When
+    // the window widens again, the saved layout is re-applied and brought in
+    // line with the open documents (`restoreLayout`).
+    const narrow = useNarrow();
+    const narrowRef = useRef(false);
+    const [singlePaneView, setSinglePaneView] = useState<SinglePaneView>("explorer");
+    // Panels removed by `restoreLayout` itself must not close their document.
+    const suppressCloseRef = useRef(false);
+    const openDocumentsRef = useRef(openDocuments);
+    useEffect(() => {
+      openDocumentsRef.current = openDocuments;
+    }, [openDocuments]);
+
     const openDocumentsById = useMemo(
       () => new Map(openDocuments.map((doc) => [doc.id, doc])),
       [openDocuments]
     );
-    const activeDocument = activeDocumentId ? (openDocumentsById.get(activeDocumentId) ?? null) : null;
+    const activeDocument = activeDocumentId
+      ? (openDocumentsById.get(activeDocumentId) ?? null)
+      : narrow
+        ? (openDocuments[openDocuments.length - 1] ?? null)
+        : null;
 
     // Reference-number display (2.2/8, P5e-S3) for document tab titles -
     // own copy of the same load-once fetch `ExplorerPane` already does for
@@ -245,6 +371,7 @@ export const DockableDocumentArea = forwardRef<DockableDocumentAreaHandle, Docka
     }, [token]);
 
     const persistLayout = useCallback((api: DockviewApi) => {
+      if (narrowRef.current) return;
       try {
         window.localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(api.toJSON()));
       } catch {
@@ -343,31 +470,51 @@ export const DockableDocumentArea = forwardRef<DockableDocumentAreaHandle, Docka
       [docPanelOptions]
     );
 
+    // Applies the saved layout (or the factory default) and reconciles it
+    // with the documents that are actually open: on first mount, and again
+    // when the window widens out of the single-pane mode (P83-S13), where
+    // documents may have been opened or closed while dockview sat hidden.
+    const restoreLayout = useCallback(
+      (api: DockviewApi, docs: DocumentSummary[]) => {
+        suppressCloseRef.current = true;
+        try {
+          let restored = false;
+          const saved = window.localStorage.getItem(LAYOUT_STORAGE_KEY);
+          if (saved) {
+            try {
+              api.fromJSON(JSON.parse(saved));
+              restored = Boolean(api.getPanel(EXPLORER_PANEL_ID));
+            } catch {
+              restored = false;
+            }
+          }
+          if (!restored) {
+            buildDefaultLayout(api, docs);
+            return;
+          }
+          // Panels of documents no longer open go; already-open documents
+          // missing from the saved layout (e.g. opened after the last save)
+          // are mounted one by one.
+          const openIds = new Set(docs.map((doc) => doc.id));
+          api.panels
+            .filter((p) => p.id.startsWith(DOC_PANEL_PREFIX) && !openIds.has(p.id.slice(DOC_PANEL_PREFIX.length)))
+            .forEach((p) => api.removePanel(p));
+          docs.forEach((doc) => {
+            if (!api.getPanel(`${DOC_PANEL_PREFIX}${doc.id}`)) addDocumentPanel(api, doc);
+          });
+        } finally {
+          suppressCloseRef.current = false;
+        }
+      },
+      [buildDefaultLayout, addDocumentPanel]
+    );
+
     const onReady = useCallback(
       (event: DockviewReadyEvent) => {
         const api = event.api;
         apiRef.current = api;
 
-        let restored = false;
-        const saved = window.localStorage.getItem(LAYOUT_STORAGE_KEY);
-        if (saved) {
-          try {
-            api.fromJSON(JSON.parse(saved));
-            restored = Boolean(api.getPanel(EXPLORER_PANEL_ID));
-          } catch {
-            restored = false;
-          }
-        }
-        if (!restored) {
-          buildDefaultLayout(api, openDocuments);
-        } else {
-          // Retroactively mount, one by one, already-open documents that are
-          // missing from the saved layout (e.g. because the session opened
-          // them after the last save).
-          openDocuments.forEach((doc) => {
-            if (!api.getPanel(`${DOC_PANEL_PREFIX}${doc.id}`)) addDocumentPanel(api, doc);
-          });
-        }
+        restoreLayout(api, openDocuments);
 
         // Only ONE panel is ever globally "active" (dockview concept across
         // the entire gridview, not per group) - a click into the metadata or
@@ -387,7 +534,7 @@ export const DockableDocumentArea = forwardRef<DockableDocumentAreaHandle, Docka
         api.onDidRemovePanel((panel) => {
           if (!panel.id.startsWith(DOC_PANEL_PREFIX)) return;
           const documentId = panel.id.slice(DOC_PANEL_PREFIX.length);
-          onCloseDocument(documentId);
+          if (!suppressCloseRef.current) onCloseDocument(documentId);
           setActiveDocumentId((current) => (current === documentId ? null : current));
           const anyDocPanelLeft = api.panels.some((p) => p.id.startsWith(DOC_PANEL_PREFIX));
           if (!anyDocPanelLeft && !api.getPanel(EMPTY_PANEL_ID)) {
@@ -410,17 +557,42 @@ export const DockableDocumentArea = forwardRef<DockableDocumentAreaHandle, Docka
       // functional `setState` in `DocumentWorkspace`, so the later
       // `onDidRemovePanel` listener never calls a stale version.
       // eslint-disable-next-line react-hooks/exhaustive-deps
-      [buildDefaultLayout, addDocumentPanel, persistLayout, t, onCloseDocument]
+      [restoreLayout, persistLayout, t, onCloseDocument]
     );
+
+    // Entering/leaving the single-pane mode. The ref is set in a layout
+    // effect so it is in place before dockview's resize to 0 can try to
+    // persist; leaving re-applies the saved layout.
+    useLayoutEffect(() => {
+      const wasNarrow = narrowRef.current;
+      narrowRef.current = narrow;
+      const api = apiRef.current;
+      if (wasNarrow && !narrow && api) restoreLayout(api, openDocumentsRef.current);
+    }, [narrow, restoreLayout]);
 
     const openDocument = useCallback(
       (doc: DocumentSummary) => {
         propsOnOpenDocument(doc);
+        if (narrowRef.current) {
+          setActiveDocumentId(doc.id);
+          setSinglePaneView("preview");
+          return;
+        }
         const api = apiRef.current;
         if (!api) return;
         addDocumentPanel(api, doc);
       },
       [addDocumentPanel, propsOnOpenDocument]
+    );
+
+    // Closing from the single-pane chips: only the open-documents state
+    // changes; dockview catches up when the window widens again.
+    const closeDocumentNarrow = useCallback(
+      (documentId: string) => {
+        onCloseDocument(documentId);
+        setActiveDocumentId((current) => (current === documentId ? null : current));
+      },
+      [onCloseDocument]
     );
 
     const resetLayout = useCallback(() => {
@@ -481,17 +653,33 @@ export const DockableDocumentArea = forwardRef<DockableDocumentAreaHandle, Docka
       onMetadataSaved: handleMetadataSaved,
       versionBumps,
       onDocumentVersionBump,
+      dockSuppressed: narrow,
     };
+
+    const titleOf = (doc: DocumentSummary) => formatDocumentTitle(doc, documentTypeById, kennzeichenShowByDefault);
 
     return (
       <div className="dockable-document-area" style={{ display: hidden ? "none" : "flex" }}>
-        <div className="dockable-document-area-toolbar">
-          <button type="button" className="toggle-btn" onClick={resetLayout} title={t("workspace.resetLayoutHint")}>
-            {t("workspace.resetLayout")}
-          </button>
-        </div>
+        {/* "Standardanordnung" has nothing to arrange in the single-pane mode */}
+        {!narrow && (
+          <div className="dockable-document-area-toolbar">
+            <button type="button" className="toggle-btn" onClick={resetLayout} title={t("workspace.resetLayoutHint")}>
+              {t("workspace.resetLayout")}
+            </button>
+          </div>
+        )}
         <WorkspaceContext.Provider value={contextValue}>
-          <div className="dockable-document-area-host">
+          {narrow && (
+            <SinglePaneWorkspace
+              view={singlePaneView}
+              onViewChange={setSinglePaneView}
+              activeDocument={activeDocument}
+              onSelectDocument={setActiveDocumentId}
+              onCloseDocument={closeDocumentNarrow}
+              titleOf={titleOf}
+            />
+          )}
+          <div className="dockable-document-area-host" style={narrow ? { display: "none" } : undefined}>
             <DockviewReact
               components={PANEL_COMPONENTS}
               onReady={onReady}

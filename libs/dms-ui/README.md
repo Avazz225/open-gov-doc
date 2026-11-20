@@ -52,5 +52,5 @@ into the `components` layer so Tailwind utilities on the same element still win:
     sit in a later layer.
 
 Consumed by `migration-console` and `process-designer` since P83-S10, `reviewer-ui` since P83-S11 and
-`admin-ui` since P83-S12. user-ui follows in P83-S13. Inside a `.bg-surface` element the scroll covers take
+`admin-ui` since P83-S12 and `user-ui` since P83-S13. Inside a `.bg-surface` element the scroll covers take
 the surface color automatically (P83-S12).

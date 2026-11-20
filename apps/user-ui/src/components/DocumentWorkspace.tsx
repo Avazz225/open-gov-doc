@@ -340,16 +340,21 @@ export function DocumentWorkspace() {
 
   return (
     <div className="flex h-screen flex-col">
-      <div className="flex items-center justify-between border-b border-border px-6 py-3">
+      {/* Narrow (P83-S13, ADR 0238): smaller padding and title, the title
+          truncates in one line, and the user name gives way below 768px -
+          language and theme already live in the icon rail's settings, so the
+          header keeps only log out and needs no account menu. */}
+      <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-2 md:px-6 md:py-3">
         {/* P83-S6 (punch list item 3): the title names the active view, in the
             icon rail's own words - it said "Dokumente" on every view before */}
-        <h1>{t(`iconRail.${view}`)}</h1>
-        <div>
-          {user && <span>{user.username} </span>}
+        <h1 className="min-w-0 truncate max-md:text-xl">{t(`iconRail.${view}`)}</h1>
+        <div className="flex flex-none items-center gap-2">
+          {user && <span className="whitespace-nowrap max-md:hidden">{user.username}</span>}
           <button
             type="button"
             onClick={logout}
-            className="rounded-md border border-border bg-hover-bg px-3 py-1 text-fg transition-colors hover:bg-accent-bg"
+            title={user?.username}
+            className="whitespace-nowrap rounded-md border border-border bg-hover-bg px-3 py-1 text-fg transition-colors hover:bg-accent-bg max-md:min-h-10"
           >
             {t("common.logout")}
           </button>
