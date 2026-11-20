@@ -47,6 +47,17 @@ volumes:
   # Deletion register ledger (10.4, P11-S4) - see audit-service comment above.
   deletion-ledger-data:
 
+# Host port binding (P84-S3, ADR 0230 follow-up): every published port is
+# bound to loopback by default, so nothing here is reachable from the LAN:
+# - the 31 backend services: hard 127.0.0.1 (ADR 0230);
+# - databases/brokers (Postgres, NATS, MinIO API, Azurite, Mailpit SMTP/POP3,
+#   Redis): ${INFRA_BIND_ADDRESS}, default 127.0.0.1;
+# - infrastructure browser UIs (Keycloak, NATS monitor, MinIO console,
+#   Mailpit UI, Prometheus, cAdvisor, Grafana): ${INFRA_UI_BIND_ADDRESS},
+#   default 127.0.0.1 - set it to 0.0.0.0 (or a LAN address) in .env to look
+#   at e.g. Grafana from another device;
+# - the gateway and the six frontends stay on all interfaces: they are the
+#   system's intended entry points.
 services:
   # A freshly created Docker volume initially belongs to root - the
   # postgres process (user `postgres`) can then not write to /wal-archive
@@ -118,7 +129,7 @@ services:
       POSTGRES_PASSWORD_VIRUS_SCAN: ${POSTGRES_PASSWORD_VIRUS_SCAN:-virus_scan_dev_only}
       POSTGRES_PASSWORD_WORKFLOW: ${POSTGRES_PASSWORD_WORKFLOW:-workflow_dev_only}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${INFRA_BIND_ADDRESS:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./postgres-init:/docker-entrypoint-initdb.d:ro
@@ -147,7 +158,7 @@ services:
       KC_DB_USERNAME: ${POSTGRES_USER:-dms}
       KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-dms_dev_only}
     ports:
-      - "${KEYCLOAK_PORT:-8080}:8080"
+      - "${INFRA_UI_BIND_ADDRESS:-127.0.0.1}:${KEYCLOAK_PORT:-8080}:8080"
     volumes:
       - keycloak-data:/opt/keycloak/data
     depends_on:
@@ -169,8 +180,8 @@ services:
     restart: "no"
     command: ["-js", "-sd", "/data", "-m", "8222"]
     ports:
-      - "${NATS_CLIENT_PORT:-4222}:4222"
-      - "${NATS_MONITOR_PORT:-8222}:8222"
+      - "${INFRA_BIND_ADDRESS:-127.0.0.1}:${NATS_CLIENT_PORT:-4222}:4222"
+      - "${INFRA_UI_BIND_ADDRESS:-127.0.0.1}:${NATS_MONITOR_PORT:-8222}:8222"
     volumes:
       - nats-data:/data
     healthcheck:
@@ -189,8 +200,8 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-dms_minio}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-dms_minio_dev_only}
     ports:
-      - "${MINIO_API_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+      - "${INFRA_BIND_ADDRESS:-127.0.0.1}:${MINIO_API_PORT:-9000}:9000"
+      - "${INFRA_UI_BIND_ADDRESS:-127.0.0.1}:${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - minio-data:/data
     healthcheck:
@@ -219,7 +230,7 @@ services:
     # pure dev/test emulation.
     command: azurite-blob --blobHost 0.0.0.0 --blobPort 10000 --location /data --skipApiVersionCheck
     ports:
-      - "${AZURITE_BLOB_PORT:-10000}:10000"
+      - "${INFRA_BIND_ADDRESS:-127.0.0.1}:${AZURITE_BLOB_PORT:-10000}:10000"
     volumes:
       - azurite-data:/data
     healthcheck:
@@ -250,9 +261,9 @@ services:
     volumes:
       - ./mailpit-pop3-auth:/data/pop3-auth:ro
     ports:
-      - "${MAILPIT_SMTP_PORT:-1025}:1025"
-      - "${MAILPIT_UI_PORT:-8025}:8025"
-      - "${MAILPIT_POP3_PORT:-1110}:1110"
+      - "${INFRA_BIND_ADDRESS:-127.0.0.1}:${MAILPIT_SMTP_PORT:-1025}:1025"
+      - "${INFRA_UI_BIND_ADDRESS:-127.0.0.1}:${MAILPIT_UI_PORT:-8025}:8025"
+      - "${INFRA_BIND_ADDRESS:-127.0.0.1}:${MAILPIT_POP3_PORT:-1110}:1110"
     networks:
       - dms-net
 
@@ -270,7 +281,7 @@ services:
     restart: "no"
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "${INFRA_BIND_ADDRESS:-127.0.0.1}:${REDIS_PORT:-6379}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -1573,7 +1584,7 @@ services:
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
     ports:
-      - "${PROMETHEUS_PORT:-9090}:9090"
+      - "${INFRA_UI_BIND_ADDRESS:-127.0.0.1}:${PROMETHEUS_PORT:-9090}:9090"
     depends_on:
       monitoring-service:
         condition: service_started
@@ -1596,7 +1607,7 @@ services:
       - /var/lib/docker:/var/lib/docker:ro
       - /dev/disk:/dev/disk:ro
     ports:
-      - "${CADVISOR_PORT:-8034}:8080"
+      - "${INFRA_UI_BIND_ADDRESS:-127.0.0.1}:${CADVISOR_PORT:-8034}:8080"
     networks:
       - dms-net
 
@@ -1618,7 +1629,7 @@ services:
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
     ports:
-      - "${GRAFANA_PORT:-3003}:3000"
+      - "${INFRA_UI_BIND_ADDRESS:-127.0.0.1}:${GRAFANA_PORT:-3003}:3000"
     depends_on:
       prometheus:
         condition: service_started

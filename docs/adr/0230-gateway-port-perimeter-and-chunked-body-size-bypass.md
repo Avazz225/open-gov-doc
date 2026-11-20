@@ -94,3 +94,27 @@ messages to what it always did.
 - All 31 rebound services + the 3 upload-limited services rebuilt/redeployed; live-verified against the
   real running stack as described in "Rationale" above (loopback access preserved, LAN access blocked,
   gateway still LAN-reachable, real end-to-end login through the gateway still succeeds).
+
+## Follow-up (P84-S3): infrastructure containers bound to loopback too
+
+The infrastructure ports this ADR left "out of scope" are now bound to loopback as well, through two
+opt-in variables (both default `127.0.0.1`, documented in `infra/.env.example` and at the top of
+`infra/docker-compose.yml`):
+- **`INFRA_BIND_ADDRESS`:** Postgres, NATS client, MinIO API, Azurite, Mailpit SMTP/POP3, Redis. These
+  are never meant for the LAN.
+- **`INFRA_UI_BIND_ADDRESS`:** Keycloak, NATS monitor, MinIO console, Mailpit UI, Prometheus, cAdvisor,
+  Grafana. These are browser UIs, so setting this to `0.0.0.0` lets an operator look at e.g. Grafana
+  from another device without opening the databases.
+
+Nothing in the dev workflow needed LAN access to them:
+- the test runner uses `localhost:5432`/`:4222`;
+- Keycloak's public base URL is already `http://localhost:8080`, so a browser SSO redirect never
+  worked from another device;
+- every service reaches the infrastructure over the compose network.
+
+Live-checked:
+- all 14 ports listen on `127.0.0.1` only;
+- loopback connects, and the host's LAN address is refused;
+- gateway and frontends are still reachable from the LAN;
+- backend tests via localhost and the user-ui/admin-ui e2e suites pass;
+- `INFRA_UI_BIND_ADDRESS=0.0.0.0` renders Grafana on `0.0.0.0`.

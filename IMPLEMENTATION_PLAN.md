@@ -3492,11 +3492,27 @@ regression runs at each phase close.
       relied on the old first-page truncation, and failing on the fix confirmed it.
   - **Checks:** ruff clean for all three services; images rebuilt; process-designer e2e 7/7 against the
     new workflow-service.
-- **P84-S3 — Infra ports to loopback** (ADR 0230 follow-up).
-  - Bind Postgres, Keycloak, NATS, MinIO, Azurite, Mailpit, Redis, Prometheus, cAdvisor and Grafana in
-    `infra/docker-compose.yml` to `127.0.0.1`, like the 31 backend services already are.
-  - First check what in the dev workflow needs LAN access (Grafana from another device?). Make that one
-    opt-in through an env variable instead.
+- **P84-S3 — Infra ports to loopback** (ADR 0230 follow-up). ✅ **Done.**
+  - **Binding:** all 14 published infrastructure ports in `infra/docker-compose.yml` are bound to
+    loopback through two opt-in variables, both defaulting to `127.0.0.1`:
+    - `INFRA_BIND_ADDRESS` for databases/brokers (Postgres, NATS client, MinIO API, Azurite, Mailpit
+      SMTP/POP3, Redis);
+    - `INFRA_UI_BIND_ADDRESS` for browser UIs (Keycloak, NATS monitor, MinIO console, Mailpit UI,
+      Prometheus, cAdvisor, Grafana). Set it to `0.0.0.0` to view e.g. Grafana from another device.
+
+    The gateway and the six frontends stay on all interfaces.
+  - **Dev-workflow check:** nothing needed LAN access. Tests use `localhost`, Keycloak's public URL is
+    already `localhost`, and services use the compose network.
+  - **Live check:**
+    - `ss -ltn` shows `127.0.0.1` for all 14 ports;
+    - loopback connects, the LAN IP is refused (5432/8080/6379/3003/9090), and gateway/UI are still
+      LAN-reachable;
+    - Grafana via localhost returns 200;
+    - the opt-in renders `0.0.0.0`;
+    - audit/registry tests via localhost pass, and user-ui/admin-ui e2e pass (a first run right after
+      the test runner's container restarts failed transiently; a re-run was green).
+  - **Docs:** a follow-up section in ADR 0230 (no new ADR), comments in compose and `.env.example`, and a
+    README note.
 - **P84-S4 — Fleet-management per-operator auth: build ADR 0234.**
   - `FleetOperator` table (UUID4 tokens, stored sha256-hashed) with `is_admin`, the bootstrap operator,
     and `/operators` management restricted to admins.

@@ -47,6 +47,8 @@ docker compose up -d
 
 Starts Postgres, NATS JetStream, Keycloak, and MinIO as base infrastructure. Functional services are added starting with Phase 1 of the roadmap.
 
+Only the gateway (`:8009`) and the six frontends are reachable from the LAN. Every backend service and infrastructure port is bound to `127.0.0.1` ([ADR 0230](docs/adr/0230-gateway-port-perimeter-and-chunked-body-size-bypass.md)). To reach the infrastructure browser UIs (Grafana, Mailpit, MinIO console, Keycloak, Prometheus) from another device, set `INFRA_UI_BIND_ADDRESS=0.0.0.0` in `infra/.env`.
+
 ## Status
 
 Current phase, latest status, and next step: see [`PROGRESS.md`](PROGRESS.md).
