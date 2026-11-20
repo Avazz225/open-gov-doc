@@ -3560,27 +3560,49 @@ Today many endpoints take the acting person from the request body (`approved_by`
 accepted that as a scaffold habit. The user decided to bind all of them to the gateway-verified
 `X-DMS-Principal`.
 
-- **P85-S1 — Inventory and rule: ADR 0240.** Grep every request schema and handler for body-supplied
-  actor fields, across all services and the five UIs plus the add-ins. Then fix the rule:
-  - The verified principal always wins.
-  - A body field that is still sent is either ignored or rejected with `400` on mismatch. The session
-    decides, with a recommendation.
-  - Service-to-service calls act as the service principal, keeping the existing `X-DMS-Principal:
-    <service>` convention. Where a service acts *on behalf of* a user, that user is passed in a separate,
-    explicitly named field that only service principals may set.
-  - A compatibility window for clients, and how the e2e/test fixtures adapt.
+- **P85-S1 — Inventory and rule: ADR 0240.** ✅ **Done (scoping, no code).**
+  → [ADR 0240](docs/adr/0240-acting-identity-from-verified-principal.md).
+  - **Inventory:** an AST pass found 70 routes that take a person from the request. Filters (`GET` routes
+    selecting whose events to show), cmis-connector (already auth-derived) and *target* `principal_id`s
+    don't count. That leaves **54 write routes**, 11 of which don't read `X-DMS-Principal` at all. About
+    70 internal call sites in 17 services and about 85 places in the UIs and add-ins send such fields.
+  - **Rule:**
+    - the acting identity is the request principal (`acting_principal()` in `dms-common`);
+    - a service acting *for* a user sends its own name plus a new `X-DMS-On-Behalf-Of`, honored only
+      from known service principals and audited as `on_behalf_of`. The gateway already strips client
+      `X-DMS-*` headers;
+    - body fields are **ignored with a logged `actor_field_ignored`**, not rejected, and dropped at the
+      end;
+    - no principal on a write means `401`, and `system:*` literals become service principals with a
+      `reason`;
+    - approve **and** reject only for entitled principals;
+    - signer = acting identity;
+    - migration inbound is a federated exception (`peer:<installation>`, the remote name kept as
+      `origin_created_by`).
+  - **Split:** four build sessions instead of three, because the client side alone is sizeable.
+- **P85-S2 — Foundation and security-critical routes (19).**
+  - `acting_principal()`, the service-principal list and on-behalf support in `dms-common`.
+  - permission-service: approval create/approve/reject, scope locks, maintenance trigger/lift.
+  - document-service: force-release (plus a real permission check), trash, delete, cascade, legal holds,
+    records quarantine.
+  - folder-service: trash and legal holds.
+  - Their internal callers move to on-behalf.
+- **P85-S3 — Workflow, cases, signatures and the rest (12).** workflow-service (instance create, claim,
+  complete), case-service (6 routes), signature-service (signer = acting), ocr-service `reviewed`, the
+  auth-service user-tracking config, and their callers.
+- **P85-S4 — Remaining document/folder routes (23).** Register, promote, classification, pseudonymize,
+  reveal, restore, redact, locks, upload and versions; folder create, references and templates;
+  favorite-service, virus-scan `/scan`, the migration federated exception; all remaining internal
+  callers.
+- **P85-S5 — Clients and cleanup.**
+  - The five UIs and both add-ins stop sending actor fields.
+  - The fields are dropped from the request schemas, and the ignore-logging is removed.
+  - All six e2e suites, docs, and the old `PROGRESS.md` "Authorization" bullet closed.
 
-  Output: the full table (service, endpoint, field, change) and the S2–S4 split.
-- **P85-S2 — Security-critical first.**
-  - permission-service approve/reject: initiator ≠ approver is checked on verified identities, and only
-    principals entitled to decide may reject.
-  - document-service force-unlock: gets a real permission check, and `released_by` comes from the token.
-  - Force-delete for documents and folders.
-- **P85-S3 — Workflow, cases, signatures.** workflow-service (`completed_by`, `started_by`, claims),
-  case-service, signature-service and notification triggers. Plus the UIs that send these fields.
-- **P85-S4 — The rest.** Everything else from the S1 inventory (folder templates `created_by`,
-  config/import actors, …). Then: UIs and add-ins stop sending actor fields, all six e2e suites pass,
-  `docs/services/*.md` are updated, and `PROGRESS.md`'s old "Authorization" bullet is closed.
+  Phase-close regression.
+
+  Every S2–S5 session tests, per touched route, that a spoofed body field has no effect and that a
+  missing principal gets `401`.
 
 ## Phase 86 — Account Menu Behind the User Name + UX Bundle (user-requested)
 

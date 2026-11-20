@@ -2,7 +2,38 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P84-S4, fleet operators with verified identities (ADR 0234 built). **Phase 84 is
+**Last completed:** P85-S1 (scoping, no code): the inventory and rule for the acting identity →
+[ADR 0240](docs/adr/0240-acting-identity-from-verified-principal.md).
+
+**Inventory:** 54 write routes take the acting person from the request (11 don't read the principal at
+all). About 70 internal call sites and about 85 UI/add-in places send such fields. Filters, auth-derived
+actors (cmis) and target `principal_id`s are excluded.
+
+**Rule:**
+- The identity is always the request principal.
+- Services acting for a user add `X-DMS-On-Behalf-Of`, which only service principals may use; it is
+  audited.
+- Body fields are ignored and logged, then removed.
+- No principal on a write means `401`.
+- Four-eyes approve/reject is limited to entitled principals, and the signer must be the acting
+  principal.
+- Migration inbound is a federated exception.
+
+**Split:** S2–S5 instead of S2–S4 (the client side gets its own session).
+
+**Open (carried over):** reviewer-ui principal names and the `<picture>` check (→ P86-S2).
+
+**Next session:** **P85-S2**:
+- the foundation in `dms-common` (`acting_principal()`, the service-principal list,
+  `X-DMS-On-Behalf-Of`);
+- the 19 security-critical routes: permission-service approvals, scope locks and maintenance;
+  document-service force-release (with a real permission check), trash, delete, cascade, legal holds and
+  quarantine; folder-service trash and legal holds;
+- their internal callers.
+
+---
+
+Earlier P84-S4 summary, kept for context: fleet operators with verified identities (ADR 0234 built). **Phase 84 is
 closed.**
 
 **What changed:**
@@ -28,7 +59,7 @@ closed.**
 **Open (carried over):** reviewer-ui principal names and the `<picture>` check (→ P86-S2). The stack was
 stopped afterwards.
 
-**Next session:** **P85-S1**, inventory and rule for binding the acting identity to the verified token
+**Next session (at the time):** P85-S1. It was done next; see the entry above. Original note:, inventory and rule for binding the acting identity to the verified token
 everywhere (ADR 0240):
 - grep every body-supplied actor field across services, UIs and add-ins;
 - set the rule (token wins; ignore vs. 400 on mismatch; service principals acting on behalf of users);
