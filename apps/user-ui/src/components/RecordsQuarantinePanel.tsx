@@ -76,7 +76,6 @@ export function RecordsQuarantinePanel({ document: activeDocument }: { document:
     try {
       const entry = await createRecordsQuarantine(accessToken, {
         documentId: activeDocument.id,
-        setBy: user.username,
         reason: reason.trim() || null,
         autoDeleteAt: autoDeleteAt ? new Date(autoDeleteAt).toISOString() : null,
       });
@@ -95,7 +94,7 @@ export function RecordsQuarantinePanel({ document: activeDocument }: { document:
     setIsBusy(true);
     setError(null);
     try {
-      const released = await releaseRecordsQuarantine(accessToken, activeEntry.id, user.username);
+      const released = await releaseRecordsQuarantine(accessToken, activeEntry.id);
       setEntries((prev) => prev.map((e) => (e.id === released.id ? released : e)));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("recordsQuarantine.error"));

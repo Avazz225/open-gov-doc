@@ -104,7 +104,6 @@ export function FolderRetentionModal({ folder, onClose }: { folder: Folder; onCl
     try {
       const hold = await createFolderLegalHold(accessToken, {
         folderId: folder.id,
-        setBy: user.username,
         reason: holdReason.trim() || null,
       });
       setHolds((prev) => [hold, ...prev]);
@@ -121,7 +120,7 @@ export function FolderRetentionModal({ folder, onClose }: { folder: Folder; onCl
     setIsHoldBusy(true);
     setError(null);
     try {
-      const released = await releaseFolderLegalHold(accessToken, activeHold.id, user.username);
+      const released = await releaseFolderLegalHold(accessToken, activeHold.id);
       setHolds((prev) => prev.map((h) => (h.id === released.id ? released : h)));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("retention.holdError"));

@@ -103,20 +103,16 @@ class LockOut(BaseModel):
 
 
 class LockAcquireRequest(BaseModel):
-    # Ignored since P85-S4 (ADR 0240): the actor is the request principal.
-    locked_by: str | None = None
     session_id: str
     timeout_seconds: float | None = None
 
 
 class LockReleaseRequest(BaseModel):
-    # Ignored since P85-S4 (ADR 0240): the actor is the request principal.
-    released_by: str | None = None
+    """Empty since P85-S5 (ADR 0240): the actor is the request principal;
+    the body is kept so existing clients that still send one keep working."""
 
 
 class LockForceReleaseRequest(BaseModel):
-    # Ignored since P85-S2 (ADR 0240): the actor is the request principal.
-    released_by: str | None = None
     reason: str | None = None
 
 
@@ -131,8 +127,8 @@ class ForceReleaseResult(BaseModel):
 
 
 class TrashRequest(BaseModel):
-    # Ignored since P85-S2 (ADR 0240): the actor is the request principal.
-    deleted_by: str | None = None
+    """Empty since P85-S5 (ADR 0240): the actor is the request principal;
+    the body is kept so existing clients that still send one keep working."""
 
 
 class TrashResult(BaseModel):
@@ -198,14 +194,12 @@ class RetentionUpdate(BaseModel):
 
 class LegalHoldCreate(BaseModel):
     document_id: str
-    # Ignored since P85-S2 (ADR 0240): the actor is the request principal.
-    set_by: str | None = None
     reason: str | None = None
 
 
 class LegalHoldReleaseRequest(BaseModel):
-    # Ignored since P85-S2 (ADR 0240): the actor is the request principal.
-    released_by: str | None = None
+    """Empty since P85-S5 (ADR 0240): the actor is the request principal;
+    the body is kept so existing clients that still send one keep working."""
 
 
 class LegalHoldOut(BaseModel):
@@ -226,13 +220,11 @@ class RecordsQuarantineCreate(BaseModel):
     # `None` = purely a visibility restriction, no scheduled destruction
     # (post-roadmap phase 31 session 5, ADR 0116).
     auto_delete_at: datetime | None = None
-    # Ignored since P85-S2 (ADR 0240): the actor is the request principal.
-    set_by: str | None = None
 
 
 class RecordsQuarantineReleaseRequest(BaseModel):
-    # Ignored since P85-S2 (ADR 0240): the actor is the request principal.
-    released_by: str | None = None
+    """Empty since P85-S5 (ADR 0240): the actor is the request principal;
+    the body is kept so existing clients that still send one keep working."""
 
 
 class RecordsQuarantineOut(BaseModel):
@@ -255,8 +247,6 @@ class ClassificationLevelUpdate(BaseModel):
     `X-DMS-Principal`-based `admin.classification` permission check)."""
 
     classification_level: Literal["VS-NfD", "VS-VERTRAULICH", "GEHEIM", "STRENG GEHEIM"]
-    # Ignored since P85-S4 (ADR 0240): the actor is the request principal.
-    changed_by: str | None = None
 
 
 class DeclassifyRequest(BaseModel):
@@ -268,8 +258,6 @@ class DeclassifyRequest(BaseModel):
     `LockForceReleaseRequest.reason`) - a heavier, human-justified
     administrative action, not a routine one."""
 
-    # Ignored since P85-S4 (ADR 0240): the actor is the request principal.
-    changed_by: str | None = None
     reason: str
 
 
@@ -291,14 +279,12 @@ class PseudonymizeAttributeRequest(BaseModel):
     independent of the `X-DMS-Principal`-based `admin.attribute_
     pseudonymization` permission check)."""
 
-    # Ignored since P85-S4 (ADR 0240): the actor is the request principal.
-    pseudonymized_by: str | None = None
     reason: str | None = None
 
 
 class RevealAttributeRequest(BaseModel):
-    # Ignored since P85-S4 (ADR 0240): the actor is the request principal.
-    revealed_by: str | None = None
+    """Empty since P85-S5 (ADR 0240): the actor is the request principal;
+    the body is kept so existing clients that still send one keep working."""
 
 
 class PseudonymizedAttributeOut(BaseModel):
@@ -334,9 +320,6 @@ class RestoreAttributeRequest(BaseModel):
     - "a small, mechanically obvious follow-up... not built here") -
     `restored_by` mirrors `RevealAttributeRequest.revealed_by`."""
 
-    # Ignored since P85-S4 (ADR 0240): the actor is the request principal.
-    restored_by: str | None = None
-
 
 class RestoredAttributeOut(BaseModel):
     """The decrypted original value, now permanently written back into
@@ -368,8 +351,6 @@ class RedactionRegion(BaseModel):
 
 class RedactionRequest(BaseModel):
     regions: list[RedactionRegion] = Field(min_length=1)
-    # Ignored since P85-S4 (ADR 0240): the actor is the request principal.
-    created_by: str | None = None
 
 
 class DocumentRegisterRequest(BaseModel):
@@ -379,9 +360,6 @@ class DocumentRegisterRequest(BaseModel):
     enforcement for this endpoint, consistent with `create_document`/
     `update_document`."""
 
-    # Ignored since P85-S4 (ADR 0240): the actor is the request principal.
-    registered_by: str | None = None
-
 
 class DocumentPromoteRequest(BaseModel):
     """Work tray promotion (14.2, post-roadmap phase 31 session 7, ADR
@@ -389,8 +367,6 @@ class DocumentPromoteRequest(BaseModel):
     atomic action/event - see `promote_document` in main.py. `promoted_by`
     is opaque, same pattern as `registered_by` above."""
 
-    # Ignored since P85-S4 (ADR 0240): the actor is the request principal.
-    promoted_by: str | None = None
     target_folder_id: str | None = None
 
 
@@ -443,14 +419,10 @@ class CascadeTrashRequest(BaseModel):
 
     folder_ids: list[str]
     via_folder_id: str
-    # Ignored since P85-S2 (ADR 0240): the actor is the request principal.
-    deleted_by: str | None = None
 
 
 class CascadeRestoreRequest(BaseModel):
     via_folder_id: str
-    # Ignored since P85-S2 (ADR 0240): the actor is the request principal.
-    restored_by: str | None = None
 
 
 class CascadeResult(BaseModel):

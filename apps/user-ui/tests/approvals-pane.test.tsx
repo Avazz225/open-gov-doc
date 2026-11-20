@@ -150,7 +150,7 @@ describe("ApprovalsPane", () => {
     await user.click(screen.getByText("Genehmigen"));
 
     await waitFor(() =>
-      expect(approveApprovalRequestMock).toHaveBeenCalledWith("token-123", "req-1", "bob")
+      expect(approveApprovalRequestMock).toHaveBeenCalledWith("token-123", "req-1")
     );
   });
 });

@@ -15,7 +15,6 @@ from dms_common import (
     ActingIdentity,
     acting_headers,
     configure_logging,
-    log_ignored_actor_field,
     require_acting_identity,
 )
 from dms_db_base import build_engine, make_session_factory
@@ -1307,13 +1306,6 @@ async def start_instance(
     identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> ProcessInstanceOut:
-    log_ignored_actor_field(
-        logger,
-        route="POST /process-definitions/{id}/instances",
-        field="created_by",
-        value=payload.created_by,
-        identity=identity,
-    )
     actor_created_by = identity.actor
     await _reject_during_maintenance(x_dms_maintenance_active)
     await _require_workflow_permission(x_dms_principal, access_type="write")
@@ -1749,13 +1741,6 @@ async def claim_task(
     and for the acting identity - `payload.principal_id` is ignored. Handing
     work to someone else is `POST .../reassign`, which checks that the
     caller is the claimant or their supervisor."""
-    log_ignored_actor_field(
-        logger,
-        route="POST /instances/{id}/tasks/{task}/claim",
-        field="principal_id",
-        value=payload.principal_id,
-        identity=identity,
-    )
     actor_principal_id = identity.actor
     await _reject_during_maintenance(x_dms_maintenance_active)
     await _require_workflow_permission(x_dms_principal, access_type="write")
@@ -1962,13 +1947,6 @@ async def complete_task(
     identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> ProcessInstanceOut:
-    log_ignored_actor_field(
-        logger,
-        route="POST /instances/{id}/tasks/{task}/complete",
-        field="completed_by",
-        value=payload.completed_by,
-        identity=identity,
-    )
     actor_completed_by = identity.actor
     await _reject_during_maintenance(x_dms_maintenance_active)
     await _require_workflow_permission(x_dms_principal, access_type="write")

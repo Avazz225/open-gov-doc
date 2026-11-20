@@ -664,8 +664,9 @@ trash, `DELETE /documents/{id}`, cascade trash/restore, legal holds (set/release
   the folder (`X-DMS-On-Behalf-Of`). The documents' `deleted_by` is that user, and the events carry
   `folder-service` as `actor` and the user as `on_behalf_of`.
 - **Permission checks** keep their existing subject (the principal).
-- **Body fields** (`deleted_by`, `restored_by`, `set_by`, `released_by`) are optional and ignored. A
-  mismatch is logged as `actor_field_ignored`.
+- **The former body fields** (`deleted_by`, `restored_by`, `set_by`, `released_by`) were ignored during
+  P85 and removed from the request schemas in P85-S5. A client that still sends one is not rejected; the
+  value is simply dropped.
 - **No principal means `401`.**
 
 **Since P85-S4 the remaining write routes follow the same rule:**

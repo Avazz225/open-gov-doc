@@ -324,7 +324,7 @@ describe("QueryConsoleView", () => {
       await user.click(screen.getByText("Genehmigen"));
 
       await waitFor(() =>
-        expect(approveApprovalRequestMock).toHaveBeenCalledWith("token-123", "req-1", "query-admin")
+        expect(approveApprovalRequestMock).toHaveBeenCalledWith("token-123", "req-1")
       );
     });
 
@@ -363,7 +363,6 @@ describe("QueryConsoleView", () => {
         expect(rejectApprovalRequestMock).toHaveBeenCalledWith(
           "token-123",
           "req-1",
-          "query-admin",
           "Nicht plausibel"
         )
       );

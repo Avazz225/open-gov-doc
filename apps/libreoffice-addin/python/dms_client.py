@@ -143,7 +143,6 @@ def checkin_version(
     filename,
     content_type,
     expected_base_version_number,
-    created_by,
 ):
     return _request(
         base_url,
@@ -153,7 +152,6 @@ def checkin_version(
         token=token,
         form_fields={
             "expected_base_version_number": expected_base_version_number,
-            "created_by": created_by,
         },
         file_field=("file", filename, content_type, file_bytes),
     )
@@ -167,13 +165,13 @@ def create_document(
     filename,
     content_type,
     title,
-    created_by,
     object_type_id=None,
     attributes=None,
     derived_from_document_id=None,
     derived_from_version_number=None,
 ):
-    fields = {"title": title, "created_by": created_by}
+    # No actor field since P85-S5 (ADR 0240): the server takes the token's identity.
+    fields = {"title": title}
     if object_type_id is not None:
         fields["object_type_id"] = object_type_id
         fields["attributes"] = json.dumps(attributes or {})
@@ -208,25 +206,25 @@ def update_document_metadata(base_url, token, document_id, *, title=None, attrib
     )
 
 
-def acquire_lock(base_url, token, document_id, *, locked_by, session_id):
+def acquire_lock(base_url, token, document_id, *, session_id):
     return _request(
         base_url,
         "document-service",
         f"documents/{document_id}/lock",
         method="POST",
         token=token,
-        json_body={"locked_by": locked_by, "session_id": session_id},
+        json_body={"session_id": session_id},
     )
 
 
-def release_lock(base_url, token, document_id, *, released_by):
+def release_lock(base_url, token, document_id):
     return _request(
         base_url,
         "document-service",
         f"documents/{document_id}/lock",
         method="DELETE",
         token=token,
-        json_body={"released_by": released_by},
+        json_body={},
     )
 
 
@@ -274,23 +272,23 @@ def list_instance_tasks(base_url, token, instance_id):
     return _request(base_url, "workflow-service", f"instances/{instance_id}/tasks", token=token)
 
 
-def start_instance(base_url, token, process_definition_id, *, created_by, business_key):
+def start_instance(base_url, token, process_definition_id, *, business_key):
     return _request(
         base_url,
         "workflow-service",
         f"process-definitions/{process_definition_id}/instances",
         method="POST",
         token=token,
-        json_body={"created_by": created_by, "business_key": business_key},
+        json_body={"business_key": business_key},
     )
 
 
-def complete_task(base_url, token, instance_id, task_id, *, completed_by):
+def complete_task(base_url, token, instance_id, task_id):
     return _request(
         base_url,
         "workflow-service",
         f"instances/{instance_id}/tasks/{task_id}/complete",
         method="POST",
         token=token,
-        json_body={"completed_by": completed_by, "data": {}},
+        json_body={"data": {}},
     )

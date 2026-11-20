@@ -86,7 +86,6 @@ export function InstanceDetail({
       await completeTask(accessToken, {
         instanceId,
         taskId: task.id,
-        completedBy,
         data,
         signatureId: signatureId || undefined,
       });

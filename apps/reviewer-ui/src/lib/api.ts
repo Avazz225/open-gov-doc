@@ -254,7 +254,6 @@ export async function completeTask(
   params: {
     instanceId: string;
     taskId: string;
-    completedBy: string;
     data?: Record<string, unknown>;
     signatureId?: string;
     onBehalfOfPrincipalId?: string;
@@ -267,7 +266,6 @@ export async function completeTask(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        completed_by: params.completedBy,
         data: params.data ?? {},
         signature_id: params.signatureId ?? null,
         on_behalf_of_principal_id: params.onBehalfOfPrincipalId ?? null,
@@ -451,16 +449,14 @@ export async function listApprovalRequests(
 
 export async function approveRequest(
   token: string,
-  requestId: string,
-  approvedBy: string
-): Promise<ApprovalRequest> {
+  requestId: string): Promise<ApprovalRequest> {
   const response = await request(
     "permission-service",
     `approval-requests/${requestId}/approve`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ approved_by: approvedBy }),
+      body: JSON.stringify({}),
     },
     token
   );
@@ -470,7 +466,7 @@ export async function approveRequest(
 export async function rejectRequest(
   token: string,
   requestId: string,
-  params: { rejectedBy: string; reason?: string }
+  params: { reason?: string }
 ): Promise<ApprovalRequest> {
   const response = await request(
     "permission-service",
@@ -478,7 +474,7 @@ export async function rejectRequest(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rejected_by: params.rejectedBy, reason: params.reason ?? null }),
+      body: JSON.stringify({ reason: params.reason ?? null }),
     },
     token
   );

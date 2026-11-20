@@ -123,7 +123,6 @@ export function RetentionPanel({ document: activeDocument }: { document: Documen
     try {
       const hold = await createLegalHold(accessToken, {
         documentId: activeDocument.id,
-        setBy: user.username,
         reason: holdReason.trim() || null,
       });
       setHolds((prev) => [hold, ...prev]);
@@ -140,7 +139,7 @@ export function RetentionPanel({ document: activeDocument }: { document: Documen
     setIsHoldBusy(true);
     setError(null);
     try {
-      const released = await releaseLegalHold(accessToken, activeHold.id, user.username);
+      const released = await releaseLegalHold(accessToken, activeHold.id);
       setHolds((prev) => prev.map((h) => (h.id === released.id ? released : h)));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("retention.holdError"));

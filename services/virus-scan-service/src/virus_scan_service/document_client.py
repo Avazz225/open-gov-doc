@@ -43,7 +43,6 @@ class DocumentClient:
             "/documents/from-quarantine-release",
             data={
                 "title": title,
-                "created_by": created_by,
                 "folder_id": folder_id,
                 "object_type_id": object_type_id,
                 "attributes": json.dumps(attributes),

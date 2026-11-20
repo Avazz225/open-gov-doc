@@ -68,7 +68,7 @@ None yet — follows in Phase 11.
 
 ## Acting Identity (P85-S4, [ADR 0240](../adr/0240-acting-identity-from-verified-principal.md))
 
-`POST /scan` records the acting identity as `created_by`; the form field is ignored. document-service
+`POST /scan` records the acting identity as `created_by`; the form field was removed in P85-S5. document-service
 (upload) and mail-connector (attachments) call it on behalf of the uploading or mailbox user
 (`X-DMS-On-Behalf-Of`), so quarantine entries name that person.
 

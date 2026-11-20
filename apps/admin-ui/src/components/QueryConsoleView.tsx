@@ -344,7 +344,7 @@ function ManipulationSection() {
     if (!accessToken || !user) return;
     setApprovalsError(null);
     try {
-      await approveApprovalRequest(accessToken, requestId, user.username);
+      await approveApprovalRequest(accessToken, requestId);
       await reloadPendingApprovals();
     } catch (err) {
       setApprovalsError(err instanceof ApiError ? err.message : t("queryConsole.loadError"));
@@ -370,7 +370,6 @@ function ManipulationSection() {
       await rejectApprovalRequest(
         accessToken,
         requestId,
-        user.username,
         rejectReason.trim() || undefined
       );
       setRejectingId(null);

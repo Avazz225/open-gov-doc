@@ -10,7 +10,6 @@ from datetime import UTC, datetime, timedelta
 from dms_common import (
     ActingIdentity,
     configure_logging,
-    log_ignored_actor_field,
     require_acting_identity,
 )
 from dms_constraint_engine import ROOT_PARENT_TYPE, validate_parent
@@ -530,13 +529,6 @@ async def create_folder(
     identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> FolderOut:
-    log_ignored_actor_field(
-        logger,
-        route="POST /folders",
-        field="created_by",
-        value=payload.created_by,
-        identity=identity,
-    )
     actor_created_by = identity.actor
     try:
         parent_folder = await repository.get_folder(session, payload.parent_id)
@@ -881,13 +873,6 @@ async def trash_folder(
     exact pattern as `document_service.main.trash_document`/
     `force_release_lock` (P6-S4). By default (no configuration), behavior
     remains unchanged: immediate execution."""
-    log_ignored_actor_field(
-        logger,
-        route="POST /folders/{id}/trash",
-        field="deleted_by",
-        value=payload.deleted_by,
-        identity=identity,
-    )
     actor_deleted_by = identity.actor
     if folder_id in PROTECTED_FOLDER_IDS:
         raise HTTPException(
@@ -1123,13 +1108,6 @@ async def pseudonymize_folder_attribute(
 ) -> PseudonymizedAttributeOut:
     """Mirrors `document_service.main.pseudonymize_document_attribute`
     exactly (5.2, Phase 58 Session 1, ADR 0156's own named Open Point)."""
-    log_ignored_actor_field(
-        logger,
-        route="POST /folders/{id}/attributes/{name}/pseudonymize",
-        field="pseudonymized_by",
-        value=payload.pseudonymized_by,
-        identity=identity,
-    )
     actor_pseudonymized_by = identity.actor
     await _require_pseudonymization_permission(x_dms_principal)
     try:
@@ -1242,13 +1220,6 @@ async def reveal_folder_attribute(
 ) -> RevealedAttributeOut:
     """Mirrors `document_service.main.reveal_document_attribute` exactly
     (5.2, Phase 58 Session 1)."""
-    log_ignored_actor_field(
-        logger,
-        route="POST /folders/{id}/attributes/{name}/reveal",
-        field="revealed_by",
-        value=payload.revealed_by,
-        identity=identity,
-    )
     actor_revealed_by = identity.actor
     await _require_reveal_permission(x_dms_principal)
     try:
@@ -1463,13 +1434,6 @@ async def add_folder_document_reference(
     identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> FolderDocumentReferenceOut:
-    log_ignored_actor_field(
-        logger,
-        route="POST /folders/{id}/document-references",
-        field="added_by",
-        value=payload.added_by,
-        identity=identity,
-    )
     actor_added_by = identity.actor
     if not x_dms_principal:
         raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
@@ -1524,13 +1488,6 @@ async def remove_folder_document_reference(
     identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> FolderDocumentReferenceOut:
-    log_ignored_actor_field(
-        logger,
-        route="DELETE /folders/{id}/document-references/{doc}",
-        field="removed_by",
-        value=payload.removed_by,
-        identity=identity,
-    )
     actor_removed_by = identity.actor
     if not x_dms_principal:
         raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
@@ -1631,9 +1588,6 @@ async def create_legal_hold(
     """Set a legal hold (5.2, since P7-S1b) - overrides any due action in
     the poll loop until it is released again. Since P19-S10 gated by
     `admin.legal_hold`, see `_require_legal_hold_permission`."""
-    log_ignored_actor_field(
-        logger, route="POST /legal-holds", field="set_by", value=payload.set_by, identity=identity
-    )
     actor_set_by = identity.actor
     await _require_legal_hold_permission(x_dms_principal)
     try:
@@ -1660,13 +1614,6 @@ async def release_legal_hold(
     identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> LegalHoldOut:
-    log_ignored_actor_field(
-        logger,
-        route="POST /legal-holds/{id}/release",
-        field="released_by",
-        value=payload.released_by,
-        identity=identity,
-    )
     actor_released_by = identity.actor
     await _require_legal_hold_permission(x_dms_principal)
     try:
@@ -1843,13 +1790,6 @@ async def create_folder_template(
     by `folder.read` on `source_folder_id` since Post-Roadmap Phase 38
     Session 4 - the captured structure (names/hierarchy) could otherwise
     leak a teamspace's internal organization to a non-member."""
-    log_ignored_actor_field(
-        logger,
-        route="POST /folder-templates",
-        field="created_by",
-        value=payload.created_by,
-        identity=identity,
-    )
     actor_created_by = identity.actor
     try:
         structure = await repository.build_template_structure(session, payload.source_folder_id)
@@ -1963,13 +1903,6 @@ async def apply_folder_template(
     `target_parent_id` since Post-Roadmap Phase 38 Session 4 - the same
     check `POST /folders` itself applies, since this creates real folders
     there just as directly."""
-    log_ignored_actor_field(
-        logger,
-        route="POST /folder-templates/{id}/apply",
-        field="created_by",
-        value=payload.created_by,
-        identity=identity,
-    )
     actor_created_by = identity.actor
     try:
         template = await repository.get_template(session, template_id)

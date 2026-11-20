@@ -206,7 +206,7 @@ export async function listChildFolders(token: string, folderId: string): Promise
 
 export async function createFolder(
   token: string,
-  params: { name: string; parentId: string; createdBy: string; objectTypeId?: number }
+  params: { name: string; parentId: string; objectTypeId?: number }
 ): Promise<Folder> {
   const response = await request(
     "folder-service",
@@ -217,7 +217,6 @@ export async function createFolder(
       body: JSON.stringify({
         name: params.name,
         parent_id: params.parentId,
-        created_by: params.createdBy,
         object_type_id: params.objectTypeId ?? null,
       }),
     },
@@ -308,16 +307,14 @@ export interface FolderTrashResult {
 
 export async function trashFolder(
   token: string,
-  folderId: string,
-  deletedBy: string
-): Promise<FolderTrashResult> {
+  folderId: string): Promise<FolderTrashResult> {
   const response = await request(
     "folder-service",
     `folders/${encodeURIComponent(folderId)}/trash`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ deleted_by: deletedBy }),
+      body: JSON.stringify({}),
     },
     token
   );
@@ -332,16 +329,14 @@ export interface DocumentTrashResult {
 
 export async function trashDocument(
   token: string,
-  documentId: string,
-  deletedBy: string
-): Promise<DocumentTrashResult> {
+  documentId: string): Promise<DocumentTrashResult> {
   const response = await request(
     "document-service",
     `documents/${encodeURIComponent(documentId)}/trash`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ deleted_by: deletedBy }),
+      body: JSON.stringify({}),
     },
     token
   );
@@ -458,7 +453,7 @@ export async function listFolderLegalHolds(
 
 export async function createFolderLegalHold(
   token: string,
-  params: { folderId: string; setBy: string; reason?: string | null }
+  params: { folderId: string; reason?: string | null }
 ): Promise<FolderLegalHold> {
   const response = await request(
     "folder-service",
@@ -468,7 +463,6 @@ export async function createFolderLegalHold(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         folder_id: params.folderId,
-        set_by: params.setBy,
         reason: params.reason ?? null,
       }),
     },
@@ -479,16 +473,14 @@ export async function createFolderLegalHold(
 
 export async function releaseFolderLegalHold(
   token: string,
-  holdId: string,
-  releasedBy: string
-): Promise<FolderLegalHold> {
+  holdId: string): Promise<FolderLegalHold> {
   const response = await request(
     "folder-service",
     `legal-holds/${encodeURIComponent(holdId)}/release`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ released_by: releasedBy }),
+      body: JSON.stringify({}),
     },
     token
   );
@@ -525,7 +517,7 @@ export async function listFolderDocumentReferences(
 export async function addFolderDocumentReference(
   token: string,
   folderId: string,
-  params: { documentId: string; addedBy: string }
+  params: { documentId: string }
 ): Promise<FolderDocumentReference> {
   const response = await request(
     "folder-service",
@@ -533,7 +525,7 @@ export async function addFolderDocumentReference(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ document_id: params.documentId, added_by: params.addedBy }),
+      body: JSON.stringify({ document_id: params.documentId }),
     },
     token
   );
@@ -543,16 +535,14 @@ export async function addFolderDocumentReference(
 export async function removeFolderDocumentReference(
   token: string,
   folderId: string,
-  documentId: string,
-  removedBy: string
-): Promise<FolderDocumentReference> {
+  documentId: string): Promise<FolderDocumentReference> {
   const response = await request(
     "folder-service",
     `folders/${encodeURIComponent(folderId)}/document-references/${encodeURIComponent(documentId)}`,
     {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ removed_by: removedBy }),
+      body: JSON.stringify({}),
     },
     token
   );
@@ -703,7 +693,6 @@ export async function uploadDocument(
   params: {
     file: File;
     title: string;
-    createdBy: string;
     folderId: string;
     objectTypeId?: number;
     attributes?: Record<string, string>;
@@ -715,7 +704,6 @@ export async function uploadDocument(
   const formData = new FormData();
   formData.append("file", params.file);
   formData.append("title", params.title);
-  formData.append("created_by", params.createdBy);
   formData.append("folder_id", params.folderId);
   if (params.objectTypeId !== undefined) {
     formData.append("object_type_id", String(params.objectTypeId));
@@ -757,16 +745,14 @@ export async function updateDocumentMetadata(
 // `draft: true` (see uploadDocument above).
 export async function registerDocument(
   token: string,
-  documentId: string,
-  registeredBy: string
-): Promise<DocumentSummary> {
+  documentId: string): Promise<DocumentSummary> {
   const response = await request(
     "document-service",
     `documents/${encodeURIComponent(documentId)}/register`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ registered_by: registeredBy }),
+      body: JSON.stringify({}),
     },
     token
   );
@@ -780,7 +766,7 @@ export async function registerDocument(
 export async function promoteDocument(
   token: string,
   documentId: string,
-  params: { promotedBy: string; targetFolderId?: string | null }
+  params: { targetFolderId?: string | null }
 ): Promise<DocumentSummary> {
   const response = await request(
     "document-service",
@@ -789,7 +775,6 @@ export async function promoteDocument(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        promoted_by: params.promotedBy,
         target_folder_id: params.targetFolderId ?? null,
       }),
     },
@@ -803,9 +788,7 @@ export async function promoteDocument(
 export async function setDocumentClassificationLevel(
   token: string,
   documentId: string,
-  classificationLevel: string,
-  changedBy: string
-): Promise<DocumentSummary> {
+  classificationLevel: string): Promise<DocumentSummary> {
   const response = await request(
     "document-service",
     `documents/${encodeURIComponent(documentId)}/classification-level`,
@@ -814,7 +797,6 @@ export async function setDocumentClassificationLevel(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         classification_level: classificationLevel,
-        changed_by: changedBy,
       }),
     },
     token
@@ -863,16 +845,14 @@ export async function getRedactionPreviewPageImage(
 export async function redactDocument(
   token: string,
   documentId: string,
-  regions: RedactionRegion[],
-  createdBy: string
-): Promise<DocumentSummary> {
+  regions: RedactionRegion[]): Promise<DocumentSummary> {
   const response = await request(
     "document-service",
     `documents/${encodeURIComponent(documentId)}/redact`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ regions, created_by: createdBy }),
+      body: JSON.stringify({ regions }),
     },
     token
   );
@@ -1362,7 +1342,7 @@ export async function listLegalHolds(
 
 export async function createLegalHold(
   token: string,
-  params: { documentId: string; setBy: string; reason?: string | null }
+  params: { documentId: string; reason?: string | null }
 ): Promise<LegalHold> {
   const response = await request(
     "document-service",
@@ -1372,7 +1352,6 @@ export async function createLegalHold(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         document_id: params.documentId,
-        set_by: params.setBy,
         reason: params.reason ?? null,
       }),
     },
@@ -1383,16 +1362,14 @@ export async function createLegalHold(
 
 export async function releaseLegalHold(
   token: string,
-  holdId: string,
-  releasedBy: string
-): Promise<LegalHold> {
+  holdId: string): Promise<LegalHold> {
   const response = await request(
     "document-service",
     `legal-holds/${encodeURIComponent(holdId)}/release`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ released_by: releasedBy }),
+      body: JSON.stringify({}),
     },
     token
   );
@@ -1438,7 +1415,7 @@ export async function listRecordsQuarantine(
 
 export async function createRecordsQuarantine(
   token: string,
-  params: { documentId: string; setBy: string; reason?: string | null; autoDeleteAt?: string | null }
+  params: { documentId: string; reason?: string | null; autoDeleteAt?: string | null }
 ): Promise<RecordsQuarantine> {
   const response = await request(
     "document-service",
@@ -1448,7 +1425,6 @@ export async function createRecordsQuarantine(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         document_id: params.documentId,
-        set_by: params.setBy,
         reason: params.reason ?? null,
         auto_delete_at: params.autoDeleteAt ?? null,
       }),
@@ -1460,16 +1436,14 @@ export async function createRecordsQuarantine(
 
 export async function releaseRecordsQuarantine(
   token: string,
-  quarantineId: string,
-  releasedBy: string
-): Promise<RecordsQuarantine> {
+  quarantineId: string): Promise<RecordsQuarantine> {
   const response = await request(
     "document-service",
     `records-quarantine/${encodeURIComponent(quarantineId)}/release`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ released_by: releasedBy }),
+      body: JSON.stringify({}),
     },
     token
   );
@@ -1981,16 +1955,14 @@ export async function listApprovalRequests(
 
 export async function approveApprovalRequest(
   token: string,
-  requestId: string,
-  approvedBy: string
-): Promise<ApprovalRequest> {
+  requestId: string): Promise<ApprovalRequest> {
   const response = await request(
     "permission-service",
     `approval-requests/${encodeURIComponent(requestId)}/approve`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ approved_by: approvedBy }),
+      body: JSON.stringify({}),
     },
     token
   );
@@ -2000,7 +1972,6 @@ export async function approveApprovalRequest(
 export async function rejectApprovalRequest(
   token: string,
   requestId: string,
-  rejectedBy: string,
   reason?: string | null
 ): Promise<ApprovalRequest> {
   const response = await request(
@@ -2009,7 +1980,7 @@ export async function rejectApprovalRequest(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rejected_by: rejectedBy, reason: reason ?? null }),
+      body: JSON.stringify({ reason: reason ?? null }),
     },
     token
   );
@@ -3000,7 +2971,7 @@ export async function getFolderTemplate(
 
 export async function createFolderTemplate(
   token: string,
-  params: { sourceFolderId: string; name: string; description?: string; createdBy: string }
+  params: { sourceFolderId: string; name: string; description?: string }
 ): Promise<FolderTemplate> {
   const response = await request(
     "folder-service",
@@ -3012,7 +2983,6 @@ export async function createFolderTemplate(
         source_folder_id: params.sourceFolderId,
         name: params.name,
         description: params.description || null,
-        created_by: params.createdBy,
       }),
     },
     token
@@ -3032,7 +3002,7 @@ export async function deleteFolderTemplate(token: string, templateId: string): P
 export async function applyFolderTemplate(
   token: string,
   templateId: string,
-  params: { targetParentId: string; createdBy: string }
+  params: { targetParentId: string }
 ): Promise<FolderTemplateApplyResult> {
   const response = await request(
     "folder-service",
@@ -3042,7 +3012,6 @@ export async function applyFolderTemplate(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         target_parent_id: params.targetParentId,
-        created_by: params.createdBy,
       }),
     },
     token

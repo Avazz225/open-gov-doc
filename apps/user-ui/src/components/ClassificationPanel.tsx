@@ -20,7 +20,7 @@ export function ClassificationPanel({
   document: DocumentSummary;
   onChanged: (updated: DocumentSummary) => void;
 }) {
-  const { accessToken, user, permissions } = useAuth();
+  const { accessToken, permissions } = useAuth();
   const { t } = useI18n();
   // RBAC (ADR 0114): raising the level requires `admin.classification`
   // server-side - the current level stays visible to every viewer, only the
@@ -45,8 +45,7 @@ export function ClassificationPanel({
       const updated = await setDocumentClassificationLevel(
         accessToken,
         activeDocument.id,
-        selected,
-        user?.username ?? ""
+        selected
       );
       onChanged(updated);
     } catch (err) {

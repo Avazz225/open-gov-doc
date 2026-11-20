@@ -165,7 +165,7 @@ non-isolated case stays visible — the decisive proof that row-level filtering,
 
 Case creation, registration, adding or removing document references, and pseudonymize/reveal record the
 request principal (`created_by`, `registered_by`, `added_by`, `removed_by`, `pseudonymized_by`,
-`revealed_by`); the body fields are optional and ignored. mail-connector adds mail-created documents to a
+`revealed_by`); the body fields were removed in P85-S5. mail-connector adds mail-created documents to a
 case as `mail-connector` on behalf of the mailbox's user (before: the non-service principal
 `system:mail-connector`, plus `added_by` in the body).
 

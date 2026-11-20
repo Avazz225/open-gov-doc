@@ -31,7 +31,6 @@ class WorkflowClient:
         response = await self._client.post(
             f"/process-definitions/{process_definition_id}/instances",
             json={
-                "created_by": created_by,
                 "business_key": business_key,
                 "initial_data": initial_data,
             },

@@ -85,7 +85,7 @@ class LocalDmsClient:
         reading remains allowed."""
         response = self._permissions.post(
             "/scope-locks",
-            json={"resource_id": resource_id, "locked_by": locked_by, "reason": reason},
+            json={"resource_id": resource_id, "reason": reason},
         )
         response.raise_for_status()
         # `scope_lock.id` is an autoincrement integer PK in permission-service,
@@ -94,9 +94,7 @@ class LocalDmsClient:
         return str(response.json()["scope_lock"]["id"])
 
     def release_scope_lock(self, scope_lock_id: str, *, released_by: str) -> None:
-        response = self._permissions.request(
-            "DELETE", f"/scope-locks/{scope_lock_id}", json={"released_by": released_by}
-        )
+        response = self._permissions.request("DELETE", f"/scope-locks/{scope_lock_id}")
         if response.status_code == 404:
             return
         response.raise_for_status()

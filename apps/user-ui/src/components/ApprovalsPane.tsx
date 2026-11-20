@@ -93,7 +93,7 @@ export function ApprovalsPane({
     setBusyId(request.id);
     setError(null);
     try {
-      await approveApprovalRequest(token, request.id, currentUsername);
+      await approveApprovalRequest(token, request.id);
       await reload();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("approvals.decisionError"));
@@ -106,7 +106,7 @@ export function ApprovalsPane({
     setBusyId(request.id);
     setError(null);
     try {
-      await rejectApprovalRequest(token, request.id, currentUsername);
+      await rejectApprovalRequest(token, request.id);
       await reload();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("approvals.decisionError"));

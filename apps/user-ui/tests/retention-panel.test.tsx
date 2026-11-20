@@ -172,7 +172,6 @@ describe("RetentionPanel", () => {
     await waitFor(() =>
       expect(createLegalHoldMock).toHaveBeenCalledWith("token-123", {
         documentId: "doc-1",
-        setBy: "alice",
         reason: "Rechtsstreit",
       })
     );
@@ -191,7 +190,7 @@ describe("RetentionPanel", () => {
     fireEvent.click(screen.getByText("Legal Hold aufheben"));
 
     await waitFor(() =>
-      expect(releaseLegalHoldMock).toHaveBeenCalledWith("token-123", "hold-1", "alice")
+      expect(releaseLegalHoldMock).toHaveBeenCalledWith("token-123", "hold-1")
     );
     expect(screen.queryByText(/Legal Hold aktiv/)).not.toBeInTheDocument();
   });

@@ -26,7 +26,7 @@ export function RedactionModal({
   onClose: () => void;
   onRedacted: (redacted: DocumentSummary) => void;
 }) {
-  const { accessToken, user } = useAuth();
+  const { accessToken } = useAuth();
   const { t } = useI18n();
   const [pageCount, setPageCount] = useState<number | null>(null);
   const [pageNumber, setPageNumber] = useState(1);
@@ -108,8 +108,7 @@ export function RedactionModal({
       const redacted = await redactDocument(
         accessToken,
         activeDocument.id,
-        regions,
-        user?.username ?? ""
+        regions
       );
       onRedacted(redacted);
       onClose();

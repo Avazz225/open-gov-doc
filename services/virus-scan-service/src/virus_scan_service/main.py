@@ -9,7 +9,6 @@ from dms_common import (
     ActingIdentity,
     MaxBodySizeMiddleware,
     configure_logging,
-    log_ignored_actor_field,
     require_acting_identity,
 )
 from dms_db_base import build_engine, make_session_factory
@@ -186,7 +185,6 @@ async def _require_scan_permission(
 async def scan_upload(
     file: UploadFile = File(...),
     document_id: str | None = Form(None),
-    created_by: str | None = Form(None),
     x_dms_principal: str = Header(default=""),
     identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
@@ -203,9 +201,6 @@ async def scan_upload(
     "everyone" regardless of whether the principal string identifies a
     real registered account (same reasoning as reporting-service's
     scheduler principal, same session)."""
-    log_ignored_actor_field(
-        logger, route="POST /scan", field="created_by", value=created_by, identity=identity
-    )
     actor_created_by = identity.actor
     await _require_scan_permission(
         x_dms_principal, permission="virus_scan.write", access_type="write"

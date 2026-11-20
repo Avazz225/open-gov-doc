@@ -133,7 +133,6 @@ describe("UserTracking", () => {
     await waitFor(() =>
       expect(setUserTrackingConfigMock).toHaveBeenCalledWith("token-123", "alice", {
         enabled: true,
-        updatedBy: "admin-1",
       })
     );
     await waitFor(() => expect(checkbox).toBeChecked());

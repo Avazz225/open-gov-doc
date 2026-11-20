@@ -505,6 +505,12 @@ Two-stage Docker image (`apps/admin-ui/Dockerfile`), identical to the User UI. `
 
 **Since Phase 49 Session 3**: the build stage's `WORKDIR`/`COPY` layout changed to mirror the actual repo shape (`/repo/apps/admin-ui/`, plus `/repo/libs/dms-ui/`) instead of flattening this app into `/app` — needed so `globals.css`'s new relative `@import` of `libs/dms-ui/tokens.css` resolves identically to a local `npm run build`, same fix as every other app in Phase 49. The two existing build args (`NEXT_PUBLIC_GATEWAY_BASE_URL`, `NEXT_PUBLIC_FEDERATION_HUB_BASE_URL`) carried over unchanged.
 
+## No Actor Fields in Requests (P85-S5, [ADR 0240](../adr/0240-acting-identity-from-verified-principal.md))
+
+The client no longer sends who is acting (`created_by`, `deleted_by`, `approved_by`, `locked_by`, …):
+the services take it from the verified token. The API helpers lost those parameters, and the
+components no longer pass the user name into them. Super-user activation, approve/reject, emergency shutdown and lift, and the user-tracking toggle no longer pass `user.sub`/`user.username`.
+
 ## Tests
 
 - `npm run typecheck` / `npm run lint` / `npm run build`.

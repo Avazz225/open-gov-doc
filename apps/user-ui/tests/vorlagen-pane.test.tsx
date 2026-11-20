@@ -23,7 +23,7 @@ vi.mock("@/lib/api", async () => {
 function renderPane() {
   return render(
     <I18nProvider>
-      <VorlagenPane token="token-123" createdBy="alice" />
+      <VorlagenPane token="token-123" />
     </I18nProvider>
   );
 }
@@ -77,7 +77,6 @@ describe("VorlagenPane", () => {
         expect.objectContaining({
           sourceFolderId: "folder-abc",
           name: "Aktenplan-Rohbau",
-          createdBy: "alice",
         })
       )
     );
@@ -117,7 +116,7 @@ describe("VorlagenPane", () => {
       expect(applyFolderTemplateMock).toHaveBeenCalledWith(
         "token-123",
         "template-1",
-        expect.objectContaining({ targetParentId: "target-folder", createdBy: "alice" })
+        expect.objectContaining({ targetParentId: "target-folder" })
       )
     );
   });

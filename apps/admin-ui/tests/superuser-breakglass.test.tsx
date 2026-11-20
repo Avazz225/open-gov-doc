@@ -126,7 +126,7 @@ describe("SuperuserBreakGlass", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Aktivierung anfordern" }));
 
-    expect(requestSuperuserActivationMock).toHaveBeenCalledWith("token-123", "alice");
+    expect(requestSuperuserActivationMock).toHaveBeenCalledWith("token-123");
     expect(await screen.findByText(/Freigabe-Request erstellt \(ID: req-1\)/)).toBeInTheDocument();
   });
 
@@ -187,7 +187,7 @@ describe("SuperuserBreakGlass", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Notfallsperre auslösen" }));
 
-    expect(triggerMaintenanceModeMock).toHaveBeenCalledWith("token-123", "alice", "");
+    expect(triggerMaintenanceModeMock).toHaveBeenCalledWith("token-123", "");
     expect(await screen.findByText("Notfallsperre aktiviert.")).toBeInTheDocument();
   });
 
@@ -208,6 +208,6 @@ describe("SuperuserBreakGlass", () => {
     const liftButton = await screen.findByRole("button", { name: "Notfallsperre aufheben" });
     fireEvent.click(liftButton);
 
-    expect(liftMaintenanceModeMock).toHaveBeenCalledWith("token-123", "alice");
+    expect(liftMaintenanceModeMock).toHaveBeenCalledWith("token-123");
   });
 });

@@ -380,7 +380,7 @@ def _open_document_by_id(smgr, ctx, document_id: str):
     try:
         session_id = str(uuid.uuid4())
         dms_client.acquire_lock(
-            base_url, token, document_id, locked_by=_session()["username"], session_id=session_id
+            base_url, token, document_id, session_id=session_id
         )
     except dms_client.ApiError:
         pass  # Sperre bereits von jemand anderem gehalten - schreibgeschützt weiter öffnen
@@ -545,7 +545,6 @@ def _handle_save():
         filename=filename,
         content_type=linked.content_type,
         expected_base_version_number=linked.version_number,
-        created_by=_session()["username"],
     )
     settings_store.set_linked_document(
         doc, linked.document_id, result["version"]["version_number"], linked.content_type
@@ -616,7 +615,6 @@ def _handle_save_new_from_template():
                 filename=filename,
                 content_type=content_type,
                 title=title,
-                created_by=_session()["username"],
                 object_type_id=object_type_id,
                 attributes=attributes,
                 derived_from_document_id=pending_template["template_id"],
@@ -646,7 +644,7 @@ def _handle_unlink():
     if linked is not None:
         try:
             dms_client.release_lock(
-                base_url, token, linked.document_id, released_by=_session()["username"]
+                base_url, token, linked.document_id
             )
         except dms_client.ApiError:
             pass  # Sperre ggf. bereits abgelaufen/nie erworben (Lesezugriff) - egal
@@ -711,7 +709,7 @@ def _handle_workflow():
         instance_id, task = task_rows[index]
         try:
             dms_client.complete_task(
-                base_url, token, instance_id, task["id"], completed_by=_session()["username"]
+                base_url, token, instance_id, task["id"]
             )
         except dms_client.ApiError as exc:
             dialogs.set_status(dialog, "lblError", i18n.t("workflow.completeError", detail=exc.message))
@@ -730,7 +728,6 @@ def _handle_workflow():
                 base_url,
                 token,
                 definition["id"],
-                created_by=_session()["username"],
                 business_key=document_id,
             )
         except dms_client.ApiError as exc:

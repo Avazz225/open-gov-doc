@@ -7,7 +7,6 @@ from typing import Literal
 from dms_common import (
     ActingIdentity,
     configure_logging,
-    log_ignored_actor_field,
     require_acting_identity,
 )
 from dms_db_base import build_engine, make_session_factory
@@ -959,14 +958,7 @@ async def create_approval_request(
 ) -> ApprovalRequestOut:
     """The initiator is the acting identity (P85-S2, ADR 0240): a service
     creating a request for a user sends `X-DMS-On-Behalf-Of`, which makes
-    that user the initiator. `payload.initiated_by` is ignored."""
-    log_ignored_actor_field(
-        logger,
-        route="POST /approval-requests",
-        field="initiated_by",
-        value=payload.initiated_by,
-        identity=identity,
-    )
+    that user the initiator. (The former `initiated_by` body field was removed in P85-S5.)"""
     return await _request_approval(
         session,
         action_type=payload.action_type,
@@ -1005,13 +997,6 @@ async def approve_approval_request(
     """Four-eyes on verified identities (P85-S2, ADR 0240): the approver is
     the acting identity - before, `approved_by` from the body, so anyone could
     approve their own request under another name."""
-    log_ignored_actor_field(
-        logger,
-        route="POST /approval-requests/{id}/approve",
-        field="approved_by",
-        value=payload.approved_by,
-        identity=identity,
-    )
     try:
         request = await repository.approve_request(session, request_id, approved_by=identity.actor)
     except repository.NotFoundError as exc:
@@ -1047,13 +1032,6 @@ async def reject_approval_request(
     """The rejecter is the acting identity, and since P85-S2 (ADR 0240)
     rejecting needs the same entitlement as approving - before, anyone could
     reject any pending request. The initiator may always withdraw their own."""
-    log_ignored_actor_field(
-        logger,
-        route="POST /approval-requests/{id}/reject",
-        field="rejected_by",
-        value=payload.rejected_by,
-        identity=identity,
-    )
     try:
         request = await repository.reject_request(
             session, request_id, rejected_by=identity.actor, reason=payload.reason
@@ -1090,13 +1068,6 @@ async def create_scope_lock(
     a principal with no permission at all could still trigger an open
     approval request. Since P85-S2 (ADR 0240) the actor is the request
     principal, not `locked_by` (ignored)."""
-    log_ignored_actor_field(
-        logger,
-        route="POST /scope-locks",
-        field="locked_by",
-        value=payload.locked_by,
-        identity=identity,
-    )
     locked_by = identity.actor
     is_superuser = await _is_active_superuser(locked_by)
     try:
@@ -1158,13 +1129,6 @@ async def release_scope_lock(
     """Self-gating since P19-S6 (ADR 0071) - see `create_scope_lock` above
     for the rationale behind the ordering. Actor: the request principal
     (P85-S2, ADR 0240); the body is optional and its `released_by` ignored."""
-    log_ignored_actor_field(
-        logger,
-        route="DELETE /scope-locks/{id}",
-        field="released_by",
-        value=payload.released_by if payload else None,
-        identity=identity,
-    )
     released_by = identity.actor
     is_superuser = await _is_active_superuser(released_by)
     try:
@@ -1233,14 +1197,7 @@ async def trigger_maintenance_mode(
     requires a baseline permission check - "freely configurable who may
     trigger it, no hard-wired role" (4.8) is not an optional addition like
     for 4.3, but mandatory from the outset. Actor: the request principal
-    (P85-S2, ADR 0240), `payload.triggered_by` is ignored."""
-    log_ignored_actor_field(
-        logger,
-        route="POST /maintenance-mode/trigger",
-        field="triggered_by",
-        value=payload.triggered_by,
-        identity=identity,
-    )
+    (P85-S2, ADR 0240); the body field was removed in P85-S5."""
     triggered_by = identity.actor
     is_superuser = await _is_active_superuser(triggered_by)
     try:
@@ -1289,14 +1246,7 @@ async def lift_maintenance_mode(
     reuses the shared `_is_active_superuser` helper (this endpoint was the
     original, one-off inline version every other direct
     `require_capability` call site was missing). Actor: the request principal
-    (P85-S2, ADR 0240), `payload.lifted_by` is ignored."""
-    log_ignored_actor_field(
-        logger,
-        route="POST /maintenance-mode/lift",
-        field="lifted_by",
-        value=payload.lifted_by if payload else None,
-        identity=identity,
-    )
+    (P85-S2, ADR 0240); the body field was removed in P85-S5."""
     lifted_by = identity.actor
     if not await _is_active_superuser(lifted_by):
         raise HTTPException(

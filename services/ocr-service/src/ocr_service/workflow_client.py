@@ -56,7 +56,6 @@ class WorkflowServiceClient:
         response = await self._client.post(
             f"/process-definitions/{definition_id}/instances",
             json={
-                "created_by": OCR_SERVICE_PRINCIPAL_ID,
                 "business_key": business_key,
                 "initial_data": initial_data,
             },

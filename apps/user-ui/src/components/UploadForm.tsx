@@ -34,13 +34,11 @@ function attributeInputType(attrType: string | undefined): string {
 export function UploadForm({
   token,
   folderId,
-  createdBy,
   onUploaded,
   onClose,
 }: {
   token: string;
   folderId: string;
-  createdBy: string;
   onUploaded: () => void;
   onClose: () => void;
 }) {
@@ -92,7 +90,6 @@ export function UploadForm({
       await uploadDocument(token, {
         file,
         title: title || file.name,
-        createdBy,
         folderId,
         objectTypeId: selectedObjectType?.id,
         attributes: selectedObjectType ? values : undefined,

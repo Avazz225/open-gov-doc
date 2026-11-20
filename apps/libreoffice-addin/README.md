@@ -62,3 +62,10 @@ cd ../../infra && docker compose up -d
 The gateway address is editable in the extension's own login dialog
 (no build-time baking-in needed as with the Next.js apps, since this package
 has no separate build step for frontend configuration).
+
+## No actor fields (P85-S5, ADR 0240)
+
+`dms_client.py` no longer sends `created_by`/`locked_by`/`released_by`/`completed_by`: the services take
+the acting user from the bearer token. The corresponding keyword parameters were removed, and
+`ogdoc_addin.py` no longer passes the session's user name.
+

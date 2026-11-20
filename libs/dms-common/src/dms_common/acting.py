@@ -19,7 +19,6 @@ only the gateway and the services themselves can set these headers.
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 
 from starlette.exceptions import HTTPException
@@ -134,16 +133,3 @@ def on_behalf_headers(service_principal: str, actor: str | None) -> dict[str, st
     ):
         return acting_headers(service_principal)
     return acting_headers(service_principal, on_behalf_of=actor)
-
-
-def log_ignored_actor_field(
-    logger: logging.Logger, *, route: str, field: str, value: str | None, identity: ActingIdentity
-) -> None:
-    """During the P85 migration a still-sent body actor field is ignored. A
-    value that names someone other than the acting identity is logged so
-    remaining senders can be found (removed again in P85-S5)."""
-    if value and value != identity.actor:
-        logger.warning(
-            "actor_field_ignored",
-            extra={"route": route, "field": field, "sent": value, "actor": identity.actor},
-        )

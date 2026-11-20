@@ -104,7 +104,6 @@ describe("RecordsQuarantinePanel (Post-Roadmap Phase 31 Session 5, ADR 0116)", (
     await waitFor(() =>
       expect(createRecordsQuarantineMock).toHaveBeenCalledWith("token-123", {
         documentId: "doc-1",
-        setBy: "alice",
         reason: "Aussonderung geprüft",
         autoDeleteAt: null,
       })
@@ -125,7 +124,7 @@ describe("RecordsQuarantinePanel (Post-Roadmap Phase 31 Session 5, ADR 0116)", (
     fireEvent.click(screen.getByText("Quarantäne aufheben"));
 
     await waitFor(() =>
-      expect(releaseRecordsQuarantineMock).toHaveBeenCalledWith("token-123", "q-1", "alice")
+      expect(releaseRecordsQuarantineMock).toHaveBeenCalledWith("token-123", "q-1")
     );
     expect(screen.queryByText(/In Quarantäne \(gesetzt von alice\)/)).not.toBeInTheDocument();
   });

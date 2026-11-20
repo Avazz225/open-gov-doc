@@ -9,7 +9,6 @@ from contextlib import asynccontextmanager
 from dms_common import (
     ActingIdentity,
     configure_logging,
-    log_ignored_actor_field,
     require_acting_identity,
 )
 from dms_db_base import build_engine, make_session_factory
@@ -361,9 +360,6 @@ async def create_case(
     identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> CaseOut:
-    log_ignored_actor_field(
-        logger, route="POST /cases", field="created_by", value=payload.created_by, identity=identity
-    )
     actor_created_by = identity.actor
     await _reject_during_maintenance(x_dms_maintenance_active)
     await _require_case_permission(x_dms_principal, access_type="write")
@@ -510,13 +506,6 @@ async def register_case(
     """Draft -> registered transition (post-roadmap phase 31 session 2, ADR
     0113) - assigns the Vorgangsnummer at this point instead of at creation
     time (see `draft` on `POST /cases`)."""
-    log_ignored_actor_field(
-        logger,
-        route="POST /cases/{id}/register",
-        field="registered_by",
-        value=payload.registered_by,
-        identity=identity,
-    )
     actor_registered_by = identity.actor
     await _get_case_or_404(session, case_id)
     await _require_case_permission(x_dms_principal, access_type="write", resource_id=case_id)
@@ -604,13 +593,6 @@ async def add_case_document(
     identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> CaseDocumentReferenceOut:
-    log_ignored_actor_field(
-        logger,
-        route="POST /cases/{id}/documents",
-        field="added_by",
-        value=payload.added_by,
-        identity=identity,
-    )
     actor_added_by = identity.actor
     await _get_case_or_404(session, case_id)
     await _require_case_permission(x_dms_principal, access_type="write", resource_id=case_id)
@@ -647,13 +629,6 @@ async def remove_case_document(
     identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> CaseDocumentReferenceOut:
-    log_ignored_actor_field(
-        logger,
-        route="DELETE /cases/{id}/documents/{doc}",
-        field="removed_by",
-        value=payload.removed_by,
-        identity=identity,
-    )
     actor_removed_by = identity.actor
     await _get_case_or_404(session, case_id)
     await _require_case_permission(x_dms_principal, access_type="write", resource_id=case_id)
@@ -854,13 +829,6 @@ async def pseudonymize_case_attribute(
 ) -> PseudonymizedAttributeOut:
     """Mirrors `document_service.main.pseudonymize_document_attribute`/
     `folder_service.main.pseudonymize_folder_attribute` exactly."""
-    log_ignored_actor_field(
-        logger,
-        route="POST /cases/{id}/attributes/{name}/pseudonymize",
-        field="pseudonymized_by",
-        value=payload.pseudonymized_by,
-        identity=identity,
-    )
     actor_pseudonymized_by = identity.actor
     await _require_pseudonymization_permission(x_dms_principal)
     try:
@@ -929,13 +897,6 @@ async def reveal_case_attribute(
     session: AsyncSession = Depends(get_session),
 ) -> RevealedAttributeOut:
     """Mirrors `document_service.main.reveal_document_attribute` exactly."""
-    log_ignored_actor_field(
-        logger,
-        route="POST /cases/{id}/attributes/{name}/reveal",
-        field="revealed_by",
-        value=payload.revealed_by,
-        identity=identity,
-    )
     actor_revealed_by = identity.actor
     await _require_reveal_permission(x_dms_principal)
     try:

@@ -568,7 +568,7 @@ describe("DocumentWorkspace", () => {
     await user.click(await screen.findByText("Verträge löschen"));
 
     await waitFor(() =>
-      expect(trashFolderMock).toHaveBeenCalledWith("token-123", "f1", "alice")
+      expect(trashFolderMock).toHaveBeenCalledWith("token-123", "f1")
     );
   });
 
@@ -1144,7 +1144,6 @@ describe("DocumentWorkspace", () => {
       expect(createFolderMock).toHaveBeenCalledWith("token-123", {
         name: "Neuer Bereich",
         parentId: "root",
-        createdBy: "alice",
       })
     );
     await waitFor(() => expect(listChildFoldersMock).toHaveBeenCalledTimes(2));
@@ -1177,7 +1176,6 @@ describe("DocumentWorkspace", () => {
       expect(createFolderMock).toHaveBeenCalledWith("token-123", {
         name: "Projekt A",
         parentId: "root",
-        createdBy: "alice",
         objectTypeId: 5,
       })
     );
@@ -1202,7 +1200,7 @@ describe("DocumentWorkspace", () => {
     fireEvent.contextMenu(folderNameButton.closest("li")!);
     await user.click(await screen.findByText("Alt löschen"));
 
-    await waitFor(() => expect(trashFolderMock).toHaveBeenCalledWith("token-123", "f1", "alice"));
+    await waitFor(() => expect(trashFolderMock).toHaveBeenCalledWith("token-123", "f1"));
   });
 
   it("starts a folder export via the context menu and shows an in-progress message (Phase 28, ADR 0107)", async () => {
@@ -1393,7 +1391,7 @@ describe("DocumentWorkspace", () => {
     await user.click(await screen.findByText('"Rechnung.pdf" löschen'));
 
     await waitFor(() =>
-      expect(trashDocumentMock).toHaveBeenCalledWith("token-123", "d1", "alice")
+      expect(trashDocumentMock).toHaveBeenCalledWith("token-123", "d1")
     );
   });
 
@@ -1674,7 +1672,7 @@ describe("DocumentWorkspace", () => {
     await user.click(within(metadataPanel).getByText("Registrieren"));
 
     await waitFor(() =>
-      expect(registerDocumentMock).toHaveBeenCalledWith("token-123", "d-draft", "alice")
+      expect(registerDocumentMock).toHaveBeenCalledWith("token-123", "d-draft")
     );
     await waitFor(() =>
       expect(within(metadataPanel).queryByText("Entwurf")).not.toBeInTheDocument()
@@ -1706,7 +1704,6 @@ describe("DocumentWorkspace", () => {
 
     await waitFor(() =>
       expect(promoteDocumentMock).toHaveBeenCalledWith("token-123", "d-draft", {
-        promotedBy: "alice",
         targetFolderId: "folder-target",
       })
     );
@@ -1756,9 +1753,7 @@ describe("DocumentWorkspace", () => {
       expect(setDocumentClassificationLevelMock).toHaveBeenCalledWith(
         "token-123",
         "d1",
-        "VS-NfD",
-        "alice"
-      )
+        "VS-NfD")
     );
     await waitFor(() =>
       expect(within(classificationPanel).getByText("VS-NfD", { selector: "p" })).toBeInTheDocument()
@@ -1834,9 +1829,7 @@ describe("DocumentWorkspace", () => {
       expect(redactDocumentMock).toHaveBeenCalledWith(
         "token-123",
         "d1",
-        [{ page_number: 1, x: 0.1, y: 0.1, width: 0.4, height: 0.4 }],
-        "alice"
-      )
+        [{ page_number: 1, x: 0.1, y: 0.1, width: 0.4, height: 0.4 }])
     );
     await waitFor(() => expect(listDocumentsInFolderMock).toHaveBeenCalledTimes(2));
   });

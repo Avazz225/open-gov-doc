@@ -76,7 +76,7 @@ export function ApprovalList() {
     setActionError(null);
     setBusyId(request.id);
     try {
-      await approveRequest(accessToken, request.id, user.username);
+      await approveRequest(accessToken, request.id);
       reload();
     } catch (err) {
       setActionError(err instanceof ApiError ? err.message : t("common.actionError"));
@@ -103,7 +103,6 @@ export function ApprovalList() {
     setBusyId(request.id);
     try {
       await rejectRequest(accessToken, request.id, {
-        rejectedBy: user.username,
         reason: rejectReason.trim() || undefined,
       });
       setRejectingId(null);

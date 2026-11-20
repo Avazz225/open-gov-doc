@@ -146,7 +146,7 @@ None yet — follows in Phase 11.
 
 `POST /ocr-results/{id}/reviewed` (the review workflow's connector callback) records the reviewer from the
 acting identity. workflow-service calls it as itself, on behalf of whoever completed the review task
-(`X-DMS-On-Behalf-Of`, taken from `dms_last_completed_by`). `reviewed_by` in the body is ignored, and a
+(`X-DMS-On-Behalf-Of`, taken from `dms_last_completed_by`). the former `reviewed_by` body field was removed (P85-S5), and a
 call without any principal is a `401`. Before, the route took no principal and read the reviewer from
 the body. The `ocr.reviewed` event carries `workflow-service` as `actor` and the reviewer as
 `on_behalf_of`.

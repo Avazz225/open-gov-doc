@@ -69,6 +69,12 @@ The icon rail stays at every width (ADR 0238 Decision 3). `e2e/narrow.spec.ts` c
 jump to Vorschau, the metadata pane, no page overflow, and widening back to a dockview tab. Two unit
 tests in `document-workspace.test.tsx` cover the switcher, the chips and closing.
 
+## No Actor Fields in Requests (P85-S5, [ADR 0240](../adr/0240-acting-identity-from-verified-principal.md))
+
+The client no longer sends who is acting (`created_by`, `deleted_by`, `approved_by`, `locked_by`, …):
+the services take it from the verified token. The API helpers lost those parameters, and the
+components no longer pass the user name into them. Recorded actors in responses (lock holder, creator, deleter, approver) are principals now (a user's `sub`); showing names is P86-S2. The favorites calls keep sending the user name, which favorite-service checks against the verified `X-DMS-Username`.
+
 ## Backend connection
 
 Almost exclusively via the API gateway (3.5, `/api/{service_type}/{path}`) — **one exception since the ad-hoc post-roadmap Office feature**: the Office URI handler navigates directly to `webdav-connector` (own build-time address `NEXT_PUBLIC_WEBDAV_CONNECTOR_BASE_URL`, see "Direct Office editing" below), no WebDAV proxying via the gateway is planned:

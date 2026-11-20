@@ -160,16 +160,14 @@ class EffectivePermissionsOut(BaseModel):
 
 class ScopeLockCreate(BaseModel):
     resource_id: str
-    # Ignored since P85-S2 (ADR 0240): the actor is the request principal.
-    locked_by: str | None = None
     reason: str | None = None
     blocks_read: bool = False
     expires_at: datetime | None = None
 
 
 class ScopeLockRelease(BaseModel):
-    # Ignored since P85-S2 (ADR 0240): the actor is the request principal.
-    released_by: str | None = None
+    """Empty since P85-S5 (ADR 0240): the actor is the request principal;
+    the body is kept so existing clients that still send one keep working."""
 
 
 class ScopeLockOut(BaseModel):
@@ -220,8 +218,6 @@ class ApprovalActionConfigUpdate(BaseModel):
 
 class ApprovalRequestCreate(BaseModel):
     action_type: str
-    # Ignored since P85-S2 (ADR 0240): the actor is the request principal.
-    initiated_by: str | None = None
     payload: dict = {}
 
 
@@ -241,13 +237,11 @@ class ApprovalRequestOut(BaseModel):
 
 
 class ApprovalDecision(BaseModel):
-    # Ignored since P85-S2 (ADR 0240): the actor is the request principal.
-    approved_by: str | None = None
+    """Empty since P85-S5 (ADR 0240): the actor is the request principal;
+    the body is kept so existing clients that still send one keep working."""
 
 
 class ApprovalRejection(BaseModel):
-    # Ignored since P85-S2 (ADR 0240): the actor is the request principal.
-    rejected_by: str | None = None
     reason: str | None = None
 
 
@@ -269,14 +263,12 @@ class MaintenanceModeOut(BaseModel):
 
 
 class MaintenanceModeTrigger(BaseModel):
-    # Ignored since P85-S2 (ADR 0240): the actor is the request principal.
-    triggered_by: str | None = None
     reason: str | None = None
 
 
 class MaintenanceModeLift(BaseModel):
-    # Ignored since P85-S2 (ADR 0240): the actor is the request principal.
-    lifted_by: str | None = None
+    """Empty since P85-S5 (ADR 0240): the actor is the request principal;
+    the body is kept so existing clients that still send one keep working."""
 
 
 class MaintenanceModeActionResult(BaseModel):

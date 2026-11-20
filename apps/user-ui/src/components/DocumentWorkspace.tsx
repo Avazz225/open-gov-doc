@@ -167,7 +167,6 @@ export function DocumentWorkspace() {
       await apiCreateFolder(accessToken, {
         name,
         parentId: currentFolder.id,
-        createdBy: user.username,
         objectTypeId,
       });
       await load(currentFolder.id);
@@ -214,7 +213,7 @@ export function DocumentWorkspace() {
       // via the four-eyes principle (`document.delete`/`folder.
       // delete`, see ExplorerPane) - only reload on immediate execution, a
       // delete request doesn't change the list yet.
-      const result = await apiTrashFolder(accessToken, folderId, user?.username ?? "");
+      const result = await apiTrashFolder(accessToken, folderId);
       if (result.status === "trashed") await load(currentFolder.id);
       return result.status;
     } catch (err) {
@@ -228,7 +227,7 @@ export function DocumentWorkspace() {
   ): Promise<"trashed" | "pending_approval" | false> {
     if (!accessToken) return false;
     try {
-      const result = await apiTrashDocument(accessToken, documentId, user?.username ?? "");
+      const result = await apiTrashDocument(accessToken, documentId);
       if (result.status === "trashed") await load(currentFolder.id);
       return result.status;
     } catch (err) {
@@ -421,7 +420,7 @@ export function DocumentWorkspace() {
             ) : view === "aussonderung" ? (
               <AussonderungPane token={accessToken ?? ""} />
             ) : view === "vorlagen" ? (
-              <VorlagenPane token={accessToken ?? ""} createdBy={user?.username ?? ""} />
+              <VorlagenPane token={accessToken ?? ""} />
             ) : view === "cases" ? (
               <CasesPane
                 token={accessToken ?? ""}

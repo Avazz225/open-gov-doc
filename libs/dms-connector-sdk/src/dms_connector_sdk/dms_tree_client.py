@@ -120,7 +120,14 @@ class DmsTreeClient:
         webdav-connector/cmis-connector, which already resolve the
         authenticated user per request for `created_by`/`deleted_by`
         elsewhere) pass `x_dms_principal=` on the individual calls below
-        instead, which httpx overrides this default with."""
+        instead, which httpx overrides this default with.
+
+        Since P85-S5 (ADR 0240) the services take the actor from that
+        principal only: the `created_by`/`deleted_by`/`locked_by`/
+        `released_by` parameters of the methods below are still accepted,
+        so connector code keeps working, but are no longer sent. Pass the
+        acting user as `x_dms_principal` (or `on_behalf_of` on
+        `write_document`)."""
         default_headers = {"X-DMS-Principal": default_principal} if default_principal else {}
         self._documents = httpx.Client(
             base_url=document_service_base_url, timeout=30.0, headers=default_headers
@@ -248,7 +255,7 @@ class DmsTreeClient:
     ) -> TreeFolder:
         response = self._folders.post(
             "/folders",
-            json={"name": name, "parent_id": parent_id, "created_by": created_by},
+            json={"name": name, "parent_id": parent_id},
             headers=self._principal_headers(x_dms_principal),
         )
         if response.status_code == 404:
@@ -312,7 +319,6 @@ class DmsTreeClient:
         if existing_document_id is not None:
             data = {
                 "expected_base_version_number": str(expected_base_version_number),
-                "created_by": created_by,
             }
             if comment is not None:
                 data["comment"] = comment
@@ -335,7 +341,7 @@ class DmsTreeClient:
 
         response = self._documents.post(
             "/documents",
-            data={"title": filename, "created_by": created_by, "folder_id": folder_id},
+            data={"title": filename, "folder_id": folder_id},
             files={"file": (filename, content, media_type)},
             headers=headers,
         )
@@ -349,7 +355,6 @@ class DmsTreeClient:
     ) -> None:
         response = self._documents.delete(
             f"/documents/{document_id}",
-            params={"deleted_by": deleted_by},
             headers=self._principal_headers(x_dms_principal),
         )
         if response.status_code == 404:
@@ -419,7 +424,7 @@ class DmsTreeClient:
         timeout_seconds: float | None = None,
         x_dms_principal: str = "",
     ) -> TreeLock:
-        payload: dict = {"locked_by": locked_by, "session_id": session_id}
+        payload: dict = {"session_id": session_id}
         if timeout_seconds is not None:
             payload["timeout_seconds"] = timeout_seconds
         response = self._documents.post(
@@ -446,7 +451,7 @@ class DmsTreeClient:
         response = self._documents.request(
             "DELETE",
             f"/documents/{document_id}/lock",
-            json={"released_by": released_by},
+            json={},
             headers=self._principal_headers(x_dms_principal),
         )
         if response.status_code == 403:

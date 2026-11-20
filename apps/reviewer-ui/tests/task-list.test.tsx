@@ -138,7 +138,6 @@ describe("TaskList", () => {
       expect(completeTaskMock).toHaveBeenCalledWith("token-123", {
         instanceId: "instance-1",
         taskId: "task-1",
-        completedBy: "alice",
         data: {},
         signatureId: undefined,
       })
@@ -223,7 +222,6 @@ describe("TaskList", () => {
       expect(completeTaskMock).toHaveBeenCalledWith("token-123", {
         instanceId: "instance-1",
         taskId: "task-1",
-        completedBy: "alice",
         data: {},
         signatureId: undefined,
         onBehalfOfPrincipalId: "carol-sub",

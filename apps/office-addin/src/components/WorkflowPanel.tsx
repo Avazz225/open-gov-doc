@@ -22,11 +22,9 @@ import {
 export function WorkflowPanel({
   token,
   documentId,
-  currentUsername,
 }: {
   token: string;
   documentId: string;
-  currentUsername: string;
 }) {
   const { t } = useI18n();
   const [instances, setInstances] = useState<
@@ -69,7 +67,6 @@ export function WorkflowPanel({
     setError(null);
     try {
       await startInstance(token, Number(selectedDefinitionId), {
-        createdBy: currentUsername,
         businessKey: documentId,
       });
       await reload();
@@ -84,7 +81,7 @@ export function WorkflowPanel({
     setIsBusy(true);
     setError(null);
     try {
-      await completeTask(token, { instanceId, taskId, completedBy: currentUsername });
+      await completeTask(token, { instanceId, taskId });
       await reload();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("workflowPanel.completeError"));

@@ -3682,15 +3682,42 @@ accepted that as a scaffold habit. The user decided to bind all of them to the g
     - e2e 32/32; ruff clean; 11 images rebuilt.
   - **Added to P86-S2:** lock holders and creators are now principals (a user's `sub`), so the UIs need
     name display there too.
-- **P85-S5 — Clients and cleanup.**
-  - The five UIs and both add-ins stop sending actor fields.
-  - The fields are dropped from the request schemas, and the ignore-logging is removed.
-  - All six e2e suites, docs, and the old `PROGRESS.md` "Authorization" bullet closed.
+- **P85-S5 — Clients and cleanup.** ✅ **Done. Closes Phase 85.**
+  - **Clients:**
+    - The five UIs and both add-ins no longer send actor fields. The API helpers lost their actor
+      parameters (positional and object fields), and every call site was updated, along with the props
+      that only carried the user name (`UploadForm`, `VorlagenPane`, office `WorkflowPanel`).
+    - **One silent hazard was caught:** after removing the parameter, user-ui's
+      `rejectApprovalRequest(token, id, currentUsername)` still type-checked and would have sent the
+      user name as the rejection *reason*. Every call site was listed, not only the compiler errors.
+  - **Backend:**
+    - 46 fields removed from the request schemas. Emptied models are documented empty bodies, so old
+      clients keep working.
+    - The leftover form/query parameters were removed, and so was `log_ignored_actor_field` (services and
+      `dms-common`).
+    - The last internal body fields were dropped. archival-service's case references now act on behalf
+      of the user.
+    - The connector SDK still accepts its actor parameters but no longer sends them.
+  - **Kept on purpose:** favorites (bound to the verified username), `signer_principal_id` (checked
+    against it), and migration peer `created_by` (the federated exception).
+  - **Docs:**
+    - stale "optional and ignored" wording replaced in 8 service docs;
+    - client notes in 4 UI docs and the LibreOffice README;
+    - the `PROGRESS.md` "Authorization" open-decision bullet closed;
+    - ADR 0240 status.
+  - **Checks:**
+    - vitest admin 319, office 23, reviewer 64, user 308 (expectations rewritten from the old actor
+      arguments; the folder-create API tests now prove the body has no `created_by`);
+    - LibreOffice add-in 44; `tsc`/`eslint` clean;
+    - 16 images rebuilt; e2e 32/32.
+  - **Phase-close regression:** **32/32 services green.** ruff only shows the pre-existing files (25
+    errors, from 28 at the start of the plan; → P91-S3).
 
-  Phase-close regression.
-
-  Every S2–S5 session tests, per touched route, that a spoofed body field has no effect and that a
-  missing principal gets `401`.
+**Phase 85 result:** across 54 write routes and about 150 client call sites, the acting identity is
+always the gateway-verified principal. Services acting for a user say so explicitly (`X-DMS-On-Behalf-Of`,
+honored only from service principals, audited as `actor` + `on_behalf_of`), and connector calls act on
+behalf of the last task completer. Four-eyes approve/reject is entitlement-checked, force-unlock has a
+real capability, and signatures are never made on behalf.
 
 ## Phase 86 — Account Menu Behind the User Name + UX Bundle (user-requested)
 

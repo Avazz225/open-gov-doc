@@ -98,7 +98,6 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
       await completeTask(accessToken, {
         instanceId: task.instance_id,
         taskId: task.id,
-        completedBy,
         data,
         signatureId: signatureId || undefined,
         onBehalfOfPrincipalId: onBehalfOf || undefined,

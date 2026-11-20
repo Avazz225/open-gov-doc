@@ -13,7 +13,6 @@ import httpx
 from dms_common import (
     ActingIdentity,
     configure_logging,
-    log_ignored_actor_field,
     require_acting_identity,
 )
 from dms_db_base import build_engine, make_session_factory
@@ -1746,7 +1745,6 @@ async def _require_document_permission(
 async def create_document(
     file: UploadFile = File(...),
     title: str = Form(...),
-    created_by: str | None = Form(None),
     folder_id: str | None = Form(None),
     object_type_id: int | None = Form(None),
     attributes: str | None = Form(None),
@@ -1759,9 +1757,6 @@ async def create_document(
     identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> DocumentOut:
-    log_ignored_actor_field(
-        logger, route="POST /documents", field="created_by", value=created_by, identity=identity
-    )
     actor_created_by = identity.actor
     # Sensor "document.upload.duration" (10.1, P11-S1): start time is only
     # captured if the sensor is currently active - when disabled, even this
@@ -1870,7 +1865,6 @@ async def create_document(
 async def create_document_from_quarantine_release(
     file: UploadFile = File(...),
     title: str = Form(...),
-    created_by: str | None = Form(None),
     folder_id: str | None = Form(None),
     object_type_id: int | None = Form(None),
     attributes: str | None = Form(None),
@@ -1892,13 +1886,6 @@ async def create_document_from_quarantine_release(
     which forwards the roles of the original caller - no endpoint that
     bypasses the mandatory virus scan should depend on a single check
     alone."""
-    log_ignored_actor_field(
-        logger,
-        route="POST /documents/from-quarantine-release",
-        field="created_by",
-        value=created_by,
-        identity=identity,
-    )
     actor_created_by = identity.actor
     if not x_dms_principal:
         raise HTTPException(status_code=401, detail="X-DMS-Principal fehlt")
@@ -2201,13 +2188,6 @@ async def cascade_trash(
     afterwards is already consistent. No own role check, same trust
     relationship as the existing `FolderClient` call in the reverse
     direction."""
-    log_ignored_actor_field(
-        logger,
-        route="POST /documents/cascade-trash",
-        field="deleted_by",
-        value=payload.deleted_by,
-        identity=identity,
-    )
     actor_deleted_by = identity.actor
     document_ids = await repository.cascade_trash_by_folder_ids(
         session,
@@ -2235,13 +2215,6 @@ async def cascade_restore(
 ) -> CascadeResult:
     """Counterpart to `cascade_trash` - when restoring a folder, restores
     only the documents that were cascade-deleted as a result."""
-    log_ignored_actor_field(
-        logger,
-        route="POST /documents/cascade-restore",
-        field="restored_by",
-        value=payload.restored_by,
-        identity=identity,
-    )
     document_ids = await repository.cascade_restore_by_via_folder_id(session, payload.via_folder_id)
     await session.commit()
     for document_id in document_ids:
@@ -2437,13 +2410,6 @@ async def register_document(
     Phase 38 Session 4 (previously ungated) - checked against the
     document's own `resource_id` since Post-Roadmap Phase 39 Session 4
     (ADR 0154), previously its containing folder's."""
-    log_ignored_actor_field(
-        logger,
-        route="POST /documents/{id}/register",
-        field="registered_by",
-        value=payload.registered_by,
-        identity=identity,
-    )
     actor_registered_by = identity.actor
     try:
         document = await repository.get_document(session, document_id)
@@ -2499,13 +2465,6 @@ async def promote_document(
     docstring previously argued the opposite - "deliberately ungated, like
     register/the PATCH move branch" - now stale since this session gates
     all three consistently)."""
-    log_ignored_actor_field(
-        logger,
-        route="POST /documents/{id}/promote",
-        field="promoted_by",
-        value=payload.promoted_by,
-        identity=identity,
-    )
     actor_promoted_by = identity.actor
     try:
         document = await repository.get_document(session, document_id)
@@ -2606,13 +2565,6 @@ async def set_document_classification_level(
     downgrade). Deliberately no way to clear/lower via this endpoint at
     all - declassification is a separate, heavier process this session does
     not build."""
-    log_ignored_actor_field(
-        logger,
-        route="PUT /documents/{id}/classification-level",
-        field="changed_by",
-        value=payload.changed_by,
-        identity=identity,
-    )
     actor_changed_by = identity.actor
     await _require_classification_permission(x_dms_principal)
     try:
@@ -2681,13 +2633,6 @@ async def declassify_document_classification_level(
     happens exclusively in `consumer.py`'s `permission.approval.approved`
     handler once a second, distinct person (never the initiator, enforced
     by `permission-service` itself) approves the request."""
-    log_ignored_actor_field(
-        logger,
-        route="POST /documents/{id}/classification-level/declassify",
-        field="changed_by",
-        value=payload.changed_by,
-        identity=identity,
-    )
     actor_changed_by = identity.actor
     await _require_declassification_permission(x_dms_principal)
     try:
@@ -2815,13 +2760,6 @@ async def pseudonymize_document_attribute(
     an object type without this flag makes every one of its attributes
     ineligible, on purpose (default-deny, not default-allow, for a
     compliance-relevant action)."""
-    log_ignored_actor_field(
-        logger,
-        route="POST /documents/{id}/attributes/{name}/pseudonymize",
-        field="pseudonymized_by",
-        value=payload.pseudonymized_by,
-        identity=identity,
-    )
     actor_pseudonymized_by = identity.actor
     await _require_pseudonymization_permission(x_dms_principal)
     try:
@@ -2952,13 +2890,6 @@ async def reveal_document_attribute(
     `_should_log_document_access`'s configurable viewed/downloaded
     logging) - re-exposing personal data is inherently security-relevant
     every single time, not an optionally-quiet business-as-usual read."""
-    log_ignored_actor_field(
-        logger,
-        route="POST /documents/{id}/attributes/{name}/reveal",
-        field="revealed_by",
-        value=payload.revealed_by,
-        identity=identity,
-    )
     actor_revealed_by = identity.actor
     await _require_reveal_permission(x_dms_principal)
     try:
@@ -3015,13 +2946,6 @@ async def restore_document_attribute(
     `admin.attribute_pseudonymization` - permanently re-exposing the value
     is at least as sensitive as a transient reveal, arguably more so (the
     value stays exposed going forward, not just in this one response)."""
-    log_ignored_actor_field(
-        logger,
-        route="POST /documents/{id}/attributes/{name}/restore",
-        field="restored_by",
-        value=payload.restored_by,
-        identity=identity,
-    )
     actor_restored_by = identity.actor
     await _require_reveal_permission(x_dms_principal)
     try:
@@ -3192,13 +3116,6 @@ async def redact_document(
     PDF export feature's endpoint (P28, ADR 0107) - creating the redacted
     copy itself is deliberately left as ungated as `POST /documents` already
     is (a pre-existing, documented gap this session doesn't newly introduce)."""
-    log_ignored_actor_field(
-        logger,
-        route="POST /documents/{id}/redact",
-        field="created_by",
-        value=payload.created_by,
-        identity=identity,
-    )
     actor_created_by = identity.actor
     if not x_dms_principal:
         raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
@@ -3298,18 +3215,10 @@ async def redact_document(
 @app.delete("/documents/{document_id}", response_model=DocumentOut)
 async def delete_document(
     document_id: str,
-    deleted_by: str | None = None,
     x_dms_principal: str = Header(default=""),
     identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> DocumentOut:
-    log_ignored_actor_field(
-        logger,
-        route="DELETE /documents/{id}",
-        field="deleted_by",
-        value=deleted_by,
-        identity=identity,
-    )
     actor_deleted_by = identity.actor
     try:
         existing = await repository.get_document(session, document_id)
@@ -3352,13 +3261,6 @@ async def trash_document(
     Post-Roadmap Phase 38 Session 4, additionally requires `document.write`
     on the document's own folder (previously ungated, unlike `DELETE
     /documents/{id}` above)."""
-    log_ignored_actor_field(
-        logger,
-        route="POST /documents/{id}/trash",
-        field="deleted_by",
-        value=payload.deleted_by,
-        identity=identity,
-    )
     actor_deleted_by = identity.actor
     try:
         existing = await repository.get_document(session, document_id)
@@ -3539,9 +3441,6 @@ async def create_legal_hold(
     """Set a legal hold (5.2, since P7-S1) - overrides any due action in
     the poll loop until it is released again. Gated by `admin.legal_hold`
     since P19-S10, see `_require_legal_hold_permission`."""
-    log_ignored_actor_field(
-        logger, route="POST /legal-holds", field="set_by", value=payload.set_by, identity=identity
-    )
     actor_set_by = identity.actor
     await _require_legal_hold_permission(x_dms_principal)
     try:
@@ -3568,13 +3467,6 @@ async def release_legal_hold(
     identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> LegalHoldOut:
-    log_ignored_actor_field(
-        logger,
-        route="POST /legal-holds/{id}/release",
-        field="released_by",
-        value=payload.released_by,
-        identity=identity,
-    )
     actor_released_by = identity.actor
     await _require_legal_hold_permission(x_dms_principal)
     try:
@@ -3642,13 +3534,6 @@ async def create_records_quarantine(
     (`repository.list_documents_by_folder`) and, if `auto_delete_at` is
     set, schedules its permanent deletion (see `_retention_poll_loop`'s new
     phase below) unless an active legal hold blocks it."""
-    log_ignored_actor_field(
-        logger,
-        route="POST /records-quarantine",
-        field="set_by",
-        value=payload.set_by,
-        identity=identity,
-    )
     actor_set_by = identity.actor
     await _require_records_quarantine_permission(x_dms_principal)
     try:
@@ -3687,13 +3572,6 @@ async def release_records_quarantine(
     identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> RecordsQuarantineOut:
-    log_ignored_actor_field(
-        logger,
-        route="POST /records-quarantine/{id}/release",
-        field="released_by",
-        value=payload.released_by,
-        identity=identity,
-    )
     actor_released_by = identity.actor
     await _require_records_quarantine_permission(x_dms_principal)
     try:
@@ -4331,20 +4209,12 @@ async def checkin_version(
     document_id: str,
     file: UploadFile = File(...),
     expected_base_version_number: int = Form(...),
-    created_by: str | None = Form(None),
     comment: str | None = Form(None),
     x_dms_principal: str = Header(default=""),
     x_dms_maintenance_active: str = Header(default="false"),
     identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> CheckinResult:
-    log_ignored_actor_field(
-        logger,
-        route="POST /documents/{id}/versions",
-        field="created_by",
-        value=created_by,
-        identity=identity,
-    )
     actor_created_by = identity.actor
     # RBAC (Post-Roadmap Phase 38 Session 4, ADR 0149) - checked before the
     # virus scan/anything else, same "fail fast on auth" convention as
@@ -4485,13 +4355,6 @@ async def acquire_lock(
     identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> LockOut:
-    log_ignored_actor_field(
-        logger,
-        route="POST /documents/{id}/lock",
-        field="locked_by",
-        value=payload.locked_by,
-        identity=identity,
-    )
     actor_locked_by = identity.actor
     await _require_document_exists(session, document_id)
     await _require_document_permission(x_dms_principal, document_id, access_type="write")
@@ -4519,13 +4382,6 @@ async def release_lock(
     identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> None:
-    log_ignored_actor_field(
-        logger,
-        route="DELETE /documents/{id}/lock",
-        field="released_by",
-        value=payload.released_by,
-        identity=identity,
-    )
     actor_released_by = identity.actor
     await _require_document_exists(session, document_id)
     await _require_document_permission(x_dms_principal, document_id, access_type="write")
@@ -4551,13 +4407,6 @@ async def force_release_lock(
     `consumer.py` once the `permission.approval.approved` event arrives. By
     default (no configuration), behavior is unchanged: immediate
     execution."""
-    log_ignored_actor_field(
-        logger,
-        route="POST /documents/{id}/lock/force-release",
-        field="released_by",
-        value=payload.released_by,
-        identity=identity,
-    )
     actor_released_by = identity.actor
     await _require_document_lock_permission(identity.principal)
     if await app.state.approval_client.requires_approval("document.force_unlock"):

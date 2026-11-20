@@ -57,7 +57,8 @@ describe("api client", () => {
     const fetchMock = mockFetchOnce({ id: "f1", name: "Neu" });
     vi.stubGlobal("fetch", fetchMock);
 
-    await createFolder("token-123", { name: "Neu", parentId: "root", createdBy: "alice" });
+    // No actor field in the body since P85-S5 (ADR 0240) - toEqual would fail on it.
+    await createFolder("token-123", { name: "Neu", parentId: "root" });
 
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("http://localhost:8009/api/folder-service/folders");
@@ -65,7 +66,6 @@ describe("api client", () => {
     expect(JSON.parse(init.body as string)).toEqual({
       name: "Neu",
       parent_id: "root",
-      created_by: "alice",
       object_type_id: null,
     });
   });
@@ -77,7 +77,6 @@ describe("api client", () => {
     await createFolder("token-123", {
       name: "Neu",
       parentId: "root",
-      createdBy: "alice",
       objectTypeId: 5,
     });
 
@@ -85,7 +84,6 @@ describe("api client", () => {
     expect(JSON.parse(init.body as string)).toEqual({
       name: "Neu",
       parent_id: "root",
-      created_by: "alice",
       object_type_id: 5,
     });
   });

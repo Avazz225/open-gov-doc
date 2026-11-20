@@ -85,7 +85,7 @@ export function RecordsQuarantineOverviewPane({
     setBusyId(row.entry.id);
     setError(null);
     try {
-      await releaseRecordsQuarantine(token, row.entry.id, user.username);
+      await releaseRecordsQuarantine(token, row.entry.id);
       await reload();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("recordsQuarantineOverview.releaseError"));

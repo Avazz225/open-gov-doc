@@ -105,8 +105,8 @@ The four-eyes routes, scope locks and maintenance mode take the acting person fr
   query and workflow) send their own name plus `X-DMS-On-Behalf-Of: <user>`. The user becomes the
   initiator, and the `permission.approval.requested` event carries the service as `actor` and the user as
   `on_behalf_of`. A `system:*` or service initiator is simply the service itself.
-- **Body fields** are optional and ignored. A value naming someone else is logged as
-  `actor_field_ignored` (removed in P85-S5).
+- **The former body fields** were ignored during P85 and removed from the request schemas in P85-S5.
+  Some request bodies are now empty; they stay accepted so older clients keep working.
 - **No principal on these writes means `401`.**
 
 ## Domain-Separated Admin Roles (4.6, since P6-S5)

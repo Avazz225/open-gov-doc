@@ -182,6 +182,12 @@ Consumes `permission-service`'s `GET /approval-requests` **unfiltered by action 
 
 **No capability-gated actions in this app** — neither task completion nor approval decisions are bound server-side to a domain-separated admin role (see ADR 0041 "Rationale"). `RequireAuth` only checks whether a valid session exists at all, no `RequireCapability` redirect like in the Admin UI. `getEffectivePermissions` is still fetched (identical pattern to the other apps), but is currently not evaluated anywhere — preparation for a possible later, more targeted restriction.
 
+## No Actor Fields in Requests (P85-S5, [ADR 0240](../adr/0240-acting-identity-from-verified-principal.md))
+
+The client no longer sends who is acting (`created_by`, `deleted_by`, `approved_by`, `locked_by`, …):
+the services take it from the verified token. The API helpers lost those parameters, and the
+components no longer pass the user name into them. Approve, reject and task completion no longer pass the user name.
+
 ## Backend Connection
 
 Exclusively via the API Gateway (3.5):

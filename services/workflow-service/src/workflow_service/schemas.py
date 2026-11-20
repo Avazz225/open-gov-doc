@@ -46,8 +46,6 @@ class DmnDefinitionDetailOut(DmnDefinitionOut):
 
 
 class ProcessInstanceCreate(BaseModel):
-    # Ignored since P85-S3 (ADR 0240): the actor is the request principal.
-    created_by: str | None = None
     business_key: str | None = None
     initial_data: dict = {}
     # Optional: the caller determines its own instance ID instead of
@@ -108,8 +106,6 @@ class ReadyTaskWithInstanceOut(ReadyTaskOut):
 
 
 class TaskCompleteRequest(BaseModel):
-    # Ignored since P85-S3 (ADR 0240): the actor is the request principal.
-    completed_by: str | None = None
     data: dict = {}
     # Required if the task is marked via `extensions["taskType"] == "signature"`
     # (3.10) - references a signature previously created at the Signature
@@ -125,8 +121,8 @@ class TaskCompleteRequest(BaseModel):
 
 
 class TaskClaimCreate(BaseModel):
-    # Ignored since P85-S3 (ADR 0240): the actor is the request principal.
-    principal_id: str | None = None
+    """Empty since P85-S5 (ADR 0240): the actor is the request principal;
+    the body is kept so existing clients that still send one keep working."""
 
 
 class TaskReassignRequest(BaseModel):

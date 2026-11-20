@@ -27,7 +27,7 @@ import { useAuth } from "@/lib/auth-context";
 // list) - unlike AdGroupMappings.tsx's "load everything, then CRUD rows"
 // shape, this section is a lookup-by-id form instead.
 export function UserTracking() {
-  const { accessToken, user, permissions } = useAuth();
+  const { accessToken, permissions } = useAuth();
   const { t } = useI18n();
   const canManage = permissions.includes("admin.user_tracking");
   const canView = permissions.includes("admin.user_tracking_view");
@@ -100,7 +100,6 @@ export function UserTracking() {
     try {
       const result = await setUserTrackingConfig(accessToken, config.principal_id, {
         enabled,
-        updatedBy: user?.sub ?? "",
       });
       if (result.status === "pending_approval") {
         // Four-eyes principle active - not yet applied, so the config

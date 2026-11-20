@@ -250,7 +250,7 @@ describe("TaskPane", () => {
 
     await user.click(screen.getByText("Verknüpfung lösen"));
 
-    await waitFor(() => expect(releaseLockMock).toHaveBeenCalledWith("token-123", "doc-1", "alice"));
+    await waitFor(() => expect(releaseLockMock).toHaveBeenCalledWith("token-123", "doc-1"));
     expect(await screen.findByText("Aus OG Doc öffnen")).toBeInTheDocument();
   });
 });

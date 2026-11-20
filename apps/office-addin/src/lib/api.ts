@@ -144,12 +144,11 @@ export interface CheckinResult {
 export async function checkinVersion(
   token: string,
   documentId: string,
-  params: { file: Blob; expectedBaseVersionNumber: number; createdBy: string; comment?: string }
+  params: { file: Blob; expectedBaseVersionNumber: number; comment?: string }
 ): Promise<CheckinResult> {
   const formData = new FormData();
   formData.append("file", params.file, "document.docx");
   formData.append("expected_base_version_number", String(params.expectedBaseVersionNumber));
-  formData.append("created_by", params.createdBy);
   if (params.comment) formData.append("comment", params.comment);
 
   const response = await request(
@@ -170,7 +169,6 @@ export async function createDocument(
   params: {
     file: Blob;
     title: string;
-    createdBy: string;
     objectTypeId?: number;
     attributes?: Record<string, unknown>;
     derivedFromDocumentId?: string;
@@ -180,7 +178,6 @@ export async function createDocument(
   const formData = new FormData();
   formData.append("file", params.file, "document.docx");
   formData.append("title", params.title);
-  formData.append("created_by", params.createdBy);
   if (params.objectTypeId !== undefined) {
     formData.append("object_type_id", String(params.objectTypeId));
     formData.append("attributes", JSON.stringify(params.attributes ?? {}));
@@ -219,7 +216,7 @@ export interface DocumentLock {
 export async function acquireLock(
   token: string,
   documentId: string,
-  params: { lockedBy: string; sessionId: string }
+  params: { sessionId: string }
 ): Promise<DocumentLock> {
   const response = await request(
     "document-service",
@@ -227,7 +224,7 @@ export async function acquireLock(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ locked_by: params.lockedBy, session_id: params.sessionId }),
+      body: JSON.stringify({ session_id: params.sessionId }),
     },
     token
   );
@@ -236,16 +233,14 @@ export async function acquireLock(
 
 export async function releaseLock(
   token: string,
-  documentId: string,
-  releasedBy: string
-): Promise<void> {
+  documentId: string): Promise<void> {
   await request(
     "document-service",
     `documents/${encodeURIComponent(documentId)}/lock`,
     {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ released_by: releasedBy }),
+      body: JSON.stringify({}),
     },
     token
   );
@@ -359,7 +354,7 @@ export async function listInstancesForDocument(
 export async function startInstance(
   token: string,
   processDefinitionId: number,
-  params: { createdBy: string; businessKey: string }
+  params: { businessKey: string }
 ): Promise<ProcessInstance> {
   const response = await request(
     "workflow-service",
@@ -367,7 +362,7 @@ export async function startInstance(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ created_by: params.createdBy, business_key: params.businessKey }),
+      body: JSON.stringify({ business_key: params.businessKey }),
     },
     token
   );
@@ -397,7 +392,7 @@ export async function listInstanceTasks(
 
 export async function completeTask(
   token: string,
-  params: { instanceId: string; taskId: string; completedBy: string }
+  params: { instanceId: string; taskId: string }
 ): Promise<void> {
   await request(
     "workflow-service",
@@ -405,7 +400,7 @@ export async function completeTask(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ completed_by: params.completedBy, data: {} }),
+      body: JSON.stringify({ data: {} }),
     },
     token
   );

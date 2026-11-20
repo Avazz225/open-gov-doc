@@ -129,7 +129,6 @@ describe("HandFolderReferencesModal (Post-Roadmap Phase 31 Session 7, ADR 0118)"
     await waitFor(() =>
       expect(addFolderDocumentReferenceMock).toHaveBeenCalledWith("token-123", "folder-1", {
         documentId: "doc-1",
-        addedBy: "alice",
       })
     );
     expect(await screen.findByText("Anlage 1")).toBeInTheDocument();
@@ -168,9 +167,7 @@ describe("HandFolderReferencesModal (Post-Roadmap Phase 31 Session 7, ADR 0118)"
       expect(removeFolderDocumentReferenceMock).toHaveBeenCalledWith(
         "token-123",
         "folder-1",
-        "doc-1",
-        "alice"
-      )
+        "doc-1")
     );
     expect(screen.queryByText("Anlage 1")).not.toBeInTheDocument();
   });

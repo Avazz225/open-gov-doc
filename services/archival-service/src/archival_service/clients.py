@@ -280,8 +280,9 @@ class CaseClient:
         externally-sourced document to an EXISTING case."""
         response = await self._client.post(
             f"/cases/{case_id}/documents",
-            json={"document_id": document_id, "added_by": added_by},
-            headers=self._SYSTEM_PRINCIPAL_HEADERS,
+            json={"document_id": document_id},
+            # P85-S5 (ADR 0240): on behalf of the importing user.
+            headers=on_behalf_headers("archival-service", added_by),
         )
         response.raise_for_status()
 

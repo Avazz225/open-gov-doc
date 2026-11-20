@@ -60,8 +60,6 @@ class UserTrackingConfigIn(BaseModel):
     `admin.user_tracking` permission check)."""
 
     enabled: bool
-    # Ignored since P85-S3 (ADR 0240): the actor is the request principal.
-    updated_by: str | None = None
 
 
 class UserTrackingConfigOut(BaseModel):

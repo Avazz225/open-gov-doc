@@ -80,7 +80,6 @@ export function HandFolderReferencesModal({
     try {
       await addFolderDocumentReference(accessToken, folder.id, {
         documentId: newDocumentId.trim(),
-        addedBy: user.username,
       });
       setNewDocumentId("");
       await reload();
@@ -99,8 +98,7 @@ export function HandFolderReferencesModal({
       await removeFolderDocumentReference(
         accessToken,
         folder.id,
-        reference.document_id,
-        user.username
+        reference.document_id
       );
       await reload();
     } catch (err) {

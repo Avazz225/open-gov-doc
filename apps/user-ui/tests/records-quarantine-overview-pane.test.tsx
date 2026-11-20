@@ -112,7 +112,7 @@ describe("RecordsQuarantineOverviewPane", () => {
     fireEvent.click(screen.getByRole("button", { name: "Quarantäne aufheben" }));
 
     await waitFor(() =>
-      expect(releaseRecordsQuarantineMock).toHaveBeenCalledWith("token-123", "q1", "admin")
+      expect(releaseRecordsQuarantineMock).toHaveBeenCalledWith("token-123", "q1")
     );
     expect(await screen.findByText("Aktuell ist kein Dokument unter Quarantäne.")).toBeInTheDocument();
   });

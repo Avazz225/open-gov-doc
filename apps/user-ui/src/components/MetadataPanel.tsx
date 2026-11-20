@@ -133,8 +133,7 @@ export function MetadataPanel({
     try {
       const registered = await registerDocument(
         accessToken,
-        activeDocument.id,
-        user?.username ?? ""
+        activeDocument.id
       );
       onSaved(registered);
     } catch (err) {
@@ -158,7 +157,6 @@ export function MetadataPanel({
     setIsPromoting(true);
     try {
       const promoted = await promoteDocument(accessToken, activeDocument.id, {
-        promotedBy: user?.username ?? "",
         targetFolderId: promoteTargetFolderId.trim() || null,
       });
       setPromoteTargetFolderId("");

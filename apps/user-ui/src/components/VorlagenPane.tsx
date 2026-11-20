@@ -18,7 +18,7 @@ import {
 // captured as raw text input rather than through a purpose-built tree
 // picker - an established simplification accepted in this project, see
 // ADR 0056.
-export function VorlagenPane({ token, createdBy }: { token: string; createdBy: string }) {
+export function VorlagenPane({ token }: { token: string }) {
   const { t } = useI18n();
   const [templates, setTemplates] = useState<FolderTemplate[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -60,7 +60,6 @@ export function VorlagenPane({ token, createdBy }: { token: string; createdBy: s
         sourceFolderId: sourceFolderId.trim(),
         name: newName.trim(),
         description: newDescription.trim(),
-        createdBy,
       });
       setSourceFolderId("");
       setNewName("");
@@ -100,7 +99,6 @@ export function VorlagenPane({ token, createdBy }: { token: string; createdBy: s
     try {
       await applyFolderTemplate(token, template.id, {
         targetParentId: targetParentId.trim(),
-        createdBy,
       });
       setApplyingId(null);
     } catch (err) {

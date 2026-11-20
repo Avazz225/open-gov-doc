@@ -51,9 +51,6 @@ class OcrResultReviewedIn(BaseModel):
     from the instance's own `initial_data`) are accepted and ignored -
     pydantic's default `extra="ignore"`."""
 
-    # Ignored since P85-S3 (ADR 0240): the actor is the request principal.
-    reviewed_by: str | None = None
-
 
 class OcrConfigIn(BaseModel):
     # None = no upper limit.

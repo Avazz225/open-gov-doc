@@ -631,7 +631,6 @@ export function ExplorerPane({
         <UploadForm
           token={token}
           folderId={currentFolderId}
-          createdBy={createdBy}
           onUploaded={onUploaded}
           onClose={() => setShowUpload(false)}
         />

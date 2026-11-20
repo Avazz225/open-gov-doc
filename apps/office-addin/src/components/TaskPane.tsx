@@ -92,7 +92,6 @@ export function TaskPane() {
 
       try {
         await acquireLock(token, result.id, {
-          lockedBy: user?.username ?? "",
           sessionId,
         });
         setLockOwner(user?.username ?? null);
@@ -148,7 +147,6 @@ export function TaskPane() {
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
       ),
       title: values.title,
-      createdBy: user?.username ?? "",
       objectTypeId: pendingTemplate.objectTypeId ?? undefined,
       attributes: values.attributes,
       derivedFromDocumentId: pendingTemplate.templateId,
@@ -160,7 +158,7 @@ export function TaskPane() {
     setPendingTemplate(null);
 
     try {
-      await acquireLock(token, created.id, { lockedBy: user?.username ?? "", sessionId });
+      await acquireLock(token, created.id, { sessionId });
       setLockOwner(user?.username ?? null);
     } catch {
       setLockOwner(null);
@@ -191,7 +189,6 @@ export function TaskPane() {
       const result = await checkinVersion(token, linked.documentId, {
         file: blob,
         expectedBaseVersionNumber: linked.versionNumber,
-        createdBy: user?.username ?? "",
       });
       const newVersion = result.version.version_number;
       await setLinkedDocument(linked.documentId, newVersion);
@@ -207,7 +204,7 @@ export function TaskPane() {
   async function handleUnlink() {
     if (linked && lockOwner) {
       try {
-        await releaseLock(token, linked.documentId, user?.username ?? "");
+        await releaseLock(token, linked.documentId);
       } catch {
         /* The lock may already have expired/been released otherwise -
            unlinking should not fail because of that. */
@@ -283,7 +280,7 @@ export function TaskPane() {
             </button>
           </div>
         </section>
-        <WorkflowPanel token={token} documentId={linked.documentId} currentUsername={user?.username ?? ""} />
+        <WorkflowPanel token={token} documentId={linked.documentId} />
       </div>
     );
   }

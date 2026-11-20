@@ -377,7 +377,7 @@ None yet — follows in Phase 11.
 - **Instance start** (`created_by`), **task completion** (`completed_by`) and **claims** take the acting
   identity (`require_acting_identity`). A write without a principal is a `401`. Before, completing
   worked without any principal and `completed_by` was free text.
-- **A claim is always for the caller.** `principal_id` is ignored; handing work to someone else is
+- **A claim is always for the caller.** The former `principal_id` field was removed (P85-S5); handing work to someone else is
   `POST .../reassign` (claimant or supervisor only).
 - **Completion checks** run against the acting identity: the delegation check (`on_behalf_of_principal_id`)
   and the claimant/supervisor check. So a service completing for a user satisfies that user's claim.
@@ -388,7 +388,7 @@ None yet — follows in Phase 11.
 - **Callers:** case-service already forwarded the user's principal. migration-service now starts
   transfer workflows as `migration-service` on behalf of the transfer's initiator; inbound and
   self-initiated transfers act as the service.
-- Body fields are optional and ignored, with `actor_field_ignored` logged.
+- The former body fields (`created_by`, `completed_by`, `principal_id`) were removed in P85-S5.
 
 ## Open Points
 

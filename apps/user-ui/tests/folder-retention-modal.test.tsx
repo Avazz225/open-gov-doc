@@ -158,7 +158,6 @@ describe("FolderRetentionModal", () => {
     await waitFor(() =>
       expect(createFolderLegalHoldMock).toHaveBeenCalledWith("token-123", {
         folderId: "folder-1",
-        setBy: "alice",
         reason: "Rechtsstreit",
       })
     );
@@ -177,7 +176,7 @@ describe("FolderRetentionModal", () => {
     fireEvent.click(screen.getByText("Legal Hold aufheben"));
 
     await waitFor(() =>
-      expect(releaseFolderLegalHoldMock).toHaveBeenCalledWith("token-123", "hold-1", "alice")
+      expect(releaseFolderLegalHoldMock).toHaveBeenCalledWith("token-123", "hold-1")
     );
     expect(screen.queryByText(/Legal Hold aktiv/)).not.toBeInTheDocument();
   });

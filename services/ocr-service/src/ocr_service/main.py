@@ -9,7 +9,6 @@ import httpx
 from dms_common import (
     ActingIdentity,
     configure_logging,
-    log_ignored_actor_field,
     require_acting_identity,
 )
 from dms_db_base import build_engine, make_session_factory
@@ -501,16 +500,9 @@ async def mark_ocr_result_reviewed(
     migration-service's `/transfers/{id}/steps/*`). Since P85-S3 (ADR 0240)
     the reviewer is the acting identity: workflow-service calls as itself,
     on behalf of the person who completed the review task
-    (`X-DMS-On-Behalf-Of`); `body.reviewed_by` is ignored. Without any
+    (`X-DMS-On-Behalf-Of`); the former `reviewed_by` body field was removed in P85-S5. Without any
     principal the call is a 401 - workflow-service has sent one since
     ADR 0173."""
-    log_ignored_actor_field(
-        logger,
-        route="POST /ocr-results/{id}/reviewed",
-        field="reviewed_by",
-        value=body.reviewed_by,
-        identity=identity,
-    )
     reviewed_by = identity.actor
     try:
         result = await repository.get_ocr_result(session, ocr_result_id)

@@ -435,7 +435,7 @@ export async function getUserTrackingConfig(
 export async function setUserTrackingConfig(
   token: string,
   principalId: string,
-  params: { enabled: boolean; updatedBy: string }
+  params: { enabled: boolean }
 ): Promise<UserTrackingConfigActionResult> {
   const response = await request(
     "auth-service",
@@ -443,7 +443,7 @@ export async function setUserTrackingConfig(
     {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled: params.enabled, updated_by: params.updatedBy }),
+      body: JSON.stringify({ enabled: params.enabled }),
     },
     token
   );
@@ -1561,13 +1561,11 @@ export interface ApprovalRequest {
 }
 
 export async function requestSuperuserActivation(
-  token: string,
-  initiatedBy: string
-): Promise<ApprovalRequest> {
+  token: string): Promise<ApprovalRequest> {
   const response = await request(
     "permission-service",
     "approval-requests",
-    jsonInit({ action_type: "auth.superuser.activate", initiated_by: initiatedBy, payload: {} }),
+    jsonInit({ action_type: "auth.superuser.activate", payload: {} }),
     token
   );
   return response.json();
@@ -1585,13 +1583,11 @@ export async function listPendingSuperuserActivations(token: string): Promise<Ap
 
 export async function approveApprovalRequest(
   token: string,
-  requestId: string,
-  approvedBy: string
-): Promise<ApprovalRequest> {
+  requestId: string): Promise<ApprovalRequest> {
   const response = await request(
     "permission-service",
     `approval-requests/${requestId}/approve`,
-    jsonInit({ approved_by: approvedBy }),
+    jsonInit({}),
     token
   );
   return response.json();
@@ -1605,13 +1601,12 @@ export async function approveApprovalRequest(
 export async function rejectApprovalRequest(
   token: string,
   requestId: string,
-  rejectedBy: string,
   reason?: string
 ): Promise<ApprovalRequest> {
   const response = await request(
     "permission-service",
     `approval-requests/${requestId}/reject`,
-    jsonInit({ rejected_by: rejectedBy, reason: reason ?? null }),
+    jsonInit({ reason: reason ?? null }),
     token
   );
   return response.json();
@@ -1643,26 +1638,23 @@ export interface MaintenanceModeActionResult {
 
 export async function triggerMaintenanceMode(
   token: string,
-  triggeredBy: string,
   reason: string
 ): Promise<MaintenanceModeActionResult> {
   const response = await request(
     "permission-service",
     "maintenance-mode/trigger",
-    jsonInit({ triggered_by: triggeredBy, reason: reason || null }),
+    jsonInit({ reason: reason || null }),
     token
   );
   return response.json();
 }
 
 export async function liftMaintenanceMode(
-  token: string,
-  liftedBy: string
-): Promise<MaintenanceMode> {
+  token: string): Promise<MaintenanceMode> {
   const response = await request(
     "permission-service",
     "maintenance-mode/lift",
-    jsonInit({ lifted_by: liftedBy }),
+    jsonInit({}),
     token
   );
   return response.json();

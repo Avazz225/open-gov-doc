@@ -67,7 +67,7 @@ export function SuperuserBreakGlass() {
     if (!accessToken || !user) return;
     setError(null);
     try {
-      const request = await requestSuperuserActivation(accessToken, user.sub);
+      const request = await requestSuperuserActivation(accessToken);
       setRequestedId(request.id);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("common.loadError"));
@@ -78,7 +78,7 @@ export function SuperuserBreakGlass() {
     if (!accessToken || !user || !approveRequestId) return;
     setError(null);
     try {
-      await approveApprovalRequest(accessToken, approveRequestId, user.sub);
+      await approveApprovalRequest(accessToken, approveRequestId);
       setApproveRequestId("");
       await reload();
     } catch (err) {
@@ -90,7 +90,7 @@ export function SuperuserBreakGlass() {
     if (!accessToken || !user) return;
     setError(null);
     try {
-      const result = await triggerMaintenanceMode(accessToken, user.sub, shutdownReason);
+      const result = await triggerMaintenanceMode(accessToken, shutdownReason);
       setShutdownResult(result.status);
       await reload();
     } catch (err) {
@@ -102,7 +102,7 @@ export function SuperuserBreakGlass() {
     if (!accessToken || !user) return;
     setError(null);
     try {
-      await liftMaintenanceMode(accessToken, user.sub);
+      await liftMaintenanceMode(accessToken);
       await reload();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("common.loadError"));

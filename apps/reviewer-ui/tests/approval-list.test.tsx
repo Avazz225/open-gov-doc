@@ -114,7 +114,7 @@ describe("ApprovalList", () => {
     fireEvent.click(screen.getByRole("button", { name: "Freigeben" }));
 
     await waitFor(() =>
-      expect(approveRequestMock).toHaveBeenCalledWith("token-123", "req-1", "alice")
+      expect(approveRequestMock).toHaveBeenCalledWith("token-123", "req-1")
     );
     expect(listApprovalRequestsMock).toHaveBeenCalledTimes(2);
   });
@@ -135,7 +135,6 @@ describe("ApprovalList", () => {
 
     await waitFor(() =>
       expect(rejectRequestMock).toHaveBeenCalledWith("token-123", "req-1", {
-        rejectedBy: "alice",
         reason: "nicht plausibel",
       })
     );
@@ -152,7 +151,6 @@ describe("ApprovalList", () => {
 
     await waitFor(() =>
       expect(rejectRequestMock).toHaveBeenCalledWith("token-123", "req-1", {
-        rejectedBy: "alice",
         reason: undefined,
       })
     );

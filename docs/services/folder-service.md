@@ -232,7 +232,7 @@ using the same resource-scoped role-grant test pattern already established for `
 ## Acting Identity (P85-S2, [ADR 0240](../adr/0240-acting-identity-from-verified-principal.md))
 
 Folder trash and legal holds (set/release) record the request principal as the actor; the body's
-`deleted_by`/`set_by`/`released_by` are optional and ignored.
+`deleted_by`/`set_by`/`released_by` were removed in P85-S5.
 - **The cascade into document-service** (`document_client.cascade_trash`/`cascade_restore`) now sends
   `X-DMS-Principal: folder-service` plus `X-DMS-On-Behalf-Of: <user>`. Before it sent no principal at
   all, and the user only as a body field.
@@ -241,7 +241,7 @@ Folder trash and legal holds (set/release) record the request principal as the a
 ## Acting Identity, remaining routes (P85-S4, [ADR 0240](../adr/0240-acting-identity-from-verified-principal.md))
 
 Folder create, pseudonymize/reveal, document references (add/remove) and folder templates (create/apply)
-record the request principal; the body fields are optional and ignored. teamspace-service creates
+record the request principal; the body fields were removed in P85-S5. teamspace-service creates
 teamspace root folders on behalf of the teamspace's creator.
 
 ## Open Points

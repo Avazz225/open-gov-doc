@@ -220,4 +220,22 @@ every touched route, plus the service's suite and ruff.
     It names both, instead of a separate `origin_created_by` field, so there is no schema change.
   - **Consequence for the UIs:** lock holders and creators are now principals (a user's `sub`), so name
     display moves to P86-S2.
+- **S5 (done, closes Phase 85):**
+  - **The five UIs and both add-ins stop sending actor fields.**
+    - API helpers lost their actor parameters, and call sites no longer pass the user name.
+    - One call site would have type-checked silently after the parameter removal: user-ui's
+      `rejectApprovalRequest(token, id, username)` would have sent the user name as the *reason*. It was
+      found by listing every call site, not only the compiler's.
+  - **Request schemas:** 46 fields removed. Emptied request bodies stay as documented empty models, so
+    older clients keep working, since pydantic ignores unknown fields. The leftover form and query
+    parameters went too.
+  - **Transition logging:** `log_ignored_actor_field` was removed from all services and from
+    `dms-common`.
+  - **Internal callers:** the last body fields are gone (case, ocr, migration scope locks, virus-scan
+    release); archival-service's case references now act on behalf of the user.
+  - **Connector SDK:** its actor parameters are still accepted for compatibility but no longer sent.
+  - **Kept on purpose:**
+    - favorites stay bound to the verified `X-DMS-Username`;
+    - `signer_principal_id` stays, checked against the verified username;
+    - migration's peer-to-peer `created_by` stays (the federated exception).
 

@@ -101,6 +101,12 @@ Reduced variant of the cross-app theming pattern (8, ADR 0009) — automatic lig
 
 **Since Phase 49 Session 1**: the build stage's `WORKDIR`/`COPY` layout changed to mirror the actual repo shape (`/repo/apps/office-addin/`, plus `/repo/libs/dms-ui/`) instead of flattening this app into `/app` — needed so `globals.css`'s new relative `@import` of `libs/dms-ui/tokens.css` resolves identically to a local `npm run build`. The `manifest.xml`/`assets/` copy into the final `nginx` stage is unaffected (already sourced from the build context, not the build stage's output).
 
+## No Actor Fields in Requests (P85-S5, [ADR 0240](../adr/0240-acting-identity-from-verified-principal.md))
+
+The client no longer sends who is acting (`created_by`, `deleted_by`, `approved_by`, `locked_by`, …):
+the services take it from the verified token. The API helpers lost those parameters, and the
+components no longer pass the user name into them. Upload, check-in, locks, process start and task completion no longer pass the user name; `WorkflowPanel` lost its `currentUsername` prop.
+
 ## Tests
 
 - `npm run typecheck`/`npm run lint`/`npm run build` — clean.

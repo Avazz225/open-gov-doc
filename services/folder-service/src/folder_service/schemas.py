@@ -9,8 +9,6 @@ class FolderCreate(BaseModel):
     parent_id: str = "root"
     object_type_id: int | None = None
     attributes: dict = {}
-    # Ignored since P85-S4 (ADR 0240): the actor is the request principal.
-    created_by: str | None = None
 
 
 class FolderUpdate(BaseModel):
@@ -43,8 +41,8 @@ class FolderOut(BaseModel):
 
 
 class TrashRequest(BaseModel):
-    # Ignored since P85-S2 (ADR 0240): the actor is the request principal.
-    deleted_by: str | None = None
+    """Empty since P85-S5 (ADR 0240): the actor is the request principal;
+    the body is kept so existing clients that still send one keep working."""
 
 
 class TrashResult(BaseModel):
@@ -74,14 +72,12 @@ class PseudonymizeAttributeRequest(BaseModel):
     """Trigger pseudonymization of one personal-data attribute (5.2, Phase
     58 Session 1, mirrors document-service's ADR 0156)."""
 
-    # Ignored since P85-S4 (ADR 0240): the actor is the request principal.
-    pseudonymized_by: str | None = None
     reason: str | None = None
 
 
 class RevealAttributeRequest(BaseModel):
-    # Ignored since P85-S4 (ADR 0240): the actor is the request principal.
-    revealed_by: str | None = None
+    """Empty since P85-S5 (ADR 0240): the actor is the request principal;
+    the body is kept so existing clients that still send one keep working."""
 
 
 class PseudonymizedAttributeOut(BaseModel):
@@ -108,13 +104,11 @@ class RevealedAttributeOut(BaseModel):
 
 class FolderDocumentReferenceAdd(BaseModel):
     document_id: str
-    # Ignored since P85-S4 (ADR 0240): the actor is the request principal.
-    added_by: str | None = None
 
 
 class FolderDocumentReferenceRemove(BaseModel):
-    # Ignored since P85-S4 (ADR 0240): the actor is the request principal.
-    removed_by: str | None = None
+    """Empty since P85-S5 (ADR 0240): the actor is the request principal;
+    the body is kept so existing clients that still send one keep working."""
 
 
 class FolderDocumentReferenceOut(BaseModel):
@@ -135,14 +129,12 @@ class FolderDocumentReferenceOut(BaseModel):
 
 class LegalHoldCreate(BaseModel):
     folder_id: str
-    # Ignored since P85-S2 (ADR 0240): the actor is the request principal.
-    set_by: str | None = None
     reason: str | None = None
 
 
 class LegalHoldReleaseRequest(BaseModel):
-    # Ignored since P85-S2 (ADR 0240): the actor is the request principal.
-    released_by: str | None = None
+    """Empty since P85-S5 (ADR 0240): the actor is the request principal;
+    the body is kept so existing clients that still send one keep working."""
 
 
 class LegalHoldOut(BaseModel):
@@ -231,8 +223,6 @@ class FolderTemplateCreate(BaseModel):
     source_folder_id: str
     name: str
     description: str | None = None
-    # Ignored since P85-S4 (ADR 0240): the actor is the request principal.
-    created_by: str | None = None
 
 
 class FolderTemplateOut(BaseModel):
@@ -251,8 +241,6 @@ class FolderTemplateDetailOut(FolderTemplateOut):
 
 class FolderTemplateApplyRequest(BaseModel):
     target_parent_id: str
-    # Ignored since P85-S4 (ADR 0240): the actor is the request principal.
-    created_by: str | None = None
 
 
 class FolderTemplateApplyResult(BaseModel):
