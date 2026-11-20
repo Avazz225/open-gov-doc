@@ -3382,6 +3382,318 @@ work has to be read against that baseline (see DoD).
 
 ---
 
+# Phase 84+: Gap analysis after Phase 83, plus user-requested initiatives
+
+## Context
+
+After Phase 83 closed (2026-11-20), the user asked for the next planning round, explicitly including
+the open points and the open decisions. Same method as the Phase 78+ round, with five research agents
+working in parallel, read-only:
+1. **ADRs 0229–0238.** They are new since the last sweep. This agent also checked whether Phase 82's
+   three build-ready hand-offs had been built, and collected every "left open" note from Phases 78–83.
+2. **`docs/services/*.md` and Open Decisions.** It swept the open-point sections of all 40 docs (about
+   185 open bullets: about 140 accepted, 18 environment-blocked, 9 stale, 13 actionable) and re-checked
+   every bullet in `PROGRESS.md`'s "Open Decisions" section.
+3. **Deferred items and coverage.** It re-verified the deferred-item premises against code, spot-checked
+   `Konzept.md` coverage, and checked the eGov package for drift.
+4. **External reference.** It compared the system with an external reference: a knowledge graph of a
+   mature document-management product, provided by the user as input.
+5. **Phase 83 carry-overs.** It diagnosed each of them.
+
+**Result:**
+- **Deferred items.** Every premise still holds (still `replicas: 1`, no WORM in Azurite, no
+  SAML/HSM/XAdES code, and so on).
+- **Phase 82 hand-offs.** None of the three was ever built: ADR 0234 fleet operator auth, ADR 0235 case
+  destruction, and ADR 0236's two cheap follow-ups.
+- **Konzept §10.1.** Two requirements fell through every earlier round: distributed tracing (the
+  OpenTelemetry helper exists in `dms-common` but no service calls it) and central log aggregation.
+- **Real bugs found by the carry-over diagnosis:**
+  - The permission-cache race is real. Under READ COMMITTED a recompute can write a pre-grant (or
+    pre-revoke) row after the invalidating DELETE, so a stale row can also keep a revoked permission
+    alive.
+  - The "flaky" workflow-service federation test is a pagination bug. `GET /installations` returns at
+    most 100 rows, so a hub with more than 100 installations cannot resolve some targets. auth-service
+    has the same pattern.
+- **Identity in request bodies.** The docs sweep found that the four-eyes endpoints take
+  `approved_by`/`rejected_by` from the body and never compare them with the verified principal, so a
+  user can approve their own request under a typed-in name. Force-unlock has no permission check at all.
+- **`PROGRESS.md`'s "Open Decisions" section.** About 38 of its roughly 40 bullets are stale. The section
+  is cleaned up in P91-S3.
+
+**User decisions taken in this round** (2026-11-20):
+- **Acting identity:** bound to the verified token **everywhere** (Phase 85), not only for four-eyes or
+  destructive actions.
+- **Account menu:** settings sit in a dropdown behind the user name, in every app that shows one, at
+  every width. user-ui's settings gear goes (Phase 86).
+- **Service instances:** a replaced instance (restart, scaling event) is forgotten as soon as its
+  successor of the same type registers. A service that disappears for good keeps its last entries as
+  evidence. An "expected replicas" count per type alarms on too few *and* too many (Phase 87).
+- **Admin UI:** all four backend-only areas get an interface: fleet groups/plans/rollouts, monitoring
+  sensors, object-type status transitions, mailboxes and realm roles (Phase 88).
+- **New capabilities:** follow-up reminders (Wiedervorlagen), approver notification plus watch
+  subscriptions, and embedded-metadata extraction get built. External signature validation and runtime
+  process changes get scoping only (Phase 90).
+
+**Numbering:** the last phase was 83 and the highest ADR is 0238, so this plan starts at **Phase 84 /
+ADR 0239**.
+
+**Order:**
+1. Cheap, high-value security and correctness first (every round's principle).
+2. Then the identity-binding sweep the user chose.
+3. Then the three user-requested UI/fleet/admin initiatives.
+4. Then compliance completions, the new collaboration features, and operations/hygiene last.
+
+`graphify update .` runs once, at the end of this whole plan (end of Phase 91). The full backend
+regression runs at each phase close.
+
+## Phase 84 — Security & Correctness Hardening (cheap, high value)
+
+- **P84-S1 — Permission-cache race.**
+  - **Fix:** `invalidate_cache` takes `pg_advisory_xact_lock(<const>)` before its DELETE.
+    `get_effective_permissions` takes `pg_advisory_xact_lock_shared(<const>)` after a cache miss and before
+    `_collect_effective_roles`. Readers don't block each other. A writer waits for in-flight recomputes,
+    and its DELETE then removes their rows.
+  - **Tests:** one that forces the interleaving (recompute started before a grant commits) for both a
+    grant and a revoke.
+  - **Then:** remove the `workers: 1` work-arounds from the migration-console and process-designer
+    Playwright configs. Their comments name this race, and their suites must then pass in parallel.
+  - **Docs:** ADR 0239 (short). It records why this fix and not a generation counter (no schema change)
+    and not dropping the materialized write (concept 4.1).
+- **P84-S2 — Federation installation lookup by id.**
+  - **Hub:** new `GET /installations/{installation_id}`, open like the list, plus a paging client helper
+    for the callers that really need the full list.
+  - **Callers:** workflow-service `_dispatch_outbound_federated_task` and auth-service's caller lookup use
+    the single-id call; auth-service `eligible_peers` pages.
+  - **Tests:** regression tests with more than 100 installations. This removes the "flaky"
+    `test_dispatch_records_delivery_failed_for_unreachable_target` at its root.
+- **P84-S3 — Infra ports to loopback** (ADR 0230 follow-up).
+  - Bind Postgres, Keycloak, NATS, MinIO, Azurite, Mailpit, Redis, Prometheus, cAdvisor and Grafana in
+    `infra/docker-compose.yml` to `127.0.0.1`, like the 31 backend services already are.
+  - First check what in the dev workflow needs LAN access (Grafana from another device?). Make that one
+    opt-in through an env variable instead.
+- **P84-S4 — Fleet-management per-operator auth: build ADR 0234.**
+  - `FleetOperator` table (UUID4 tokens, stored sha256-hashed) with `is_admin`, the bootstrap operator,
+    and `/operators` management restricted to admins.
+  - The four-eyes check (`actor != proposed_by`) and `started_by` use the verified operator identity, no
+    longer the payload.
+  - Admin UI: operator token entry and display of who proposed/approved.
+  - Doc: ADR 0234's status updated to built.
+
+## Phase 85 — Acting Identity from the Verified Token, Everywhere (user decision)
+
+Today many endpoints take the acting person from the request body (`approved_by`, `rejected_by`,
+`released_by`, `deleted_by`, `completed_by`, `started_by`, `created_by`, `initiated_by`, …). ADR 0025
+accepted that as a scaffold habit. The user decided to bind all of them to the gateway-verified
+`X-DMS-Principal`.
+
+- **P85-S1 — Inventory and rule: ADR 0240.** Grep every request schema and handler for body-supplied
+  actor fields, across all services and the five UIs plus the add-ins. Then fix the rule:
+  - The verified principal always wins.
+  - A body field that is still sent is either ignored or rejected with `400` on mismatch. The session
+    decides, with a recommendation.
+  - Service-to-service calls act as the service principal, keeping the existing `X-DMS-Principal:
+    <service>` convention. Where a service acts *on behalf of* a user, that user is passed in a separate,
+    explicitly named field that only service principals may set.
+  - A compatibility window for clients, and how the e2e/test fixtures adapt.
+
+  Output: the full table (service, endpoint, field, change) and the S2–S4 split.
+- **P85-S2 — Security-critical first.**
+  - permission-service approve/reject: initiator ≠ approver is checked on verified identities, and only
+    principals entitled to decide may reject.
+  - document-service force-unlock: gets a real permission check, and `released_by` comes from the token.
+  - Force-delete for documents and folders.
+- **P85-S3 — Workflow, cases, signatures.** workflow-service (`completed_by`, `started_by`, claims),
+  case-service, signature-service and notification triggers. Plus the UIs that send these fields.
+- **P85-S4 — The rest.** Everything else from the S1 inventory (folder templates `created_by`,
+  config/import actors, …). Then: UIs and add-ins stop sending actor fields, all six e2e suites pass,
+  `docs/services/*.md` are updated, and `PROGRESS.md`'s old "Authorization" bullet is closed.
+
+## Phase 86 — Account Menu Behind the User Name + UX Bundle (user-requested)
+
+- **P86-S1 — Settings behind the user name, in every app, at every width.**
+  - **Pattern:** the header shows only the user name plus a chevron. It opens the account dropdown
+    (`AccountMenu`): installation switcher (admin-ui only, via `leading`), language, theme, log out. The
+    inline cluster and `inlineFrom` are removed from all copies.
+  - **user-ui:** the name becomes the same dropdown, and the icon rail's settings gear (language/theme
+    only) is removed.
+  - **Not affected:** office-addin, which shows no user name.
+  - **Docs:** ADR 0238 Decision 2 amendment.
+  - **Checks:** e2e specs that click "Abmelden" go through the menu. Screenshots at 390/768/1400 in all
+    five apps.
+- **P86-S2 — UX bundle.**
+  - reviewer-ui "Beantragt von" shows names: copy user-ui's `usePrincipalNames` and `lookupUserById`,
+    resolve UUID-shaped ids only, keep the raw id on hover. Apply it to team-task/instance ids too.
+  - user-ui `ApprovalsPane` gets a reject-reason field.
+  - admin-ui `.form-grid`/layout gap polish (deferred since P81-S5).
+  - A one-time check, in a narrow browser window, that GitHub honors the README `<picture>` width query.
+
+## Phase 87 — Service Instances: Replacement, Scaling, Expected Replicas (user-requested)
+
+The user named the rules:
+- An instance replaced by another of the same type (restart, scaling event) is forgotten once the
+  successor registers.
+- A type that disappears and never comes back keeps its last entries.
+- An expected-replicas count per type alarms on too few and too many.
+
+Today registry-service deletes instances unreachable for 7 days, regardless of type. Fleet-managed
+installations are never pruned.
+
+- **P87-S1 — Scoping: ADR 0241.** Pin the semantics before building:
+  - **What counts as "successor":** same `service_name`, registered after the old one became unreachable.
+    One new instance supersedes one unreachable old one, oldest first.
+  - **Scale-down:** when the reachable count is ≥ the expected count, surplus unreachable instances are
+    forgotten.
+  - **A type with zero reachable instances** keeps its entries, and they are flagged.
+  - Whether the 7-day blanket cleanup stays as a backstop.
+  - Where expected counts come from: an admin setting per type, with an optional default from the Helm
+    `replicas`.
+  - The alarm path: registry events into notification-service plus a Prometheus metric.
+  - Whether fleet-management applies the same rules to installations, or only shows each installation's
+    instance health.
+- **P87-S2 — registry-service build.** Supersede logic on register/heartbeat, `expected_replicas` per
+  service type (new table plus admin API), and under/over-replica detection with events
+  (`registry.replicas.under`/`.over`/`.restored`) and a metric. Tests for restart, scale up, scale down,
+  vanish, and over-provisioning.
+- **P87-S3 — Admin UI and hygiene.**
+  - **Registry/fleet view grouped by type:** expected vs. actual, last seen, the alarm state, an editor
+    for expected replicas, and "forgotten because superseded" made visible in the audit trail.
+  - **Notification on alarm.**
+  - **Test hygiene:** suites that register instances or installations clean up after themselves, so the
+    dev stack stops collecting debris.
+
+## Phase 88 — Admin UI Completions (user-requested)
+
+- **P88-S1 — Fleet groups, update plans, rollouts.** The admin UI only lists installations today.
+  Depends on P84-S4 (operator identity).
+- **P88-S2 — Monitoring sensors page.** View and change the sensor configuration (`PUT /sensor-config/*`
+  exists), including the cost flags, and the P91-S1 tracing sampling ratio once it exists.
+- **P88-S3 — Object-type status transitions.** An editor for `status_transitions`, plus guided forms for
+  `naming_constraints`/`conditions` (today passed through raw in `ObjectTypeEditor`).
+- **P88-S4 — Mailboxes and realm roles.**
+  - mail-connector mailboxes move from env variables to a config API/table: the backend part with
+    migration of the existing env config, then the admin page.
+  - Realm-role assignment in user management.
+  - If the mailbox backend turns out to be large, this session splits in two.
+
+## Phase 89 — Compliance Completions
+
+- **P89-S1 — Case destruction, case-service part (build ADR 0235).** `retention_until`/`full_deletion`
+  on cases, `GET /cases/due-for-destruction`, and `POST /cases/{id}/destroy`, shaped like the archival
+  pair. The destroy guard refuses while any referenced document is actively quarantined, using the
+  existing per-reference `has_active_quarantine`. Docs: add the open point `case-service.md` never got,
+  then close it.
+- **P89-S2 — Case destruction, archival-service pipeline and admin visibility.** A new pipeline in
+  `case_pipeline.py`, deletion-register entries, and the admin archival view.
+- **P89-S3 — Small compliance bundle.**
+  - **ADR 0236:** `is_tagged_pdf()` also checks `/MarkInfo /Marked`, `/Lang` and Figure `/Alt`; a doc
+    section on an offline veraPDF CLI workflow.
+  - **eGov package 1.3.0:**
+    - four-eyes presets for `permission.role.update` and the AD-group mapping/composite-rule actions
+      (Konzept §14.2 "permission change");
+    - the output-stamping defaults deferred in P80;
+    - README rationale for what stays ungated.
+
+## Phase 90 — Collaboration Features (user-selected from the external comparison)
+
+- **P90-S1 — Follow-up reminders (Wiedervorlagen), backend: ADR 0242.** Set a date and note on a
+  document, folder or case. List "my reminders", clear or snooze, and notify when due, reusing the
+  existing deletion-reminder/SLA timer infrastructure (Konzept names exactly this as a future add-on).
+  The session decides the owning service (favorite-service vs. notification-service vs. a small new
+  table elsewhere).
+- **P90-S2 — Follow-up reminders, UI.**
+  - user-ui: set from the document/folder/case context menu and detail panes, and a "Wiedervorlagen" view
+    in the icon rail.
+  - reviewer-ui: for cases.
+- **P90-S3 — Approver notification and role-based recipients.**
+  - notification-service consumes `permission.approval.requested` (published, never consumed).
+  - Resolve "who may decide" to concrete recipients (role → principals via permission-service), in-app
+    and by email.
+- **P90-S4 — Watch subscriptions.** Subscribe to a document or folder (and optionally a workflow
+  instance), and get notified on new version, metadata change, move, or delete. Backend events are
+  already published. favorite-service's "watchlist" wording finally means watching. ADR 0243.
+- **P90-S5 — Embedded-metadata extraction on upload.** Copy PDF info/XMP and Office core properties into
+  document attributes, configured per object type (source property → attribute, overwrite policy). An
+  admin UI mapping in the object-type editor.
+- **P90-S6 — Scoping: validating externally signed incoming documents (ADR 0244).** Validate PAdES (and
+  detached CAdES?) on ingest (upload, mail-connector), with trust lists, a stored validation report per
+  document, and a UI badge. Stay format-agnostic and keep QES creation, HSM and XAdES out (still
+  declined). No code.
+- **P90-S7 — Scoping: changing running processes, and lane semantics (ADR 0245).**
+  - Insert, remove or redirect a step in a running instance (circulation-folder routing by hand), against
+    SpiffWorkflow's serialized state.
+  - Decide in the same pass whether BPMN lanes become an authorization boundary (lane = role) or stay
+    display-only. This is a still-open decision that blocks reviewer-ui's lane pre-selection and
+    role-based routing.
+
+  No code.
+
+## Phase 91 — Operations & Hygiene
+
+- **P91-S1 — Distributed tracing (Konzept §10.1).**
+  - Call `dms_common.otel.configure_tracing()` from every service's startup, with FastAPI and httpx
+    instrumentation and trace propagation through NATS headers.
+  - An OTLP collector plus Tempo (or Jaeger) in compose and the Helm chart, a Grafana datasource, and the
+    sampling ratio as a monitoring-service sensor parameter.
+  - ADR 0246.
+- **P91-S2 — Central log aggregation (§10.1).** Loki plus promtail (or Alloy) in compose and Helm, with
+  the JSON logs that already exist and a Grafana datasource. Trace-id ↔ log correlation with S1.
+- **P91-S3 — Hygiene bundle.**
+  - ruff fully green: run `ruff format`, wrap the 12 long lines in the LibreOffice add-in, exclude
+    `loadtest/notebook/*.ipynb`.
+  - SBOM generation: CycloneDX for Python and npm, as a script and CI step.
+  - The 9 stale `docs/services` entries.
+  - `PROGRESS.md`'s "Open Decisions" section rewritten: about 38 stale bullets removed and the section
+    split from the MVP-era session log it runs into.
+  - The `process-designer.md` "stale specs" sentence annotated as closed in P79-S3.
+- **P91-S4 — Scoping: database schema migrations (ADR 0247).** Today schemas evolve through
+  `create_all` plus ad-hoc `ALTER TABLE … IF NOT EXISTS` at startup. Options: Alembic per service,
+  formalizing the current pattern, or accepting it, judged against fleet rolling updates and the
+  Helm upgrade path. No code. **This is the last session of the plan:** phase-close regression, then
+  `graphify update .` once.
+
+## Deliberately Not Included in This Plan
+
+- **Phase 76's three candidates (ERP connector, native mobile client, AI features).** Still unbuilt and
+  still the user's open choice. This round's feature slots went to the comparison findings above.
+- **The remaining comparison findings.** An annotation layer, computed attributes, form letters from
+  templates, storage quotas, audit-log retention/offloading, an SAP archive connector, mobile-specific
+  form layouts, and a long-term-preservation archive connector (TR-ESOR-style). They are real but either
+  lower value or large. They are candidates for a later round.
+- **Archival key rotation/KMS.** `EnvKeyStore` stays single and static. This is an open design choice
+  without a trigger yet. Revisit with a real deployment.
+- **"everyone" grants** (`ocr.read`/`ocr.write`, `users.lookup`). They stay open by policy, which is a
+  documented decision.
+- **Re-confirmed deferrals** (premises verified against code this round):
+  - workflow-service multi-replica timer lock (still `replicas: 1`);
+  - Azure WORM;
+  - HSM/QES/OCSP;
+  - SAML, XAdES/CAdES creation;
+  - the mail-connector Graph backend (ADR 0161);
+  - ZUGFeRD and batch-scan splitting (ADR 0207/0209);
+  - PaddleOCR;
+  - the registry's unpolled `health_endpoint` (partly superseded by Phase 87);
+  - coarse cache invalidation (P84-S1 fixes the race, not the granularity);
+  - the CMIS 1.1 scope;
+  - CheckMK (declined);
+  - the DMS-to-DMS automatic xdomea handoff (ADR 0147).
+- **Environment-blocked:** real Office/LibreOffice hosts, real GUI WebDAV/CMIS clients, a real k8s
+  cluster, a second installation for migration/federation, and ClamAV signature access.
+
+## Definition of Done for Phases 84–91 (unchanged, `CONTRIBUTING.md`)
+
+- Tests green.
+- `docs/services/*.md` current.
+- An ADR where the session names one.
+- `PROGRESS.md` updated per session.
+- Frontend checks (`tsc`/`eslint`/`vitest`/`next build`) for every touched app.
+- Real browser verification with screenshots for every UI-visible change (390/768/1400 for layout
+  changes, as in Phase 83).
+- Full backend regression (`scripts/run-tests.sh`, with `~/.local/bin` on PATH) once per phase close.
+- `graphify update .` only at the end of the whole plan (P91-S4).
+- Scoping sessions produce an ADR and no code diff; `PROGRESS.md` marks them "Scoping, kein Feature".
+
+---
+
 ## PROGRESS.md — Resume Mechanism
 
 `dms/PROGRESS.md` is created as the first order of business in P0-S1 and is the entry point for every new session:

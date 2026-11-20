@@ -32,8 +32,13 @@
 
 The stack was stopped afterwards.
 
-**Next session:** none planned. Phase 83 was the last phase in `IMPLEMENTATION_PLAN.md`. A next step needs
-a new phase or a gap replan, for which the open points above are candidates.
+**Next session:** **P84-S1**, the permission-cache race (advisory lock), from the new plan "Phase 84+: Gap
+analysis after Phase 83" (Phases 84–91, ADR 0239+), built 2026-11-20 with the user's decisions:
+- identity bound to the token everywhere;
+- the account dropdown behind the user name in all apps, with user-ui's gear removed;
+- service-instance replacement/scaling/expected replicas;
+- all four admin-UI completions;
+- Wiedervorlagen, notifications, metadata extraction, plus two scoping ADRs.
 
 ---
 
