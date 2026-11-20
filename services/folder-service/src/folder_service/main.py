@@ -7,7 +7,12 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime, timedelta
 
-from dms_common import configure_logging
+from dms_common import (
+    ActingIdentity,
+    configure_logging,
+    log_ignored_actor_field,
+    require_acting_identity,
+)
 from dms_constraint_engine import ROOT_PARENT_TYPE, validate_parent
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
@@ -855,6 +860,7 @@ async def trash_folder(
     payload: TrashRequest,
     x_dms_principal: str = Header(default=""),
     x_dms_maintenance_active: str = Header(default="false"),
+    identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> TrashResult:
     """Trash path (5.2, since P7-S1b) - cascades over the entire active
@@ -866,6 +872,14 @@ async def trash_folder(
     exact pattern as `document_service.main.trash_document`/
     `force_release_lock` (P6-S4). By default (no configuration), behavior
     remains unchanged: immediate execution."""
+    log_ignored_actor_field(
+        logger,
+        route="POST /folders/{id}/trash",
+        field="deleted_by",
+        value=payload.deleted_by,
+        identity=identity,
+    )
+    actor_deleted_by = identity.actor
     if folder_id in PROTECTED_FOLDER_IDS:
         raise HTTPException(
             status_code=409,
@@ -880,8 +894,8 @@ async def trash_folder(
     if await app.state.approval_client.requires_approval("folder.delete"):
         request = await app.state.approval_client.create_request(
             action_type="folder.delete",
-            initiated_by=payload.deleted_by,
-            payload={"folder_id": folder_id, "deleted_by": payload.deleted_by},
+            initiated_by=actor_deleted_by,
+            payload={"folder_id": folder_id, "deleted_by": actor_deleted_by},
         )
         return TrashResult(status="pending_approval", approval_request_id=request["id"])
 
@@ -889,7 +903,7 @@ async def trash_folder(
         folder = await repository.soft_delete_folder(
             session,
             folder_id,
-            deleted_by=payload.deleted_by,
+            deleted_by=actor_deleted_by,
             document_client=app.state.document_client,
         )
     except repository.NotFoundError as exc:
@@ -898,8 +912,8 @@ async def trash_folder(
     await publish_event(
         "folder.trashed",
         subject=folder_id,
-        payload={"deleted_by": payload.deleted_by},
-        actor=payload.deleted_by,
+        payload={"deleted_by": actor_deleted_by},
+        actor=actor_deleted_by,
     )
     return TrashResult(status="trashed", folder=folder)
 
@@ -1566,15 +1580,20 @@ async def _require_deletion_permission(x_dms_principal: str) -> None:
 async def create_legal_hold(
     payload: LegalHoldCreate,
     x_dms_principal: str = Header(default=""),
+    identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> LegalHoldOut:
     """Set a legal hold (5.2, since P7-S1b) - overrides any due action in
     the poll loop until it is released again. Since P19-S10 gated by
     `admin.legal_hold`, see `_require_legal_hold_permission`."""
+    log_ignored_actor_field(
+        logger, route="POST /legal-holds", field="set_by", value=payload.set_by, identity=identity
+    )
+    actor_set_by = identity.actor
     await _require_legal_hold_permission(x_dms_principal)
     try:
         hold = await repository.create_legal_hold(
-            session, payload.folder_id, set_by=payload.set_by, reason=payload.reason
+            session, payload.folder_id, set_by=actor_set_by, reason=payload.reason
         )
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -1582,8 +1601,8 @@ async def create_legal_hold(
     await publish_event(
         "folder.legal_hold.set",
         subject=payload.folder_id,
-        payload={"set_by": payload.set_by, "reason": payload.reason},
-        actor=payload.set_by,
+        payload={"set_by": actor_set_by, "reason": payload.reason},
+        actor=actor_set_by,
     )
     return hold
 
@@ -1593,13 +1612,20 @@ async def release_legal_hold(
     hold_id: str,
     payload: LegalHoldReleaseRequest,
     x_dms_principal: str = Header(default=""),
+    identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> LegalHoldOut:
+    log_ignored_actor_field(
+        logger,
+        route="POST /legal-holds/{id}/release",
+        field="released_by",
+        value=payload.released_by,
+        identity=identity,
+    )
+    actor_released_by = identity.actor
     await _require_legal_hold_permission(x_dms_principal)
     try:
-        hold = await repository.release_legal_hold(
-            session, hold_id, released_by=payload.released_by
-        )
+        hold = await repository.release_legal_hold(session, hold_id, released_by=actor_released_by)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except repository.AlreadyReleasedError as exc:
@@ -1608,8 +1634,8 @@ async def release_legal_hold(
     await publish_event(
         "folder.legal_hold.released",
         subject=hold.folder_id,
-        payload={"released_by": payload.released_by},
-        actor=payload.released_by,
+        payload={"released_by": actor_released_by},
+        actor=actor_released_by,
     )
     return hold
 

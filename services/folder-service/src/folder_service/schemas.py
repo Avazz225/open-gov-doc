@@ -42,7 +42,8 @@ class FolderOut(BaseModel):
 
 
 class TrashRequest(BaseModel):
-    deleted_by: str
+    # Ignored since P85-S2 (ADR 0240): the actor is the request principal.
+    deleted_by: str | None = None
 
 
 class TrashResult(BaseModel):
@@ -129,12 +130,14 @@ class FolderDocumentReferenceOut(BaseModel):
 
 class LegalHoldCreate(BaseModel):
     folder_id: str
-    set_by: str
+    # Ignored since P85-S2 (ADR 0240): the actor is the request principal.
+    set_by: str | None = None
     reason: str | None = None
 
 
 class LegalHoldReleaseRequest(BaseModel):
-    released_by: str
+    # Ignored since P85-S2 (ADR 0240): the actor is the request principal.
+    released_by: str | None = None
 
 
 class LegalHoldOut(BaseModel):

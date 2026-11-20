@@ -653,6 +653,21 @@ was plain `document.read`) — the response reveals nothing more sensitive than 
 dismissable-by-navigation `role="status"` warning next to the "Exportieren" button — never a confirmation
 dialog gating the click, matching the plan's own wording ("an explicit warning", not a required gate).
 
+## Acting Identity (P85-S2, [ADR 0240](../adr/0240-acting-identity-from-verified-principal.md))
+
+These routes record the request principal as the actor, no longer a body/query field: force-release,
+trash, `DELETE /documents/{id}`, cascade trash/restore, legal holds (set/release) and records quarantine
+(set/release).
+- **Force-release** additionally requires the new capability `admin.document_lock` (role
+  `domain-admin-document-locks`). Before, any authenticated principal could release anyone's lock.
+- **Cascade trash/restore** are called by folder-service *on behalf of* the user who trashed or restored
+  the folder (`X-DMS-On-Behalf-Of`). The documents' `deleted_by` is that user, and the events carry
+  `folder-service` as `actor` and the user as `on_behalf_of`.
+- **Permission checks** keep their existing subject (the principal).
+- **Body fields** (`deleted_by`, `restored_by`, `set_by`, `released_by`) are optional and ignored. A
+  mismatch is logged as `actor_field_ignored`.
+- **No principal means `401`.**
+
 ## Open Points
 
 - ~~**Reference number display in the frontend** (before the filename, globally or overridable per object type) not yet wired up — follows with P5e-S3.~~ — **closed at P5e-S3**: `apps/user-ui/src/lib/kennzeichen.ts` (`resolveKennzeichenDisplay`/`formatDocumentTitle`) is wired into `ExplorerPane.tsx`/`FolderTree.tsx`, plus admin-ui's `ObjectTypeEditor`/`/kennzeichen-settings/` page. Stale forward-reference, found and struck during Phase 65+'s gap-analysis round.

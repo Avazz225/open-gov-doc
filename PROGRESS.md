@@ -2,7 +2,43 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P85-S1 (scoping, no code): the inventory and rule for the acting identity →
+**Last completed:** P85-S2: the acting identity foundation and the 19 security-critical routes (ADR 0240).
+
+**What changed:**
+- **`dms-common` `acting.py`:** the acting identity from `X-DMS-Principal`, plus `X-DMS-On-Behalf-Of`
+  honored only from service principals. A write without a principal gets `401`.
+- **permission-service:** approvals, scope locks and maintenance mode take the principal, and
+  **rejecting now needs the approval entitlement** (initiators may withdraw).
+- **document-service:**
+  - force-release has a real check: the new role `domain-admin-document-locks`;
+  - trash, delete, cascade, legal holds and quarantine take the principal.
+- **folder-service:** trash and legal holds take the principal.
+- **Callers:**
+  - the approval clients of seven services, and folder-service's cascade, act on behalf of the user;
+  - events say service = `actor`, user = `on_behalf_of`;
+  - the body fields are ignored and logged.
+
+**Checks:**
+- permission 201, document 425, folder 178, config 56, migration 21, query 56, workflow 240, auth 164.
+- e2e 32/32; ruff clean; 8 images rebuilt.
+- Live through the gateway: a spoofed `initiated_by` and a client-sent on-behalf header were both
+  ignored.
+
+**Open (carried over):** reviewer-ui principal names and the `<picture>` check (→ P86-S2). The stack was
+stopped afterwards.
+
+**Next session:** **P85-S3**, bind the actor in:
+- workflow-service (instance create, claim, complete);
+- case-service (6 routes);
+- signature-service (signer = acting principal, otherwise 403);
+- ocr-service `reviewed`;
+- the auth-service user-tracking config;
+
+plus their callers.
+
+---
+
+Earlier P85-S1 summary, kept for context (scoping, no code): the inventory and rule for the acting identity →
 [ADR 0240](docs/adr/0240-acting-identity-from-verified-principal.md).
 
 **Inventory:** 54 write routes take the acting person from the request (11 don't read the principal at
@@ -23,7 +59,7 @@ actors (cmis) and target `principal_id`s are excluded.
 
 **Open (carried over):** reviewer-ui principal names and the `<picture>` check (→ P86-S2).
 
-**Next session:** **P85-S2**:
+**Next session (at the time):** P85-S2. It was done next; see the entry above. Original note::
 - the foundation in `dms-common` (`acting_principal()`, the service-principal list,
   `X-DMS-On-Behalf-Of`);
 - the 19 security-critical routes: permission-service approvals, scope locks and maintenance;

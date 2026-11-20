@@ -1,4 +1,14 @@
 import httpx
+from dms_common import SERVICE_PRINCIPALS, acting_headers
+
+
+def _on_behalf_headers(actor: str) -> dict[str, str]:
+    """folder-service as principal, acting for the user who trashed/restored
+    the folder (P85-S2, ADR 0240) - or as itself for service/`system:*`
+    actors (retention poll, approval execution)."""
+    if not actor or actor in SERVICE_PRINCIPALS or actor.startswith("system:"):
+        return acting_headers("folder-service")
+    return acting_headers("folder-service", on_behalf_of=actor)
 
 
 class DocumentClient:
@@ -17,11 +27,8 @@ class DocumentClient:
     ) -> list[str]:
         response = await self._client.post(
             "/documents/cascade-trash",
-            json={
-                "folder_ids": folder_ids,
-                "via_folder_id": via_folder_id,
-                "deleted_by": deleted_by,
-            },
+            json={"folder_ids": folder_ids, "via_folder_id": via_folder_id},
+            headers=_on_behalf_headers(deleted_by),
         )
         response.raise_for_status()
         return response.json()["document_ids"]
@@ -29,7 +36,8 @@ class DocumentClient:
     async def cascade_restore(self, via_folder_id: str, *, restored_by: str) -> list[str]:
         response = await self._client.post(
             "/documents/cascade-restore",
-            json={"via_folder_id": via_folder_id, "restored_by": restored_by},
+            json={"via_folder_id": via_folder_id},
+            headers=_on_behalf_headers(restored_by),
         )
         response.raise_for_status()
         return response.json()["document_ids"]

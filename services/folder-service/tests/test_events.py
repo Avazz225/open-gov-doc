@@ -95,7 +95,11 @@ async def test_manual_purge_publishes_resource_deleted(client, consumer):
     `permission-service` on every one of these paths (ADR 0154's own
     documented, then-untracked finding)."""
     created = client.post("/folders", json={"name": "Weg", "created_by": "alice"}).json()
-    client.post(f"/folders/{created['id']}/trash", json={"deleted_by": "alice"})
+    client.post(
+        f"/folders/{created['id']}/trash",
+        json={"deleted_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
 
     received, got_message = await _collect_one(consumer, "folder.resource.deleted")
 

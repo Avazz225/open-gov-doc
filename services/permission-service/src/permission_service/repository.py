@@ -247,6 +247,10 @@ DOMAIN_ADMIN_ROLES: list[tuple[str, str, list[str]]] = [
     # two are conceptually opposite (a hold prevents deletion, deletion
     # admin performs it) - see ADR 0075 "Rationale".
     ("domain-admin-legal-hold", "Legal-Hold-Verwaltung", ["admin.legal_hold"]),
+    # P85-S2 (ADR 0240): force-releasing another person's document lock (4.2)
+    # had no permission check at all - its own domain, not folded into
+    # "domain-admin-document-config" (configuration, not intervention).
+    ("domain-admin-document-locks", "Dokumentsperren-Verwaltung", ["admin.document_lock"]),
     # Post-Roadmap Phase 22 Session 5: `teamspace-service`'s new
     # installation-wide overview endpoint (`GET /admin/teamspaces`, shows
     # ALL teamspaces, not just those of the requesting principal like
@@ -1292,6 +1296,12 @@ async def reject_request(
         raise ApprovalRequestNotPendingError(
             f"approval_request {request_id!r} ist bereits {request.status!r}"
         )
+    # P85-S2 (ADR 0240): rejecting needs the same entitlement as approving
+    # (before, anyone could reject any request). The initiator may always
+    # withdraw their own request.
+    if rejected_by != request.initiated_by:
+        config = await get_approval_config(session, request.action_type)
+        await _require_permission_if_configured(session, config, rejected_by)
     request.status = "rejected"
     request.rejected_by = rejected_by
     request.reason = reason

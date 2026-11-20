@@ -107,7 +107,9 @@ def test_inbox_folder_cannot_be_hard_deleted(client):
 
 
 def test_outbox_folder_cannot_be_trashed(client):
-    response = client.post("/folders/outbox/trash", json={"deleted_by": "alice"})
+    response = client.post(
+        "/folders/outbox/trash", json={"deleted_by": "alice"}, headers={"X-DMS-Principal": "alice"}
+    )
     assert response.status_code == 409
 
 
@@ -128,7 +130,9 @@ def test_root_folder_cannot_be_hard_deleted(client):
 
 
 def test_root_folder_cannot_be_trashed(client):
-    response = client.post("/folders/root/trash", json={"deleted_by": "alice"})
+    response = client.post(
+        "/folders/root/trash", json={"deleted_by": "alice"}, headers={"X-DMS-Principal": "alice"}
+    )
     assert response.status_code == 409
 
 
@@ -253,7 +257,11 @@ def test_trash_and_restore_folder_calls_document_cascade(client):
     direkt gegen das Repository."""
     parent = client.post("/folders", json={"name": "Akte", "created_by": "alice"}).json()
 
-    trash_response = client.post(f"/folders/{parent['id']}/trash", json={"deleted_by": "alice"})
+    trash_response = client.post(
+        f"/folders/{parent['id']}/trash",
+        json={"deleted_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
     assert trash_response.status_code == 200
     trash_result = trash_response.json()
     assert trash_result["status"] == "trashed"
@@ -284,7 +292,7 @@ def test_trash_folder_rejected_during_maintenance_mode(client):
     response = client.post(
         f"/folders/{created['id']}/trash",
         json={"deleted_by": "alice"},
-        headers={"X-DMS-Maintenance-Active": "true"},
+        headers={"X-DMS-Principal": "alice", "X-DMS-Maintenance-Active": "true"},
     )
 
     assert response.status_code == 503
@@ -295,7 +303,11 @@ def test_restore_folder_rejected_during_maintenance_mode(client):
     """Same as above, for the other endpoint that cascades into
     document-service (`cascade_restore`)."""
     created = client.post("/folders", json={"name": "X", "created_by": "alice"}).json()
-    client.post(f"/folders/{created['id']}/trash", json={"deleted_by": "alice"})
+    client.post(
+        f"/folders/{created['id']}/trash",
+        json={"deleted_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
 
     response = client.post(
         f"/folders/{created['id']}/restore",
@@ -317,7 +329,11 @@ def test_trash_folder_with_approval_required_defers_execution(client):
     try:
         created = client.post("/folders", json={"name": "X", "created_by": "alice"}).json()
 
-        response = client.post(f"/folders/{created['id']}/trash", json={"deleted_by": "alice"})
+        response = client.post(
+            f"/folders/{created['id']}/trash",
+            json={"deleted_by": "alice"},
+            headers={"X-DMS-Principal": "alice"},
+        )
 
         assert response.status_code == 200
         result = response.json()
@@ -349,7 +365,11 @@ def test_restore_unknown_folder_returns_404(client):
 def test_list_deleted_folders_shows_only_trash(client):
     kept = client.post("/folders", json={"name": "Bleibt", "created_by": "alice"}).json()
     deleted = client.post("/folders", json={"name": "Weg", "created_by": "alice"}).json()
-    client.post(f"/folders/{deleted['id']}/trash", json={"deleted_by": "alice"})
+    client.post(
+        f"/folders/{deleted['id']}/trash",
+        json={"deleted_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
 
     response = client.get("/folders/deleted", params={"parent_id": "root"})
 
@@ -369,7 +389,11 @@ def test_trash_folder_persists_deleted_by(client):
     tatsächlich gespeichert - Voraussetzung für den persönlichen Papierkorb
     (2.5, P15-S1)."""
     created = client.post("/folders", json={"name": "Weg", "created_by": "alice"}).json()
-    client.post(f"/folders/{created['id']}/trash", json={"deleted_by": "alice"})
+    client.post(
+        f"/folders/{created['id']}/trash",
+        json={"deleted_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
 
     response = client.get(
         "/folders/deleted", params={"scope": "personal"}, headers={"X-DMS-Principal": "alice"}
@@ -383,8 +407,16 @@ def test_trash_folder_persists_deleted_by(client):
 def test_list_deleted_folders_personal_scope_hides_other_users_items(client):
     own = client.post("/folders", json={"name": "Eigener", "created_by": "alice"}).json()
     other = client.post("/folders", json={"name": "Fremder", "created_by": "bob"}).json()
-    client.post(f"/folders/{own['id']}/trash", json={"deleted_by": "alice"})
-    client.post(f"/folders/{other['id']}/trash", json={"deleted_by": "bob"})
+    client.post(
+        f"/folders/{own['id']}/trash",
+        json={"deleted_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
+    client.post(
+        f"/folders/{other['id']}/trash",
+        json={"deleted_by": "bob"},
+        headers={"X-DMS-Principal": "bob"},
+    )
 
     response = client.get(
         "/folders/deleted", params={"scope": "personal"}, headers={"X-DMS-Principal": "alice"}
@@ -407,7 +439,11 @@ def test_list_deleted_folders_personal_scope_without_principal_returns_401(clien
 
 def test_list_deleted_folders_admin_scope_requires_role(client):
     created = client.post("/folders", json={"name": "Weg", "created_by": "alice"}).json()
-    client.post(f"/folders/{created['id']}/trash", json={"deleted_by": "alice"})
+    client.post(
+        f"/folders/{created['id']}/trash",
+        json={"deleted_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
 
     response = client.get("/folders/deleted", params={"scope": "admin"})
     assert response.status_code == 403
@@ -435,7 +471,11 @@ def test_purge_folder_unknown_returns_404(client):
 
 def test_purge_folder_without_principal_returns_401(client):
     created = client.post("/folders", json={"name": "Weg", "created_by": "alice"}).json()
-    client.post(f"/folders/{created['id']}/trash", json={"deleted_by": "alice"})
+    client.post(
+        f"/folders/{created['id']}/trash",
+        json={"deleted_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
     # Same default-header override as the personal-scope test above.
     response = client.post(f"/folders/{created['id']}/purge", headers={"X-DMS-Principal": ""})
     assert response.status_code == 401
@@ -443,14 +483,22 @@ def test_purge_folder_without_principal_returns_401(client):
 
 def test_purge_folder_without_admin_role_returns_403(client):
     created = client.post("/folders", json={"name": "Weg", "created_by": "alice"}).json()
-    client.post(f"/folders/{created['id']}/trash", json={"deleted_by": "alice"})
+    client.post(
+        f"/folders/{created['id']}/trash",
+        json={"deleted_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
     response = client.post(f"/folders/{created['id']}/purge", headers={"X-DMS-Principal": "alice"})
     assert response.status_code == 403
 
 
 def test_purge_folder_with_admin_role_hard_deletes(client):
     created = client.post("/folders", json={"name": "Weg", "created_by": "alice"}).json()
-    client.post(f"/folders/{created['id']}/trash", json={"deleted_by": "alice"})
+    client.post(
+        f"/folders/{created['id']}/trash",
+        json={"deleted_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
 
     response = client.post(f"/folders/{created['id']}/purge", headers=DELETION_ADMIN_HEADERS)
     assert response.status_code == 204
@@ -473,7 +521,11 @@ def test_purge_folder_with_remaining_child_row_returns_409(client):
     würde sonst mit einer FK-Violation fehlschlagen."""
     parent = client.post("/folders", json={"name": "Eltern", "created_by": "alice"}).json()
     client.post("/folders", json={"name": "Kind", "parent_id": parent["id"], "created_by": "alice"})
-    client.post(f"/folders/{parent['id']}/trash", json={"deleted_by": "alice"})
+    client.post(
+        f"/folders/{parent['id']}/trash",
+        json={"deleted_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
 
     response = client.post(f"/folders/{parent['id']}/purge", headers=DELETION_ADMIN_HEADERS)
     assert response.status_code == 409

@@ -65,6 +65,7 @@ async def test_create_scope_lock_publishes_event(client, consumer):
     response = client.post(
         "/scope-locks",
         json={"resource_id": ROOT_RESOURCE_ID, "locked_by": "admin", "reason": "Migration"},
+        headers={"X-DMS-Principal": "admin"},
     )
     lock_id = response.json()["scope_lock"]["id"]
 
@@ -82,12 +83,19 @@ async def test_release_scope_lock_publishes_event(client, consumer):
     _grant_scope_lock_permission(client, "admin")
     _grant_scope_lock_permission(client, "admin2")
     lock = client.post(
-        "/scope-locks", json={"resource_id": ROOT_RESOURCE_ID, "locked_by": "admin"}
+        "/scope-locks",
+        json={"resource_id": ROOT_RESOURCE_ID, "locked_by": "admin"},
+        headers={"X-DMS-Principal": "admin"},
     ).json()["scope_lock"]
 
     received, got_message = await _collect_one(consumer, "permission.scope_lock.released")
 
-    client.request("DELETE", f"/scope-locks/{lock['id']}", json={"released_by": "admin2"})
+    client.request(
+        "DELETE",
+        f"/scope-locks/{lock['id']}",
+        json={"released_by": "admin2"},
+        headers={"X-DMS-Principal": "admin2"},
+    )
 
     await asyncio.wait_for(got_message.wait(), timeout=5)
     assert received[0].payload == {

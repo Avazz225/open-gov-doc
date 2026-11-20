@@ -395,6 +395,7 @@ def test_import_with_approval_required_defers_execution(authorized_principal):
             permission_client.post(
                 f"/approval-requests/{body['approval_request_id']}/reject",
                 json={"rejected_by": "supervisor"},
+                headers={"X-DMS-Principal": "supervisor"},
             )
     finally:
         httpx.put(

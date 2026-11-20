@@ -679,7 +679,10 @@ def test_release_lock_wrong_holder_returns_403(client):
     client.post(f"/documents/{document_id}/lock", json={"locked_by": "alice", "session_id": "s1"})
 
     response = client.request(
-        "DELETE", f"/documents/{document_id}/lock", json={"released_by": "bob"}
+        "DELETE",
+        f"/documents/{document_id}/lock",
+        json={"released_by": "bob"},
+        headers={"X-DMS-Principal": "bob"},
     )
     assert response.status_code == 403
 
@@ -692,6 +695,7 @@ def test_force_release_then_conflicting_checkin(client):
     force_response = client.post(
         f"/documents/{document_id}/lock/force-release",
         json={"released_by": "admin", "reason": "Mitarbeiter im Urlaub"},
+        headers={"X-DMS-Principal": "admin"},
     )
     assert force_response.status_code == 200
     assert force_response.json()["status"] == "released"
@@ -714,6 +718,27 @@ def test_force_release_then_conflicting_checkin(client):
     assert alice_response.json()["is_conflict"] is True
 
 
+def test_force_release_requires_the_document_lock_capability(client):
+    """P85-S2 (ADR 0240): force-releasing someone else's lock had no
+    permission check at all; now it needs `admin.document_lock`."""
+    document_id = upload(client).json()["id"]
+    client.post(f"/documents/{document_id}/lock", json={"locked_by": "alice", "session_id": "s1"})
+
+    unprivileged = client.post(
+        f"/documents/{document_id}/lock/force-release",
+        json={"released_by": "admin", "reason": "spoofed name"},
+        headers={"X-DMS-Principal": "mallory"},
+    )
+    assert unprivileged.status_code == 403
+
+    anonymous = client.post(
+        f"/documents/{document_id}/lock/force-release",
+        json={"released_by": "admin", "reason": "no principal"},
+        headers={"X-DMS-Principal": ""},  # the client fixture sets one by default
+    )
+    assert anonymous.status_code == 401
+
+
 def test_force_release_with_approval_required_defers_execution(client):
     """Vier-Augen-Retrofit (4.3, P6-S4): mit aktivierter Genehmigungspflicht
     wird die Sperre NICHT sofort aufgehoben - echte Integration gegen den
@@ -734,6 +759,7 @@ def test_force_release_with_approval_required_defers_execution(client):
         response = client.post(
             f"/documents/{document_id}/lock/force-release",
             json={"released_by": "admin", "reason": "Test"},
+            headers={"X-DMS-Principal": "admin"},
         )
         assert response.status_code == 200
         result = response.json()
@@ -1742,7 +1768,11 @@ def test_trash_document_immediate_by_default(client):
     `DELETE /documents/{id}`: sofortige Ausführung."""
     document_id = upload(client).json()["id"]
 
-    response = client.post(f"/documents/{document_id}/trash", json={"deleted_by": "alice"})
+    response = client.post(
+        f"/documents/{document_id}/trash",
+        json={"deleted_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
 
     assert response.status_code == 200
     result = response.json()
@@ -1763,7 +1793,11 @@ def test_trash_document_with_approval_required_defers_execution(client):
     try:
         document_id = upload(client).json()["id"]
 
-        response = client.post(f"/documents/{document_id}/trash", json={"deleted_by": "alice"})
+        response = client.post(
+            f"/documents/{document_id}/trash",
+            json={"deleted_by": "alice"},
+            headers={"X-DMS-Principal": "alice"},
+        )
 
         assert response.status_code == 200
         result = response.json()
@@ -1830,7 +1864,11 @@ def test_trash_document_persists_deleted_by(client):
     """P15-S0-Fund: `deleted_by` wurde bislang entgegengenommen, aber nie
     tatsächlich gespeichert - Voraussetzung für den persönlichen Papierkorb."""
     document_id = upload(client, folder_id="root").json()["id"]
-    client.post(f"/documents/{document_id}/trash", json={"deleted_by": "alice"})
+    client.post(
+        f"/documents/{document_id}/trash",
+        json={"deleted_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
 
     response = client.get(
         "/documents/deleted", params={"scope": "personal"}, headers={"X-DMS-Principal": "alice"}
@@ -1844,8 +1882,16 @@ def test_trash_document_persists_deleted_by(client):
 def test_list_deleted_documents_personal_scope_hides_other_users_items(client):
     own_id = upload(client, folder_id="root").json()["id"]
     other_id = upload(client, folder_id="root").json()["id"]
-    client.post(f"/documents/{own_id}/trash", json={"deleted_by": "alice"})
-    client.post(f"/documents/{other_id}/trash", json={"deleted_by": "bob"})
+    client.post(
+        f"/documents/{own_id}/trash",
+        json={"deleted_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
+    client.post(
+        f"/documents/{other_id}/trash",
+        json={"deleted_by": "bob"},
+        headers={"X-DMS-Principal": "bob"},
+    )
 
     response = client.get(
         "/documents/deleted", params={"scope": "personal"}, headers={"X-DMS-Principal": "alice"}
@@ -1867,7 +1913,11 @@ def test_list_deleted_documents_personal_scope_without_principal_returns_401(cli
 
 def test_list_deleted_documents_admin_scope_requires_role(client):
     document_id = upload(client, folder_id="root").json()["id"]
-    client.post(f"/documents/{document_id}/trash", json={"deleted_by": "alice"})
+    client.post(
+        f"/documents/{document_id}/trash",
+        json={"deleted_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
 
     response = client.get("/documents/deleted", params={"scope": "admin"})
     assert response.status_code == 403
@@ -1887,8 +1937,16 @@ def test_list_deleted_documents_admin_scope_excludes_classified(client):
     classified_id = upload(client, folder_id="root", object_type_id=str(classified_type_id)).json()[
         "id"
     ]
-    client.post(f"/documents/{regular_id}/trash", json={"deleted_by": "alice"})
-    client.post(f"/documents/{classified_id}/trash", json={"deleted_by": "alice"})
+    client.post(
+        f"/documents/{regular_id}/trash",
+        json={"deleted_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
+    client.post(
+        f"/documents/{classified_id}/trash",
+        json={"deleted_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
 
     response = client.get(
         "/documents/deleted",
@@ -1923,8 +1981,16 @@ def test_list_deleted_documents_admin_classified_scope_shows_only_classified(cli
     classified_id = upload(client, folder_id="root", object_type_id=str(classified_type_id)).json()[
         "id"
     ]
-    client.post(f"/documents/{regular_id}/trash", json={"deleted_by": "alice"})
-    client.post(f"/documents/{classified_id}/trash", json={"deleted_by": "alice"})
+    client.post(
+        f"/documents/{regular_id}/trash",
+        json={"deleted_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
+    client.post(
+        f"/documents/{classified_id}/trash",
+        json={"deleted_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
 
     response = client.get(
         "/documents/deleted",
@@ -1952,21 +2018,33 @@ def test_purge_document_unknown_returns_404(client):
 
 def test_purge_document_without_principal_returns_401(client):
     document_id = upload(client, folder_id="root").json()["id"]
-    client.post(f"/documents/{document_id}/trash", json={"deleted_by": "alice"})
+    client.post(
+        f"/documents/{document_id}/trash",
+        json={"deleted_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
     response = client.post(f"/documents/{document_id}/purge", headers={"X-DMS-Principal": ""})
     assert response.status_code == 401
 
 
 def test_purge_document_without_admin_role_returns_403(client):
     document_id = upload(client, folder_id="root").json()["id"]
-    client.post(f"/documents/{document_id}/trash", json={"deleted_by": "alice"})
+    client.post(
+        f"/documents/{document_id}/trash",
+        json={"deleted_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
     response = client.post(f"/documents/{document_id}/purge", headers={"X-DMS-Principal": "alice"})
     assert response.status_code == 403
 
 
 def test_purge_document_with_admin_role_hard_deletes(client):
     document_id = upload(client, folder_id="root").json()["id"]
-    client.post(f"/documents/{document_id}/trash", json={"deleted_by": "alice"})
+    client.post(
+        f"/documents/{document_id}/trash",
+        json={"deleted_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
 
     response = client.post(f"/documents/{document_id}/purge", headers=DELETION_ADMIN_HEADERS)
     assert response.status_code == 204
@@ -1988,7 +2066,11 @@ def test_purge_classified_document_requires_classified_deletion_permission(clien
     document_id = upload(client, folder_id="root", object_type_id=str(classified_type_id)).json()[
         "id"
     ]
-    client.post(f"/documents/{document_id}/trash", json={"deleted_by": "alice"})
+    client.post(
+        f"/documents/{document_id}/trash",
+        json={"deleted_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
 
     # The REGULAR trash permission does not suffice for a classified
     # document - `admin.deletion_classified` is a distinct capability
@@ -2188,6 +2270,7 @@ def test_declassify_approval_gate_accepts_a_second_distinct_holder_of_the_same_c
     approve_response = httpx.post(
         f"{PERMISSION_SERVICE_URL}/approval-requests/{request_id}/approve",
         json={"approved_by": DECLASSIFICATION_ADMIN_2_PRINCIPAL_ID},
+        headers={"X-DMS-Principal": DECLASSIFICATION_ADMIN_2_PRINCIPAL_ID},
     )
 
     assert approve_response.status_code == 200
@@ -2223,6 +2306,7 @@ def test_cascade_trash_and_restore_roundtrip(client):
             "via_folder_id": "root",
             "deleted_by": "system:folder-cascade",
         },
+        headers={"X-DMS-Principal": "system:folder-cascade"},
     )
     assert trash_response.status_code == 200
     assert trash_response.json()["document_ids"] == [document_id]
@@ -2231,6 +2315,7 @@ def test_cascade_trash_and_restore_roundtrip(client):
     restore_response = client.post(
         "/documents/cascade-restore",
         json={"via_folder_id": "root", "restored_by": "system:folder-cascade"},
+        headers={"X-DMS-Principal": "system:folder-cascade"},
     )
     assert restore_response.status_code == 200
     assert restore_response.json()["document_ids"] == [document_id]
@@ -2294,7 +2379,9 @@ def test_legal_hold_lifecycle(client):
         headers=LEGAL_HOLD_ADMIN_HEADERS,
     )
     assert release_response.status_code == 200
-    assert release_response.json()["released_by"] == "bob"
+    # The actor is the principal, the body's "bob" is ignored (P85-S2, ADR 0240).
+    assert release_response.json()["released_by"] == LEGAL_HOLD_ADMIN_HEADERS["X-DMS-Principal"]
+    assert hold["set_by"] == LEGAL_HOLD_ADMIN_HEADERS["X-DMS-Principal"]
 
     list_after_release = client.get(
         "/legal-holds", params={"document_id": document_id, "active_only": True}
@@ -2372,7 +2459,11 @@ def test_records_quarantine_lifecycle(client):
         headers=RECORDS_QUARANTINE_ADMIN_HEADERS,
     )
     assert release_response.status_code == 200
-    assert release_response.json()["released_by"] == "bob"
+    # The actor is the principal, the body's "bob" is ignored (P85-S2, ADR 0240).
+    assert (
+        release_response.json()["released_by"]
+        == RECORDS_QUARANTINE_ADMIN_HEADERS["X-DMS-Principal"]
+    )
 
     list_after_release = client.get(
         "/records-quarantine",

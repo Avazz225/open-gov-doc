@@ -4,7 +4,12 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Literal
 
-from dms_common import configure_logging
+from dms_common import (
+    ActingIdentity,
+    configure_logging,
+    log_ignored_actor_field,
+    require_acting_identity,
+)
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
 from dms_metrics_client import (
@@ -268,9 +273,18 @@ async def get_session() -> AsyncIterator[AsyncSession]:
         yield session
 
 
-async def publish_event(event_type: str, payload: dict, actor: str | None = None) -> None:
+async def publish_event(
+    event_type: str, payload: dict, actor: str | None = None, on_behalf_of: str | None = None
+) -> None:
+    """`on_behalf_of` (P85-S2, ADR 0240): set when a service acted for a user -
+    then `actor` is the service, the same meaning the field has for
+    delegations (who acted, for whom)."""
     event = Event(
-        event_type=event_type, service_name=settings.service_name, payload=payload, actor=actor
+        event_type=event_type,
+        service_name=settings.service_name,
+        payload=payload,
+        actor=actor,
+        on_behalf_of=on_behalf_of,
     )
     await app.state.publisher.publish(event_type, event.to_bytes())
 
@@ -863,7 +877,12 @@ async def check_batch(
 
 
 async def _request_approval(
-    session: AsyncSession, *, action_type: str, initiated_by: str, payload: dict
+    session: AsyncSession,
+    *,
+    action_type: str,
+    initiated_by: str,
+    payload: dict,
+    via_service: str | None = None,
 ) -> ApprovalRequest:
     """Shared creation/publish path for `POST /approval-requests` and every
     gated endpoint (scope locks here, `document-service`'s force-unlock via
@@ -882,7 +901,10 @@ async def _request_approval(
             "action_type": request.action_type,
             "initiated_by": request.initiated_by,
         },
-        actor=request.initiated_by,
+        # A service creating the request for a user (P85-S2): the service
+        # acted, on behalf of the initiator.
+        actor=via_service or request.initiated_by,
+        on_behalf_of=request.initiated_by if via_service else None,
     )
     return request
 
@@ -931,13 +953,26 @@ async def put_approval_config(
 
 @app.post("/approval-requests", response_model=ApprovalRequestOut, status_code=201)
 async def create_approval_request(
-    payload: ApprovalRequestCreate, session: AsyncSession = Depends(get_session)
+    payload: ApprovalRequestCreate,
+    identity: ActingIdentity = Depends(require_acting_identity),
+    session: AsyncSession = Depends(get_session),
 ) -> ApprovalRequestOut:
+    """The initiator is the acting identity (P85-S2, ADR 0240): a service
+    creating a request for a user sends `X-DMS-On-Behalf-Of`, which makes
+    that user the initiator. `payload.initiated_by` is ignored."""
+    log_ignored_actor_field(
+        logger,
+        route="POST /approval-requests",
+        field="initiated_by",
+        value=payload.initiated_by,
+        identity=identity,
+    )
     return await _request_approval(
         session,
         action_type=payload.action_type,
-        initiated_by=payload.initiated_by,
+        initiated_by=identity.actor,
         payload=payload.payload,
+        via_service=identity.principal if identity.on_behalf_of else None,
     )
 
 
@@ -962,12 +997,23 @@ async def get_approval_request(
 
 @app.post("/approval-requests/{request_id}/approve", response_model=ApprovalRequestOut)
 async def approve_approval_request(
-    request_id: str, payload: ApprovalDecision, session: AsyncSession = Depends(get_session)
+    request_id: str,
+    payload: ApprovalDecision,
+    identity: ActingIdentity = Depends(require_acting_identity),
+    session: AsyncSession = Depends(get_session),
 ) -> ApprovalRequestOut:
+    """Four-eyes on verified identities (P85-S2, ADR 0240): the approver is
+    the acting identity - before, `approved_by` from the body, so anyone could
+    approve their own request under another name."""
+    log_ignored_actor_field(
+        logger,
+        route="POST /approval-requests/{id}/approve",
+        field="approved_by",
+        value=payload.approved_by,
+        identity=identity,
+    )
     try:
-        request = await repository.approve_request(
-            session, request_id, approved_by=payload.approved_by
-        )
+        request = await repository.approve_request(session, request_id, approved_by=identity.actor)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except repository.NotInitiatorAllowedError as exc:
@@ -993,14 +1039,29 @@ async def approve_approval_request(
 
 @app.post("/approval-requests/{request_id}/reject", response_model=ApprovalRequestOut)
 async def reject_approval_request(
-    request_id: str, payload: ApprovalRejection, session: AsyncSession = Depends(get_session)
+    request_id: str,
+    payload: ApprovalRejection,
+    identity: ActingIdentity = Depends(require_acting_identity),
+    session: AsyncSession = Depends(get_session),
 ) -> ApprovalRequestOut:
+    """The rejecter is the acting identity, and since P85-S2 (ADR 0240)
+    rejecting needs the same entitlement as approving - before, anyone could
+    reject any pending request. The initiator may always withdraw their own."""
+    log_ignored_actor_field(
+        logger,
+        route="POST /approval-requests/{id}/reject",
+        field="rejected_by",
+        value=payload.rejected_by,
+        identity=identity,
+    )
     try:
         request = await repository.reject_request(
-            session, request_id, rejected_by=payload.rejected_by, reason=payload.reason
+            session, request_id, rejected_by=identity.actor, reason=payload.reason
         )
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except repository.MissingRequiredPermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except repository.ApprovalRequestNotPendingError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     await session.commit()
@@ -1020,19 +1081,27 @@ async def reject_approval_request(
 
 @app.post("/scope-locks", response_model=ScopeLockActionResult, status_code=201)
 async def create_scope_lock(
-    payload: ScopeLockCreate, session: AsyncSession = Depends(get_session)
+    payload: ScopeLockCreate,
+    identity: ActingIdentity = Depends(require_acting_identity),
+    session: AsyncSession = Depends(get_session),
 ) -> ScopeLockActionResult:
     """Self-gating since P19-S6 (ADR 0071): the baseline capability check
     RUNS BEFORE the optional four-eyes branch below - without this ordering,
     a principal with no permission at all could still trigger an open
-    approval request. `payload.locked_by` is already the established actor
-    source for the four-eyes branch here (`initiated_by`); the same source
-    is reused for the new check instead of an additional `X-DMS-Principal`
-    header."""
-    is_superuser = await _is_active_superuser(payload.locked_by)
+    approval request. Since P85-S2 (ADR 0240) the actor is the request
+    principal, not `locked_by` (ignored)."""
+    log_ignored_actor_field(
+        logger,
+        route="POST /scope-locks",
+        field="locked_by",
+        value=payload.locked_by,
+        identity=identity,
+    )
+    locked_by = identity.actor
+    is_superuser = await _is_active_superuser(locked_by)
     try:
         await repository.require_capability(
-            session, payload.locked_by, "admin.user_management", is_superuser=is_superuser
+            session, locked_by, "admin.user_management", is_superuser=is_superuser
         )
     except repository.MissingRequiredPermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
@@ -1042,10 +1111,10 @@ async def create_scope_lock(
         request = await _request_approval(
             session,
             action_type="permission.scope_lock.create",
-            initiated_by=payload.locked_by,
+            initiated_by=locked_by,
             payload={
                 "resource_id": payload.resource_id,
-                "locked_by": payload.locked_by,
+                "locked_by": locked_by,
                 "reason": payload.reason,
                 "blocks_read": payload.blocks_read,
                 "expires_at": payload.expires_at.isoformat() if payload.expires_at else None,
@@ -1057,7 +1126,7 @@ async def create_scope_lock(
         lock = await repository.create_scope_lock(
             session,
             resource_id=payload.resource_id,
-            locked_by=payload.locked_by,
+            locked_by=locked_by,
             reason=payload.reason,
             blocks_read=payload.blocks_read,
             expires_at=payload.expires_at,
@@ -1081,14 +1150,26 @@ async def create_scope_lock(
 
 @app.delete("/scope-locks/{lock_id}", response_model=ScopeLockActionResult)
 async def release_scope_lock(
-    lock_id: int, payload: ScopeLockRelease, session: AsyncSession = Depends(get_session)
+    lock_id: int,
+    payload: ScopeLockRelease | None = None,
+    identity: ActingIdentity = Depends(require_acting_identity),
+    session: AsyncSession = Depends(get_session),
 ) -> ScopeLockActionResult:
     """Self-gating since P19-S6 (ADR 0071) - see `create_scope_lock` above
-    for the rationale behind the ordering and actor source."""
-    is_superuser = await _is_active_superuser(payload.released_by)
+    for the rationale behind the ordering. Actor: the request principal
+    (P85-S2, ADR 0240); the body is optional and its `released_by` ignored."""
+    log_ignored_actor_field(
+        logger,
+        route="DELETE /scope-locks/{id}",
+        field="released_by",
+        value=payload.released_by if payload else None,
+        identity=identity,
+    )
+    released_by = identity.actor
+    is_superuser = await _is_active_superuser(released_by)
     try:
         await repository.require_capability(
-            session, payload.released_by, "admin.user_management", is_superuser=is_superuser
+            session, released_by, "admin.user_management", is_superuser=is_superuser
         )
     except repository.MissingRequiredPermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
@@ -1098,13 +1179,13 @@ async def release_scope_lock(
         request = await _request_approval(
             session,
             action_type="permission.scope_lock.release",
-            initiated_by=payload.released_by,
-            payload={"lock_id": lock_id, "released_by": payload.released_by},
+            initiated_by=released_by,
+            payload={"lock_id": lock_id, "released_by": released_by},
         )
         return ScopeLockActionResult(status="pending_approval", approval_request_id=request.id)
 
     try:
-        lock = await repository.release_scope_lock(session, lock_id, payload.released_by)
+        lock = await repository.release_scope_lock(session, lock_id, released_by)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     await session.commit()
@@ -1143,18 +1224,29 @@ async def get_maintenance_mode(session: AsyncSession = Depends(get_session)) -> 
 
 @app.post("/maintenance-mode/trigger", response_model=MaintenanceModeActionResult, status_code=201)
 async def trigger_maintenance_mode(
-    payload: MaintenanceModeTrigger, session: AsyncSession = Depends(get_session)
+    payload: MaintenanceModeTrigger,
+    identity: ActingIdentity = Depends(require_acting_identity),
+    session: AsyncSession = Depends(get_session),
 ) -> MaintenanceModeActionResult:
     """Emergency shutdown trigger (4.8, P6-S6): unlike scope locks/force-
     unlock (P6-S4), even the *direct* path (without four-eyes) already
     requires a baseline permission check - "freely configurable who may
     trigger it, no hard-wired role" (4.8) is not an optional addition like
-    for 4.3, but mandatory from the outset."""
-    is_superuser = await _is_active_superuser(payload.triggered_by)
+    for 4.3, but mandatory from the outset. Actor: the request principal
+    (P85-S2, ADR 0240), `payload.triggered_by` is ignored."""
+    log_ignored_actor_field(
+        logger,
+        route="POST /maintenance-mode/trigger",
+        field="triggered_by",
+        value=payload.triggered_by,
+        identity=identity,
+    )
+    triggered_by = identity.actor
+    is_superuser = await _is_active_superuser(triggered_by)
     try:
         await repository.require_capability(
             session,
-            payload.triggered_by,
+            triggered_by,
             "system.not_shutdown.trigger",
             is_superuser=is_superuser,
         )
@@ -1166,15 +1258,15 @@ async def trigger_maintenance_mode(
         request = await _request_approval(
             session,
             action_type="system.not_shutdown.trigger",
-            initiated_by=payload.triggered_by,
-            payload={"triggered_by": payload.triggered_by, "reason": payload.reason},
+            initiated_by=triggered_by,
+            payload={"triggered_by": triggered_by, "reason": payload.reason},
         )
         return MaintenanceModeActionResult(
             status="pending_approval", approval_request_id=request.id
         )
 
     mode = await repository.activate_maintenance_mode(
-        session, triggered_by=payload.triggered_by, reason=payload.reason
+        session, triggered_by=triggered_by, reason=payload.reason
     )
     await session.commit()
     await publish_event(
@@ -1187,21 +1279,32 @@ async def trigger_maintenance_mode(
 
 @app.post("/maintenance-mode/lift", response_model=MaintenanceModeOut)
 async def lift_maintenance_mode(
-    payload: MaintenanceModeLift, session: AsyncSession = Depends(get_session)
+    payload: MaintenanceModeLift | None = None,
+    identity: ActingIdentity = Depends(require_acting_identity),
+    session: AsyncSession = Depends(get_session),
 ) -> MaintenanceModeOut:
     """Only the currently active superuser may lift it (4.8) - their
     identity lives in auth-service (P6-S5), hence the cross-service check
     instead of a second, independent source of truth here. Since P63-S1,
     reuses the shared `_is_active_superuser` helper (this endpoint was the
     original, one-off inline version every other direct
-    `require_capability` call site was missing)."""
-    if not await _is_active_superuser(payload.lifted_by):
+    `require_capability` call site was missing). Actor: the request principal
+    (P85-S2, ADR 0240), `payload.lifted_by` is ignored."""
+    log_ignored_actor_field(
+        logger,
+        route="POST /maintenance-mode/lift",
+        field="lifted_by",
+        value=payload.lifted_by if payload else None,
+        identity=identity,
+    )
+    lifted_by = identity.actor
+    if not await _is_active_superuser(lifted_by):
         raise HTTPException(
             status_code=403,
             detail="Nur der aktuell aktive Superuser darf den Wartungsmodus aufheben",
         )
 
-    mode = await repository.lift_maintenance_mode(session, lifted_by=payload.lifted_by)
+    mode = await repository.lift_maintenance_mode(session, lifted_by=lifted_by)
     await session.commit()
     await publish_event(
         "permission.maintenance_mode.lifted",

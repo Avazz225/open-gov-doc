@@ -3580,13 +3580,46 @@ accepted that as a scaffold habit. The user decided to bind all of them to the g
     - migration inbound is a federated exception (`peer:<installation>`, the remote name kept as
       `origin_created_by`).
   - **Split:** four build sessions instead of three, because the client side alone is sizeable.
-- **P85-S2 — Foundation and security-critical routes (19).**
-  - `acting_principal()`, the service-principal list and on-behalf support in `dms-common`.
-  - permission-service: approval create/approve/reject, scope locks, maintenance trigger/lift.
-  - document-service: force-release (plus a real permission check), trash, delete, cascade, legal holds,
-    records quarantine.
-  - folder-service: trash and legal holds.
-  - Their internal callers move to on-behalf.
+- **P85-S2 — Foundation and security-critical routes (19).** ✅ **Done.**
+  - **`dms-common` `acting.py`:**
+    - `require_acting_identity` (401 without a principal);
+    - `SERVICE_PRINCIPALS` (checked against `services/` by a test);
+    - `X-DMS-On-Behalf-Of`, honored only from service principals;
+    - `acting_headers` and `log_ignored_actor_field`;
+    - 7 tests.
+  - **permission-service:**
+    - approval create/approve/reject take the principal;
+    - **reject needs the approval entitlement** (initiators may withdraw);
+    - scope locks and maintenance trigger/lift likewise;
+    - `permission.approval.requested` carries the service as `actor` and the user as `on_behalf_of` for
+      service-created requests.
+  - **document-service:** force-release (**new role `domain-admin-document-locks` / `admin.document_lock`**;
+    before, there was no check at all), trash, `DELETE`, cascade trash/restore (on-behalf events), legal
+    holds and records quarantine.
+  - **folder-service:** trash and legal holds.
+  - **Callers:**
+    - the seven approval clients (auth, config, document, folder, migration, query, workflow) send their
+      own principal plus `X-DMS-On-Behalf-Of`, with service and `system:*` initiators acting as the
+      service;
+    - folder-service's cascade client, which before sent no principal at all;
+    - migration-service's scope locks already used `migration-service` on both sides.
+  - Body fields are optional and ignored, with `actor_field_ignored` logged.
+  - **Tests:**
+    - an AST script added `X-DMS-Principal` to every test call naming an actor in its body;
+    - expectations changed where the principal now wins (legal hold, quarantine);
+    - new tests: spoofed approver, initiator from principal, reject entitlement and withdrawal, on-behalf
+      by a service but not by a user, 401 on all routes, force-release capability, on-behalf event.
+  - **Results:**
+    - permission 201, document 425, folder 178, config 56, migration 21, query 56, workflow 240, auth
+      164;
+    - e2e 32/32;
+    - ruff clean;
+    - 8 images rebuilt.
+
+    The config-service suite tests the live container, which only passed after the rebuild. One
+    migration run failed transiently right after the container restarts.
+  - **Live through the gateway:** a body `initiated_by` and a client-sent `X-DMS-On-Behalf-Of` were both
+    ignored (initiator = the token's `sub`), and `actor_field_ignored` was logged.
 - **P85-S3 — Workflow, cases, signatures and the rest (12).** workflow-service (instance create, claim,
   complete), case-service (6 routes), signature-service (signer = acting), ocr-service `reviewed`, the
   auth-service user-tracking config, and their callers.

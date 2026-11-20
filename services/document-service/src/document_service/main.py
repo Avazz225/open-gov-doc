@@ -10,7 +10,12 @@ from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime, timedelta
 
 import httpx
-from dms_common import configure_logging
+from dms_common import (
+    ActingIdentity,
+    configure_logging,
+    log_ignored_actor_field,
+    require_acting_identity,
+)
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
 from dms_metrics_client import (
@@ -1074,14 +1079,22 @@ async def get_session() -> AsyncIterator[AsyncSession]:
 
 
 async def publish_event(
-    event_type: str, subject: str, payload: dict, actor: str | None = None
+    event_type: str,
+    subject: str,
+    payload: dict,
+    actor: str | None = None,
+    on_behalf_of: str | None = None,
 ) -> None:
+    """`on_behalf_of` (P85-S2, ADR 0240): set when a service acted for a user -
+    then `actor` is the service, the same meaning the field has for
+    delegations (who acted, for whom)."""
     event = Event(
         event_type=event_type,
         service_name=settings.service_name,
         subject=subject,
         payload=payload,
         actor=actor,
+        on_behalf_of=on_behalf_of,
     )
     await app.state.event_bus.publish(event_type, event.to_bytes())
 
@@ -2163,7 +2176,9 @@ async def purge_document(
 
 @app.post("/documents/cascade-trash", response_model=CascadeResult)
 async def cascade_trash(
-    payload: CascadeTrashRequest, session: AsyncSession = Depends(get_session)
+    payload: CascadeTrashRequest,
+    identity: ActingIdentity = Depends(require_acting_identity),
+    session: AsyncSession = Depends(get_session),
 ) -> CascadeResult:
     """Internal service-to-service call from `folder-service` (5.2, since
     P7-S1b): soft-deletes all active documents in the given folders when
@@ -2172,34 +2187,56 @@ async def cascade_trash(
     afterwards is already consistent. No own role check, same trust
     relationship as the existing `FolderClient` call in the reverse
     direction."""
+    log_ignored_actor_field(
+        logger,
+        route="POST /documents/cascade-trash",
+        field="deleted_by",
+        value=payload.deleted_by,
+        identity=identity,
+    )
+    actor_deleted_by = identity.actor
     document_ids = await repository.cascade_trash_by_folder_ids(
         session,
         payload.folder_ids,
         via_folder_id=payload.via_folder_id,
-        deleted_by=payload.deleted_by,
+        deleted_by=actor_deleted_by,
     )
     await session.commit()
     for document_id in document_ids:
         await publish_event(
             "document.deleted",
             subject=document_id,
-            payload={"deleted_by": payload.deleted_by},
-            actor=payload.deleted_by,
+            payload={"deleted_by": actor_deleted_by},
+            actor=identity.principal,
+            on_behalf_of=identity.on_behalf_of,
         )
     return CascadeResult(document_ids=document_ids)
 
 
 @app.post("/documents/cascade-restore", response_model=CascadeResult)
 async def cascade_restore(
-    payload: CascadeRestoreRequest, session: AsyncSession = Depends(get_session)
+    payload: CascadeRestoreRequest,
+    identity: ActingIdentity = Depends(require_acting_identity),
+    session: AsyncSession = Depends(get_session),
 ) -> CascadeResult:
     """Counterpart to `cascade_trash` - when restoring a folder, restores
     only the documents that were cascade-deleted as a result."""
+    log_ignored_actor_field(
+        logger,
+        route="POST /documents/cascade-restore",
+        field="restored_by",
+        value=payload.restored_by,
+        identity=identity,
+    )
     document_ids = await repository.cascade_restore_by_via_folder_id(session, payload.via_folder_id)
     await session.commit()
     for document_id in document_ids:
         await publish_event(
-            "document.restored", subject=document_id, payload={}, actor=payload.restored_by
+            "document.restored",
+            subject=document_id,
+            payload={},
+            actor=identity.principal,
+            on_behalf_of=identity.on_behalf_of,
         )
     return CascadeResult(document_ids=document_ids)
 
@@ -3175,25 +3212,36 @@ async def redact_document(
 @app.delete("/documents/{document_id}", response_model=DocumentOut)
 async def delete_document(
     document_id: str,
-    deleted_by: str,
+    deleted_by: str | None = None,
     x_dms_principal: str = Header(default=""),
+    identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> DocumentOut:
+    log_ignored_actor_field(
+        logger,
+        route="DELETE /documents/{id}",
+        field="deleted_by",
+        value=deleted_by,
+        identity=identity,
+    )
+    actor_deleted_by = identity.actor
     try:
         existing = await repository.get_document(session, document_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     await _require_document_permission(x_dms_principal, existing.id, access_type="write")
     try:
-        document = await repository.delete_document(session, document_id, deleted_by=deleted_by)
+        document = await repository.delete_document(
+            session, document_id, deleted_by=actor_deleted_by
+        )
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     await session.commit()
     await publish_event(
         "document.deleted",
         subject=document_id,
-        payload={"deleted_by": deleted_by},
-        actor=deleted_by,
+        payload={"deleted_by": actor_deleted_by},
+        actor=actor_deleted_by,
     )
     return document
 
@@ -3203,6 +3251,7 @@ async def trash_document(
     document_id: str,
     payload: TrashRequest,
     x_dms_principal: str = Header(default=""),
+    identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> TrashResult:
     """Deletion request workflow for regular users (5.2, since P7-S1c) -
@@ -3217,6 +3266,14 @@ async def trash_document(
     Post-Roadmap Phase 38 Session 4, additionally requires `document.write`
     on the document's own folder (previously ungated, unlike `DELETE
     /documents/{id}` above)."""
+    log_ignored_actor_field(
+        logger,
+        route="POST /documents/{id}/trash",
+        field="deleted_by",
+        value=payload.deleted_by,
+        identity=identity,
+    )
+    actor_deleted_by = identity.actor
     try:
         existing = await repository.get_document(session, document_id)
     except repository.NotFoundError as exc:
@@ -3225,14 +3282,14 @@ async def trash_document(
     if await app.state.approval_client.requires_approval("document.delete"):
         request = await app.state.approval_client.create_request(
             action_type="document.delete",
-            initiated_by=payload.deleted_by,
-            payload={"document_id": document_id, "deleted_by": payload.deleted_by},
+            initiated_by=actor_deleted_by,
+            payload={"document_id": document_id, "deleted_by": actor_deleted_by},
         )
         return TrashResult(status="pending_approval", approval_request_id=request["id"])
 
     try:
         document = await repository.delete_document(
-            session, document_id, deleted_by=payload.deleted_by
+            session, document_id, deleted_by=actor_deleted_by
         )
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -3240,8 +3297,8 @@ async def trash_document(
     await publish_event(
         "document.deleted",
         subject=document_id,
-        payload={"deleted_by": payload.deleted_by},
-        actor=payload.deleted_by,
+        payload={"deleted_by": actor_deleted_by},
+        actor=actor_deleted_by,
     )
     return TrashResult(status="trashed", document=document)
 
@@ -3356,6 +3413,20 @@ async def put_retention(
     return updated
 
 
+async def _require_document_lock_permission(x_dms_principal: str) -> None:
+    """Force-releasing someone else's lock (4.2) had NO permission check at
+    all until P85-S2 (ADR 0240) - any authenticated principal could do it.
+    Now gated by its own domain admin capability `admin.document_lock`
+    (role "domain-admin-document-locks"), same "own domain per admin
+    concern" precedent as `admin.legal_hold` below."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    if not await app.state.permission_client.has_permission(x_dms_principal, "admin.document_lock"):
+        raise HTTPException(
+            status_code=403, detail="Fehlende Domain-Admin-Rolle 'Dokumentsperren-Verwaltung'"
+        )
+
+
 async def _require_legal_hold_permission(x_dms_principal: str) -> None:
     """RBAC (post-roadmap Phase 19 Session 10, ADR 0075) - setting/releasing
     a legal hold previously had NO permission check at all. Checks the new
@@ -3376,15 +3447,20 @@ async def _require_legal_hold_permission(x_dms_principal: str) -> None:
 async def create_legal_hold(
     payload: LegalHoldCreate,
     x_dms_principal: str = Header(default=""),
+    identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> LegalHoldOut:
     """Set a legal hold (5.2, since P7-S1) - overrides any due action in
     the poll loop until it is released again. Gated by `admin.legal_hold`
     since P19-S10, see `_require_legal_hold_permission`."""
+    log_ignored_actor_field(
+        logger, route="POST /legal-holds", field="set_by", value=payload.set_by, identity=identity
+    )
+    actor_set_by = identity.actor
     await _require_legal_hold_permission(x_dms_principal)
     try:
         hold = await repository.create_legal_hold(
-            session, payload.document_id, set_by=payload.set_by, reason=payload.reason
+            session, payload.document_id, set_by=actor_set_by, reason=payload.reason
         )
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -3392,8 +3468,8 @@ async def create_legal_hold(
     await publish_event(
         "document.legal_hold.set",
         subject=payload.document_id,
-        payload={"set_by": payload.set_by, "reason": payload.reason},
-        actor=payload.set_by,
+        payload={"set_by": actor_set_by, "reason": payload.reason},
+        actor=actor_set_by,
     )
     return hold
 
@@ -3403,13 +3479,20 @@ async def release_legal_hold(
     hold_id: str,
     payload: LegalHoldReleaseRequest,
     x_dms_principal: str = Header(default=""),
+    identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> LegalHoldOut:
+    log_ignored_actor_field(
+        logger,
+        route="POST /legal-holds/{id}/release",
+        field="released_by",
+        value=payload.released_by,
+        identity=identity,
+    )
+    actor_released_by = identity.actor
     await _require_legal_hold_permission(x_dms_principal)
     try:
-        hold = await repository.release_legal_hold(
-            session, hold_id, released_by=payload.released_by
-        )
+        hold = await repository.release_legal_hold(session, hold_id, released_by=actor_released_by)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except repository.AlreadyReleasedError as exc:
@@ -3418,8 +3501,8 @@ async def release_legal_hold(
     await publish_event(
         "document.legal_hold.released",
         subject=hold.document_id,
-        payload={"released_by": payload.released_by},
-        actor=payload.released_by,
+        payload={"released_by": actor_released_by},
+        actor=actor_released_by,
     )
     return hold
 
@@ -3465,6 +3548,7 @@ async def _require_records_quarantine_permission(x_dms_principal: str) -> None:
 async def create_records_quarantine(
     payload: RecordsQuarantineCreate,
     x_dms_principal: str = Header(default=""),
+    identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> RecordsQuarantineOut:
     """Move a document into records quarantine (14.2, post-roadmap phase 31
@@ -3472,12 +3556,20 @@ async def create_records_quarantine(
     (`repository.list_documents_by_folder`) and, if `auto_delete_at` is
     set, schedules its permanent deletion (see `_retention_poll_loop`'s new
     phase below) unless an active legal hold blocks it."""
+    log_ignored_actor_field(
+        logger,
+        route="POST /records-quarantine",
+        field="set_by",
+        value=payload.set_by,
+        identity=identity,
+    )
+    actor_set_by = identity.actor
     await _require_records_quarantine_permission(x_dms_principal)
     try:
         quarantine = await repository.create_records_quarantine(
             session,
             payload.document_id,
-            set_by=payload.set_by,
+            set_by=actor_set_by,
             reason=payload.reason,
             auto_delete_at=payload.auto_delete_at,
         )
@@ -3490,13 +3582,13 @@ async def create_records_quarantine(
         "document.records_quarantine.set",
         subject=payload.document_id,
         payload={
-            "set_by": payload.set_by,
+            "set_by": actor_set_by,
             "reason": payload.reason,
             "auto_delete_at": payload.auto_delete_at.isoformat()
             if payload.auto_delete_at
             else None,
         },
-        actor=payload.set_by,
+        actor=actor_set_by,
     )
     return quarantine
 
@@ -3506,12 +3598,21 @@ async def release_records_quarantine(
     quarantine_id: str,
     payload: RecordsQuarantineReleaseRequest,
     x_dms_principal: str = Header(default=""),
+    identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> RecordsQuarantineOut:
+    log_ignored_actor_field(
+        logger,
+        route="POST /records-quarantine/{id}/release",
+        field="released_by",
+        value=payload.released_by,
+        identity=identity,
+    )
+    actor_released_by = identity.actor
     await _require_records_quarantine_permission(x_dms_principal)
     try:
         quarantine = await repository.release_records_quarantine(
-            session, quarantine_id, released_by=payload.released_by
+            session, quarantine_id, released_by=actor_released_by
         )
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -3521,8 +3622,8 @@ async def release_records_quarantine(
     await publish_event(
         "document.records_quarantine.released",
         subject=quarantine.document_id,
-        payload={"released_by": payload.released_by},
-        actor=payload.released_by,
+        payload={"released_by": actor_released_by},
+        actor=actor_released_by,
     )
     return quarantine
 
@@ -4324,7 +4425,10 @@ async def release_lock(
 
 @app.post("/documents/{document_id}/lock/force-release", response_model=ForceReleaseResult)
 async def force_release_lock(
-    document_id: str, payload: LockForceReleaseRequest, session: AsyncSession = Depends(get_session)
+    document_id: str,
+    payload: LockForceReleaseRequest,
+    identity: ActingIdentity = Depends(require_acting_identity),
+    session: AsyncSession = Depends(get_session),
 ) -> ForceReleaseResult:
     """Administrative force unlock (4.2) - a particularly sensitive audit
     case. Since P6-S4 optionally gated by the generic four-eyes mechanism
@@ -4334,13 +4438,22 @@ async def force_release_lock(
     `consumer.py` once the `permission.approval.approved` event arrives. By
     default (no configuration), behavior is unchanged: immediate
     execution."""
+    log_ignored_actor_field(
+        logger,
+        route="POST /documents/{id}/lock/force-release",
+        field="released_by",
+        value=payload.released_by,
+        identity=identity,
+    )
+    actor_released_by = identity.actor
+    await _require_document_lock_permission(identity.principal)
     if await app.state.approval_client.requires_approval("document.force_unlock"):
         request = await app.state.approval_client.create_request(
             action_type="document.force_unlock",
-            initiated_by=payload.released_by,
+            initiated_by=actor_released_by,
             payload={
                 "document_id": document_id,
-                "released_by": payload.released_by,
+                "released_by": actor_released_by,
                 "reason": payload.reason,
             },
         )
@@ -4356,10 +4469,10 @@ async def force_release_lock(
         subject=document_id,
         payload={
             "original_locked_by": original_lock.locked_by,
-            "released_by": payload.released_by,
+            "released_by": actor_released_by,
             "reason": payload.reason,
         },
-        actor=payload.released_by,
+        actor=actor_released_by,
     )
     return ForceReleaseResult(status="released", lock=original_lock)
 

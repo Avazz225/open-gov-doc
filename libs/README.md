@@ -4,7 +4,7 @@ Shared Python packages used by multiple services — explicitly **not** shared b
 
 Created in P0-S2:
 
-- `dms-common/` — settings, logging, OpenTelemetry base
+- `dms-common/` — settings, logging, OpenTelemetry base; since P85-S2 also `acting.py`: the acting identity (`require_acting_identity`, `acting_headers`, `SERVICE_PRINCIPALS`, `X-DMS-On-Behalf-Of`, [ADR 0240](../docs/adr/0240-acting-identity-from-verified-principal.md))
 - `dms-db-base/` — SQLAlchemy async setup, schema-per-service convention
 - `dms-eventbus-client/` — publish/consume interface over NATS JetStream (swappable, Concept 3.4)
 - `dms-auth-client/` — OIDC/JWT validation against Keycloak (Concept 4.4)

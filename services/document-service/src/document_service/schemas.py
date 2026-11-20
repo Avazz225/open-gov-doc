@@ -113,7 +113,8 @@ class LockReleaseRequest(BaseModel):
 
 
 class LockForceReleaseRequest(BaseModel):
-    released_by: str
+    # Ignored since P85-S2 (ADR 0240): the actor is the request principal.
+    released_by: str | None = None
     reason: str | None = None
 
 
@@ -128,7 +129,8 @@ class ForceReleaseResult(BaseModel):
 
 
 class TrashRequest(BaseModel):
-    deleted_by: str
+    # Ignored since P85-S2 (ADR 0240): the actor is the request principal.
+    deleted_by: str | None = None
 
 
 class TrashResult(BaseModel):
@@ -194,12 +196,14 @@ class RetentionUpdate(BaseModel):
 
 class LegalHoldCreate(BaseModel):
     document_id: str
-    set_by: str
+    # Ignored since P85-S2 (ADR 0240): the actor is the request principal.
+    set_by: str | None = None
     reason: str | None = None
 
 
 class LegalHoldReleaseRequest(BaseModel):
-    released_by: str
+    # Ignored since P85-S2 (ADR 0240): the actor is the request principal.
+    released_by: str | None = None
 
 
 class LegalHoldOut(BaseModel):
@@ -220,11 +224,13 @@ class RecordsQuarantineCreate(BaseModel):
     # `None` = purely a visibility restriction, no scheduled destruction
     # (post-roadmap phase 31 session 5, ADR 0116).
     auto_delete_at: datetime | None = None
-    set_by: str
+    # Ignored since P85-S2 (ADR 0240): the actor is the request principal.
+    set_by: str | None = None
 
 
 class RecordsQuarantineReleaseRequest(BaseModel):
-    released_by: str
+    # Ignored since P85-S2 (ADR 0240): the actor is the request principal.
+    released_by: str | None = None
 
 
 class RecordsQuarantineOut(BaseModel):
@@ -427,12 +433,14 @@ class CascadeTrashRequest(BaseModel):
 
     folder_ids: list[str]
     via_folder_id: str
-    deleted_by: str
+    # Ignored since P85-S2 (ADR 0240): the actor is the request principal.
+    deleted_by: str | None = None
 
 
 class CascadeRestoreRequest(BaseModel):
     via_folder_id: str
-    restored_by: str
+    # Ignored since P85-S2 (ADR 0240): the actor is the request principal.
+    restored_by: str | None = None
 
 
 class CascadeResult(BaseModel):

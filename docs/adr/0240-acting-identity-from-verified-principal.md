@@ -171,3 +171,19 @@ every touched route, plus the service's suite and ruff.
 - The gateway needs no change: it already strips client `X-DMS-*` headers, including the new one.
 - `system:*` literal actors disappear from new audit entries, replaced by service principals with a
   `reason`. Old entries are unchanged.
+
+## Implementation status
+
+- **S2 (done):**
+  - `dms-common` `acting.py`;
+  - permission-service approval create/approve/reject (reject now entitlement-checked; the initiator
+    may withdraw), scope locks and maintenance mode;
+  - document-service force-release (new `admin.document_lock`), trash, delete, cascade, legal holds and
+    records quarantine;
+  - folder-service trash and legal holds;
+  - the seven approval clients and folder-service's cascade client switched to on-behalf.
+
+  Events use the existing `on_behalf_of` envelope field with the same meaning as for delegations: the
+  service as `actor`, the user as `on_behalf_of`. The domain fields (`deleted_by`, `initiated_by`, …)
+  name the user.
+

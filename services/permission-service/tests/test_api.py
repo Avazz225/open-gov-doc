@@ -715,6 +715,7 @@ def test_check_batch_respects_blocking_scope_lock(client, role_management_header
     client.post(
         "/scope-locks",
         json={"resource_id": ROOT_RESOURCE_ID, "locked_by": "admin", "blocks_read": True},
+        headers={"X-DMS-Principal": "admin"},
     )
 
     response = client.post(
@@ -947,26 +948,29 @@ def test_list_role_assignments_filters_by_principal_id(client, role_management_h
 
 
 def test_scope_lock_requires_authentication(client):
+    """No principal, no write (P85-S2, ADR 0240): 401 before any capability
+    check - before P85-S2 the empty body actor reached the check (403)."""
     response = client.post(
         "/scope-locks",
         json={"resource_id": ROOT_RESOURCE_ID, "locked_by": ""},
+        headers={"X-DMS-Principal": ""},
     )
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 def test_scope_lock_with_unknown_resource_returns_404(client, role_management_headers):
     response = client.post(
         "/scope-locks",
         json={"resource_id": "does-not-exist", "locked_by": "admin"},
+        headers={"X-DMS-Principal": "admin"},
     )
     assert response.status_code == 404
 
 
 def test_create_scope_lock_bypassed_by_active_superuser_without_explicit_role(client, monkeypatch):
-    """P63-S1: `create_scope_lock`'s actor source is `payload.locked_by`
-    (a body field), not the `X-DMS-Principal` header - a distinct code
-    path from `test_create_role_bypassed_by_active_superuser...` above,
-    worth its own regression test."""
+    """P63-S1: the superuser bypass on `create_scope_lock`. (Its actor source
+    was the `locked_by` body field until P85-S2; since then it is the request
+    principal, ADR 0240 - the test sends both, as before.)"""
 
     async def fake_get_active_superuser():
         return True, "root-admin"
@@ -976,6 +980,7 @@ def test_create_scope_lock_bypassed_by_active_superuser_without_explicit_role(cl
     response = client.post(
         "/scope-locks",
         json={"resource_id": "does-not-exist", "locked_by": "root-admin"},
+        headers={"X-DMS-Principal": "root-admin"},
     )
     # No explicit `admin.user_management` grant for "root-admin" anywhere in
     # this test - a `404` (not `403`) proves the capability check itself
@@ -991,6 +996,7 @@ def test_scope_lock_blocks_write_check_with_reason(client, role_management_heade
             "locked_by": "admin",
             "reason": "Revision läuft",
         },
+        headers={"X-DMS-Principal": "admin"},
     ).json()
     assert created["status"] == "created"
     lock = created["scope_lock"]
@@ -1009,7 +1015,12 @@ def test_scope_lock_blocks_write_check_with_reason(client, role_management_heade
     assert result["blocked_by_scope_lock"] is True
     assert result["scope_lock_reason"] == "Revision läuft"
 
-    release = client.request("DELETE", f"/scope-locks/{lock['id']}", json={"released_by": "admin"})
+    release = client.request(
+        "DELETE",
+        f"/scope-locks/{lock['id']}",
+        json={"released_by": "admin"},
+        headers={"X-DMS-Principal": "admin"},
+    )
     assert release.status_code == 200
     assert release.json()["status"] == "released"
     assert release.json()["scope_lock"]["released_by"] == "admin"
@@ -1027,7 +1038,11 @@ def test_scope_lock_blocks_write_check_with_reason(client, role_management_heade
 
 
 def test_scope_lock_without_blocks_read_allows_read_access(client, role_management_headers):
-    client.post("/scope-locks", json={"resource_id": ROOT_RESOURCE_ID, "locked_by": "admin"})
+    client.post(
+        "/scope-locks",
+        json={"resource_id": ROOT_RESOURCE_ID, "locked_by": "admin"},
+        headers={"X-DMS-Principal": "admin"},
+    )
 
     result = client.get(
         "/check",
@@ -1046,6 +1061,7 @@ def test_scope_lock_with_blocks_read_also_blocks_read_access(client, role_manage
     client.post(
         "/scope-locks",
         json={"resource_id": ROOT_RESOURCE_ID, "locked_by": "admin", "blocks_read": True},
+        headers={"X-DMS-Principal": "admin"},
     )
 
     result = client.get(
@@ -1062,7 +1078,11 @@ def test_scope_lock_with_blocks_read_also_blocks_read_access(client, role_manage
 
 
 def test_scope_lock_bypass_capability_overrides_block(client, role_management_headers):
-    client.post("/scope-locks", json={"resource_id": ROOT_RESOURCE_ID, "locked_by": "admin"})
+    client.post(
+        "/scope-locks",
+        json={"resource_id": ROOT_RESOURCE_ID, "locked_by": "admin"},
+        headers={"X-DMS-Principal": "admin"},
+    )
     role = client.post(
         "/roles",
         json={"name": "ScopeLockBypasser", "permissions": ["scope_lock.bypass", "write"]},
@@ -1093,7 +1113,11 @@ def test_scope_lock_bypass_capability_overrides_block(client, role_management_he
 
 
 def test_list_scope_locks_endpoint(client, role_management_headers):
-    client.post("/scope-locks", json={"resource_id": ROOT_RESOURCE_ID, "locked_by": "admin"})
+    client.post(
+        "/scope-locks",
+        json={"resource_id": ROOT_RESOURCE_ID, "locked_by": "admin"},
+        headers={"X-DMS-Principal": "admin"},
+    )
 
     response = client.get("/scope-locks", params={"resource_id": ROOT_RESOURCE_ID})
 
@@ -1102,7 +1126,11 @@ def test_list_scope_locks_endpoint(client, role_management_headers):
 
 
 def test_effective_scope_locks_endpoint(client, role_management_headers):
-    client.post("/scope-locks", json={"resource_id": ROOT_RESOURCE_ID, "locked_by": "admin"})
+    client.post(
+        "/scope-locks",
+        json={"resource_id": ROOT_RESOURCE_ID, "locked_by": "admin"},
+        headers={"X-DMS-Principal": "admin"},
+    )
 
     response = client.get(f"/scope-locks/effective/{ROOT_RESOURCE_ID}")
 
@@ -1111,7 +1139,12 @@ def test_effective_scope_locks_endpoint(client, role_management_headers):
 
 
 def test_release_unknown_scope_lock_returns_404(client, role_management_headers):
-    response = client.request("DELETE", "/scope-locks/999999", json={"released_by": "admin"})
+    response = client.request(
+        "DELETE",
+        "/scope-locks/999999",
+        json={"released_by": "admin"},
+        headers={"X-DMS-Principal": "admin"},
+    )
     assert response.status_code == 404
 
 
@@ -1166,11 +1199,16 @@ def test_approval_request_lifecycle_publishes_events_with_actor(client, monkeypa
     created = client.post(
         "/approval-requests",
         json={"action_type": "document.force_unlock", "initiated_by": "alice", "payload": {"x": 1}},
+        headers={"X-DMS-Principal": "alice"},
     )
     assert created.status_code == 201
     request_id = created.json()["id"]
 
-    client.post(f"/approval-requests/{request_id}/approve", json={"approved_by": "bob"})
+    client.post(
+        f"/approval-requests/{request_id}/approve",
+        json={"approved_by": "bob"},
+        headers={"X-DMS-Principal": "bob"},
+    )
 
     requested = [e for e in published if e.event_type == "permission.approval.requested"]
     approved = [e for e in published if e.event_type == "permission.approval.approved"]
@@ -1182,6 +1220,7 @@ def test_approval_request_lifecycle_via_api(client):
     created = client.post(
         "/approval-requests",
         json={"action_type": "document.force_unlock", "initiated_by": "alice", "payload": {"x": 1}},
+        headers={"X-DMS-Principal": "alice"},
     )
     assert created.status_code == 201
     request = created.json()
@@ -1191,19 +1230,25 @@ def test_approval_request_lifecycle_via_api(client):
     assert fetched.status_code == 200
 
     same_person = client.post(
-        f"/approval-requests/{request['id']}/approve", json={"approved_by": "alice"}
+        f"/approval-requests/{request['id']}/approve",
+        json={"approved_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
     )
     assert same_person.status_code == 403
 
     approved = client.post(
-        f"/approval-requests/{request['id']}/approve", json={"approved_by": "bob"}
+        f"/approval-requests/{request['id']}/approve",
+        json={"approved_by": "bob"},
+        headers={"X-DMS-Principal": "bob"},
     )
     assert approved.status_code == 200
     assert approved.json()["status"] == "approved"
     assert approved.json()["approved_by"] == "bob"
 
     double_decision = client.post(
-        f"/approval-requests/{request['id']}/approve", json={"approved_by": "carol"}
+        f"/approval-requests/{request['id']}/approve",
+        json={"approved_by": "carol"},
+        headers={"X-DMS-Principal": "carol"},
     )
     assert double_decision.status_code == 409
 
@@ -1212,11 +1257,13 @@ def test_approval_request_reject_allows_initiator(client):
     request = client.post(
         "/approval-requests",
         json={"action_type": "document.force_unlock", "initiated_by": "alice", "payload": {}},
+        headers={"X-DMS-Principal": "alice"},
     ).json()
 
     rejected = client.post(
         f"/approval-requests/{request['id']}/reject",
         json={"rejected_by": "alice", "reason": "Doch nicht nötig"},
+        headers={"X-DMS-Principal": "alice"},
     )
     assert rejected.status_code == 200
     assert rejected.json()["status"] == "rejected"
@@ -1237,6 +1284,7 @@ def test_create_scope_lock_with_approval_required_defers_creation(client, role_m
     response = client.post(
         "/scope-locks",
         json={"resource_id": ROOT_RESOURCE_ID, "locked_by": "admin", "reason": "Migration"},
+        headers={"X-DMS-Principal": "admin"},
     )
 
     assert response.status_code == 201
@@ -1253,7 +1301,9 @@ def test_create_scope_lock_with_approval_required_defers_creation(client, role_m
 
 def test_release_scope_lock_with_approval_required_defers_release(client, role_management_headers):
     created = client.post(
-        "/scope-locks", json={"resource_id": ROOT_RESOURCE_ID, "locked_by": "admin"}
+        "/scope-locks",
+        json={"resource_id": ROOT_RESOURCE_ID, "locked_by": "admin"},
+        headers={"X-DMS-Principal": "admin"},
     ).json()
     lock_id = created["scope_lock"]["id"]
 
@@ -1263,7 +1313,12 @@ def test_release_scope_lock_with_approval_required_defers_release(client, role_m
         headers=role_management_headers,
     )
 
-    response = client.request("DELETE", f"/scope-locks/{lock_id}", json={"released_by": "admin"})
+    response = client.request(
+        "DELETE",
+        f"/scope-locks/{lock_id}",
+        json={"released_by": "admin"},
+        headers={"X-DMS-Principal": "admin"},
+    )
 
     assert response.status_code == 200
     body = response.json()
@@ -1350,6 +1405,7 @@ def test_create_approval_request_without_required_permission_is_forbidden(client
     response = client.post(
         "/approval-requests",
         json={"action_type": "auth.superuser.activate", "initiated_by": "alice", "payload": {}},
+        headers={"X-DMS-Principal": "alice"},
     )
 
     assert response.status_code == 403
@@ -1364,10 +1420,13 @@ def test_approve_approval_request_without_required_permission_is_forbidden(
     request = client.post(
         "/approval-requests",
         json={"action_type": "auth.superuser.activate", "initiated_by": "alice", "payload": {}},
+        headers={"X-DMS-Principal": "alice"},
     ).json()
 
     response = client.post(
-        f"/approval-requests/{request['id']}/approve", json={"approved_by": "bob"}
+        f"/approval-requests/{request['id']}/approve",
+        json={"approved_by": "bob"},
+        headers={"X-DMS-Principal": "bob"},
     )
 
     assert response.status_code == 403
@@ -1383,10 +1442,13 @@ def test_break_glass_activation_via_api_with_two_group_members(client, role_mana
     request = client.post(
         "/approval-requests",
         json={"action_type": "auth.superuser.activate", "initiated_by": "alice", "payload": {}},
+        headers={"X-DMS-Principal": "alice"},
     ).json()
 
     response = client.post(
-        f"/approval-requests/{request['id']}/approve", json={"approved_by": "bob"}
+        f"/approval-requests/{request['id']}/approve",
+        json={"approved_by": "bob"},
+        headers={"X-DMS-Principal": "bob"},
     )
 
     assert response.status_code == 200
@@ -1402,7 +1464,9 @@ def test_get_maintenance_mode_defaults_to_inactive(client):
 
 def test_trigger_maintenance_mode_without_permission_is_forbidden(client):
     response = client.post(
-        "/maintenance-mode/trigger", json={"triggered_by": "alice", "reason": "Verdacht"}
+        "/maintenance-mode/trigger",
+        json={"triggered_by": "alice", "reason": "Verdacht"},
+        headers={"X-DMS-Principal": "alice"},
     )
 
     assert response.status_code == 403
@@ -1419,7 +1483,9 @@ def test_trigger_maintenance_mode_activates_directly_with_permission(
     )
 
     response = client.post(
-        "/maintenance-mode/trigger", json={"triggered_by": "alice", "reason": "Verdacht"}
+        "/maintenance-mode/trigger",
+        json={"triggered_by": "alice", "reason": "Verdacht"},
+        headers={"X-DMS-Principal": "alice"},
     )
 
     assert response.status_code == 201
@@ -1446,7 +1512,9 @@ def test_trigger_maintenance_mode_defers_when_approval_required(client, role_man
     )
 
     response = client.post(
-        "/maintenance-mode/trigger", json={"triggered_by": "alice", "reason": "Verdacht"}
+        "/maintenance-mode/trigger",
+        json={"triggered_by": "alice", "reason": "Verdacht"},
+        headers={"X-DMS-Principal": "alice"},
     )
 
     assert response.status_code == 201
@@ -1479,12 +1547,15 @@ def test_trigger_maintenance_mode_via_approval_flow_activates_after_second_appro
         headers=role_management_headers,
     )
     request = client.post(
-        "/maintenance-mode/trigger", json={"triggered_by": "alice", "reason": "Verdacht"}
+        "/maintenance-mode/trigger",
+        json={"triggered_by": "alice", "reason": "Verdacht"},
+        headers={"X-DMS-Principal": "alice"},
     ).json()
 
     approval = client.post(
         f"/approval-requests/{request['approval_request_id']}/approve",
         json={"approved_by": "bob"},
+        headers={"X-DMS-Principal": "bob"},
     )
 
     assert approval.status_code == 200
@@ -1505,9 +1576,15 @@ def test_lift_maintenance_mode_without_active_superuser_is_forbidden(
         principal_id="alice",
         permissions=["system.not_shutdown.trigger"],
     )
-    client.post("/maintenance-mode/trigger", json={"triggered_by": "alice", "reason": None})
+    client.post(
+        "/maintenance-mode/trigger",
+        json={"triggered_by": "alice", "reason": None},
+        headers={"X-DMS-Principal": "alice"},
+    )
 
-    response = client.post("/maintenance-mode/lift", json={"lifted_by": "alice"})
+    response = client.post(
+        "/maintenance-mode/lift", json={"lifted_by": "alice"}, headers={"X-DMS-Principal": "alice"}
+    )
 
     assert response.status_code == 403
     status = client.get("/maintenance-mode").json()
@@ -2020,3 +2097,111 @@ def test_revoke_org_hierarchy_grant_revokes_the_underlying_delegation(
 def test_revoke_org_hierarchy_grant_unknown_id_returns_404(client):
     response = client.delete("/org-hierarchy-grants/does-not-exist")
     assert response.status_code == 404
+
+
+# --- Acting identity from the principal (P85-S2, ADR 0240) -------------------
+
+
+def test_approver_cannot_spoof_another_name_to_approve_own_request(client):
+    request = client.post(
+        "/approval-requests",
+        json={"action_type": "spoof.test", "initiated_by": "alice", "payload": {}},
+        headers={"X-DMS-Principal": "alice"},
+    ).json()
+    # Alice claims to be bob in the body - the principal decides.
+    response = client.post(
+        f"/approval-requests/{request['id']}/approve",
+        json={"approved_by": "bob"},
+        headers={"X-DMS-Principal": "alice"},
+    )
+    assert response.status_code == 403
+
+
+def test_initiator_is_the_principal_not_the_body_field(client):
+    request = client.post(
+        "/approval-requests",
+        json={"action_type": "spoof.test", "initiated_by": "someone-else", "payload": {}},
+        headers={"X-DMS-Principal": "alice"},
+    ).json()
+    assert request["initiated_by"] == "alice"
+
+
+def test_reject_requires_the_approval_entitlement(client, role_management_headers):
+    """Before P85-S2 anyone could reject any pending request."""
+    _grant_permission_via_api(
+        client, role_management_headers, principal_id="alice", permissions=["breakglass.approve"]
+    )
+    request = client.post(
+        "/approval-requests",
+        json={"action_type": "auth.superuser.activate", "payload": {}},
+        headers={"X-DMS-Principal": "alice"},
+    ).json()
+
+    outsider = client.post(
+        f"/approval-requests/{request['id']}/reject",
+        json={"rejected_by": "alice"},
+        headers={"X-DMS-Principal": "mallory"},
+    )
+    assert outsider.status_code == 403
+
+    withdrawn = client.post(
+        f"/approval-requests/{request['id']}/reject",
+        json={},
+        headers={"X-DMS-Principal": "alice"},
+    )
+    assert withdrawn.status_code == 200
+    assert withdrawn.json()["rejected_by"] == "alice"
+
+
+def test_service_may_create_a_request_on_behalf_of_a_user(client):
+    request = client.post(
+        "/approval-requests",
+        json={"action_type": "spoof.test", "payload": {}},
+        headers={"X-DMS-Principal": "document-service", "X-DMS-On-Behalf-Of": "alice"},
+    ).json()
+    assert request["initiated_by"] == "alice"
+
+
+def test_a_user_cannot_act_on_behalf_of_another_user(client):
+    request = client.post(
+        "/approval-requests",
+        json={"action_type": "spoof.test", "payload": {}},
+        headers={"X-DMS-Principal": "mallory", "X-DMS-On-Behalf-Of": "alice"},
+    ).json()
+    assert request["initiated_by"] == "mallory"
+
+
+def test_writes_without_a_principal_return_401(client):
+    for method, path, body in [
+        ("post", "/approval-requests", {"action_type": "spoof.test", "payload": {}}),
+        ("post", "/approval-requests/x/approve", {}),
+        ("post", "/approval-requests/x/reject", {}),
+        ("delete", "/scope-locks/1", None),
+        ("post", "/maintenance-mode/trigger", {"reason": "x"}),
+        ("post", "/maintenance-mode/lift", {}),
+    ]:
+        kwargs = {"json": body} if body is not None else {}
+        response = client.request(method.upper(), path, **kwargs)
+        assert response.status_code == 401, (method, path, response.text)
+
+
+def test_on_behalf_request_event_names_the_service_as_actor(client, monkeypatch):
+    """P85-S2 (ADR 0240): a service creating a request for a user - the event
+    says who acted (the service) and for whom (the user), the same meaning
+    `on_behalf_of` already has for delegations."""
+    published: list[Event] = []
+
+    async def fake_publish(subject: str, data: bytes) -> None:
+        published.append(Event.from_bytes(data))
+
+    monkeypatch.setattr(app.state.publisher, "publish", fake_publish)
+
+    created = client.post(
+        "/approval-requests",
+        json={"action_type": "document.delete", "payload": {}},
+        headers={"X-DMS-Principal": "document-service", "X-DMS-On-Behalf-Of": "alice"},
+    )
+    assert created.json()["initiated_by"] == "alice"
+    requested = [e for e in published if e.event_type == "permission.approval.requested"]
+    assert requested[0].actor == "document-service"
+    assert requested[0].on_behalf_of == "alice"

@@ -1,6 +1,18 @@
 from datetime import datetime
 
 import httpx
+from dms_common import SERVICE_PRINCIPALS, acting_headers
+
+_SERVICE_PRINCIPAL = "query-service"
+
+
+def _on_behalf_headers(initiated_by: str) -> dict[str, str]:
+    """This service as principal, acting for ``initiated_by`` - unless the
+    initiator is a service or a ``system:*`` job itself, which then simply is
+    the service (ADR 0240)."""
+    if not initiated_by or initiated_by in SERVICE_PRINCIPALS or initiated_by.startswith("system:"):
+        return acting_headers(_SERVICE_PRINCIPAL)
+    return acting_headers(_SERVICE_PRINCIPAL, on_behalf_of=initiated_by)
 
 
 class AuditClient:
@@ -187,7 +199,10 @@ class PermissionServiceClient:
     ) -> dict:
         response = await self._client.post(
             "/approval-requests",
-            json={"action_type": action_type, "initiated_by": initiated_by, "payload": payload},
+            json={"action_type": action_type, "payload": payload},
+            # P85-S2 (ADR 0240): the initiator is the acting identity - this
+            # service, acting on behalf of the user who triggered the action.
+            headers=_on_behalf_headers(initiated_by),
         )
         response.raise_for_status()
         return response.json()

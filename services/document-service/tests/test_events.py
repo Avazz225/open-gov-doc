@@ -69,6 +69,7 @@ async def test_force_release_publishes_event(client, consumer):
     client.post(
         f"/documents/{document_id}/lock/force-release",
         json={"released_by": "admin", "reason": "Test"},
+        headers={"X-DMS-Principal": "admin"},
     )
 
     await asyncio.wait_for(got_message.wait(), timeout=5)

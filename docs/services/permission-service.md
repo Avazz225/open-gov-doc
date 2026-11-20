@@ -91,7 +91,27 @@ A generic, per-action-type configurable approval mechanism — see [ADR 0022](..
 - **Role creation wired up since Post-Roadmap Phase 32 Session 1** ([ADR 0130](../adr/0130-approval-config-self-gated-role-creation-four-eyes.md)): `POST /roles` checks `permission.role.create` the same way — response `RoleActionResult` (`status`/`role`/`approval_request_id`). Unlike `RoleAssignmentCreate`, `RoleCreate` has no actor field at all, so `initiated_by` reuses the already-mandatory `X-DMS-Principal` header (the same one the baseline `admin.user_management` check consumes) rather than a body field.
 - **`required_permission` (4.6, since P6-S5)**: a generic extension of `ApprovalActionConfig` — if set, both `initiated_by` and `approved_by` must hold this capability per `GET /effective-permissions/.../root` (in addition to the initiator≠approver rule), otherwise `403` (`MissingRequiredPermissionError`). Fixed to `breakglass.approve` at startup for `auth.superuser.activate` (superuser break-glass, see below and `docs/services/auth-service.md`) — a stricter implementation of "two different members of a permission group" (4.6) than the mere "any second person" from 4.3. Remains `null` for scope locks/force unlock, unchanged behavior. **Since P70-S2** ([ADR 0204](../adr/0204-p70s2-declassification-build.md)): fixed to `admin.declassification` for `document.classification.declassify` (document-service, 14.2) — the SAME shared-capability shape as break-glass, not two distinct initiator/approver capabilities (a real design mistake caught by that session's own tests: the caller must pass the authenticated principal, already verified to hold this capability, as `initiated_by` — not an unrelated attribution field — or `create_approval_request` itself rejects it with `403` before an approver is ever involved).
 
+## Acting Identity (P85-S2, [ADR 0240](../adr/0240-acting-identity-from-verified-principal.md))
+
+The four-eyes routes, scope locks and maintenance mode take the acting person from the request principal
+(`require_acting_identity` from `dms-common`), no longer from the body:
+- **Approval requests:** `initiated_by`, `approved_by` and `rejected_by` come from the principal. Before,
+  someone could approve their own request by typing another name.
+- **Rejecting** now needs the same entitlement as approving: the action type's `required_permission`.
+  Before, anyone could reject any pending request. The initiator may always withdraw their own request.
+- **Scope locks and maintenance mode:** the same applies to `locked_by`/`released_by` (scope locks) and
+  `triggered_by`/`lifted_by` (maintenance mode). The superuser check for lifting runs on the principal.
+- **Services acting for a user** (the approval clients of auth, config, document, folder, migration,
+  query and workflow) send their own name plus `X-DMS-On-Behalf-Of: <user>`. The user becomes the
+  initiator, and the `permission.approval.requested` event carries the service as `actor` and the user as
+  `on_behalf_of`. A `system:*` or service initiator is simply the service itself.
+- **Body fields** are optional and ignored. A value naming someone else is logged as
+  `actor_field_ignored` (removed in P85-S5).
+- **No principal on these writes means `401`.**
+
 ## Domain-Separated Admin Roles (4.6, since P6-S5)
+
+**Since P85-S2:** `domain-admin-document-locks` ("Dokumentsperren-Verwaltung", `admin.document_lock`) for document-service's force-release, which had no permission check before.
 
 Native to the system (not Keycloak realm roles) — full architectural rationale in [ADR 0023](../adr/0023-superuser-breakglass-and-domain-admin-accounts.md). `repository.ensure_domain_admin_roles` idempotently seeds all `DOMAIN_ADMIN_ROLES` rows on every startup (if not already present, checked by name):
 

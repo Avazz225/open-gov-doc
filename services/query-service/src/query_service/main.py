@@ -75,7 +75,9 @@ async def _is_active_superuser(x_dms_principal: str) -> bool:
     try:
         active, superuser_principal_id = await app.state.auth_client.get_active_superuser()
     except Exception:
-        logger.warning("superuser_status_check_failed - auth-service nicht erreichbar?", exc_info=True)
+        logger.warning(
+            "superuser_status_check_failed - auth-service nicht erreichbar?", exc_info=True
+        )
         return False
     return active and bool(x_dms_principal) and superuser_principal_id == x_dms_principal
 

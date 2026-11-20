@@ -127,7 +127,11 @@ def test_moving_a_document_reparents_its_resource_node(client, real_folder_id):
 
 def test_purging_a_document_removes_its_resource_node(client):
     document_id = _upload(client, title="Zu löschen")
-    trash_response = client.post(f"/documents/{document_id}/trash", json={"deleted_by": "alice"})
+    trash_response = client.post(
+        f"/documents/{document_id}/trash",
+        json={"deleted_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
     assert trash_response.status_code == 200
 
     purge_response = client.post(f"/documents/{document_id}/purge", headers=DELETION_ADMIN_HEADERS)

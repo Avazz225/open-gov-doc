@@ -82,6 +82,36 @@ async def _grant_legal_hold_permission():
         response.raise_for_status()
 
 
+DOCUMENT_LOCK_ADMIN_PRINCIPAL_ID = "admin"
+
+
+@pytest.fixture(scope="session", autouse=True)
+async def _grant_document_lock_permission():
+    """P85-S2 (ADR 0240): `POST /documents/{id}/lock/force-release` requires
+    `admin.document_lock` (role "domain-admin-document-locks") since then -
+    the force-release tests act as principal "admin"."""
+    async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL) as pc:
+        roles = (await pc.get("/roles")).json()
+        role_id = next(r["id"] for r in roles if r["name"] == "domain-admin-document-locks")
+        existing = (
+            await pc.get(
+                "/role-assignments", params={"principal_id": DOCUMENT_LOCK_ADMIN_PRINCIPAL_ID}
+            )
+        ).json()
+        if any(a["role_id"] == role_id for a in existing):
+            return
+        response = await pc.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": DOCUMENT_LOCK_ADMIN_PRINCIPAL_ID,
+                "role_id": role_id,
+                "resource_id": "root",
+            },
+        )
+        response.raise_for_status()
+
+
 CLASSIFICATION_ADMIN_PRINCIPAL_ID = "document-service-test-classification-admin"
 
 
