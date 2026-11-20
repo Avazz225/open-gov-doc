@@ -157,5 +157,77 @@
     "documentTitleUnavailable": "Document title not available",
     "documentAddedAt": "added on {date}",
     "documentDownloadError": "Document could not be downloaded"
+  },
+  "account": {
+    "menuLabel": "Account: {name}"
+  },
+  "actionTypes": {
+    "auth": {
+      "ad_group_mapping": {
+        "default_role_set": "AD groups: set default role"
+      },
+      "ad_group_role_composite_rule": {
+        "create": "AD groups: create composite rule",
+        "delete": "AD groups: delete composite rule"
+      },
+      "ad_group_role_mapping": {
+        "create": "AD groups: create role mapping",
+        "delete": "AD groups: delete role mapping"
+      },
+      "superuser": {
+        "activate": "Activate superuser access"
+      },
+      "user_tracking_config": {
+        "update": "Change user tracking"
+      }
+    },
+    "config": {
+      "import": "Import configuration package"
+    },
+    "document": {
+      "attribute_reset": "Reset document attributes",
+      "classification": {
+        "declassify": "Declassify document"
+      },
+      "delete": "Delete document",
+      "force_delete": "Permanently delete document",
+      "force_unlock": "Force-unlock document"
+    },
+    "folder": {
+      "delete": "Delete folder",
+      "force_delete": "Permanently delete folder"
+    },
+    "migration": {
+      "transfer": {
+        "start": "Start migration transfer"
+      }
+    },
+    "object_type": {
+      "update": "Change object type"
+    },
+    "permission": {
+      "role_assignment": {
+        "create": "Assign role",
+        "delete": "Remove role assignment"
+      },
+      "role": {
+        "create": "Create role",
+        "update": "Change role"
+      },
+      "scope_lock": {
+        "create": "Set scope lock",
+        "release": "Release scope lock"
+      }
+    },
+    "system": {
+      "not_shutdown": {
+        "trigger": "Trigger emergency shutdown"
+      }
+    },
+    "workflow": {
+      "process_definition": {
+        "import": "Import process definition"
+      }
+    }
   }
 }

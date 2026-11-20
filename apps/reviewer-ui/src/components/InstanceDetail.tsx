@@ -149,109 +149,112 @@ export function InstanceDetail({
       {tasks.length === 0 ? (
         <p className="italic opacity-70">{t("taskList.empty")}</p>
       ) : (
-        <table className="mb-6 w-full border-collapse">
-          <thead>
-            <tr>
-              <th className={th}>{t("taskList.nameColumn")}</th>
-              <th className={th}>{t("taskList.laneColumn")}</th>
-              <th className={th}>{t("taskList.claimColumn")}</th>
-              <th className={th}>{t("taskList.actionsColumn")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {tasks.map((task) => {
-              const isSignature = task.extensions.taskType === "signature";
-              return (
-                <Fragment key={task.id}>
-                  <tr>
-                    <td className={td}>
-                      {task.name}
-                      {isSignature && (
-                        <>
-                          {" "}
-                          <span className={badge}>{t("taskList.signatureBadge")}</span>
-                        </>
-                      )}
-                    </td>
-                    <td className={td}>{task.lane ?? "-"}</td>
-                    {/* Read-only awareness only (post-roadmap phase 31 session
-                        10) - claiming/org-hierarchy grants stay a TaskList.tsx
-                        action, this view deliberately stays a lightweight
-                        status display (ADR 0110), same precedent as omitting
-                        the "on behalf of" delegation selector below. */}
-                    <td className={td}>{task.claimed_by ?? "-"}</td>
-                    <td className={td}>
-                      <button type="button" onClick={() => toggleExpand(task)} className={secondaryBtn}>
-                        {t("taskList.completeButton")}
-                      </button>
-                    </td>
-                  </tr>
-                  {expandedTaskId === task.id && (
-                    <tr className="bg-hover-bg">
-                      <td colSpan={4} className="px-2 py-2">
-                        <form className={inlineForm} onSubmit={(event) => handleComplete(task, event)}>
-                          <h2 className="text-sm opacity-80">{t("taskList.completeHeading")}</h2>
-                          <label htmlFor={`completed-by-${task.id}`} className={fieldLabel}>
-                            {t("taskList.completedByLabel")}
-                          </label>
-                          <input
-                            id={`completed-by-${task.id}`}
-                            value={completedBy}
-                            onChange={(e) => setCompletedBy(e.target.value)}
-                            required
-                            className={fieldInput}
-                          />
-                          {isSignature && (
-                            <>
-                              <label htmlFor={`signature-id-${task.id}`} className={fieldLabel}>
-                                {t("taskList.signatureIdLabel")}
-                              </label>
-                              <input
-                                id={`signature-id-${task.id}`}
-                                value={signatureId}
-                                onChange={(e) => setSignatureId(e.target.value)}
-                                required
-                                className={fieldInput}
-                              />
-                            </>
-                          )}
-                          <label htmlFor={`data-${task.id}`} className={fieldLabel}>
-                            {t("taskList.dataLabel")}
-                          </label>
-                          <textarea
-                            id={`data-${task.id}`}
-                            rows={3}
-                            value={dataJson}
-                            onChange={(e) => setDataJson(e.target.value)}
-                            placeholder="{}"
-                            className={fieldInput}
-                          />
-                          {formError && (
-                            <p className="text-danger" role="alert">
-                              {formError}
-                            </p>
-                          )}
-                          <div className="flex gap-2">
-                            <button type="submit" disabled={submitting} className={primaryBtn}>
-                              {submitting ? t("taskList.submitting") : t("taskList.submit")}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setExpandedTaskId(null)}
-                              className={secondaryBtn}
-                            >
-                              {t("common.cancel")}
-                            </button>
-                          </div>
-                        </form>
+        <div className="dms-scroll-x mb-6">
+          {/* Contained scroll, the page never scrolls sideways (P83-S11, ADR 0238 Decision 4) */}
+          <table className="w-full border-collapse">
+            <thead>
+              <tr>
+                <th className={th}>{t("taskList.nameColumn")}</th>
+                <th className={th}>{t("taskList.laneColumn")}</th>
+                <th className={th}>{t("taskList.claimColumn")}</th>
+                <th className={th}>{t("taskList.actionsColumn")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tasks.map((task) => {
+                const isSignature = task.extensions.taskType === "signature";
+                return (
+                  <Fragment key={task.id}>
+                    <tr>
+                      <td className={td}>
+                        {task.name}
+                        {isSignature && (
+                          <>
+                            {" "}
+                            <span className={badge}>{t("taskList.signatureBadge")}</span>
+                          </>
+                        )}
+                      </td>
+                      <td className={td}>{task.lane ?? "-"}</td>
+                      {/* Read-only awareness only (post-roadmap phase 31 session
+                          10) - claiming/org-hierarchy grants stay a TaskList.tsx
+                          action, this view deliberately stays a lightweight
+                          status display (ADR 0110), same precedent as omitting
+                          the "on behalf of" delegation selector below. */}
+                      <td className={td}>{task.claimed_by ?? "-"}</td>
+                      <td className={td}>
+                        <button type="button" onClick={() => toggleExpand(task)} className={secondaryBtn}>
+                          {t("taskList.completeButton")}
+                        </button>
                       </td>
                     </tr>
-                  )}
-                </Fragment>
-              );
-            })}
-          </tbody>
-        </table>
+                    {expandedTaskId === task.id && (
+                      <tr className="bg-hover-bg">
+                        <td colSpan={4} className="px-2 py-2">
+                          <form className={inlineForm} onSubmit={(event) => handleComplete(task, event)}>
+                            <h2 className="text-sm opacity-80">{t("taskList.completeHeading")}</h2>
+                            <label htmlFor={`completed-by-${task.id}`} className={fieldLabel}>
+                              {t("taskList.completedByLabel")}
+                            </label>
+                            <input
+                              id={`completed-by-${task.id}`}
+                              value={completedBy}
+                              onChange={(e) => setCompletedBy(e.target.value)}
+                              required
+                              className={fieldInput}
+                            />
+                            {isSignature && (
+                              <>
+                                <label htmlFor={`signature-id-${task.id}`} className={fieldLabel}>
+                                  {t("taskList.signatureIdLabel")}
+                                </label>
+                                <input
+                                  id={`signature-id-${task.id}`}
+                                  value={signatureId}
+                                  onChange={(e) => setSignatureId(e.target.value)}
+                                  required
+                                  className={fieldInput}
+                                />
+                              </>
+                            )}
+                            <label htmlFor={`data-${task.id}`} className={fieldLabel}>
+                              {t("taskList.dataLabel")}
+                            </label>
+                            <textarea
+                              id={`data-${task.id}`}
+                              rows={3}
+                              value={dataJson}
+                              onChange={(e) => setDataJson(e.target.value)}
+                              placeholder="{}"
+                              className={fieldInput}
+                            />
+                            {formError && (
+                              <p className="text-danger" role="alert">
+                                {formError}
+                              </p>
+                            )}
+                            <div className="flex gap-2">
+                              <button type="submit" disabled={submitting} className={primaryBtn}>
+                                {submitting ? t("taskList.submitting") : t("taskList.submit")}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setExpandedTaskId(null)}
+                                className={secondaryBtn}
+                              >
+                                {t("common.cancel")}
+                              </button>
+                            </div>
+                          </form>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
     </section>
   );

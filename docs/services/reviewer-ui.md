@@ -44,6 +44,33 @@ tsconfig `paths` and the Dockerfile `COPY`. `tests/login-illustration.test.tsx` 
 **Known, not changed:** "Beantragt von" shows principal ids. Some test users' ids are UUIDs. reviewer-ui
 has no principal-name lookup, and adding one needs user-directory access; see the plan.
 
+## Narrow widths, action-type names, short keys (Phase 83 Session 11, [ADR 0238](../adr/0238-narrow-width-patterns-for-all-apps.md))
+
+**Narrow widths.** The page no longer scrolls sideways at any width. Before, it was 874–1112px wide at
+both 390 and 768px.
+- **Header.** The four tabs scroll inside their own strip. The header cluster collapses into the
+  account menu (`components/AccountMenu.tsx`, the same file as migration-console's and
+  process-designer's) **below 1024px** (`inlineFrom="lg"`), not 768px, because four tabs and the inline
+  cluster don't fit one row at 768px.
+- **Stacked rows.** Below 768px, the task list and the four-eyes inbox turn each row into a card, using
+  `dms-stack-table` from `libs/dms-ui/layout.css`. It is the same markup: cells carry `data-label`, and
+  `data-stack` marks the title, the actions (full-width, ≥ 40px) and expanded detail rows (attached to
+  their card). From 768px both are ordinary tables in a `dms-scroll-x` container.
+- **Team tasks and the instance's step table** are scroll containers at every width.
+
+**Action types as names** (punch-list item 6, missed in P83-S7). The inbox showed raw identifiers such
+as `auth.ad_group_mapping.default_role_set`. The 25 action types the services create now have
+translated names (`actionTypes.*` in i18n, nested by the type's dots), with the raw identifier on hover.
+An unknown type, for example one of query-service's configurable manipulation actions, still shows raw
+and monospaced. The app keeps working unadapted when a service adds a type.
+
+**Short related-object keys.** "Bezugsobjekt" in the task and team lists shows a UUID business key
+short and monospaced, with the full value on hover (`ShortKey` in `src/lib/display.tsx`). Readable keys
+show unchanged. The instance detail still shows the full key, because there it is the subject.
+
+`e2e/narrow.spec.ts` checks at 390px that no page overflows, that task rows are stacked, and that the
+account menu works. Unit tests cover the helpers and the translated names.
+
 ## Pages
 
 | Route | Purpose |

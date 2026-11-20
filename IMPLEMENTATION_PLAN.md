@@ -3250,8 +3250,30 @@ work has to be read against that baseline (see DoD).
     - Both images rebuilt (`next build` inside).
     - e2e: migration-console 5/5, process-designer 7/7, each with a new `narrow.spec.ts` (390px: no page
       overflow, account menu, properties toggle).
-- **P83-S11 — Narrow widths: `reviewer-ui`**: account menu, stacked task/approval rows, translated action
-  types, short related-object ids.
+- **P83-S11 — Narrow widths: `reviewer-ui`**: ✅ **Done.**
+  - **Header:** tabs in a scrolling strip, plus the account menu (copied with the `touch` switchers).
+    - The menu switches at **1024px** here, not 768. `AccountMenu` got `inlineFrom: "md" | "lg"`, and all
+      three copies stay identical. Four tabs plus the cluster overflowed at 768px.
+    - Recorded as a refinement in ADR 0238 Decision 2.
+  - **Stacked rows:** `.dms-stack-table` is new in `libs/dms-ui/layout.css`. Below 768px a row becomes a
+    card from the same markup:
+    - `data-label` names the cells, and the `thead` is visually hidden;
+    - `data-stack` marks the title, the full-width ≥ 40px actions and the attached detail rows.
+
+    Applied to the task list and the four-eyes inbox. From 768px both are tables in `dms-scroll-x`; team
+    tasks and the instance step table are scroll containers.
+  - **Item 6 leftovers:**
+    - 25 action types got translated names (`actionTypes.*`, nested by dots), with the raw id on hover;
+      unknown types show raw and monospaced.
+    - UUID business keys show short in the task/team lists (`ShortKey`, `src/lib/display.tsx`).
+  - **Measured:** before, 874–1112px wide at 390 and at 768px. After, no page overflow in all 16 views at
+    390/768/1024/1400px. At 1400px only the intended cells differ.
+  - **Checks:**
+    - `tsc`/`eslint` clean in reviewer-ui, migration-console and process-designer.
+    - vitest reviewer-ui 64: 7 inbox tests expected the raw `document.delete`, plus a new label test and
+      `display.test.tsx`.
+    - Three images rebuilt.
+    - e2e reviewer-ui 6/6 (new `narrow.spec.ts`), migration-console 5/5, process-designer 7/7.
 - **P83-S12 — Narrow widths: `admin-ui`**: sidebar drawer, account menu, scroll containers on all tables,
   one-column forms.
 - **P83-S13 — Narrow widths: `user-ui`**: single-pane mode instead of dockview below 768 px, narrow header,

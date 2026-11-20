@@ -45,6 +45,10 @@ single account button (the user's name, or an icon with the name as accessible l
 opens a popover with the same four controls, stacked, each ≥ 40 px tall. Wide layouts keep the inline
 cluster.
 
+*Refinement (P83-S11):* where the inline cluster and the tabs don't fit one row at 768px, the switch
+moves to 1024px (`AccountMenu inlineFrom="lg"`). reviewer-ui is the one case: four tabs plus the
+cluster overflowed at 768px.
+
 Navigation tabs (reviewer-ui, migration-console, process-designer) get the row to themselves; if they
 still don't fit they scroll horizontally inside their own strip with an edge fade, never wrapping into a
 second row and never scrolling the page.

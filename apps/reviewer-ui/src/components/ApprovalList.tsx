@@ -10,6 +10,7 @@ import {
   type ApprovalRequest,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { actionTypeLabel } from "@/lib/display";
 
 type StatusFilter = "" | "pending" | "approved" | "rejected";
 
@@ -21,6 +22,19 @@ function statusBadgeClass(status: string): string {
   return `${BADGE_BASE} bg-accent-bg text-accent`;
 }
 
+// The action type as a translated label (P83-S11, item 6 - S7 missed it):
+// the raw type stays on hover for whoever needs the exact identifier, and an
+// unknown type shows raw and monospaced instead of pretending to be prose.
+function ActionType({ type }: { type: string }) {
+  const { t } = useI18n();
+  const { label, known } = actionTypeLabel(t, type);
+  return known ? (
+    <span title={type}>{label}</span>
+  ) : (
+    <code className="font-mono text-sm">{label}</code>
+  );
+}
+
 // Generic four-eyes approval inbox (4.3, 8, P14-S2) - consumes
 // `permission-service`'s `GET /approval-requests` unfiltered by
 // `action_type` (previously there were only narrowly filtered individual
@@ -28,7 +42,9 @@ function statusBadgeClass(status: string): string {
 // "Relationship to existing consumers"). `payload` deliberately stays raw
 // JSON in the detail view - this app does not know the domain meaning of the
 // individual `action_type`s (and should not need to, otherwise it would have
-// to be adapted for every new action type added to the system).
+// to be adapted for every new action type added to the system). Since P83-S11
+// the known types get a translated *name* (`actionTypes.*` in i18n); a new
+// type still works unadapted and simply shows its raw identifier.
 export function ApprovalList() {
   const { accessToken, user } = useAuth();
   const { t, locale } = useI18n();
@@ -143,111 +159,118 @@ export function ApprovalList() {
       {requests.length === 0 ? (
         <p className="italic opacity-70">{t("approvalList.empty")}</p>
       ) : (
-        <table className="mb-6 w-full border-collapse">
-          <thead>
-            <tr>
-              <th className={th}>{t("approvalList.actionTypeColumn")}</th>
-              <th className={th}>{t("approvalList.initiatedByColumn")}</th>
-              <th className={th}>{t("approvalList.createdColumn")}</th>
-              <th className={th}>{t("approvalList.statusColumn")}</th>
-              <th className={th}>{t("approvalList.actionsColumn")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {requests.map((request) => (
-              <Fragment key={request.id}>
-                <tr>
-                  <td className={td}>{request.action_type}</td>
-                  <td className={td}>{request.initiated_by}</td>
-                  <td className={`${td} whitespace-nowrap`}>{new Date(request.created_at).toLocaleString(locale)}</td>
-                  <td className={td}>
-                    <span className={statusBadgeClass(request.status)}>
-                      {t(`approvalList.status${request.status[0].toUpperCase()}${request.status.slice(1)}`)}
-                    </span>
-                  </td>
-                  <td className={td}>
-                    <div className="flex gap-3">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setExpandedId(expandedId === request.id ? null : request.id)
-                        }
-                        className={secondaryBtn}
-                      >
-                        {expandedId === request.id
-                          ? t("approvalList.detailsToggleHide")
-                          : t("approvalList.detailsToggleShow")}
-                      </button>
-                      {request.status === "pending" && rejectingId !== request.id && (
-                        <>
-                          <button
-                            type="button"
-                            disabled={busyId === request.id}
-                            onClick={() => handleApprove(request)}
-                            className={secondaryBtn}
-                          >
-                            {t("approvalList.approveButton")}
-                          </button>
-                          <button
-                            type="button"
-                            disabled={busyId === request.id}
-                            onClick={() => handleStartReject(request.id)}
-                            className={secondaryBtn}
-                          >
-                            {t("approvalList.rejectButton")}
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-                {rejectingId === request.id && (
-                  <tr className="bg-hover-bg">
-                    <td colSpan={5} className="px-2 py-2">
-                      <form
-                        aria-label={t("approvalList.rejectFormLabel")}
-                        className="mt-2 flex max-w-[420px] flex-col gap-2 rounded-sm border border-border p-3"
-                        onSubmit={(e) => handleConfirmReject(e, request)}
-                      >
-                        <label className="flex flex-col gap-1 text-sm font-medium text-fg">
-                          {t("approvalList.rejectReasonLabel")}
-                          <input
-                            value={rejectReason}
-                            onChange={(e) => setRejectReason(e.target.value)}
-                            placeholder={t("approvalList.rejectReasonPlaceholder")}
-                            className={fieldInput}
-                          />
-                        </label>
-                        <div className="flex gap-3">
-                          <button type="submit" disabled={busyId === request.id} className={primaryBtn}>
-                            {t("approvalList.rejectConfirm")}
-                          </button>
-                          <button type="button" onClick={handleCancelReject} className={secondaryBtn}>
-                            {t("approvalList.rejectCancel")}
-                          </button>
-                        </div>
-                      </form>
+        <div className="dms-scroll-x mb-6">
+          {/* Contained scroll from 768px; below it each row stacks into a card (P83-S11, ADR 0238 Decision 4) */}
+          <table className="dms-stack-table w-full border-collapse">
+            <thead>
+              <tr>
+                <th className={th}>{t("approvalList.actionTypeColumn")}</th>
+                <th className={th}>{t("approvalList.initiatedByColumn")}</th>
+                <th className={th}>{t("approvalList.createdColumn")}</th>
+                <th className={th}>{t("approvalList.statusColumn")}</th>
+                <th className={th}>{t("approvalList.actionsColumn")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {requests.map((request) => (
+                <Fragment key={request.id}>
+                  <tr>
+                    <td className={td} data-stack="title">
+                      <ActionType type={request.action_type} />
+                    </td>
+                    <td className={td} data-label={t("approvalList.initiatedByColumn")}>{request.initiated_by}</td>
+                    <td className={`${td} whitespace-nowrap`} data-label={t("approvalList.createdColumn")}>
+                      {new Date(request.created_at).toLocaleString(locale)}
+                    </td>
+                    <td className={td} data-label={t("approvalList.statusColumn")}>
+                      <span className={statusBadgeClass(request.status)}>
+                        {t(`approvalList.status${request.status[0].toUpperCase()}${request.status.slice(1)}`)}
+                      </span>
+                    </td>
+                    <td className={td} data-stack="actions">
+                      <div className="flex gap-3">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setExpandedId(expandedId === request.id ? null : request.id)
+                          }
+                          className={secondaryBtn}
+                        >
+                          {expandedId === request.id
+                            ? t("approvalList.detailsToggleHide")
+                            : t("approvalList.detailsToggleShow")}
+                        </button>
+                        {request.status === "pending" && rejectingId !== request.id && (
+                          <>
+                            <button
+                              type="button"
+                              disabled={busyId === request.id}
+                              onClick={() => handleApprove(request)}
+                              className={secondaryBtn}
+                            >
+                              {t("approvalList.approveButton")}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={busyId === request.id}
+                              onClick={() => handleStartReject(request.id)}
+                              className={secondaryBtn}
+                            >
+                              {t("approvalList.rejectButton")}
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </td>
                   </tr>
-                )}
-                {expandedId === request.id && (
-                  <tr className="bg-hover-bg">
-                    <td colSpan={5} className="px-2 py-2">
-                      <pre className="m-0 whitespace-pre-wrap break-words">
-                        {JSON.stringify(request.payload, null, 2)}
-                      </pre>
-                      {request.reason && (
-                        <p>
-                          <strong>{t("approvalList.rejectReasonDisplayLabel")}</strong> {request.reason}
-                        </p>
-                      )}
-                    </td>
-                  </tr>
-                )}
-              </Fragment>
-            ))}
-          </tbody>
-        </table>
+                  {rejectingId === request.id && (
+                    <tr className="bg-hover-bg" data-stack="detail">
+                      <td colSpan={5} className="px-2 py-2">
+                        <form
+                          aria-label={t("approvalList.rejectFormLabel")}
+                          className="mt-2 flex max-w-[420px] flex-col gap-2 rounded-sm border border-border p-3"
+                          onSubmit={(e) => handleConfirmReject(e, request)}
+                        >
+                          <label className="flex flex-col gap-1 text-sm font-medium text-fg">
+                            {t("approvalList.rejectReasonLabel")}
+                            <input
+                              value={rejectReason}
+                              onChange={(e) => setRejectReason(e.target.value)}
+                              placeholder={t("approvalList.rejectReasonPlaceholder")}
+                              className={fieldInput}
+                            />
+                          </label>
+                          <div className="flex gap-3">
+                            <button type="submit" disabled={busyId === request.id} className={primaryBtn}>
+                              {t("approvalList.rejectConfirm")}
+                            </button>
+                            <button type="button" onClick={handleCancelReject} className={secondaryBtn}>
+                              {t("approvalList.rejectCancel")}
+                            </button>
+                          </div>
+                        </form>
+                      </td>
+                    </tr>
+                  )}
+                  {expandedId === request.id && (
+                    <tr className="bg-hover-bg" data-stack="detail">
+                      <td colSpan={5} className="px-2 py-2">
+                        <pre className="m-0 whitespace-pre-wrap break-words">
+                          {JSON.stringify(request.payload, null, 2)}
+                        </pre>
+                        {request.reason && (
+                          <p>
+                            <strong>{t("approvalList.rejectReasonDisplayLabel")}</strong> {request.reason}
+                          </p>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </section>
   );

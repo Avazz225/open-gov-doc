@@ -39,3 +39,78 @@
 .dms-tab-strip::-webkit-scrollbar {
   display: none;
 }
+
+/* Stacked rows (ADR 0238 Decision 4): below 768px a table whose job on a
+   phone is acting on one row turns each row into a card - the same markup,
+   no second rendering. Cells name themselves via `data-label` (the column
+   header is visually hidden but stays for screen readers); `data-stack`
+   marks the card's roles:
+     title   - the first line, emphasized, no label;
+     actions - the card's buttons, full-width, at least 40px tall;
+     detail  - on a <tr> that expands below its row (forms, payloads),
+               attached to the card above.
+   The !important flags are deliberate and scoped to this media query: the
+   cells carry Tailwind padding/border utilities, which sit in a later
+   layer than this file and would otherwise win. */
+@media (max-width: 767.98px) {
+  .dms-stack-table,
+  .dms-stack-table tbody,
+  .dms-stack-table tr,
+  .dms-stack-table td {
+    display: block;
+  }
+  .dms-stack-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .dms-stack-table tbody tr {
+    margin-bottom: 0.75rem;
+    padding: 0.75rem;
+    border: 1px solid var(--dms-border);
+    border-radius: var(--dms-radius-lg);
+  }
+  .dms-stack-table tbody tr[data-stack="detail"] {
+    margin-top: -0.75rem;
+    border-top: 0;
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+  }
+  .dms-stack-table td {
+    padding: 0.25rem 0 !important;
+    border: 0 !important;
+  }
+  .dms-stack-table td[data-label]:not([data-stack])::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 0.75rem;
+    opacity: 0.7;
+  }
+  .dms-stack-table td[data-stack="title"] {
+    font-weight: 600;
+  }
+  .dms-stack-table td[data-stack="actions"] {
+    padding-top: 0.5rem !important;
+  }
+  .dms-stack-table td[data-stack="actions"] > *,
+  .dms-stack-table td[data-stack="actions"] > div > * {
+    min-height: 2.5rem;
+  }
+  .dms-stack-table td[data-stack="actions"] > div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  .dms-stack-table td[data-stack="actions"] > div > button {
+    flex: 1 1 auto;
+  }
+  .dms-stack-table td[data-stack="actions"] > button {
+    width: 100%;
+  }
+  .dms-stack-table td:empty {
+    display: none;
+  }
+}

@@ -11,6 +11,7 @@ import {
   type ReadyTaskWithInstance,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { ShortKey } from "@/lib/display";
 
 // Supervisor/team task oversight view (14.2, post-roadmap phase 31 session
 // 11) - a SEPARATE, org-hierarchy-aware view alongside TaskList.tsx (which
@@ -142,86 +143,91 @@ export function TeamTaskList({
       ) : teamTasks.length === 0 ? (
         <p className="italic opacity-70">{t("teamTaskList.empty")}</p>
       ) : (
-        <table className="mb-6 w-full border-collapse">
-          <thead>
-            <tr>
-              <th className={th}>{t("taskList.nameColumn")}</th>
-              <th className={th}>{t("taskList.processColumn")}</th>
-              <th className={th}>{t("taskList.businessKeyColumn")}</th>
-              <th className={th}>{t("teamTaskList.statusColumn")}</th>
-              <th className={th}></th>
-              <th className={th}>{t("taskList.actionsColumn")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {teamTasks.map((task) => (
-              <Fragment key={task.id}>
-                <tr>
-                  <td className={td}>{task.name}</td>
-                  <td className={td}>#{task.process_definition_id}</td>
-                  <td className={td}>{task.business_key ?? "-"}</td>
-                  <td className={td}>
-                    {task.claimed_by !== null
-                      ? t("teamTaskList.statusClaimed", { principalId: task.claimed_by })
-                      : t("teamTaskList.statusUnclaimed", { createdBy: task.created_by })}
-                  </td>
-                  <td className={td}>
-                    <button
-                      type="button"
-                      onClick={() => onOpenInstance(task.instance_id)}
-                      className={secondaryBtn}
-                    >
-                      {t("taskList.instanceLink")}
-                    </button>
-                  </td>
-                  <td className={td}>
-                    <button type="button" onClick={() => openForm(task.id)} className={secondaryBtn}>
-                      {task.claimed_by === null
-                        ? t("teamTaskList.assignButton")
-                        : t("teamTaskList.reassignButton")}
-                    </button>
-                  </td>
-                </tr>
-                {openFormTaskId === task.id && (
+        <div className="dms-scroll-x mb-6">
+          {/* Contained scroll, the page never scrolls sideways (P83-S11, ADR 0238 Decision 4) */}
+          <table className="w-full border-collapse">
+            <thead>
+              <tr>
+                <th className={th}>{t("taskList.nameColumn")}</th>
+                <th className={th}>{t("taskList.processColumn")}</th>
+                <th className={th}>{t("taskList.businessKeyColumn")}</th>
+                <th className={th}>{t("teamTaskList.statusColumn")}</th>
+                <th className={th}></th>
+                <th className={th}>{t("taskList.actionsColumn")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {teamTasks.map((task) => (
+                <Fragment key={task.id}>
                   <tr>
-                    <td colSpan={6} className="px-2 py-2">
-                      <form
-                        className="mt-2 flex max-w-[420px] flex-col gap-2 rounded-sm border border-border p-3"
-                        aria-label={
-                          task.claimed_by === null
-                            ? t("teamTaskList.assignFormLabel")
-                            : t("teamTaskList.reassignFormLabel")
-                        }
-                        onSubmit={(event) =>
-                          task.claimed_by === null
-                            ? handleAssign(task, event)
-                            : handleReassign(task, event)
-                        }
+                    <td className={td}>{task.name}</td>
+                    <td className={td}>#{task.process_definition_id}</td>
+                    <td className={td}>
+                      <ShortKey value={task.business_key} />
+                    </td>
+                    <td className={td}>
+                      {task.claimed_by !== null
+                        ? t("teamTaskList.statusClaimed", { principalId: task.claimed_by })
+                        : t("teamTaskList.statusUnclaimed", { createdBy: task.created_by })}
+                    </td>
+                    <td className={td}>
+                      <button
+                        type="button"
+                        onClick={() => onOpenInstance(task.instance_id)}
+                        className={secondaryBtn}
                       >
-                        <label className="flex flex-col gap-1 text-sm font-medium text-fg">
-                          {task.claimed_by === null
-                            ? t("teamTaskList.assignPrincipalIdLabel")
-                            : t("teamTaskList.reassignPrincipalIdLabel")}
-                          <input
-                            value={principalIdInput}
-                            onChange={(e) => setPrincipalIdInput(e.target.value)}
-                            required
-                            className="box-border w-full rounded-md border border-border bg-bg px-2 py-1.5 text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg"
-                          />
-                        </label>
-                        <button type="submit" disabled={submitting} className={primaryBtn}>
-                          {task.claimed_by === null
-                            ? t("teamTaskList.assignButton")
-                            : t("teamTaskList.reassignButton")}
-                        </button>
-                      </form>
+                        {t("taskList.instanceLink")}
+                      </button>
+                    </td>
+                    <td className={td}>
+                      <button type="button" onClick={() => openForm(task.id)} className={secondaryBtn}>
+                        {task.claimed_by === null
+                          ? t("teamTaskList.assignButton")
+                          : t("teamTaskList.reassignButton")}
+                      </button>
                     </td>
                   </tr>
-                )}
-              </Fragment>
-            ))}
-          </tbody>
-        </table>
+                  {openFormTaskId === task.id && (
+                    <tr>
+                      <td colSpan={6} className="px-2 py-2">
+                        <form
+                          className="mt-2 flex max-w-[420px] flex-col gap-2 rounded-sm border border-border p-3"
+                          aria-label={
+                            task.claimed_by === null
+                              ? t("teamTaskList.assignFormLabel")
+                              : t("teamTaskList.reassignFormLabel")
+                          }
+                          onSubmit={(event) =>
+                            task.claimed_by === null
+                              ? handleAssign(task, event)
+                              : handleReassign(task, event)
+                          }
+                        >
+                          <label className="flex flex-col gap-1 text-sm font-medium text-fg">
+                            {task.claimed_by === null
+                              ? t("teamTaskList.assignPrincipalIdLabel")
+                              : t("teamTaskList.reassignPrincipalIdLabel")}
+                            <input
+                              value={principalIdInput}
+                              onChange={(e) => setPrincipalIdInput(e.target.value)}
+                              required
+                              className="box-border w-full rounded-md border border-border bg-bg px-2 py-1.5 text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg"
+                            />
+                          </label>
+                          <button type="submit" disabled={submitting} className={primaryBtn}>
+                            {task.claimed_by === null
+                              ? t("teamTaskList.assignButton")
+                              : t("teamTaskList.reassignButton")}
+                          </button>
+                        </form>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </section>
   );

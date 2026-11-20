@@ -157,5 +157,77 @@
     "documentTitleUnavailable": "Dokumenttitel nicht verfügbar",
     "documentAddedAt": "hinzugefügt am {date}",
     "documentDownloadError": "Dokument konnte nicht heruntergeladen werden"
+  },
+  "account": {
+    "menuLabel": "Konto: {name}"
+  },
+  "actionTypes": {
+    "auth": {
+      "ad_group_mapping": {
+        "default_role_set": "AD-Gruppen: Standardrolle festlegen"
+      },
+      "ad_group_role_composite_rule": {
+        "create": "AD-Gruppen: Kombinationsregel anlegen",
+        "delete": "AD-Gruppen: Kombinationsregel löschen"
+      },
+      "ad_group_role_mapping": {
+        "create": "AD-Gruppen: Rollenzuordnung anlegen",
+        "delete": "AD-Gruppen: Rollenzuordnung löschen"
+      },
+      "superuser": {
+        "activate": "Superuser-Zugang aktivieren"
+      },
+      "user_tracking_config": {
+        "update": "Nutzungsprotokollierung ändern"
+      }
+    },
+    "config": {
+      "import": "Konfigurationspaket importieren"
+    },
+    "document": {
+      "attribute_reset": "Dokument-Attribute zurücksetzen",
+      "classification": {
+        "declassify": "Dokument-Einstufung aufheben"
+      },
+      "delete": "Dokument löschen",
+      "force_delete": "Dokument endgültig löschen",
+      "force_unlock": "Dokument-Sperre aufheben"
+    },
+    "folder": {
+      "delete": "Ordner löschen",
+      "force_delete": "Ordner endgültig löschen"
+    },
+    "migration": {
+      "transfer": {
+        "start": "Migrations-Transfer starten"
+      }
+    },
+    "object_type": {
+      "update": "Objekttyp ändern"
+    },
+    "permission": {
+      "role_assignment": {
+        "create": "Rolle zuweisen",
+        "delete": "Rollenzuweisung entfernen"
+      },
+      "role": {
+        "create": "Rolle anlegen",
+        "update": "Rolle ändern"
+      },
+      "scope_lock": {
+        "create": "Bereichssperre setzen",
+        "release": "Bereichssperre aufheben"
+      }
+    },
+    "system": {
+      "not_shutdown": {
+        "trigger": "Not-Shutdown auslösen"
+      }
+    },
+    "workflow": {
+      "process_definition": {
+        "import": "Prozessdefinition importieren"
+      }
+    }
   }
 }

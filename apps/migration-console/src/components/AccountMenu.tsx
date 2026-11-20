@@ -14,9 +14,18 @@ import { ThemeSwitcher } from "./ThemeSwitcher";
 //   controls stacked, each at least 40px tall.
 // Both forms are rendered and switched by CSS; `display: none` keeps the
 // hidden one out of the accessibility tree and the tab order.
+// `inlineFrom="lg"` (P83-S11) moves the switch to 1024px for a header whose
+// row is too full at 768px (reviewer-ui: four tabs plus the cluster).
 // Duplicated per app on purpose (ADR 0006: no shared JS between apps); the
 // same file exists in every app that has this header.
-export function AccountMenu() {
+// Literal class names per breakpoint - Tailwind only generates classes it
+// finds spelled out in the source.
+const BREAKPOINT_CLASSES = {
+  md: { inline: "hidden md:flex", menu: "md:hidden" },
+  lg: { inline: "hidden lg:flex", menu: "lg:hidden" },
+} as const;
+
+export function AccountMenu({ inlineFrom = "md" }: { inlineFrom?: "md" | "lg" }) {
   const { user, logout } = useAuth();
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
@@ -48,7 +57,7 @@ export function AccountMenu() {
 
   return (
     <>
-      <div className="hidden flex-none items-center gap-4 md:flex">
+      <div className={`${BREAKPOINT_CLASSES[inlineFrom].inline} flex-none items-center gap-4`}>
         <LocaleSwitcher />
         <ThemeSwitcher />
         {user && <span className="whitespace-nowrap">{user.username}</span>}
@@ -57,7 +66,7 @@ export function AccountMenu() {
         </button>
       </div>
 
-      <div ref={rootRef} className="relative flex-none md:hidden">
+      <div ref={rootRef} className={`relative flex-none ${BREAKPOINT_CLASSES[inlineFrom].menu}`}>
         <button
           ref={buttonRef}
           type="button"

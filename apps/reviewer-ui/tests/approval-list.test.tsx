@@ -67,8 +67,23 @@ describe("ApprovalList", () => {
     await waitFor(() =>
       expect(listApprovalRequestsMock).toHaveBeenCalledWith("token-123", { status: "pending" })
     );
-    expect(screen.getByText("document.delete")).toBeInTheDocument();
+    expect(screen.getByText("Dokument löschen")).toBeInTheDocument();
     expect(screen.getByText("bob")).toBeInTheDocument();
+  });
+
+  // P83-S11 (item 6): the action type shows as a translated name, the raw
+  // identifier only on hover; an unknown type falls back to the raw value.
+  it("shows known action types translated and unknown ones raw", async () => {
+    listApprovalRequestsMock.mockResolvedValue([
+      PENDING_REQUEST,
+      { ...PENDING_REQUEST, id: "req-2", action_type: "query.custom_fix" },
+    ]);
+    renderList();
+
+    const known = await screen.findByText("Dokument löschen");
+    expect(known).toHaveAttribute("title", "document.delete");
+    expect(screen.queryByText("document.delete")).not.toBeInTheDocument();
+    expect(screen.getByText("query.custom_fix").tagName).toBe("CODE");
   });
 
   it("shows an empty state when there are no matching requests", async () => {
@@ -84,7 +99,7 @@ describe("ApprovalList", () => {
     listApprovalRequestsMock.mockResolvedValue([PENDING_REQUEST]);
     renderList();
 
-    await waitFor(() => expect(screen.getByText("document.delete")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Dokument löschen")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "Details anzeigen" }));
 
     expect(screen.getByText(/"document_id": "doc-1"/)).toBeInTheDocument();
@@ -95,7 +110,7 @@ describe("ApprovalList", () => {
     approveRequestMock.mockResolvedValue({ ...PENDING_REQUEST, status: "approved" });
     renderList();
 
-    await waitFor(() => expect(screen.getByText("document.delete")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Dokument löschen")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "Freigeben" }));
 
     await waitFor(() =>
@@ -109,7 +124,7 @@ describe("ApprovalList", () => {
     rejectRequestMock.mockResolvedValue({ ...PENDING_REQUEST, status: "rejected" });
     renderList();
 
-    await waitFor(() => expect(screen.getByText("document.delete")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Dokument löschen")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "Ablehnen" }));
 
     const form = screen.getByRole("form", { name: "Ablehnung begründen" });
@@ -131,7 +146,7 @@ describe("ApprovalList", () => {
     rejectRequestMock.mockResolvedValue({ ...PENDING_REQUEST, status: "rejected" });
     renderList();
 
-    await waitFor(() => expect(screen.getByText("document.delete")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Dokument löschen")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "Ablehnen" }));
     fireEvent.submit(screen.getByRole("form", { name: "Ablehnung begründen" }));
 
@@ -147,7 +162,7 @@ describe("ApprovalList", () => {
     listApprovalRequestsMock.mockResolvedValue([PENDING_REQUEST]);
     renderList();
 
-    await waitFor(() => expect(screen.getByText("document.delete")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Dokument löschen")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "Ablehnen" }));
     fireEvent.click(screen.getByRole("button", { name: "Abbrechen" }));
 
@@ -162,7 +177,7 @@ describe("ApprovalList", () => {
     ]);
     renderList();
 
-    await waitFor(() => expect(screen.getByText("document.delete")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Dokument löschen")).toBeInTheDocument());
     expect(screen.queryByRole("button", { name: "Freigeben" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Ablehnen" })).not.toBeInTheDocument();
   });

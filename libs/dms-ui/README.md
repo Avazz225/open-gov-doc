@@ -43,6 +43,13 @@ into the `components` layer so Tailwind utilities on the same element still win:
   other than the page sets `--dms-scroll-cover` to that surface's color.
 - **`.dms-tab-strip`**: one row of tabs that never wraps, scrollbar hidden. Combine it with
   `.dms-scroll-x`.
+- **`.dms-stack-table`** (P83-S11): below 768px each row of the table becomes a card, with no second
+  markup.
+  - Cells name themselves with `data-label`; the `thead` is visually hidden.
+  - `data-stack="title"` marks the first line, `"actions"` the full-width ≥ 40px buttons, and
+    `"detail"` (on a `<tr>`) an expanded row attached to the card above.
+  - Uses `!important` on cell padding/border inside the media query only, because Tailwind utilities
+    sit in a later layer.
 
-Consumed by `migration-console` and `process-designer` since P83-S10. reviewer-ui, admin-ui and user-ui
-follow in P83-S11–S13.
+Consumed by `migration-console` and `process-designer` since P83-S10 and by `reviewer-ui` since P83-S11.
+admin-ui and user-ui follow in P83-S12/S13.
