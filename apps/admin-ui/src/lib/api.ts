@@ -2362,6 +2362,24 @@ export interface InstallationStatus {
   error?: string | null;
 }
 
+// P84-S4 (ADR 0234): each operator has their own token; the env's
+// `DMS_FLEET_OPERATOR_KEY` is the "bootstrap" admin. `/operators/me` says who
+// a token belongs to.
+export interface FleetOperator {
+  id: string;
+  name: string;
+  is_admin: boolean;
+  created_at: string;
+  revoked_at: string | null;
+}
+
+export async function getCurrentFleetOperator(operatorKey: string): Promise<FleetOperator> {
+  const response = await fleetManagementRequest("operators/me", {
+    headers: fleetOperatorHeaders(operatorKey),
+  });
+  return response.json();
+}
+
 export async function listManagedInstallations(
   operatorKey: string
 ): Promise<ManagedInstallation[]> {

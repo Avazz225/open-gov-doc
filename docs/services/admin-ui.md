@@ -400,6 +400,11 @@ component state, never persisted, same convention as `ProcessingFailuresView`'s
 update plans, and rollouts — the rest of `fleet-management-service`'s API — are not built here, a
 separate, larger UI surface left for a future session.
 
+
+**Operator identity (P84-S4, ADR 0234):** after "Laden" the view also calls `GET /operators/me` and shows
+"Angemeldet als <name>", with an "Admin-Operator" badge for admins. The field is labelled
+"Fleet-Operator-Token" and accepts the env key (operator `bootstrap`) or a personal minted token.
+
 ## Theming (Concept 8, since P4-S6)
 
 `src/lib/theme-context.tsx` (`ThemeProvider`/`useTheme()`) — identical pattern to the User UI (deliberately duplicated instead of shared, ADR 0006), toggleable via the `ThemeSwitcher` in the header. Stored across devices on the user account of the **active installation** (`GET/PUT /api/auth-service/me/preferences`, `accessToken` comes from the installation-bound `AuthProvider`, ADR 0008), see [ADR 0009](../adr/0009-cross-ui-theming-profile-persistence.md). The `localStorage` cache key (`dms.theme`) is deliberately **not** installation-specific — switching installations briefly still shows the last-cached theme choice, until the new installation's own preference has been loaded (see ADR 0009 "Consequences").

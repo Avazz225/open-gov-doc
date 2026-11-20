@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from dms_db_base import make_declarative_base
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 Base = make_declarative_base("fleet")
@@ -125,3 +125,25 @@ class InstallationRun(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class FleetOperator(Base):
+    """A person (or tool) operating this fleet-management-service (P84-S4,
+    ADR 0234 building on 0212). Each operator authenticates with their own
+    bearer token, so the four-eyes check on rollout steps compares two
+    verified identities instead of two free-text ``actor`` fields.
+
+    Tokens are random UUID4 values, stored only as sha256 hex. The row named
+    ``bootstrap`` is special: it is the identity behind the environment's
+    ``fleet_operator_key``, which stays the source of truth for that one
+    operator (rotating or removing the env key takes effect immediately), so
+    its ``token_hash`` is empty and never matched."""
+
+    __tablename__ = "fleet_operator"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), unique=True)
+    token_hash: Mapped[str] = mapped_column(String(64), default="")
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

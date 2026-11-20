@@ -11,6 +11,8 @@ import {
   pushInstallationLicense,
   type InstallationStatus,
   type ManagedInstallation,
+  getCurrentFleetOperator,
+  type FleetOperator,
 } from "@/lib/api";
 
 // Fleet Management (P67-S1) - wires up fleet-management-service, which had
@@ -35,16 +37,23 @@ export function FleetManagementView() {
 
   const [licenseTokenById, setLicenseTokenById] = useState<Record<string, string>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
+  // P84-S4: who the entered token belongs to (its own operator identity).
+  const [operator, setOperator] = useState<FleetOperator | null>(null);
 
   async function load() {
     setIsLoading(true);
     setError(null);
     try {
-      const list = await listManagedInstallations(operatorKey);
+      const [list, me] = await Promise.all([
+        listManagedInstallations(operatorKey),
+        getCurrentFleetOperator(operatorKey),
+      ]);
       setInstallations(list);
+      setOperator(me);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("fleetManagement.unreachable"));
       setInstallations(null);
+      setOperator(null);
     } finally {
       setIsLoading(false);
     }
@@ -148,6 +157,14 @@ export function FleetManagementView() {
           {isLoading ? t("common.loading") : t("fleetManagement.load")}
         </button>
       </div>
+      {operator && (
+        <p className="text-sm opacity-80">
+          {t("fleetManagement.signedInAs", { name: operator.name })}
+          {operator.is_admin && <span className="badge-hc-border ml-2 inline-block whitespace-nowrap rounded-full bg-accent-bg px-2 py-[0.1rem] text-xs text-accent">
+              {t("fleetManagement.adminOperator")}
+            </span>}
+        </p>
+      )}
 
       {error && (
         <p className="text-danger" role="alert">

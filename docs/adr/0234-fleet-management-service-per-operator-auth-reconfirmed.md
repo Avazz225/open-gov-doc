@@ -1,6 +1,6 @@
 # 0234 — fleet-management-service: per-operator authentication, re-confirmed and unblocked for build
 
-**Status:** accepted
+**Status:** accepted — **built in P84-S4** (see "Build notes" at the end)
 **Context:** P82-S1 (Phase 82, first scoping-only session — "larger remaining items" round). ADR 0212
 (P73-S2) already scoped a concrete fix for `fleet-management-service`'s per-operator identity gap and
 named a specific follow-up build session, **P73-S2b, which was never executed**. Per this project's own
@@ -81,3 +81,18 @@ ADR 0147/0161/0207/0209/0212 precedent this phase itself continues). Concretely,
 - `docs/services/fleet-management-service.md`'s Open Points entry should be updated by that build session
   (not this one) once the fix actually lands, per this project's convention of updating docs alongside the
   code change that closes a gap, not ahead of it.
+
+## Build notes (P84-S4)
+
+Built as recommended, with one deliberate deviation and one addition:
+- **Bootstrap stays env-backed.** Instead of hashing the env `fleet_operator_key` into the bootstrap row
+  once, the env value stays the source of truth for the `bootstrap` operator: it is checked directly, and
+  the row (`token_hash` empty) is only the identity. With a one-time hash, rotating the env key would
+  have left the old key valid, and removing it would no longer lock that path. Both now behave as before
+  this change (ADR 0172's fail-closed default). For the same reason the bootstrap row cannot be revoked
+  through the API.
+- **`GET /operators/me`** was added, so admin-ui can show "signed in as".
+- **The removed body fields** (`actor`, `started_by`) are ignored rather than rejected when an old
+  client still sends them.
+
+Tests: 42 (+8). Details in `docs/services/fleet-management-service.md` "Operators".

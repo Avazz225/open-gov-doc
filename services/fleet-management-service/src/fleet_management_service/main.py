@@ -14,7 +14,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fleet_management_service import orchestration, repository
 from fleet_management_service.agent_client import AgentError, FleetAgentClient
-from fleet_management_service.models import Base, InstallationRun, ManagedInstallation, UpdatePlan
+from fleet_management_service.models import (
+    Base,
+    FleetOperator,
+    InstallationRun,
+    ManagedInstallation,
+    UpdatePlan,
+)
 from fleet_management_service.schemas import (
     ApprovalDecision,
     GroupCreate,
@@ -28,6 +34,9 @@ from fleet_management_service.schemas import (
     ManagedInstallationOut,
     ManagedInstallationRotateKeyRequest,
     MarkDoneRequest,
+    OperatorCreate,
+    OperatorCreateOut,
+    OperatorOut,
     ProvisionRequest,
     RolloutCreate,
     RolloutOut,
@@ -89,23 +98,39 @@ async def get_session() -> AsyncIterator[AsyncSession]:
         yield session
 
 
-async def _require_operator_key(authorization: str = Header(default="")) -> None:
-    """P54-S1/ADR 0172: gates every endpoint below except `/healthz`. Same
-    `hub_operator_key` mechanism `federation-hub-service` already uses
-    (ADR 0039/0162) - fully locked (403) without a configured
-    `fleet_operator_key`, a deliberate fail-closed default, not a
-    regression. P67-S1: switched to `hmac.compare_digest` - the plain `!=`
-    this had until now was a timing-safety gap `federation-hub-service`'s
-    own `hub_operator_key` check already closed for itself back at P62-S1,
-    just never ported here (this function's own docstring already named
-    that check as the precedent to follow, but not this exact detail)."""
-    if not settings.fleet_operator_key or not hmac.compare_digest(
-        authorization, f"Bearer {settings.fleet_operator_key}"
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Fehlender oder ungültiger Fleet-Operator-Schlüssel",
-        )
+async def _require_fleet_operator(
+    authorization: str = Header(default=""), session: AsyncSession = Depends(get_session)
+) -> FleetOperator:
+    """Gates every endpoint but `/healthz` and returns WHO is calling
+    (P84-S4, ADR 0234; before, ADR 0172's single shared key only said "some
+    operator"). Two ways in:
+    - the environment's `fleet_operator_key` - the `bootstrap` operator (an
+      admin). The env value stays authoritative: rotating it switches the
+      accepted token at once, removing it locks that path (fail-closed, as
+      before);
+    - a minted operator token (`POST /operators`), matched by its sha256.
+    Comparisons are timing-safe (`hmac.compare_digest`)."""
+    token = authorization[len("Bearer ") :] if authorization.startswith("Bearer ") else ""
+    if token:
+        if settings.fleet_operator_key and hmac.compare_digest(token, settings.fleet_operator_key):
+            return await repository.ensure_bootstrap_operator(session)
+        operator = await repository.resolve_operator(session, token)
+        if operator is not None:
+            return operator
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Fehlender oder ungültiger Fleet-Operator-Schlüssel",
+    )
+
+
+async def _require_admin_operator(
+    operator: FleetOperator = Depends(_require_fleet_operator),
+) -> FleetOperator:
+    """Minting and revoking operators is admin-only, so one compromised
+    ordinary token can't mint more (ADR 0234)."""
+    if not operator.is_admin:
+        raise HTTPException(status_code=403, detail="Nur Admin-Operatoren dürfen das")
+    return operator
 
 
 def _agent_client(installation: ManagedInstallation) -> FleetAgentClient:
@@ -122,11 +147,71 @@ def healthz() -> dict:
     return {"status": "ok", "service": settings.service_name}
 
 
+# --- Operators (P84-S4, ADR 0234) ------------------------------------------
+
+
+@app.get("/operators/me", response_model=OperatorOut)
+async def get_current_operator(operator: FleetOperator = Depends(_require_fleet_operator)):
+    """Who the presented token belongs to - lets a UI show "signed in as"."""
+    return operator
+
+
+@app.get(
+    "/operators",
+    response_model=list[OperatorOut],
+    dependencies=[Depends(_require_fleet_operator)],
+)
+async def list_operators(session: AsyncSession = Depends(get_session)):
+    """Any operator may list operators; token values are never returned."""
+    return await repository.list_operators(session)
+
+
+@app.post("/operators", response_model=OperatorCreateOut, status_code=201)
+async def create_operator(
+    payload: OperatorCreate,
+    _admin: FleetOperator = Depends(_require_admin_operator),
+    session: AsyncSession = Depends(get_session),
+):
+    """Mints a new operator; the token is in this response only."""
+    try:
+        operator, token = await repository.create_operator(
+            session, name=payload.name, is_admin=payload.is_admin
+        )
+    except repository.OperatorConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await session.commit()
+    return OperatorCreateOut(
+        id=operator.id,
+        name=operator.name,
+        is_admin=operator.is_admin,
+        created_at=operator.created_at,
+        revoked_at=operator.revoked_at,
+        token=token,
+    )
+
+
+@app.delete("/operators/{operator_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_operator(
+    operator_id: str,
+    _admin: FleetOperator = Depends(_require_admin_operator),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    """Sets `revoked_at`; the token stops working at once. The bootstrap
+    operator is revoked by removing/rotating the env key instead."""
+    try:
+        await repository.revoke_operator(session, operator_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except repository.OperatorConflictError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await session.commit()
+
+
 @app.post(
     "/installations",
     response_model=ManagedInstallationCreateOut,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(_require_operator_key)],
+    dependencies=[Depends(_require_fleet_operator)],
 )
 async def create_installation(
     payload: ManagedInstallationCreate, session: AsyncSession = Depends(get_session)
@@ -146,7 +231,7 @@ async def create_installation(
 @app.get(
     "/installations",
     response_model=list[ManagedInstallationOut],
-    dependencies=[Depends(_require_operator_key)],
+    dependencies=[Depends(_require_fleet_operator)],
 )
 async def list_installations(
     session: AsyncSession = Depends(get_session),
@@ -159,7 +244,7 @@ async def list_installations(
 @app.delete(
     "/installations/{installation_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(_require_operator_key)],
+    dependencies=[Depends(_require_fleet_operator)],
 )
 async def delete_installation(
     installation_id: str, session: AsyncSession = Depends(get_session)
@@ -174,7 +259,7 @@ async def delete_installation(
 @app.post(
     "/installations/{installation_id}/rotate-key",
     response_model=ManagedInstallationCreateOut,
-    dependencies=[Depends(_require_operator_key)],
+    dependencies=[Depends(_require_fleet_operator)],
 )
 async def rotate_installation_key(
     installation_id: str,
@@ -240,7 +325,7 @@ async def _fetch_status(installation: ManagedInstallation) -> InstallationStatus
 @app.get(
     "/installations/{installation_id}/status",
     response_model=InstallationStatusOut,
-    dependencies=[Depends(_require_operator_key)],
+    dependencies=[Depends(_require_fleet_operator)],
 )
 async def get_installation_status(
     installation_id: str, session: AsyncSession = Depends(get_session)
@@ -255,7 +340,7 @@ async def get_installation_status(
 @app.get(
     "/installations/status",
     response_model=list[InstallationStatusOut],
-    dependencies=[Depends(_require_operator_key)],
+    dependencies=[Depends(_require_fleet_operator)],
 )
 async def list_installation_statuses(
     session: AsyncSession = Depends(get_session),
@@ -267,7 +352,9 @@ async def list_installation_statuses(
     return list(await asyncio.gather(*(_fetch_status(i) for i in installations)))
 
 
-@app.post("/installations/{installation_id}/license", dependencies=[Depends(_require_operator_key)])
+@app.post(
+    "/installations/{installation_id}/license", dependencies=[Depends(_require_fleet_operator)]
+)
 async def push_license(
     installation_id: str,
     payload: LicenseUploadRequest,
@@ -290,7 +377,7 @@ async def push_license(
 
 
 @app.post(
-    "/installations/{installation_id}/provision", dependencies=[Depends(_require_operator_key)]
+    "/installations/{installation_id}/provision", dependencies=[Depends(_require_fleet_operator)]
 )
 async def provision_installation(
     installation_id: str,
@@ -329,7 +416,7 @@ async def _group_out(session: AsyncSession, group) -> GroupOut:
     "/groups",
     response_model=GroupOut,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(_require_operator_key)],
+    dependencies=[Depends(_require_fleet_operator)],
 )
 async def create_group(
     payload: GroupCreate, session: AsyncSession = Depends(get_session)
@@ -339,7 +426,7 @@ async def create_group(
     return await _group_out(session, group)
 
 
-@app.get("/groups", response_model=list[GroupOut], dependencies=[Depends(_require_operator_key)])
+@app.get("/groups", response_model=list[GroupOut], dependencies=[Depends(_require_fleet_operator)])
 async def list_groups(session: AsyncSession = Depends(get_session)) -> list[GroupOut]:
     groups = await repository.list_groups(session)
     return [await _group_out(session, g) for g in groups]
@@ -348,7 +435,7 @@ async def list_groups(session: AsyncSession = Depends(get_session)) -> list[Grou
 @app.post(
     "/groups/{group_id}/members",
     response_model=GroupOut,
-    dependencies=[Depends(_require_operator_key)],
+    dependencies=[Depends(_require_fleet_operator)],
 )
 async def add_group_member(
     group_id: str, payload: GroupMemberAdd, session: AsyncSession = Depends(get_session)
@@ -365,7 +452,7 @@ async def add_group_member(
 @app.delete(
     "/groups/{group_id}/members/{installation_id}",
     response_model=GroupOut,
-    dependencies=[Depends(_require_operator_key)],
+    dependencies=[Depends(_require_fleet_operator)],
 )
 async def remove_group_member(
     group_id: str, installation_id: str, session: AsyncSession = Depends(get_session)
@@ -382,7 +469,7 @@ async def remove_group_member(
 @app.delete(
     "/groups/{group_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(_require_operator_key)],
+    dependencies=[Depends(_require_fleet_operator)],
 )
 async def delete_group(group_id: str, session: AsyncSession = Depends(get_session)) -> None:
     try:
@@ -396,7 +483,7 @@ async def delete_group(group_id: str, session: AsyncSession = Depends(get_sessio
     "/plans",
     response_model=UpdatePlanOut,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(_require_operator_key)],
+    dependencies=[Depends(_require_fleet_operator)],
 )
 async def create_plan(
     payload: UpdatePlanCreate, session: AsyncSession = Depends(get_session)
@@ -411,7 +498,7 @@ async def create_plan(
 
 
 @app.get(
-    "/plans", response_model=list[UpdatePlanOut], dependencies=[Depends(_require_operator_key)]
+    "/plans", response_model=list[UpdatePlanOut], dependencies=[Depends(_require_fleet_operator)]
 )
 async def list_plans(session: AsyncSession = Depends(get_session)) -> list[UpdatePlan]:
     return await repository.list_update_plans(session)
@@ -420,7 +507,7 @@ async def list_plans(session: AsyncSession = Depends(get_session)) -> list[Updat
 @app.get(
     "/plans/{plan_id}",
     response_model=UpdatePlanOut,
-    dependencies=[Depends(_require_operator_key)],
+    dependencies=[Depends(_require_fleet_operator)],
 )
 async def get_plan(plan_id: str, session: AsyncSession = Depends(get_session)) -> UpdatePlan:
     try:
@@ -470,7 +557,7 @@ async def _rollout_out(session: AsyncSession, rollout) -> RolloutOut:
     "/rollouts",
     response_model=RolloutOut,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(_require_operator_key)],
+    dependencies=[Depends(_require_fleet_operator)],
 )
 async def create_rollout(payload: RolloutCreate, session: AsyncSession = Depends(get_session)):
     try:
@@ -482,7 +569,7 @@ async def create_rollout(payload: RolloutCreate, session: AsyncSession = Depends
 
 
 @app.get(
-    "/rollouts", response_model=list[RolloutOut], dependencies=[Depends(_require_operator_key)]
+    "/rollouts", response_model=list[RolloutOut], dependencies=[Depends(_require_fleet_operator)]
 )
 async def list_rollouts(session: AsyncSession = Depends(get_session)):
     rollouts = await repository.list_rollouts(session)
@@ -492,7 +579,7 @@ async def list_rollouts(session: AsyncSession = Depends(get_session)):
 @app.get(
     "/rollouts/{rollout_id}",
     response_model=RolloutOut,
-    dependencies=[Depends(_require_operator_key)],
+    dependencies=[Depends(_require_fleet_operator)],
 )
 async def get_rollout(rollout_id: str, session: AsyncSession = Depends(get_session)):
     try:
@@ -505,10 +592,13 @@ async def get_rollout(rollout_id: str, session: AsyncSession = Depends(get_sessi
 @app.post(
     "/rollouts/{rollout_id}/start",
     response_model=RolloutOut,
-    dependencies=[Depends(_require_operator_key)],
+    dependencies=[Depends(_require_fleet_operator)],
 )
 async def start_rollout(
-    rollout_id: str, payload: RolloutStart, session: AsyncSession = Depends(get_session)
+    rollout_id: str,
+    payload: RolloutStart,
+    operator: FleetOperator = Depends(_require_fleet_operator),
+    session: AsyncSession = Depends(get_session),
 ):
     """3a: "a wave must be started explicitly" - sets every not-yet-started
     `InstallationRun` to the waiting state of its first step
@@ -523,7 +613,7 @@ async def start_rollout(
         raise HTTPException(
             status_code=409, detail=f"Rollout ist bereits im Status {rollout.status!r}"
         )
-    await repository.start_rollout(session, rollout, started_by=payload.started_by)
+    await repository.start_rollout(session, rollout, started_by=operator.name)
     runs = await repository.list_runs_for_rollout(session, rollout_id)
     for run in runs:
         await repository.set_run_status(session, run, status="wait_external")
@@ -544,7 +634,7 @@ async def _load_run_context(session: AsyncSession, rollout_id: str, installation
 @app.post(
     "/rollouts/{rollout_id}/installations/{installation_id}/advance",
     response_model=InstallationRunOut,
-    dependencies=[Depends(_require_operator_key)],
+    dependencies=[Depends(_require_fleet_operator)],
 )
 async def advance_installation_run(
     rollout_id: str, installation_id: str, session: AsyncSession = Depends(get_session)
@@ -596,12 +686,13 @@ async def advance_installation_run(
 @app.post(
     "/rollouts/{rollout_id}/installations/{installation_id}/mark-done",
     response_model=InstallationRunOut,
-    dependencies=[Depends(_require_operator_key)],
+    dependencies=[Depends(_require_fleet_operator)],
 )
 async def mark_installation_run_done(
     rollout_id: str,
     installation_id: str,
     payload: MarkDoneRequest,
+    operator: FleetOperator = Depends(_require_fleet_operator),
     session: AsyncSession = Depends(get_session),
 ):
     """Confirms a ``"gate"`` step (scope lock/maintenance mode set, rolling
@@ -632,7 +723,7 @@ async def mark_installation_run_done(
             error_message=payload.detail,
         )
     elif step.get("requires_approval"):
-        await repository.propose_run(session, run, actor=payload.actor)
+        await repository.propose_run(session, run, actor=operator.name)
     else:
         await repository.advance_run(session, run, plan)
     await session.commit()
@@ -642,27 +733,27 @@ async def mark_installation_run_done(
 @app.post(
     "/rollouts/{rollout_id}/installations/{installation_id}/approve",
     response_model=InstallationRunOut,
-    dependencies=[Depends(_require_operator_key)],
+    dependencies=[Depends(_require_fleet_operator)],
 )
 async def approve_installation_run(
     rollout_id: str,
     installation_id: str,
     payload: ApprovalDecision,
+    operator: FleetOperator = Depends(_require_fleet_operator),
     session: AsyncSession = Depends(get_session),
 ):
     """Reuse of the generic four-eyes principle (4.3) at the fleet level:
     separate proposal/approval step, enforced via two separate API calls
-    (`mark-done` proposes, `approve` confirms) - ``actor`` must differ from
-    the original `proposed_by`. Unlike `permission-service`'s genuine 4.3,
-    fleet-management-service does not manage its own users (see ADR 0038) -
-    the separation is structural (two calls), not cryptographically enforced
-    between two real identities."""
+    (`mark-done` proposes, `approve` confirms) - the approving operator must
+    differ from the original `proposed_by`. Since P84-S4 (ADR 0234) both are
+    verified operator identities from their own bearer tokens; before, both
+    were free-text `actor` fields anyone could fill in."""
     rollout, run, plan = await _load_run_context(session, rollout_id, installation_id)
     if run.status != "manual_required":
         raise HTTPException(
             status_code=409, detail=f"Schritt ist im Status {run.status!r} - keine offene Freigabe"
         )
-    if payload.actor == run.proposed_by:
+    if operator.name == run.proposed_by:
         raise HTTPException(
             status_code=409,
             detail="Freigabe durch dieselbe Person wie der Vorschlag ist nicht erlaubt (4.3)",
@@ -675,12 +766,13 @@ async def approve_installation_run(
 @app.post(
     "/rollouts/{rollout_id}/installations/{installation_id}/reject",
     response_model=InstallationRunOut,
-    dependencies=[Depends(_require_operator_key)],
+    dependencies=[Depends(_require_fleet_operator)],
 )
 async def reject_installation_run(
     rollout_id: str,
     installation_id: str,
     payload: ApprovalDecision,
+    operator: FleetOperator = Depends(_require_fleet_operator),
     session: AsyncSession = Depends(get_session),
 ):
     rollout, run, plan = await _load_run_context(session, rollout_id, installation_id)
@@ -693,7 +785,7 @@ async def reject_installation_run(
         run,
         status="recoverable_failed",
         last_outcome="recoverable_failed",
-        error_message=f"Abgelehnt von {payload.actor}: {payload.reason or 'kein Grund angegeben'}",
+        error_message=f"Abgelehnt von {operator.name}: {payload.reason or 'kein Grund angegeben'}",
     )
     await session.commit()
     return await _run_out(session, run, plan)
@@ -702,7 +794,7 @@ async def reject_installation_run(
 @app.post(
     "/rollouts/{rollout_id}/installations/{installation_id}/retry",
     response_model=InstallationRunOut,
-    dependencies=[Depends(_require_operator_key)],
+    dependencies=[Depends(_require_fleet_operator)],
 )
 async def retry_installation_run(
     rollout_id: str, installation_id: str, session: AsyncSession = Depends(get_session)
@@ -724,7 +816,7 @@ async def retry_installation_run(
 @app.post(
     "/rollouts/{rollout_id}/installations/{installation_id}/acknowledge-fatal",
     response_model=InstallationRunOut,
-    dependencies=[Depends(_require_operator_key)],
+    dependencies=[Depends(_require_fleet_operator)],
 )
 async def acknowledge_fatal_installation_run(
     rollout_id: str, installation_id: str, session: AsyncSession = Depends(get_session)

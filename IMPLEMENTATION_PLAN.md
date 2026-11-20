@@ -3513,13 +3513,45 @@ regression runs at each phase close.
       the test runner's container restarts failed transiently; a re-run was green).
   - **Docs:** a follow-up section in ADR 0230 (no new ADR), comments in compose and `.env.example`, and a
     README note.
-- **P84-S4 — Fleet-management per-operator auth: build ADR 0234.**
-  - `FleetOperator` table (UUID4 tokens, stored sha256-hashed) with `is_admin`, the bootstrap operator,
-    and `/operators` management restricted to admins.
-  - The four-eyes check (`actor != proposed_by`) and `started_by` use the verified operator identity, no
-    longer the payload.
-  - Admin UI: operator token entry and display of who proposed/approved.
-  - Doc: ADR 0234's status updated to built.
+- **P84-S4 — Fleet-management per-operator auth: build ADR 0234.** ✅ **Done. Closes Phase 84.**
+  - **Table:** `fleet.fleet_operator` with a unique name, a sha256-hashed UUID4 token, `is_admin` and
+    `revoked_at`.
+  - **Auth:** `_require_fleet_operator` gates every endpoint and returns the operator.
+    `_require_admin_operator` gates minting and revoking.
+  - **Identity in rollouts:** `mark-done` (`proposed_by`), `approve` (the four-eyes check is now on
+    verified identities), `reject` and `start` (`started_by`) take the operator from the token. `actor`
+    and `started_by` were removed from the schemas; old clients sending them are ignored, so spoofing has
+    no effect.
+  - **Endpoints:** `GET /operators/me`, `GET /operators`, `POST /operators` (token shown once) and
+    `DELETE /operators/{id}`.
+  - **Deviation from ADR 0234:** the env `fleet_operator_key` stays authoritative for the `bootstrap`
+    operator, which is identity only and not revocable through the API. Rotating or removing the env
+    key takes effect immediately, where a one-time hash would have kept the old key valid. Recorded in
+    ADR 0234's "Build notes".
+  - **admin-ui:** after loading it shows "Angemeldet als <name>" plus an "Admin-Operator" pill through
+    `/operators/me`; the field is relabelled "Fleet-Operator-Token". Screenshots at 1400/390.
+  - **Tests:**
+    - fleet 42 (+8), with the four-eyes test on two minted operators;
+    - admin-ui vitest 319 (+1);
+    - admin-ui e2e 8/8;
+    - ruff clean; images rebuilt.
+  - **Phase-close regression:** 30/32 green at first. Two test-only failures, both fixed:
+    - **fleet:** the new operator rows were only cleaned up by the `engine` fixture, which the
+      `client`-only tests don't use, so names collided on a second run. Fixed with an `autouse` cleanup.
+    - **federation-hub `test_run_retry_tick_redelivers_a_due_handover`:** it existed since P73-S3 and
+      failed timing-dependently, because the tick delivers every due handover, including leftovers from
+      earlier tests. It now counts only its own handover's deliveries.
+
+    Both services then ran green twice in a row. ruff is down to the pre-existing files only (26
+    errors/9 files, from 28/11; → P91-S3).
+
+**Phase 84 result:**
+- The permission-cache race is closed (ADR 0239).
+- Federation lookups work beyond 100 installations, which removes the flaky test.
+- Infra ports are bound to loopback.
+- Fleet operators have verified identities.
+- Three hidden test bugs were found and fixed on the way: idempotent shared e2e grants, fleet operator
+  leftovers, and the hub retry count.
 
 ## Phase 85 — Acting Identity from the Verified Token, Everywhere (user decision)
 

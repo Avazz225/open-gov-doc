@@ -15,6 +15,22 @@ DSN = os.environ.get(
 os.environ["DMS_POSTGRES_DSN"] = DSN
 
 
+@pytest.fixture(autouse=True)
+async def _clean_operators():
+    """Operators (P84-S4) are created through the API by tests that only use
+    the `client` fixture, so the `engine` fixture's cleanup below never ran
+    for them - names then collided with leftovers on the next run. Cleared
+    before every test instead. (`create_all` first: the very first test of a
+    fresh test DB runs before the app's lifespan created the table.)"""
+    eng = build_engine(DSN)
+    async with eng.begin() as conn:
+        await conn.execute(text("CREATE SCHEMA IF NOT EXISTS fleet"))
+        await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(text("DELETE FROM fleet.fleet_operator"))
+    await eng.dispose()
+    yield
+
+
 @pytest.fixture
 async def engine():
     eng = build_engine(DSN)
@@ -31,6 +47,7 @@ async def engine():
         await conn.execute(text("DELETE FROM fleet.installation_group_member"))
         await conn.execute(text("DELETE FROM fleet.installation_group"))
         await conn.execute(text("DELETE FROM fleet.managed_installation"))
+        await conn.execute(text("DELETE FROM fleet.fleet_operator"))
     await eng.dispose()
 
 

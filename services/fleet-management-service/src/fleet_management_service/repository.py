@@ -1,11 +1,15 @@
+import hashlib
+import hmac
 import secrets
 import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fleet_management_service.models import (
+    FleetOperator,
     InstallationGroup,
     InstallationGroupMember,
     InstallationRun,
@@ -314,3 +318,97 @@ async def propose_run(session: AsyncSession, run: InstallationRun, *, actor: str
     run.proposed_by = actor
     run.updated_at = datetime.now(UTC)
     await session.flush()
+
+
+# --- Operators (P84-S4, ADR 0234) ------------------------------------------
+
+BOOTSTRAP_OPERATOR_NAME = "bootstrap"
+
+
+class OperatorConflictError(Exception):
+    """An operator with that name exists already (or the name is reserved)."""
+
+
+def hash_operator_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+async def ensure_bootstrap_operator(session: AsyncSession) -> FleetOperator:
+    """The identity behind the environment's ``fleet_operator_key``, created
+    on first use. Concurrency-safe (``ON CONFLICT DO NOTHING`` on the unique
+    name, then read back) and committed right away, since the caller is an
+    auth dependency that runs before the endpoint's own work."""
+    await session.execute(
+        pg_insert(FleetOperator)
+        .values(
+            id=str(uuid.uuid4()),
+            name=BOOTSTRAP_OPERATOR_NAME,
+            token_hash="",
+            is_admin=True,
+            created_at=datetime.now(UTC),
+        )
+        .on_conflict_do_nothing(index_elements=["name"])
+    )
+    await session.commit()
+    result = await session.execute(
+        select(FleetOperator).where(FleetOperator.name == BOOTSTRAP_OPERATOR_NAME)
+    )
+    return result.scalar_one()
+
+
+async def resolve_operator(session: AsyncSession, token: str) -> FleetOperator | None:
+    """A minted (non-bootstrap, non-revoked) operator by token. A linear
+    scan with ``hmac.compare_digest`` on the hashes, the same timing-safe
+    pattern the single-key check used; operator counts are tiny."""
+    presented = hash_operator_token(token)
+    result = await session.execute(
+        select(FleetOperator).where(
+            FleetOperator.revoked_at.is_(None),
+            FleetOperator.name != BOOTSTRAP_OPERATOR_NAME,
+        )
+    )
+    match = None
+    for operator in result.scalars().all():
+        if operator.token_hash and hmac.compare_digest(presented, operator.token_hash):
+            match = operator
+    return match
+
+
+async def create_operator(
+    session: AsyncSession, *, name: str, is_admin: bool
+) -> tuple[FleetOperator, str]:
+    if name == BOOTSTRAP_OPERATOR_NAME:
+        raise OperatorConflictError(f"Name {name!r} ist reserviert")
+    existing = await session.execute(select(FleetOperator).where(FleetOperator.name == name))
+    if existing.scalar_one_or_none() is not None:
+        raise OperatorConflictError(f"Operator {name!r} existiert bereits")
+    token = str(uuid.uuid4())
+    operator = FleetOperator(
+        id=str(uuid.uuid4()),
+        name=name,
+        token_hash=hash_operator_token(token),
+        is_admin=is_admin,
+        created_at=datetime.now(UTC),
+    )
+    session.add(operator)
+    await session.flush()
+    return operator, token
+
+
+async def list_operators(session: AsyncSession) -> list[FleetOperator]:
+    result = await session.execute(select(FleetOperator).order_by(FleetOperator.created_at))
+    return list(result.scalars().all())
+
+
+async def revoke_operator(session: AsyncSession, operator_id: str) -> FleetOperator:
+    operator = await session.get(FleetOperator, operator_id)
+    if operator is None:
+        raise NotFoundError(f"Operator {operator_id!r} unbekannt")
+    if operator.name == BOOTSTRAP_OPERATOR_NAME:
+        raise OperatorConflictError(
+            "Der Bootstrap-Operator folgt dem Umgebungsschlüssel und wird dort widerrufen"
+        )
+    if operator.revoked_at is None:
+        operator.revoked_at = datetime.now(UTC)
+        await session.flush()
+    return operator

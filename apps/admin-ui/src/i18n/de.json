@@ -463,8 +463,8 @@
   "fleetManagement": {
     "pageTitle": "Flottenverwaltung",
     "heading": "Verwaltete Installationen",
-    "hint": "Installationen, die dieser Flotten-Betreiber administriert - direkt beim Fleet Management Service, nicht über das Gateway dieser Installation (der Service ist geteilte, installationsübergreifende Infrastruktur, keine interne Komponente). Jeder Aufruf, auch das reine Auflisten, erfordert den Betreiber-Schlüssel.",
-    "operatorKey": "Fleet-Operator-Schlüssel",
+    "hint": "Installationen, die dieser Flotten-Betreiber administriert - direkt beim Fleet Management Service, nicht über das Gateway dieser Installation (der Service ist geteilte, installationsübergreifende Infrastruktur, keine interne Komponente). Jeder Aufruf, auch das reine Auflisten, erfordert den Betreiber-Schlüssel. Jeder Betreiber hat ein eigenes Token; der Umgebungsschlüssel gehört dem Admin-Operator „bootstrap“.",
+    "operatorKey": "Fleet-Operator-Token",
     "operatorKeyPlaceholder": "Erforderlich für jede Aktion auf dieser Seite",
     "load": "Laden",
     "unreachable": "Fleet Management Service nicht erreichbar oder Schlüssel ungültig.",
@@ -486,7 +486,9 @@
     "pushLicense": "Übertragen",
     "licenseError": "Lizenzübertragung fehlgeschlagen",
     "delete": "Entfernen",
-    "deleteError": "Entfernen fehlgeschlagen"
+    "deleteError": "Entfernen fehlgeschlagen",
+    "signedInAs": "Angemeldet als {name}",
+    "adminOperator": "Admin-Operator"
   },
   "delegationsAdmin": {
     "pageTitle": "Stellvertretungen",

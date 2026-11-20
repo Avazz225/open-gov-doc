@@ -119,7 +119,9 @@ class RolloutCreate(BaseModel):
 
 
 class RolloutStart(BaseModel):
-    started_by: str
+    """Empty since P84-S4: who started the rollout is the verified operator.
+    Kept so existing clients that still send ``started_by`` don't break
+    (pydantic ignores unknown fields; the value is never used)."""
 
 
 class InstallationRunOut(BaseModel):
@@ -150,11 +152,32 @@ class RolloutOut(BaseModel):
 
 
 class MarkDoneRequest(BaseModel):
-    actor: str
+    # `actor` was removed in P84-S4: the proposer is the verified operator.
+    # A client still sending it is not rejected, the value is just ignored.
     outcome: str = "success"
     detail: str | None = None
 
 
 class ApprovalDecision(BaseModel):
-    actor: str
+    # `actor` removed in P84-S4, see MarkDoneRequest.
     reason: str | None = None
+
+
+class OperatorCreate(BaseModel):
+    """P84-S4: minting a new operator (admins only)."""
+
+    name: str
+    is_admin: bool = False
+
+
+class OperatorOut(BaseModel):
+    id: str
+    name: str
+    is_admin: bool
+    created_at: datetime
+    revoked_at: datetime | None = None
+
+
+class OperatorCreateOut(OperatorOut):
+    # Returned exactly once, at creation - only its sha256 is stored.
+    token: str

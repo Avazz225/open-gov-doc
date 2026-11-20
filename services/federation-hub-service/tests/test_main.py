@@ -158,7 +158,12 @@ async def test_run_retry_tick_redelivers_a_due_handover(client, session_factory)
             fresh = await repository.get_handover(fresh_session, created["id"])
             assert fresh.status == "delivered"
             assert fresh.attempts == 1
-        assert len(received) == 1
+        # Only this test's handover counts (P84 phase close): the tick
+        # delivers EVERY due handover, and earlier tests leave pending_retry
+        # handovers to unreachable targets whose next_retry_at can pass during
+        # a long run - those were counted too, a timing-dependent failure.
+        own = [r for r in received if payload["handover_id"].encode() in r["body"]]
+        assert len(own) == 1
         assert not await _has_pending_payload(session_factory, created["id"], leg="forward")
     finally:
         settings.max_handover_delivery_attempts = original_max_attempts

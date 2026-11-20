@@ -16,6 +16,7 @@ const createManagedInstallationMock = vi.fn();
 const deleteManagedInstallationMock = vi.fn();
 const getManagedInstallationsStatusMock = vi.fn();
 const pushInstallationLicenseMock = vi.fn();
+const getCurrentFleetOperatorMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   listManagedInstallations: (...args: unknown[]) => listManagedInstallationsMock(...args),
@@ -23,6 +24,7 @@ vi.mock("@/lib/api", () => ({
   deleteManagedInstallation: (...args: unknown[]) => deleteManagedInstallationMock(...args),
   getManagedInstallationsStatus: (...args: unknown[]) => getManagedInstallationsStatusMock(...args),
   pushInstallationLicense: (...args: unknown[]) => pushInstallationLicenseMock(...args),
+  getCurrentFleetOperator: (...args: unknown[]) => getCurrentFleetOperatorMock(...args),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {
@@ -55,6 +57,32 @@ describe("FleetManagementView", () => {
     deleteManagedInstallationMock.mockReset();
     getManagedInstallationsStatusMock.mockReset();
     pushInstallationLicenseMock.mockReset();
+    getCurrentFleetOperatorMock.mockReset();
+    getCurrentFleetOperatorMock.mockResolvedValue({
+      id: "op-1",
+      name: "bootstrap",
+      is_admin: true,
+      created_at: "2026-01-01T00:00:00Z",
+      revoked_at: null,
+    });
+  });
+
+  // P84-S4 (ADR 0234): every operator has their own token; the view says whose.
+  it("shows which operator the token belongs to", async () => {
+    listManagedInstallationsMock.mockResolvedValue([]);
+    getCurrentFleetOperatorMock.mockResolvedValue({
+      id: "op-2",
+      name: "olga",
+      is_admin: false,
+      created_at: "2026-01-01T00:00:00Z",
+      revoked_at: null,
+    });
+
+    await loadWithKey("olgas-token");
+
+    expect(await screen.findByText("Angemeldet als olga")).toBeInTheDocument();
+    expect(screen.queryByText("Admin-Operator")).not.toBeInTheDocument();
+    expect(getCurrentFleetOperatorMock).toHaveBeenCalledWith("olgas-token");
   });
 
   it("does not list installations before an operator key is loaded", () => {

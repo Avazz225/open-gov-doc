@@ -2,7 +2,41 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P84-S3: the infrastructure ports are bound to loopback. Postgres, NATS, MinIO,
+**Last completed:** P84-S4, fleet operators with verified identities (ADR 0234 built). **Phase 84 is
+closed.**
+
+**What changed:**
+- **Operators.** Every fleet operator has their own token (sha256-hashed); the env key is the admin
+  operator `bootstrap`.
+- **Verified identity.** Four-eyes approval, proposal, rejection and rollout start use the token's
+  identity. The `actor`/`started_by` body fields are gone and are ignored if still sent.
+- **Endpoints.** `/operators` (admins mint and revoke) and `/operators/me`. admin-ui shows "Angemeldet als
+  <name>".
+- **Deviation from ADR 0234:** the env key stays authoritative for `bootstrap`, so rotation and removal
+  work immediately (see ADR 0234 "Build notes").
+
+**Phase-close regression:**
+- 30/32 green at first. Two test-only failures were fixed:
+  - fleet operator leftovers between runs (`autouse` cleanup);
+  - a pre-existing, timing-dependent count in the federation-hub retry test, which now counts only its
+    own handover.
+
+  Both ran green twice afterwards.
+- fleet 42, admin-ui vitest 319, e2e admin-ui 8/8.
+- ruff only shows pre-existing files (→ P91-S3).
+
+**Open (carried over):** reviewer-ui principal names and the `<picture>` check (→ P86-S2). The stack was
+stopped afterwards.
+
+**Next session:** **P85-S1**, inventory and rule for binding the acting identity to the verified token
+everywhere (ADR 0240):
+- grep every body-supplied actor field across services, UIs and add-ins;
+- set the rule (token wins; ignore vs. 400 on mismatch; service principals acting on behalf of users);
+- produce the S2–S4 split.
+
+---
+
+Earlier P84-S3 summary, kept for context: the infrastructure ports are bound to loopback. Postgres, NATS, MinIO,
 Azurite, Mailpit, Redis, Keycloak, Prometheus, cAdvisor and Grafana now listen on `127.0.0.1` only, like
 the backend services since ADR 0230. Two opt-in variables control them:
 - `INFRA_BIND_ADDRESS` for data stores;
@@ -20,7 +54,7 @@ The gateway and frontends stay LAN-reachable.
 **Open (carried over):** reviewer-ui principal names and the `<picture>` check (→ P86-S2). The stack was
 stopped afterwards.
 
-**Next session:** **P84-S4**, build fleet-management per-operator auth (ADR 0234):
+**Next session (at the time):** P84-S4. It was done next; see the entry above. Original note:, build fleet-management per-operator auth (ADR 0234):
 - `FleetOperator` table with hashed UUID4 tokens and `is_admin`, plus a bootstrap operator;
 - `/operators` for admins only;
 - four-eyes and `started_by` taken from the verified operator;

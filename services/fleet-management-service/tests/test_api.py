@@ -64,6 +64,17 @@ def client():
         settings.fleet_operator_key = None
 
 
+def _bearer(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _mint_operator(client, name: str, *, is_admin: bool = False) -> str:
+    """Mints an operator via the bootstrap (env key) admin and returns its token."""
+    response = client.post("/operators", json={"name": name, "is_admin": is_admin})
+    assert response.status_code == 201, response.text
+    return response.json()["token"]
+
+
 def test_healthz(client):
     response = client.get("/healthz")
     assert response.status_code == 200
@@ -334,20 +345,20 @@ def test_create_rollout_with_empty_target_set_returns_422(client):
     assert response.status_code == 422
 
 
-def _start_rollout_for_one_installation(client) -> tuple[dict, dict]:
+def _start_rollout_for_one_installation(client, headers: dict | None = None) -> tuple[dict, dict]:
     installation = _register(client)
     plan = _create_plan(client)
     rollout = client.post(
         "/rollouts",
         json={"plan_id": plan["id"], "name": "Testwelle", "include": [installation["id"]]},
     ).json()
-    started = client.post(f"/rollouts/{rollout['id']}/start", json={"started_by": "alice"}).json()
+    started = client.post(f"/rollouts/{rollout['id']}/start", json={}, headers=headers).json()
     return started, installation
 
 
 def test_start_rollout_requires_draft_status(client):
     started, _installation = _start_rollout_for_one_installation(client)
-    response = client.post(f"/rollouts/{started['id']}/start", json={"started_by": "alice"})
+    response = client.post(f"/rollouts/{started['id']}/start", json={})
     assert response.status_code == 409
 
 
@@ -359,10 +370,16 @@ def test_full_rollout_happy_path_through_all_step_types(client):
     assert run["status"] == "wait_external"
     assert run["current_step_index"] == 0
 
+    # Two real operators (P84-S4, ADR 0234): the four-eyes check now compares
+    # verified identities from their own tokens, not free-text actors.
+    operator_a = _mint_operator(client, "operator-a")
+    operator_b = _mint_operator(client, "operator-b")
+
     # Schritt 0: "gate", keine Freigabe noetig - direkt bestaetigt.
     response = client.post(
         f"/rollouts/{rollout_id}/installations/{installation_id}/mark-done",
-        json={"actor": "operator-a"},
+        json={},
+        headers=_bearer(operator_a),
     )
     assert response.status_code == 200
     body = response.json()
@@ -377,9 +394,11 @@ def test_full_rollout_happy_path_through_all_step_types(client):
     assert body["status"] == "wait_external"
 
     # Schritt 2: "gate" mit requires_approval - mark-done schlaegt nur vor.
+    # A spoofed `actor` in the body is ignored: the proposer is operator A.
     response = client.post(
         f"/rollouts/{rollout_id}/installations/{installation_id}/mark-done",
-        json={"actor": "operator-a"},
+        json={},
+        headers=_bearer(operator_a),
     )
     assert response.status_code == 200
     body = response.json()
@@ -387,15 +406,18 @@ def test_full_rollout_happy_path_through_all_step_types(client):
     assert body["proposed_by"] == "operator-a"
 
     # Dieselbe Person darf nicht freigeben (4.3).
+    # Claiming to be someone else in the body doesn't help any more.
     same_actor = client.post(
         f"/rollouts/{rollout_id}/installations/{installation_id}/approve",
-        json={"actor": "operator-a"},
+        json={},
+        headers=_bearer(operator_a),
     )
     assert same_actor.status_code == 409
 
     response = client.post(
         f"/rollouts/{rollout_id}/installations/{installation_id}/approve",
-        json={"actor": "operator-b"},
+        json={},
+        headers=_bearer(operator_b),
     )
     assert response.status_code == 200
     body = response.json()
@@ -408,11 +430,11 @@ def test_mark_done_rejects_verify_step(client):
     rollout_id, installation_id = started["id"], installation["id"]
     client.post(
         f"/rollouts/{rollout_id}/installations/{installation_id}/mark-done",
-        json={"actor": "a"},
+        json={},
     )
     response = client.post(
         f"/rollouts/{rollout_id}/installations/{installation_id}/mark-done",
-        json={"actor": "a"},
+        json={},
     )
     assert response.status_code == 400
 
@@ -430,7 +452,6 @@ def test_mark_done_recoverable_failed_then_retry(client):
     response = client.post(
         f"/rollouts/{rollout_id}/installations/{installation_id}/mark-done",
         json={
-            "actor": "a",
             "outcome": "recoverable_failed",
             "detail": "Rolling Update fehlgeschlagen",
         },
@@ -446,7 +467,7 @@ def test_mark_done_recoverable_failed_then_retry(client):
 
     response = client.post(
         f"/rollouts/{rollout_id}/installations/{installation_id}/mark-done",
-        json={"actor": "a"},
+        json={},
     )
     assert response.status_code == 200
     assert response.json()["current_step_index"] == 1
@@ -458,7 +479,7 @@ def test_mark_done_fatal_contract_requires_acknowledge(client):
 
     client.post(
         f"/rollouts/{rollout_id}/installations/{installation_id}/mark-done",
-        json={"actor": "a", "outcome": "fatal_contract"},
+        json={"outcome": "fatal_contract"},
     )
     retry_response = client.post(f"/rollouts/{rollout_id}/installations/{installation_id}/retry")
     assert retry_response.status_code == 409
@@ -475,7 +496,7 @@ def test_verify_step_unreachable_installation_returns_retry_later(client):
     rollout_id, installation_id = started["id"], installation["id"]
     client.post(
         f"/rollouts/{rollout_id}/installations/{installation_id}/mark-done",
-        json={"actor": "a"},
+        json={},
     )
 
     app.state.agent_transport = httpx.MockTransport(
@@ -491,19 +512,83 @@ def test_verify_step_unreachable_installation_returns_retry_later(client):
 def test_reject_approval_sets_recoverable_failed(client):
     started, installation = _start_rollout_for_one_installation(client)
     rollout_id, installation_id = started["id"], installation["id"]
-    client.post(
-        f"/rollouts/{rollout_id}/installations/{installation_id}/mark-done", json={"actor": "a"}
-    )
+    client.post(f"/rollouts/{rollout_id}/installations/{installation_id}/mark-done", json={})
     client.post(f"/rollouts/{rollout_id}/installations/{installation_id}/advance")
-    client.post(
-        f"/rollouts/{rollout_id}/installations/{installation_id}/mark-done", json={"actor": "a"}
-    )
+    client.post(f"/rollouts/{rollout_id}/installations/{installation_id}/mark-done", json={})
 
     response = client.post(
         f"/rollouts/{rollout_id}/installations/{installation_id}/reject",
-        json={"actor": "b", "reason": "Verdacht auf Fehlkonfiguration"},
+        json={"reason": "Verdacht auf Fehlkonfiguration"},
     )
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "recoverable_failed"
     assert "Verdacht auf Fehlkonfiguration" in body["error_message"]
+
+
+# --- Operators (P84-S4, ADR 0234) -------------------------------------------
+
+
+def test_bootstrap_operator_is_the_env_key_admin(client):
+    me = client.get("/operators/me")
+    assert me.status_code == 200
+    assert me.json()["name"] == "bootstrap"
+    assert me.json()["is_admin"] is True
+
+
+def test_minted_operator_token_works_and_is_never_listed(client):
+    token = _mint_operator(client, "olga")
+    me = client.get("/operators/me", headers=_bearer(token))
+    assert me.status_code == 200
+    assert me.json() == {**me.json(), "name": "olga", "is_admin": False}
+    assert client.get("/installations", headers=_bearer(token)).status_code == 200
+
+    listed = client.get("/operators").json()
+    assert {o["name"] for o in listed} >= {"bootstrap", "olga"}
+    assert all("token" not in o and "token_hash" not in o for o in listed)
+
+
+def test_only_admins_mint_or_revoke_operators(client):
+    token = _mint_operator(client, "plain")
+    target = client.post("/operators", json={"name": "target"}).json()
+
+    assert client.post("/operators", json={"name": "x"}, headers=_bearer(token)).status_code == 403
+    assert client.delete(f"/operators/{target['id']}", headers=_bearer(token)).status_code == 403
+
+    admin = _mint_operator(client, "second-admin", is_admin=True)
+    assert client.post("/operators", json={"name": "y"}, headers=_bearer(admin)).status_code == 201
+
+
+def test_revoked_operator_token_stops_working(client):
+    created = client.post("/operators", json={"name": "leaver"}).json()
+    assert client.get("/operators/me", headers=_bearer(created["token"])).status_code == 200
+
+    assert client.delete(f"/operators/{created['id']}").status_code == 204
+    assert client.get("/operators/me", headers=_bearer(created["token"])).status_code == 403
+
+
+def test_operator_names_are_unique_and_bootstrap_is_reserved(client):
+    _mint_operator(client, "dup")
+    assert client.post("/operators", json={"name": "dup"}).status_code == 409
+    assert client.post("/operators", json={"name": "bootstrap"}).status_code == 409
+
+
+def test_bootstrap_cannot_be_revoked_through_the_api(client):
+    bootstrap = client.get("/operators/me").json()
+    assert client.delete(f"/operators/{bootstrap['id']}").status_code == 400
+
+
+def test_removing_the_env_key_locks_bootstrap_but_not_minted_operators(client):
+    token = _mint_operator(client, "survivor")
+    settings.fleet_operator_key = None
+    try:
+        assert client.get("/operators/me").status_code == 403  # the old env key
+        assert client.get("/operators/me", headers=_bearer(token)).status_code == 200
+    finally:
+        settings.fleet_operator_key = OPERATOR_KEY
+
+
+def test_rollout_records_the_verified_starter(client):
+    token = _mint_operator(client, "starter")
+    started, _ = _start_rollout_for_one_installation(client, headers=_bearer(token))
+    assert started["started_by"] == "starter"

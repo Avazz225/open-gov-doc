@@ -463,8 +463,8 @@
   "fleetManagement": {
     "pageTitle": "Fleet management",
     "heading": "Managed installations",
-    "hint": "Installations this fleet operator administers - reached directly at the Fleet Management Service, not through this installation's gateway (the service is shared, cross-installation infrastructure, not an internal component). Every call, including the plain list, requires the operator key.",
-    "operatorKey": "Fleet operator key",
+    "hint": "Installations this fleet operator administers - reached directly at the Fleet Management Service, not through this installation's gateway (the service is shared, cross-installation infrastructure, not an internal component). Every call, including the plain list, requires the operator key. Each operator has their own token; the environment key belongs to the admin operator \"bootstrap\".",
+    "operatorKey": "Fleet operator token",
     "operatorKeyPlaceholder": "Required for every action on this page",
     "load": "Load",
     "unreachable": "Fleet Management Service not reachable or key invalid.",
@@ -486,7 +486,9 @@
     "pushLicense": "Push",
     "licenseError": "License push failed",
     "delete": "Remove",
-    "deleteError": "Removal failed"
+    "deleteError": "Removal failed",
+    "signedInAs": "Signed in as {name}",
+    "adminOperator": "Admin operator"
   },
   "delegationsAdmin": {
     "pageTitle": "Delegations",
