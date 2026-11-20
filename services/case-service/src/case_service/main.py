@@ -6,7 +6,12 @@ import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from dms_common import configure_logging
+from dms_common import (
+    ActingIdentity,
+    configure_logging,
+    log_ignored_actor_field,
+    require_acting_identity,
+)
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
 from dms_metrics_client import (
@@ -353,8 +358,13 @@ async def create_case(
     payload: CaseCreate,
     x_dms_principal: str = Header(default=""),
     x_dms_maintenance_active: str = Header(default="false"),
+    identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> CaseOut:
+    log_ignored_actor_field(
+        logger, route="POST /cases", field="created_by", value=payload.created_by, identity=identity
+    )
+    actor_created_by = identity.actor
     await _reject_during_maintenance(x_dms_maintenance_active)
     await _require_case_permission(x_dms_principal, access_type="write")
     if payload.object_type_id is not None:
@@ -403,7 +413,7 @@ async def create_case(
         attributes=payload.attributes,
         process_definition_id=payload.process_definition_id,
         process_instance_id=None,
-        created_by=payload.created_by,
+        created_by=actor_created_by,
         vorgangsnummer=vorgangsnummer,
         draft=payload.draft,
     )
@@ -412,7 +422,7 @@ async def create_case(
     try:
         instance = await app.state.workflow_client.start_instance(
             payload.process_definition_id,
-            created_by=payload.created_by,
+            created_by=actor_created_by,
             business_key=case_id,
             initial_data=payload.initial_data,
             x_dms_principal=x_dms_principal,
@@ -427,8 +437,8 @@ async def create_case(
     await publish_event(
         "case.created",
         subject=case_id,
-        payload={"name": payload.name, "created_by": payload.created_by},
-        actor=payload.created_by,
+        payload={"name": payload.name, "created_by": actor_created_by},
+        actor=actor_created_by,
     )
     # Real per-case RBAC resource (Post-Roadmap Phase 35 Session 2, ADR
     # 0144). `parent_id="root"` so the case's node inherits root's
@@ -456,7 +466,7 @@ async def create_case(
         "case.resource.created",
         subject=case_id,
         payload={"resource_id": case_id, "parent_id": "root", "resource_type": "case"},
-        actor=payload.created_by,
+        actor=actor_created_by,
     )
     # Fully-automated process, closed synchronously right here instead of
     # relying on `workflow.instance.completed` (Post-Roadmap Phase 44
@@ -476,7 +486,7 @@ async def create_case(
             object_type_client=app.state.object_type_client,
             snapshots={},
             publish_event=publish_event,
-            actor=payload.created_by,
+            actor=actor_created_by,
         )
         await session.commit()
         if closed:
@@ -484,7 +494,7 @@ async def create_case(
                 "case.closed",
                 subject=case_id,
                 payload={"process_instance_id": instance["id"]},
-                actor=payload.created_by,
+                actor=actor_created_by,
             )
     return case
 
@@ -494,11 +504,20 @@ async def register_case(
     case_id: str,
     payload: CaseRegisterRequest,
     x_dms_principal: str = Header(default=""),
+    identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> CaseOut:
     """Draft -> registered transition (post-roadmap phase 31 session 2, ADR
     0113) - assigns the Vorgangsnummer at this point instead of at creation
     time (see `draft` on `POST /cases`)."""
+    log_ignored_actor_field(
+        logger,
+        route="POST /cases/{id}/register",
+        field="registered_by",
+        value=payload.registered_by,
+        identity=identity,
+    )
+    actor_registered_by = identity.actor
     await _get_case_or_404(session, case_id)
     await _require_case_permission(x_dms_principal, access_type="write", resource_id=case_id)
     vorgangsnummer = await repository.next_vorgangsnummer(session)
@@ -513,7 +532,7 @@ async def register_case(
         "case.registered",
         subject=case_id,
         payload={"vorgangsnummer": vorgangsnummer},
-        actor=payload.registered_by,
+        actor=actor_registered_by,
     )
     return case
 
@@ -582,8 +601,17 @@ async def add_case_document(
     case_id: str,
     payload: CaseDocumentAdd,
     x_dms_principal: str = Header(default=""),
+    identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> CaseDocumentReferenceOut:
+    log_ignored_actor_field(
+        logger,
+        route="POST /cases/{id}/documents",
+        field="added_by",
+        value=payload.added_by,
+        identity=identity,
+    )
+    actor_added_by = identity.actor
     await _get_case_or_404(session, case_id)
     await _require_case_permission(x_dms_principal, access_type="write", resource_id=case_id)
     document = await app.state.document_client.get(payload.document_id)
@@ -593,7 +621,7 @@ async def add_case_document(
         )
     try:
         reference = await repository.add_document_reference(
-            session, case_id, document_id=payload.document_id, added_by=payload.added_by
+            session, case_id, document_id=payload.document_id, added_by=actor_added_by
         )
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -604,8 +632,8 @@ async def add_case_document(
     await publish_event(
         "case.document.added",
         subject=case_id,
-        payload={"document_id": payload.document_id, "added_by": payload.added_by},
-        actor=payload.added_by,
+        payload={"document_id": payload.document_id, "added_by": actor_added_by},
+        actor=actor_added_by,
     )
     return await _resolve_reference(session, case, reference)
 
@@ -616,13 +644,22 @@ async def remove_case_document(
     document_id: str,
     payload: CaseDocumentRemove,
     x_dms_principal: str = Header(default=""),
+    identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> CaseDocumentReferenceOut:
+    log_ignored_actor_field(
+        logger,
+        route="DELETE /cases/{id}/documents/{doc}",
+        field="removed_by",
+        value=payload.removed_by,
+        identity=identity,
+    )
+    actor_removed_by = identity.actor
     await _get_case_or_404(session, case_id)
     await _require_case_permission(x_dms_principal, access_type="write", resource_id=case_id)
     try:
         reference = await repository.remove_document_reference(
-            session, case_id, document_id, removed_by=payload.removed_by
+            session, case_id, document_id, removed_by=actor_removed_by
         )
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -633,8 +670,8 @@ async def remove_case_document(
     await publish_event(
         "case.document.removed",
         subject=case_id,
-        payload={"document_id": document_id, "removed_by": payload.removed_by},
-        actor=payload.removed_by,
+        payload={"document_id": document_id, "removed_by": actor_removed_by},
+        actor=actor_removed_by,
     )
     return await _resolve_reference(session, case, reference)
 
@@ -812,10 +849,19 @@ async def pseudonymize_case_attribute(
     attribute_name: str,
     payload: PseudonymizeAttributeRequest,
     x_dms_principal: str = Header(default=""),
+    identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> PseudonymizedAttributeOut:
     """Mirrors `document_service.main.pseudonymize_document_attribute`/
     `folder_service.main.pseudonymize_folder_attribute` exactly."""
+    log_ignored_actor_field(
+        logger,
+        route="POST /cases/{id}/attributes/{name}/pseudonymize",
+        field="pseudonymized_by",
+        value=payload.pseudonymized_by,
+        identity=identity,
+    )
+    actor_pseudonymized_by = identity.actor
     await _require_pseudonymization_permission(x_dms_principal)
     try:
         case = await repository.get_case(session, case_id)
@@ -855,7 +901,7 @@ async def pseudonymize_case_attribute(
             case_id,
             attribute_name,
             encrypted_value=encrypted_value,
-            pseudonymized_by=payload.pseudonymized_by,
+            pseudonymized_by=actor_pseudonymized_by,
             reason=payload.reason,
         )
     except repository.AlreadyPseudonymizedError as exc:
@@ -865,7 +911,7 @@ async def pseudonymize_case_attribute(
         "case.attribute.pseudonymized",
         subject=case_id,
         payload={"attribute_name": attribute_name},
-        actor=payload.pseudonymized_by,
+        actor=actor_pseudonymized_by,
     )
     return vault_entry
 
@@ -879,9 +925,18 @@ async def reveal_case_attribute(
     attribute_name: str,
     payload: RevealAttributeRequest,
     x_dms_principal: str = Header(default=""),
+    identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> RevealedAttributeOut:
     """Mirrors `document_service.main.reveal_document_attribute` exactly."""
+    log_ignored_actor_field(
+        logger,
+        route="POST /cases/{id}/attributes/{name}/reveal",
+        field="revealed_by",
+        value=payload.revealed_by,
+        identity=identity,
+    )
+    actor_revealed_by = identity.actor
     await _require_reveal_permission(x_dms_principal)
     try:
         vault_entry = await repository.get_pseudonymized_attribute(session, case_id, attribute_name)
@@ -894,13 +949,13 @@ async def reveal_case_attribute(
     except crypto.DecryptionError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    await repository.mark_revealed(session, vault_entry.id, revealed_by=payload.revealed_by)
+    await repository.mark_revealed(session, vault_entry.id, revealed_by=actor_revealed_by)
     await session.commit()
     await publish_event(
         "case.attribute.revealed",
         subject=case_id,
         payload={"attribute_name": attribute_name},
-        actor=payload.revealed_by,
+        actor=actor_revealed_by,
     )
     return RevealedAttributeOut(
         case_id=case_id,

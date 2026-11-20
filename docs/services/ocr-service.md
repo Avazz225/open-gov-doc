@@ -142,6 +142,15 @@ None yet — follows in Phase 11.
 - **Live E2E for the `needs_review` workflow integration** (Phase 45 Session 3, in the real running Docker container): temporarily allowed `image/png` via `PUT /config`, uploaded a blank PNG → `status="needs_review"` (confidence `0.0`) → confirmed via `GET /instances?business_key=...` on the real running `workflow-service` that an instance actually started, `GET /instances/{id}/tasks` showed the Manual Task with the correct `document_id`/`ocr_result_id`/`average_confidence` in its data → completed the task via `POST /instances/{id}/tasks/{task_id}/complete` with `data={"reviewed_by": "alice"}` → the instance completed (the connector call succeeded synchronously) → `GET /ocr-results/{id}` confirmed `status="ready"`, `reviewed_by="alice"`, `reviewed_at` set. Also confirmed at container startup: `GET /process-definitions?name=ocr_review` shows the bundled BPMN registered, `GET /role-assignments?principal_id=system:ocr-service` shows the self-bootstrapped `domain-admin-config` role assignment.
 - **Live E2E for the text-layer embedding** (user feedback round): a synthetic scan PDF (image with text, no native text layer) was really uploaded — the `tesseract` engine recognized the word, and exactly one new version was automatically produced (`created_by="system:ocr-service"`, `comment="OCR: searchable text layer embedded"`), whose content was demonstrably extractable via `fitz`, while the visible pixels remained unchanged. The malfunction actually observed on the first attempt (three versions instead of two, due to the reprocessing bug described above) was re-verified live after the fix — exactly two versions. An uploaded image was correctly skipped with `status="skipped"` under the new default (`allowed_content_types=["application/pdf"]`); after explicit admin approval (`PUT /config`), OCR really ran for it without producing a new version (follow-up decision: images keep their format).
 
+## Acting Identity (P85-S3, [ADR 0240](../adr/0240-acting-identity-from-verified-principal.md))
+
+`POST /ocr-results/{id}/reviewed` (the review workflow's connector callback) records the reviewer from the
+acting identity. workflow-service calls it as itself, on behalf of whoever completed the review task
+(`X-DMS-On-Behalf-Of`, taken from `dms_last_completed_by`). `reviewed_by` in the body is ignored, and a
+call without any principal is a `401`. Before, the route took no principal and read the reviewer from
+the body. The `ocr.reviewed` event carries `workflow-service` as `actor` and the reviewer as
+`on_behalf_of`.
+
 ## Open Points
 
 - **PaddleOCR not implemented**: only the plugin interface allows for it, see ADR 0011.

@@ -220,7 +220,7 @@ def test_create_case_rejected_during_maintenance_mode(client):
     response = client.post(
         "/cases",
         json={"name": "X", "process_definition_id": 999999, "created_by": "alice"},
-        headers={"X-DMS-Maintenance-Active": "true"},
+        headers={"X-DMS-Principal": "alice", "X-DMS-Maintenance-Active": "true"},
     )
     assert response.status_code == 503
 
@@ -458,7 +458,8 @@ def test_remove_document_reference_soft_deletes_and_stops_resolving_version(
         headers=case_headers,
     )
     assert remove_response.status_code == 200
-    assert remove_response.json()["removed_by"] == "bob"
+    # The principal, not the body's "bob" (P85-S3, ADR 0240).
+    assert remove_response.json()["removed_by"] == "case-service-tests"
 
     [reference] = client.get(f"/cases/{case['id']}/documents", headers=case_headers).json()
     assert reference["removed_at"] is not None

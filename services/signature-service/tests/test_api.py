@@ -299,6 +299,22 @@ def test_create_signature_with_mismatched_signer_is_403(client, pdf_document, re
     assert response.status_code == 403
 
 
+def test_create_signature_on_behalf_of_someone_is_403(client, pdf_document, real_signer):
+    """P85-S3 (ADR 0240): a service may act on behalf of a user elsewhere,
+    never to sign."""
+    document_id, _version = pdf_document
+    response = client.post(
+        "/signatures",
+        json={"document_id": document_id, "level": "ses", "signer_principal_id": real_signer},
+        headers={
+            "X-DMS-Principal": "workflow-service",
+            "X-DMS-On-Behalf-Of": real_signer,
+            "X-DMS-Username": real_signer,
+        },
+    )
+    assert response.status_code == 403
+
+
 def test_list_signatures_without_document_id_is_400(client):
     """No more system-wide listing (Phase 59 Session 3) - `document_id` is
     now mandatory."""
@@ -342,9 +358,7 @@ def test_due_for_retimestamp_without_permission_is_403(client, real_signer):
     assert response.status_code == 403
 
 
-def test_due_for_retimestamp_excludes_a_freshly_signed_signature(
-    client, pdf_document, real_signer
-):
+def test_due_for_retimestamp_excludes_a_freshly_signed_signature(client, pdf_document, real_signer):
     """P71-S4 (3.10, ADR 0155): read-only admin visibility for the poll
     loop's own due-set, reusing `repository.list_signatures_due_for_
     retimestamp` with the real `Settings.retimestamp_interval_days`
@@ -368,9 +382,7 @@ def test_due_for_retimestamp_excludes_a_freshly_signed_signature(
         headers={"X-DMS-Username": real_signer},
     ).json()
 
-    response = client.get(
-        "/signatures/due-for-retimestamp", headers=SIGNATURE_CONFIG_ADMIN_HEADERS
-    )
+    response = client.get("/signatures/due-for-retimestamp", headers=SIGNATURE_CONFIG_ADMIN_HEADERS)
 
     assert response.status_code == 200
     assert created["id"] not in [s["id"] for s in response.json()]

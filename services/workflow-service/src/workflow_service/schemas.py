@@ -46,7 +46,8 @@ class DmnDefinitionDetailOut(DmnDefinitionOut):
 
 
 class ProcessInstanceCreate(BaseModel):
-    created_by: str
+    # Ignored since P85-S3 (ADR 0240): the actor is the request principal.
+    created_by: str | None = None
     business_key: str | None = None
     initial_data: dict = {}
     # Optional: the caller determines its own instance ID instead of
@@ -107,7 +108,8 @@ class ReadyTaskWithInstanceOut(ReadyTaskOut):
 
 
 class TaskCompleteRequest(BaseModel):
-    completed_by: str
+    # Ignored since P85-S3 (ADR 0240): the actor is the request principal.
+    completed_by: str | None = None
     data: dict = {}
     # Required if the task is marked via `extensions["taskType"] == "signature"`
     # (3.10) - references a signature previously created at the Signature
@@ -123,7 +125,8 @@ class TaskCompleteRequest(BaseModel):
 
 
 class TaskClaimCreate(BaseModel):
-    principal_id: str
+    # Ignored since P85-S3 (ADR 0240): the actor is the request principal.
+    principal_id: str | None = None
 
 
 class TaskReassignRequest(BaseModel):

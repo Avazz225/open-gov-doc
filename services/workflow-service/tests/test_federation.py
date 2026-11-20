@@ -244,7 +244,9 @@ async def test_complete_task_rejects_federated_task_directly(client, admin_heade
     definition_id = create_response.json()["id"]
 
     instance_response = client.post(
-        f"/process-definitions/{definition_id}/instances", json={"created_by": "tester"}
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "tester"},
+        headers={"X-DMS-Principal": "tester"},
     )
     assert instance_response.status_code == 201
     instance_id = instance_response.json()["id"]
@@ -256,6 +258,7 @@ async def test_complete_task_rejects_federated_task_directly(client, admin_heade
     complete_response = client.post(
         f"/instances/{instance_id}/tasks/{tasks[0]['id']}/complete",
         json={"completed_by": "tester"},
+        headers={"X-DMS-Principal": "tester"},
     )
     assert complete_response.status_code == 409
 
@@ -272,7 +275,9 @@ async def test_dispatch_skips_unknown_target_and_leaves_task_ready(client, admin
     ).json()["id"]
 
     instance_id = client.post(
-        f"/process-definitions/{definition_id}/instances", json={"created_by": "tester"}
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "tester"},
+        headers={"X-DMS-Principal": "tester"},
     ).json()["id"]
 
     tasks = client.get(f"/instances/{instance_id}/tasks").json()
@@ -295,7 +300,9 @@ async def test_list_ready_tasks_excludes_federated_tasks(client, admin_headers):
     ).json()["id"]
 
     instance_id = client.post(
-        f"/process-definitions/{definition_id}/instances", json={"created_by": "tester"}
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "tester"},
+        headers={"X-DMS-Principal": "tester"},
     ).json()["id"]
 
     all_tasks = client.get("/tasks").json()
@@ -327,7 +334,9 @@ async def test_dispatch_records_delivery_failed_for_unreachable_target(
     ).json()["id"]
 
     instance_id = client.post(
-        f"/process-definitions/{definition_id}/instances", json={"created_by": "tester"}
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "tester"},
+        headers={"X-DMS-Principal": "tester"},
     ).json()["id"]
 
     tasks = client.get(f"/instances/{instance_id}/tasks").json()
@@ -355,7 +364,9 @@ async def test_dispatch_federated_return_without_inbound_row_is_skipped(client, 
     ).json()["id"]
 
     instance_id = client.post(
-        f"/process-definitions/{definition_id}/instances", json={"created_by": "tester"}
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "tester"},
+        headers={"X-DMS-Principal": "tester"},
     ).json()["id"]
 
     tasks = client.get(f"/instances/{instance_id}/tasks").json()

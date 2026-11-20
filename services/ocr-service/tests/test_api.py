@@ -183,11 +183,11 @@ async def test_mark_reviewed_returns_409_for_a_result_not_needing_review(session
 
 
 async def test_mark_reviewed_flips_status_to_ready_and_records_reviewer(session):
-    """Deliberately no `X-DMS-Principal` header on the request client below
-    (unlike every other test in this file) - this endpoint is meant to be
-    reachable exactly the way `workflow-service`'s `_handle_connector_task`
-    calls it: no principal header at all (Phase 45 Session 3, see the
-    endpoint's own docstring)."""
+    """Called the way `workflow-service`'s `_handle_connector_task` calls it
+    since P85-S3 (ADR 0240): as `workflow-service`, on behalf of the person
+    who completed the review task. The reviewer is that person - the body's
+    `reviewed_by` is ignored. (Before P85-S3: no principal at all and the
+    reviewer from the body.)"""
     document_id = _upload_corrupt_pdf()
     result = await repository.upsert_ocr_result(
         session,
@@ -207,13 +207,16 @@ async def test_mark_reviewed_flips_status_to_ready_and_records_reviewer(session)
         response = client.post(
             f"/ocr-results/{result.id}/reviewed",
             json={
-                "reviewed_by": "alice",
+                "reviewed_by": "spoofed-name",
                 "document_id": document_id,
                 "ocr_result_id": result.id,
                 "average_confidence": 40.0,
             },
+            headers={"X-DMS-Principal": "workflow-service", "X-DMS-On-Behalf-Of": "alice"},
         )
+        anonymous = client.post(f"/ocr-results/{result.id}/reviewed", json={})
 
+    assert anonymous.status_code == 401
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "ready"

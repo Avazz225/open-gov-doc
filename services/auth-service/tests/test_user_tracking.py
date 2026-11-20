@@ -51,7 +51,8 @@ def test_put_and_get_tracking_config_roundtrip(client, test_user, grant_role):
     body = put_response.json()
     assert body["status"] == "applied"
     assert body["config"]["enabled"] is True
-    assert body["config"]["updated_by"] == "tester"
+    # The token's subject, not the body's "tester" (P85-S3, ADR 0240).
+    assert body["config"]["updated_by"] == principal_id
 
     get_response = client.get(f"/user-tracking-config/{principal_id}", headers=headers)
     assert get_response.json()["enabled"] is True

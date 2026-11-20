@@ -139,6 +139,12 @@ None yet - follows in Phase 11.
 - Before that, 18 tests since Post-Roadmap Phase 38 Session 3 (previously 16, +2): 401/403 pair for `PUT /signature-config` — the service's first-ever RBAC coverage — before that, 16 tests since Post-Roadmap Phase 22 Session 6 (previously 11, +5, [ADR 0091](../adr/0091-connector-operational-config-live-editable.md)): `GET /signature-config` returns the env-var defaults before the first `PUT`, `PUT` with an unknown connector `id`/empty `levels`/`qes` for `type=internal` each return `422`, an end-to-end test removes `aes` from `internal`'s levels and proves live (without a restart) that a subsequent AES signing attempt fails with `400`, while SES continues to work.
 - A pure backend session, no browser test needed (for user-UI integration see `docs/services/user-ui.md`).
 
+## Acting Identity (P85-S3, [ADR 0240](../adr/0240-acting-identity-from-verified-principal.md))
+
+`POST /signatures` requires a principal (`401` otherwise) and refuses any on-behalf call (`403`): a
+service may act for a user elsewhere, never to sign. The existing binding of `signer_principal_id` to the
+verified `X-DMS-Username` (P59-S3) stays.
+
 ## Open Points
 
 - **QES completely unimplemented** - neither a real QTSP connector nor a test case for it exists; a signing attempt with `level="qes"` fails with `400` regardless of object type ("no connector configured"). Requires an external business relationship with an accredited trust service provider, see [ADR 0025](../adr/0025-signature-service-internal-ca-and-connector-plugin.md).

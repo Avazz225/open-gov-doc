@@ -372,6 +372,24 @@ None yet — follows in Phase 11.
 - **Live smoke test**: `docker compose build workflow-service` + `up -d`, real BPMN file uploaded via curl, instance started, ready tasks listed, task completed, instance status `"completed"` confirmed — test data deleted afterward. Since P6-S2 additionally: BPMN file with boundary timer + `escalation_email` started, after a short wait confirmed via `notification-service` that an escalation notification was delivered. Since **P6-S9** additionally: a real self-loopback handover round trip (see ADR 0028) against the bundled `federation-hub-service`. Since **Post-Roadmap Phase 35 Session 3**: a real `workflow.task_claim.abandoned` event published directly against the running stack and confirmed to produce a real in-app notification at `notification-service`; a full Playwright pass through `reviewer-ui`'s `/team` page confirming a claimed report task renders and reassigning it via the UI updates the claim (see `docs/services/reviewer-ui.md`). Since **Post-Roadmap Phase 43 Session 1**: a real, full DMS-to-DMS self-loopback XDOMEA handoff against the rebuilt, restarted stack — a real closed case with a real document reference, a `taskType=federated`/`targetProcessType="xdomea.case_handoff"` task pointed at the installation's own registered ID, dispatched through the real hub, imported automatically on the receiving side into a brand-new case (correctly named after the original case, `created_by="federation-hub"`) with the document's real content byte-identical, confirmed back through the hub, and the original task/instance completing end to end with no manual intervention. This same live pass is what found the pre-existing `archival-service` gap noted above (an open case's document references are silently excluded from export).
 - Pure backend session, no browser test needed (not on the UI sessions list of `IMPLEMENTATION_PLAN.md`).
 
+## Acting Identity (P85-S3, [ADR 0240](../adr/0240-acting-identity-from-verified-principal.md))
+
+- **Instance start** (`created_by`), **task completion** (`completed_by`) and **claims** take the acting
+  identity (`require_acting_identity`). A write without a principal is a `401`. Before, completing
+  worked without any principal and `completed_by` was free text.
+- **A claim is always for the caller.** `principal_id` is ignored; handing work to someone else is
+  `POST .../reassign` (claimant or supervisor only).
+- **Completion checks** run against the acting identity: the delegation check (`on_behalf_of_principal_id`)
+  and the claimant/supervisor check. So a service completing for a user satisfies that user's claim.
+- **`complete_task` records the completer** in the reserved process-data key `dms_last_completed_by`.
+  A following `connector_call` sends it as `X-DMS-On-Behalf-Of`, next to the fixed
+  `X-DMS-Principal: workflow-service` (ADR 0173). The target can then attribute the automated step to
+  the person behind it; ocr-service's reviewer is the first user of this.
+- **Callers:** case-service already forwarded the user's principal. migration-service now starts
+  transfer workflows as `migration-service` on behalf of the transfer's initiator; inbound and
+  self-initiated transfers act as the service.
+- Body fields are optional and ignored, with `actor_field_ignored` logged.
+
 ## Open Points
 
 - ~~Role check since P6-S6 only for process definitions (`admin.object_config`) — instance start/task completion deliberately remain open to every authenticated principal~~ — **fixed in Post-Roadmap Phase 19 Session 9** ([ADR 0074](../adr/0074-workflow-instance-task-rbac.md)): both now check `workflow.write` via `permission-service` (the "everyone" group retains the previous open behavior, but makes it admin-editable). `completed_by`/`created_by` remain purely unchecked strings — the gating decision only affects *whether* an action may be performed, not whether the given name is correct.

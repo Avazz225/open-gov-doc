@@ -133,6 +133,7 @@ async def test_dispatch_builds_xdomea_package_instead_of_raw_task_data(
     instance_id = client.post(
         f"/process-definitions/{definition_id}/instances",
         json={"created_by": "tester", "initial_data": {"case_id": "case-123"}},
+        headers={"X-DMS-Principal": "tester"},
     ).json()["id"]
 
     assert exported == {"case_id": "case-123", "leser_name": "Test-Zielinstallation"}
@@ -167,7 +168,11 @@ async def test_dispatch_skips_xdomea_handoff_missing_case_id(client, admin_heade
     ).json()["id"]
 
     # No `initial_data` at all - `task.data.get("case_id")` is missing.
-    client.post(f"/process-definitions/{definition_id}/instances", json={"created_by": "tester"})
+    client.post(
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "tester"},
+        headers={"X-DMS-Principal": "tester"},
+    )
 
     assert called is False
 
@@ -195,6 +200,7 @@ async def test_dispatch_skips_xdomea_handoff_on_export_failure(
     instance_id = client.post(
         f"/process-definitions/{definition_id}/instances",
         json={"created_by": "tester", "initial_data": {"case_id": "case-123"}},
+        headers={"X-DMS-Principal": "tester"},
     ).json()["id"]
 
     # No crash, task stays ready, no FederationTask row was created (export

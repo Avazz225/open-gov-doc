@@ -1,6 +1,13 @@
 import httpx
+from dms_common import acting_headers
 
 _CONFIG_ADMIN_PRINCIPAL_ID = "migration-service"
+
+
+def _on_behalf_headers(created_by: str) -> dict[str, str]:
+    if not created_by or created_by.startswith(("migration-service", "system:")):
+        return acting_headers(_CONFIG_ADMIN_PRINCIPAL_ID)
+    return acting_headers(_CONFIG_ADMIN_PRINCIPAL_ID, on_behalf_of=created_by)
 
 
 class WorkflowServiceClient:
@@ -49,11 +56,10 @@ class WorkflowServiceClient:
         `POST /instances/{id}/retry`."""
         response = await self._client.post(
             f"/process-definitions/{definition_id}/instances",
-            json={
-                "created_by": created_by,
-                "initial_data": initial_data,
-                "instance_id": instance_id,
-            },
+            json={"initial_data": initial_data, "instance_id": instance_id},
+            # P85-S3 (ADR 0240): started on behalf of the transfer's
+            # initiator; self-initiated (inbound) transfers act as the service.
+            headers=_on_behalf_headers(created_by),
         )
         response.raise_for_status()
         return response.json()["id"]

@@ -150,7 +150,7 @@ def test_pseudonymize_succeeds_and_overwrites_the_live_value(client, case_id):
     body = response.json()
     assert body["case_id"] == case_id
     assert body["attribute_name"] == "SVNR"
-    assert body["pseudonymized_by"] == "carol"
+    assert body["pseudonymized_by"] == PSEUDONYMIZATION_ADMIN_HEADERS["X-DMS-Principal"]  # P85-S3
     assert body["reason"] == "DSGVO-Löschanfrage"
     assert body["last_revealed_at"] is None
     assert "encrypted_value" not in body
@@ -199,7 +199,7 @@ def test_reveal_returns_the_original_value_without_restoring_it_live(client, cas
     body = response.json()
     assert body["value"] == "123-45-6789"
     assert body["reason"] == "DSGVO-Löschanfrage"
-    assert body["pseudonymized_by"] == "carol"
+    assert body["pseudonymized_by"] == PSEUDONYMIZATION_ADMIN_HEADERS["X-DMS-Principal"]  # P85-S3
 
     case = client.get(f"/cases/{case_id}", headers=CASE_HEADERS).json()
     assert case["attributes"]["SVNR"] == "[PSEUDONYMISIERT]"
@@ -215,7 +215,7 @@ def test_reveal_updates_last_revealed_tracking_on_the_listing(client, case_id):
 
     listing = client.get(f"/cases/{case_id}/attributes/pseudonymized", headers=CASE_HEADERS).json()
     assert len(listing) == 1
-    assert listing[0]["last_revealed_by"] == "dave"
+    assert listing[0]["last_revealed_by"] == REVEAL_ADMIN_HEADERS["X-DMS-Principal"]  # P85-S3
     assert listing[0]["last_revealed_at"] is not None
 
 

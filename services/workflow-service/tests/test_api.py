@@ -292,7 +292,11 @@ def test_delete_process_definition_with_instance_returns_409(
     definition_id = _upload_definition(
         client, manual_task_bpmn, name="Approval", headers=admin_headers
     ).json()["id"]
-    client.post(f"/process-definitions/{definition_id}/instances", json={"created_by": "alice"})
+    client.post(
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
     response = _delete_definition(client, definition_id, headers=admin_headers)
     assert response.status_code == 409
 
@@ -533,6 +537,7 @@ def test_business_rule_task_process_definition_evaluates_dmn_end_to_end(
     response = client.post(
         f"/process-definitions/{definition_id}/instances",
         json={"created_by": "alice", "initial_data": {"amount": 1500}},
+        headers={"X-DMS-Principal": "alice"},
     )
     assert response.status_code == 201
     assert response.json()["status"] == "completed"
@@ -654,7 +659,9 @@ def test_business_days_timer_process_respects_calendar_end_to_end(
         client, business_days_timer_bpmn, name="Wartezeit-Workflow", headers=admin_headers
     ).json()["id"]
     response = client.post(
-        f"/process-definitions/{definition_id}/instances", json={"created_by": "alice"}
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
     )
     assert response.status_code == 201
 
@@ -666,6 +673,7 @@ def test_start_instance_with_manual_task_stays_running(client, manual_task_bpmn,
     response = client.post(
         f"/process-definitions/{definition_id}/instances",
         json={"created_by": "alice", "business_key": "doc-1"},
+        headers={"X-DMS-Principal": "alice"},
     )
     assert response.status_code == 201
     assert response.json()["status"] == "running"
@@ -677,14 +685,20 @@ def test_start_instance_fully_automatic_completes_immediately(client, no_tasks_b
         client, no_tasks_bpmn, name="NoTasks", headers=admin_headers
     ).json()["id"]
     response = client.post(
-        f"/process-definitions/{definition_id}/instances", json={"created_by": "alice"}
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
     )
     assert response.status_code == 201
     assert response.json()["status"] == "completed"
 
 
 def test_start_instance_unknown_definition_returns_404(client):
-    response = client.post("/process-definitions/999999/instances", json={"created_by": "alice"})
+    response = client.post(
+        "/process-definitions/999999/instances",
+        json={"created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
     assert response.status_code == 404
 
 
@@ -700,6 +714,7 @@ def test_start_instance_with_explicit_instance_id_uses_it(client, no_tasks_bpmn,
     response = client.post(
         f"/process-definitions/{definition_id}/instances",
         json={"created_by": "alice", "instance_id": chosen_id},
+        headers={"X-DMS-Principal": "alice"},
     )
     assert response.status_code == 201
     assert response.json()["id"] == chosen_id
@@ -717,7 +732,7 @@ def test_start_instance_rejected_during_maintenance_mode(client, manual_task_bpm
     response = client.post(
         f"/process-definitions/{definition_id}/instances",
         json={"created_by": "alice"},
-        headers={"X-DMS-Maintenance-Active": "true"},
+        headers={"X-DMS-Principal": "alice", "X-DMS-Maintenance-Active": "true"},
     )
 
     assert response.status_code == 503
@@ -728,7 +743,9 @@ def test_get_ready_tasks_and_complete_it(client, manual_task_bpmn, admin_headers
         client, manual_task_bpmn, name="Approval", headers=admin_headers
     ).json()["id"]
     instance = client.post(
-        f"/process-definitions/{definition_id}/instances", json={"created_by": "alice"}
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
     ).json()
 
     tasks_response = client.get(f"/instances/{instance['id']}/tasks")
@@ -740,6 +757,7 @@ def test_get_ready_tasks_and_complete_it(client, manual_task_bpmn, admin_headers
     complete_response = client.post(
         f"/instances/{instance['id']}/tasks/{tasks[0]['id']}/complete",
         json={"completed_by": "bob", "data": {"decision": "approved"}},
+        headers={"X-DMS-Principal": "bob"},
     )
     assert complete_response.status_code == 200
     assert complete_response.json()["status"] == "completed"
@@ -756,15 +774,20 @@ def test_list_ready_tasks_spans_multiple_running_instances(client, manual_task_b
         client, manual_task_bpmn, name="CrossInstanceTasks", headers=admin_headers
     ).json()["id"]
     running = client.post(
-        f"/process-definitions/{definition_id}/instances", json={"created_by": "alice"}
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
     ).json()
     to_complete = client.post(
-        f"/process-definitions/{definition_id}/instances", json={"created_by": "alice"}
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
     ).json()
     task_to_complete = client.get(f"/instances/{to_complete['id']}/tasks").json()[0]
     client.post(
         f"/instances/{to_complete['id']}/tasks/{task_to_complete['id']}/complete",
         json={"completed_by": "bob"},
+        headers={"X-DMS-Principal": "bob"},
     )
 
     all_tasks = client.get("/tasks").json()
@@ -783,8 +806,16 @@ def test_list_ready_tasks_respects_limit(client, manual_task_bpmn, admin_headers
     definition_id = _upload_definition(
         client, manual_task_bpmn, name="LimitTasks", headers=admin_headers
     ).json()["id"]
-    client.post(f"/process-definitions/{definition_id}/instances", json={"created_by": "alice"})
-    client.post(f"/process-definitions/{definition_id}/instances", json={"created_by": "alice"})
+    client.post(
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
+    client.post(
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
 
     response = client.get("/tasks", params={"limit": 1})
     assert response.status_code == 200
@@ -796,14 +827,16 @@ def test_complete_task_rejected_during_maintenance_mode(client, manual_task_bpmn
         client, manual_task_bpmn, name="Approval", headers=admin_headers
     ).json()["id"]
     instance = client.post(
-        f"/process-definitions/{definition_id}/instances", json={"created_by": "alice"}
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
     ).json()
     tasks = client.get(f"/instances/{instance['id']}/tasks").json()
 
     response = client.post(
         f"/instances/{instance['id']}/tasks/{tasks[0]['id']}/complete",
         json={"completed_by": "bob"},
-        headers={"X-DMS-Maintenance-Active": "true"},
+        headers={"X-DMS-Principal": "bob", "X-DMS-Maintenance-Active": "true"},
     )
 
     assert response.status_code == 503
@@ -814,12 +847,15 @@ def test_complete_unknown_task_returns_409(client, manual_task_bpmn, admin_heade
         client, manual_task_bpmn, name="Approval", headers=admin_headers
     ).json()["id"]
     instance = client.post(
-        f"/process-definitions/{definition_id}/instances", json={"created_by": "alice"}
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
     ).json()
 
     response = client.post(
         f"/instances/{instance['id']}/tasks/does-not-exist/complete",
         json={"completed_by": "bob"},
+        headers={"X-DMS-Principal": "bob"},
     )
     assert response.status_code == 409
 
@@ -833,7 +869,9 @@ def _start_instance_with_one_task(client, manual_task_bpmn, admin_headers, *, na
         client, manual_task_bpmn, name=name, headers=admin_headers
     ).json()["id"]
     return client.post(
-        f"/process-definitions/{definition_id}/instances", json={"created_by": "carla-creator"}
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "carla-creator"},
+        headers={"X-DMS-Principal": "carla-creator"},
     ).json()
 
 
@@ -844,6 +882,7 @@ def test_claim_task_and_it_is_visible_in_task_listing(client, manual_task_bpmn, 
     response = client.post(
         f"/instances/{instance['id']}/tasks/{task_id}/claim",
         json={"principal_id": "dora-assignee"},
+        headers={"X-DMS-Principal": "dora-assignee"},
     )
     assert response.status_code == 200
     assert response.json()["principal_id"] == "dora-assignee"
@@ -854,6 +893,52 @@ def test_claim_task_and_it_is_visible_in_task_listing(client, manual_task_bpmn, 
     assert cross_instance[0]["claimed_by"] == "dora-assignee"
 
 
+def test_claim_is_always_for_the_caller(client, manual_task_bpmn, admin_headers):
+    """P85-S3 (ADR 0240): `principal_id` in the body is ignored - claiming
+    for someone else is `reassign`'s job (claimant/supervisor-checked)."""
+    definition_id = _upload_definition(
+        client, manual_task_bpmn, name="Approval", headers=admin_headers
+    ).json()["id"]
+    instance = client.post(
+        f"/process-definitions/{definition_id}/instances",
+        json={},
+        headers={"X-DMS-Principal": "alice"},
+    ).json()
+    task_id = client.get(f"/instances/{instance['id']}/tasks").json()[0]["id"]
+
+    response = client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/claim",
+        json={"principal_id": "someone-else"},
+        headers={"X-DMS-Principal": "carla"},
+    )
+    assert response.status_code == 200
+    assert response.json()["principal_id"] == "carla"
+
+
+def test_connector_call_acts_on_behalf_of_the_last_completer(monkeypatch):
+    """P85-S3 (ADR 0240): a connector call carries the person who completed
+    the preceding user task as `X-DMS-On-Behalf-Of` (recorded in process data
+    by `complete_task`), so the target can attribute the step to them."""
+    seen = {}
+
+    def stub(request: httpx.Request) -> httpx.Response:
+        seen.update(request.headers)
+        return httpx.Response(200, json={})
+
+    monkeypatch.setattr(
+        main, "_connector_http_client", httpx.Client(transport=httpx.MockTransport(stub))
+    )
+    main._handle_connector_task(
+        {"serviceUrl": "http://target.invalid/step"}, {main.LAST_COMPLETED_BY_KEY: "rita"}
+    )
+    assert seen["x-dms-principal"] == "workflow-service"
+    assert seen["x-dms-on-behalf-of"] == "rita"
+
+    seen.clear()
+    main._handle_connector_task({"serviceUrl": "http://target.invalid/step"}, {})
+    assert "x-dms-on-behalf-of" not in seen
+
+
 def test_claim_task_by_same_principal_is_idempotent(client, manual_task_bpmn, admin_headers):
     instance = _start_instance_with_one_task(client, manual_task_bpmn, admin_headers, name="Claim2")
     task_id = client.get(f"/instances/{instance['id']}/tasks").json()[0]["id"]
@@ -861,10 +946,12 @@ def test_claim_task_by_same_principal_is_idempotent(client, manual_task_bpmn, ad
     first = client.post(
         f"/instances/{instance['id']}/tasks/{task_id}/claim",
         json={"principal_id": "dora-assignee"},
+        headers={"X-DMS-Principal": "dora-assignee"},
     ).json()
     second = client.post(
         f"/instances/{instance['id']}/tasks/{task_id}/claim",
         json={"principal_id": "dora-assignee"},
+        headers={"X-DMS-Principal": "dora-assignee"},
     ).json()
     assert first["id"] == second["id"]
 
@@ -877,11 +964,13 @@ def test_claim_task_already_claimed_by_different_principal_returns_409(
     client.post(
         f"/instances/{instance['id']}/tasks/{task_id}/claim",
         json={"principal_id": "dora-assignee"},
+        headers={"X-DMS-Principal": "dora-assignee"},
     )
 
     response = client.post(
         f"/instances/{instance['id']}/tasks/{task_id}/claim",
         json={"principal_id": "someone-else"},
+        headers={"X-DMS-Principal": "someone-else"},
     )
     assert response.status_code == 409
 
@@ -891,6 +980,7 @@ def test_claim_unknown_task_returns_409(client, manual_task_bpmn, admin_headers)
     response = client.post(
         f"/instances/{instance['id']}/tasks/does-not-exist/claim",
         json={"principal_id": "dora-assignee"},
+        headers={"X-DMS-Principal": "dora-assignee"},
     )
     assert response.status_code == 409
 
@@ -901,6 +991,7 @@ def test_release_task_claim_clears_it(client, manual_task_bpmn, admin_headers):
     client.post(
         f"/instances/{instance['id']}/tasks/{task_id}/claim",
         json={"principal_id": "dora-assignee"},
+        headers={"X-DMS-Principal": "dora-assignee"},
     )
 
     response = client.delete(f"/instances/{instance['id']}/tasks/{task_id}/claim")
@@ -936,6 +1027,7 @@ def test_reassign_task_moves_claim_to_new_principal(client, manual_task_bpmn, ad
     client.post(
         f"/instances/{instance['id']}/tasks/{task_id}/claim",
         json={"principal_id": "dora-assignee"},
+        headers={"X-DMS-Principal": "dora-assignee"},
     )
 
     # P66-S2: reassignment is now restricted to the current claimant
@@ -965,6 +1057,7 @@ def test_reassign_task_by_a_non_claimant_non_supervisor_is_403(
     client.post(
         f"/instances/{instance['id']}/tasks/{task_id}/claim",
         json={"principal_id": "dora-assignee-1b"},
+        headers={"X-DMS-Principal": "dora-assignee-1b"},
     )
 
     response = client.post(
@@ -997,6 +1090,7 @@ def test_reassign_task_bypassed_by_active_superuser_without_being_claimant_or_su
     client.post(
         f"/instances/{instance['id']}/tasks/{task_id}/claim",
         json={"principal_id": "dora-assignee-1c"},
+        headers={"X-DMS-Principal": "dora-assignee-1c"},
     )
 
     response = client.post(
@@ -1028,6 +1122,7 @@ def test_reassign_task_not_bypassed_by_a_different_principal_than_the_active_sup
     client.post(
         f"/instances/{instance['id']}/tasks/{task_id}/claim",
         json={"principal_id": "dora-assignee-1d"},
+        headers={"X-DMS-Principal": "dora-assignee-1d"},
     )
 
     response = client.post(
@@ -1073,6 +1168,7 @@ def test_reassign_task_revokes_the_old_org_hierarchy_grant(
     client.post(
         f"/instances/{instance['id']}/tasks/{task_id}/claim",
         json={"principal_id": "dora-assignee-r3"},
+        headers={"X-DMS-Principal": "dora-assignee-r3"},
     )
     client.post(
         f"/instances/{instance['id']}/tasks/{task_id}/org-hierarchy-grant",
@@ -1128,6 +1224,7 @@ def test_org_hierarchy_grant_supervisor_grants_the_assignees_direct_supervisor(
     client.post(
         f"/instances/{instance['id']}/tasks/{task_id}/claim",
         json={"principal_id": "dora-assignee-g2"},
+        headers={"X-DMS-Principal": "dora-assignee-g2"},
     )
 
     response = client.post(
@@ -1183,11 +1280,13 @@ def test_org_hierarchy_grant_narrows_to_the_resolved_case(
     instance = client.post(
         f"/process-definitions/{definition_id}/instances",
         json={"created_by": "alice", "business_key": business_key},
+        headers={"X-DMS-Principal": "alice"},
     ).json()
     task_id = client.get(f"/instances/{instance['id']}/tasks").json()[0]["id"]
     client.post(
         f"/instances/{instance['id']}/tasks/{task_id}/claim",
         json={"principal_id": "dora-assignee-g3"},
+        headers={"X-DMS-Principal": "dora-assignee-g3"},
     )
 
     response = client.post(
@@ -1228,6 +1327,7 @@ def test_org_hierarchy_grant_org_unit_without_org_unit_of_returns_422(
     client.post(
         f"/instances/{instance['id']}/tasks/{task_id}/claim",
         json={"principal_id": "dora-assignee-g3"},
+        headers={"X-DMS-Principal": "dora-assignee-g3"},
     )
 
     response = client.post(
@@ -1253,6 +1353,7 @@ def test_org_hierarchy_grant_org_unit_of_creator_resolves_from_instance_creator(
     client.post(
         f"/instances/{instance['id']}/tasks/{task_id}/claim",
         json={"principal_id": "dora-assignee-g4"},
+        headers={"X-DMS-Principal": "dora-assignee-g4"},
     )
 
     response = client.post(
@@ -1276,6 +1377,7 @@ def test_completing_task_auto_releases_claim_and_revokes_grant(
     client.post(
         f"/instances/{instance['id']}/tasks/{task_id}/claim",
         json={"principal_id": "dora-assignee-g5"},
+        headers={"X-DMS-Principal": "dora-assignee-g5"},
     )
     client.post(
         f"/instances/{instance['id']}/tasks/{task_id}/org-hierarchy-grant",
@@ -1323,7 +1425,9 @@ def test_complete_task_on_behalf_of_without_principal_header_returns_401(
         client, manual_task_bpmn, name="Approval", headers=admin_headers
     ).json()["id"]
     instance = client.post(
-        f"/process-definitions/{definition_id}/instances", json={"created_by": "alice"}
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
     ).json()
     task = client.get(f"/instances/{instance['id']}/tasks").json()[0]
 
@@ -1343,7 +1447,9 @@ def test_complete_task_on_behalf_of_without_active_delegation_returns_403(
         client, manual_task_bpmn, name="Approval", headers=admin_headers
     ).json()["id"]
     instance = client.post(
-        f"/process-definitions/{definition_id}/instances", json={"created_by": "alice"}
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
     ).json()
     task = client.get(f"/instances/{instance['id']}/tasks").json()[0]
     deputy = f"deputy-{uuid.uuid4().hex[:8]}"
@@ -1371,7 +1477,9 @@ def test_complete_task_on_behalf_of_with_active_delegation_succeeds_and_annotate
         client, manual_task_bpmn, name="Approval", headers=admin_headers
     ).json()["id"]
     instance = client.post(
-        f"/process-definitions/{definition_id}/instances", json={"created_by": "alice"}
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
     ).json()
     task = client.get(f"/instances/{instance['id']}/tasks").json()[0]
 
@@ -1403,7 +1511,9 @@ def test_complete_task_on_behalf_of_respects_process_definition_scope(
         client, manual_task_bpmn, name="Approval2", headers=admin_headers
     ).json()["id"]
     instance = client.post(
-        f"/process-definitions/{definition_id}/instances", json={"created_by": "alice"}
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
     ).json()
     task = client.get(f"/instances/{instance['id']}/tasks").json()[0]
 
@@ -1463,6 +1573,7 @@ def test_complete_task_on_behalf_of_respects_object_type_scope(
     instance = client.post(
         f"/process-definitions/{definition_id}/instances",
         json={"created_by": "alice", "business_key": business_key},
+        headers={"X-DMS-Principal": "alice"},
     ).json()
     task = client.get(f"/instances/{instance['id']}/tasks").json()[0]
 
@@ -1505,6 +1616,7 @@ def test_complete_task_on_behalf_of_allows_matching_object_type_scope(
     instance = client.post(
         f"/process-definitions/{definition_id}/instances",
         json={"created_by": "alice", "business_key": business_key},
+        headers={"X-DMS-Principal": "alice"},
     ).json()
     task = client.get(f"/instances/{instance['id']}/tasks").json()[0]
 
@@ -1538,6 +1650,7 @@ def test_complete_task_on_behalf_of_respects_folder_resource_scope(
     instance = client.post(
         f"/process-definitions/{definition_id}/instances",
         json={"created_by": "alice", "business_key": document["id"]},
+        headers={"X-DMS-Principal": "alice"},
     ).json()
     task = client.get(f"/instances/{instance['id']}/tasks").json()[0]
 
@@ -1570,6 +1683,7 @@ def test_complete_task_on_behalf_of_allows_matching_folder_resource_scope(
     instance = client.post(
         f"/process-definitions/{definition_id}/instances",
         json={"created_by": "alice", "business_key": document["id"]},
+        headers={"X-DMS-Principal": "alice"},
     ).json()
     task = client.get(f"/instances/{instance['id']}/tasks").json()[0]
 
@@ -1588,26 +1702,46 @@ def test_complete_task_on_behalf_of_allows_matching_folder_resource_scope(
     assert response.status_code == 200
 
 
-def test_complete_task_without_on_behalf_of_needs_no_principal_header(
-    client, manual_task_bpmn, admin_headers
+def test_complete_task_records_the_principal_and_needs_one(
+    client, manual_task_bpmn, admin_headers, monkeypatch
 ):
-    """Regulärer, nicht delegierter Abschluss bleibt unverändert möglich
-    ohne X-DMS-Principal-Header - `completed_by` bleibt wie bisher ein
-    ungeprüftes Freitextfeld, siehe main.py._require_delegation_if_on_behalf_of."""
+    """A regular, non-delegated completion. Until P85-S3 it worked without
+    any X-DMS-Principal and `completed_by` was free text; since then the
+    acting identity is required (ADR 0240: no principal, no write) and is
+    what gets recorded - a spoofed body `completed_by` is ignored."""
+    published: list[Event] = []
+
+    async def fake_publish(subject: str, data: bytes) -> None:
+        published.append(Event.from_bytes(data))
+
+    monkeypatch.setattr(app.state.event_bus, "publish", fake_publish)
     definition_id = _upload_definition(
         client, manual_task_bpmn, name="Approval", headers=admin_headers
     ).json()["id"]
     instance = client.post(
-        f"/process-definitions/{definition_id}/instances", json={"created_by": "alice"}
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
     ).json()
+    assert instance["created_by"] == "alice"
     task = client.get(f"/instances/{instance['id']}/tasks").json()[0]
+
+    anonymous = client.post(
+        f"/instances/{instance['id']}/tasks/{task['id']}/complete",
+        json={"completed_by": "bob"},
+        headers={"X-DMS-Principal": ""},
+    )
+    assert anonymous.status_code == 401
 
     response = client.post(
         f"/instances/{instance['id']}/tasks/{task['id']}/complete",
-        json={"completed_by": "bob"},
+        json={"completed_by": "someone-else"},
+        headers={"X-DMS-Principal": "bob"},
     )
-
     assert response.status_code == 200
+    completed = [e for e in published if e.event_type == "workflow.task.completed"]
+    assert completed[-1].actor == "bob"
+    assert completed[-1].payload["completed_by"] == "bob"
 
 
 def test_complete_claimed_task_by_a_non_claimant_non_supervisor_is_403(
@@ -1624,6 +1758,7 @@ def test_complete_claimed_task_by_a_non_claimant_non_supervisor_is_403(
     client.post(
         f"/instances/{instance['id']}/tasks/{task_id}/claim",
         json={"principal_id": "dora-assignee-cc1"},
+        headers={"X-DMS-Principal": "dora-assignee-cc1"},
     )
 
     response = client.post(
@@ -1643,6 +1778,7 @@ def test_complete_claimed_task_by_the_claimant_succeeds(client, manual_task_bpmn
     client.post(
         f"/instances/{instance['id']}/tasks/{task_id}/claim",
         json={"principal_id": "dora-assignee-cc2"},
+        headers={"X-DMS-Principal": "dora-assignee-cc2"},
     )
 
     response = client.post(
@@ -1669,6 +1805,7 @@ def test_complete_claimed_task_by_claimants_supervisor_succeeds(
     client.post(
         f"/instances/{instance['id']}/tasks/{task_id}/claim",
         json={"principal_id": "dora-assignee-cc3"},
+        headers={"X-DMS-Principal": "dora-assignee-cc3"},
     )
 
     response = client.post(
@@ -1698,6 +1835,7 @@ def test_complete_claimed_task_bypassed_by_active_superuser(
     client.post(
         f"/instances/{instance['id']}/tasks/{task_id}/claim",
         json={"principal_id": "dora-assignee-cc4b"},
+        headers={"X-DMS-Principal": "dora-assignee-cc4b"},
     )
 
     response = client.post(
@@ -1744,6 +1882,7 @@ def test_get_ready_tasks_surfaces_signature_task_extensions(
     instance = client.post(
         f"/process-definitions/{definition_id}/instances",
         json={"created_by": "alice", "initial_data": {"document_id": "doc-1"}},
+        headers={"X-DMS-Principal": "alice"},
     ).json()
 
     tasks = client.get(f"/instances/{instance['id']}/tasks").json()
@@ -1760,11 +1899,14 @@ def test_complete_signature_task_without_signature_id_returns_400(
     instance = client.post(
         f"/process-definitions/{definition_id}/instances",
         json={"created_by": "alice", "initial_data": {"document_id": "doc-1"}},
+        headers={"X-DMS-Principal": "alice"},
     ).json()
     task_id = client.get(f"/instances/{instance['id']}/tasks").json()[0]["id"]
 
     response = client.post(
-        f"/instances/{instance['id']}/tasks/{task_id}/complete", json={"completed_by": "bob"}
+        f"/instances/{instance['id']}/tasks/{task_id}/complete",
+        json={"completed_by": "bob"},
+        headers={"X-DMS-Principal": "bob"},
     )
     assert response.status_code == 400
 
@@ -1778,12 +1920,14 @@ def test_complete_signature_task_with_unknown_signature_id_returns_400(
     instance = client.post(
         f"/process-definitions/{definition_id}/instances",
         json={"created_by": "alice", "initial_data": {"document_id": "doc-1"}},
+        headers={"X-DMS-Principal": "alice"},
     ).json()
     task_id = client.get(f"/instances/{instance['id']}/tasks").json()[0]["id"]
 
     response = client.post(
         f"/instances/{instance['id']}/tasks/{task_id}/complete",
         json={"completed_by": "bob", "signature_id": "999999"},
+        headers={"X-DMS-Principal": "bob"},
     )
     assert response.status_code == 400
 
@@ -1798,12 +1942,14 @@ def test_complete_signature_task_with_mismatched_document_returns_400(
     instance = client.post(
         f"/process-definitions/{definition_id}/instances",
         json={"created_by": "alice", "initial_data": {"document_id": "ein-anderes-dokument"}},
+        headers={"X-DMS-Principal": "alice"},
     ).json()
     task_id = client.get(f"/instances/{instance['id']}/tasks").json()[0]["id"]
 
     response = client.post(
         f"/instances/{instance['id']}/tasks/{task_id}/complete",
         json={"completed_by": "bob", "signature_id": str(signature_id)},
+        headers={"X-DMS-Principal": "bob"},
     )
     assert response.status_code == 400
     assert document_id != "ein-anderes-dokument"
@@ -1820,12 +1966,14 @@ def test_complete_signature_task_with_insufficient_level_returns_400(
     instance = client.post(
         f"/process-definitions/{definition_id}/instances",
         json={"created_by": "alice", "initial_data": {"document_id": document_id}},
+        headers={"X-DMS-Principal": "alice"},
     ).json()
     task_id = client.get(f"/instances/{instance['id']}/tasks").json()[0]["id"]
 
     response = client.post(
         f"/instances/{instance['id']}/tasks/{task_id}/complete",
         json={"completed_by": "bob", "signature_id": str(signature_id)},
+        headers={"X-DMS-Principal": "bob"},
     )
     assert response.status_code == 400
 
@@ -1841,12 +1989,14 @@ def test_complete_signature_task_with_valid_signature_succeeds(
     instance = client.post(
         f"/process-definitions/{definition_id}/instances",
         json={"created_by": "alice", "initial_data": {"document_id": document_id}},
+        headers={"X-DMS-Principal": "alice"},
     ).json()
     task_id = client.get(f"/instances/{instance['id']}/tasks").json()[0]["id"]
 
     response = client.post(
         f"/instances/{instance['id']}/tasks/{task_id}/complete",
         json={"completed_by": "bob", "signature_id": str(signature_id)},
+        headers={"X-DMS-Principal": "bob"},
     )
     assert response.status_code == 200
     assert response.json()["status"] == "completed"
@@ -1859,8 +2009,16 @@ def test_list_instances_filters_by_status(client, manual_task_bpmn, no_tasks_bpm
     completed_id = _upload_definition(
         client, no_tasks_bpmn, name="NoTasks", headers=admin_headers
     ).json()["id"]
-    client.post(f"/process-definitions/{running_id}/instances", json={"created_by": "alice"})
-    client.post(f"/process-definitions/{completed_id}/instances", json={"created_by": "alice"})
+    client.post(
+        f"/process-definitions/{running_id}/instances",
+        json={"created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
+    client.post(
+        f"/process-definitions/{completed_id}/instances",
+        json={"created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
 
     running = client.get("/instances", params={"status": "running"}).json()
     completed = client.get("/instances", params={"status": "completed"}).json()
@@ -1873,8 +2031,16 @@ def test_list_instances_respects_limit(client, manual_task_bpmn, admin_headers):
     definition_id = _upload_definition(
         client, manual_task_bpmn, name="LimitTest", headers=admin_headers
     ).json()["id"]
-    client.post(f"/process-definitions/{definition_id}/instances", json={"created_by": "alice"})
-    client.post(f"/process-definitions/{definition_id}/instances", json={"created_by": "alice"})
+    client.post(
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
+    client.post(
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
 
     response = client.get("/instances", params={"limit": 1})
     assert response.status_code == 200
@@ -1906,7 +2072,9 @@ def test_instance_with_connector_service_task_completes_via_stub(
         client, connector_service_task_bpmn, name="ConnectorCall", headers=admin_headers
     ).json()["id"]
     response = client.post(
-        f"/process-definitions/{definition_id}/instances", json={"created_by": "alice"}
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
     )
     assert response.status_code == 201
     assert response.json()["status"] == "completed"
@@ -1937,6 +2105,7 @@ def test_connector_service_task_service_url_supports_process_data_templating(
     response = client.post(
         f"/process-definitions/{definition_id}/instances",
         json={"created_by": "alice", "initial_data": {"transfer_id": "abc-123"}},
+        headers={"X-DMS-Principal": "alice"},
     )
     assert response.status_code == 201
     assert called_urls == ["http://connector-stub.invalid/transfers/abc-123/steps/lock"]
@@ -1969,7 +2138,9 @@ def test_retry_instance_resumes_after_a_failed_connector_call(
             client, connector_service_task_bpmn, name="ConnectorCallRetry", headers=admin_headers
         ).json()["id"]
         start_response = client.post(
-            f"/process-definitions/{definition_id}/instances", json={"created_by": "alice"}
+            f"/process-definitions/{definition_id}/instances",
+            json={"created_by": "alice"},
+            headers={"X-DMS-Principal": "alice"},
         )
         assert start_response.status_code == 500
 
@@ -1987,7 +2158,9 @@ def test_retry_instance_on_completed_instance_returns_409(client, no_tasks_bpmn,
         client, no_tasks_bpmn, name="NoTasksRetry", headers=admin_headers
     ).json()["id"]
     instance_id = client.post(
-        f"/process-definitions/{definition_id}/instances", json={"created_by": "alice"}
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
     ).json()["id"]
 
     response = client.post(f"/instances/{instance_id}/retry")

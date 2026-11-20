@@ -9,7 +9,8 @@ class CaseCreate(BaseModel):
     object_type_id: int | None = None
     attributes: dict = {}
     process_definition_id: int
-    created_by: str
+    # Ignored since P85-S3 (ADR 0240): the actor is the request principal.
+    created_by: str | None = None
     initial_data: dict = {}
     # Draft / pre-registration lifecycle (post-roadmap phase 31 session 2,
     # ADR 0113) - see `Case.registered_at`. Default `False` keeps today's
@@ -38,7 +39,8 @@ class CaseOut(BaseModel):
 
 
 class CaseRegisterRequest(BaseModel):
-    registered_by: str
+    # Ignored since P85-S3 (ADR 0240): the actor is the request principal.
+    registered_by: str | None = None
 
 
 class CaseNumberConfigIn(BaseModel):
@@ -54,11 +56,13 @@ class CaseNumberConfigOut(BaseModel):
 
 class CaseDocumentAdd(BaseModel):
     document_id: str
-    added_by: str
+    # Ignored since P85-S3 (ADR 0240): the actor is the request principal.
+    added_by: str | None = None
 
 
 class CaseDocumentRemove(BaseModel):
-    removed_by: str
+    # Ignored since P85-S3 (ADR 0240): the actor is the request principal.
+    removed_by: str | None = None
 
 
 class CaseDocumentReferenceOut(BaseModel):
@@ -112,12 +116,14 @@ class PseudonymizeAttributeRequest(BaseModel):
     service has no `retention_until`/`full_deletion` mechanism at all
     (see `docs/adr/0156-...md`'s Phase 58 Session 1 addendum)."""
 
-    pseudonymized_by: str
+    # Ignored since P85-S3 (ADR 0240): the actor is the request principal.
+    pseudonymized_by: str | None = None
     reason: str | None = None
 
 
 class RevealAttributeRequest(BaseModel):
-    revealed_by: str
+    # Ignored since P85-S3 (ADR 0240): the actor is the request principal.
+    revealed_by: str | None = None
 
 
 class PseudonymizedAttributeOut(BaseModel):

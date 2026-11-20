@@ -3620,9 +3620,38 @@ accepted that as a scaffold habit. The user decided to bind all of them to the g
     migration run failed transiently right after the container restarts.
   - **Live through the gateway:** a body `initiated_by` and a client-sent `X-DMS-On-Behalf-Of` were both
     ignored (initiator = the token's `sub`), and `actor_field_ignored` was logged.
-- **P85-S3 — Workflow, cases, signatures and the rest (12).** workflow-service (instance create, claim,
-  complete), case-service (6 routes), signature-service (signer = acting), ocr-service `reviewed`, the
-  auth-service user-tracking config, and their callers.
+- **P85-S3 — Workflow, cases, signatures and the rest (12).** ✅ **Done.**
+  - **workflow-service:**
+    - instance start (`created_by`), completion (`completed_by`; delegation and claimant checks now on
+      the acting identity) and claims (**always for the caller**; handing over is `reassign`);
+    - completion without a principal is now `401`; before, it needed none.
+  - **case-service:** 6 routes (create, register, add/remove reference, pseudonymize, reveal).
+  - **signature-service:** `401` without a principal, **`403` for any on-behalf call**; the existing
+    signer = verified-username rule stays.
+  - **ocr-service:** `reviewed` takes the reviewer from the acting identity.
+  - **auth-service:** user-tracking config takes the token `sub`.
+  - **Addition to ADR 0240 — connector calls act on behalf of the last completer:**
+    - `complete_task` stores the completer in the reserved process-data key `dms_last_completed_by`;
+    - `_handle_connector_task` sends it as `X-DMS-On-Behalf-Of` next to `workflow-service`;
+    - this replaces the only remaining "human behind an automated step comes from the body" path (OCR
+      review).
+  - **Callers:**
+    - migration-service starts workflows on behalf of the transfer initiator;
+    - mail-connector adds case references as `mail-connector` on behalf of the mailbox user; before, it
+      used `system:mail-connector`, which isn't a service principal;
+    - case-service already forwarded the user principal.
+  - **Tests:**
+    - headers added by the AST script;
+    - it wrongly added a principal to one auth test (`test_create_case_requires_authentication`,
+      reverted) and masked an obsolete-premise test (completion "needs no principal"), which was
+      rewritten to assert 401 plus the recorded principal;
+    - expectations changed where the principal now wins (case, auth tracking);
+    - new tests: claim for the caller, connector on-behalf header, signature on-behalf 403, OCR reviewer
+      from on-behalf plus 401.
+  - **Results:**
+    - case 87, workflow 242, ocr 60, signature 36, migration 21, mail 80, auth 164 (tracking re-run 12 +
+      163 from the full run);
+    - e2e 32/32; ruff clean; 7 images rebuilt.
 - **P85-S4 — Remaining document/folder routes (23).** Register, promote, classification, pseudonymize,
   reveal, restore, redact, locks, upload and versions; folder create, references and templates;
   favorite-service, virus-scan `/scan`, the migration federated exception; all remaining internal

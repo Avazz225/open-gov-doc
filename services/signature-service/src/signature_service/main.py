@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime, timedelta
 
-from dms_common import configure_logging
+from dms_common import ActingIdentity, configure_logging, require_acting_identity
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
 from dms_metrics_client import (
@@ -316,11 +316,20 @@ async def _require_document_read_permission(x_dms_principal: str, document_id: s
 async def create_signature(
     payload: SignatureCreate,
     session: AsyncSession = Depends(get_session),
+    identity: ActingIdentity = Depends(require_acting_identity),
     x_dms_principal: str = Header(default=""),
     x_dms_username: str = Header(default=""),
     x_dms_maintenance_active: str = Header(default="false"),
 ) -> SignatureOut:
     await _reject_during_maintenance(x_dms_maintenance_active)
+    # P85-S3 (ADR 0240): a signature is never made on someone's behalf - a
+    # service may act for a user elsewhere, but not here. (No principal at
+    # all is already a 401 from `require_acting_identity`.) The existing
+    # check below binds the signer to the verified username.
+    if identity.on_behalf_of:
+        raise HTTPException(
+            status_code=403, detail="Signieren im Auftrag einer anderen Person ist nicht möglich"
+        )
     try:
         document = await app.state.document_client.get_document(payload.document_id)
     except DocumentNotFoundError as exc:

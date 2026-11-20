@@ -186,4 +186,20 @@ every touched route, plus the service's suite and ruff.
   Events use the existing `on_behalf_of` envelope field with the same meaning as for delegations: the
   service as `actor`, the user as `on_behalf_of`. The domain fields (`deleted_by`, `initiated_by`, …)
   name the user.
+- **S3 (done):**
+  - workflow-service: instance start, claim (always for the caller; `reassign` is how work is handed
+    over) and complete (delegation and claim checks on the acting identity);
+  - case-service: 6 routes;
+  - signature-service: `401` without a principal, `403` for any on-behalf call;
+  - ocr-service: reviewer from the acting identity;
+  - auth-service: user-tracking config.
+
+  **Addition to the decision:** connector calls act on behalf of the person who completed the preceding
+  user task. `complete_task` records them in the reserved process-data key `dms_last_completed_by`, and
+  `_handle_connector_task` sends it as `X-DMS-On-Behalf-Of`. This closes the one place where a body
+  field was the only way to name the human behind an automated step.
+
+  Callers: migration-service (workflow start on behalf of the transfer initiator) and mail-connector
+  (case references as `mail-connector` on behalf of the mailbox user, instead of the non-service
+  principal `system:mail-connector`).
 

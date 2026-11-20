@@ -1744,14 +1744,22 @@ async def put_user_tracking_config(
         return UserTrackingConfigActionResult(
             status="pending_approval", approval_request_id=request_id
         )
+    # P85-S3 (ADR 0240): the actor is the verified token's subject;
+    # `payload.updated_by` is ignored.
+    updated_by = user.get("sub") or ""
+    if payload.updated_by and payload.updated_by != updated_by:
+        logger.warning(
+            "actor_field_ignored",
+            extra={"route": "PUT /user-tracking-config/{id}", "field": "updated_by"},
+        )
     config = await tracking.set_tracking_enabled(
-        session, principal_id, enabled=payload.enabled, updated_by=payload.updated_by
+        session, principal_id, enabled=payload.enabled, updated_by=updated_by
     )
     await session.commit()
     await publish_event(
         "auth.user_tracking.config_changed",
         {"principal_id": principal_id, "enabled": payload.enabled},
-        actor=payload.updated_by,
+        actor=updated_by,
     )
     return UserTrackingConfigActionResult(status="applied", config=config)
 

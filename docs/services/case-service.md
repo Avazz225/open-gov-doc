@@ -161,6 +161,14 @@ non-isolated case stays visible — the decisive proof that row-level filtering,
 - **Live smoke test for status-transition gating** (Phase 45 Session 4): created a real object type (`status_transitions`: `open`→`closed` requires `Abschlussgrund`) against the real running object-type-service; a case created against a zero-manual-task process WITHOUT the attribute stayed `"open"` after the BPMN instance completed, with `case.close_blocked` recorded in the audit trail (exact constraint-engine error message); a case created WITH the attribute closed immediately as before. Repeated the blocked scenario via a manual-task process (real task completion → `workflow.instance.completed` → `consumer.py`'s path) to confirm BOTH call sites are gated identically — same block, same audit event.
 - Pure backend session, no browser test needed (not on the UI sessions list in `IMPLEMENTATION_PLAN.md`).
 
+## Acting Identity (P85-S3, [ADR 0240](../adr/0240-acting-identity-from-verified-principal.md))
+
+Case creation, registration, adding or removing document references, and pseudonymize/reveal record the
+request principal (`created_by`, `registered_by`, `added_by`, `removed_by`, `pseudonymized_by`,
+`revealed_by`); the body fields are optional and ignored. mail-connector adds mail-created documents to a
+case as `mail-connector` on behalf of the mailbox's user (before: the non-service principal
+`system:mail-connector`, plus `added_by` in the body).
+
 ## Open Points
 
 - ~~No role check/RBAC~~ — **fixed in Post-Roadmap Phase 19 Session 5** ([ADR 0070](../adr/0070-case-service-rbac.md)): all human-usable endpoints now check `case.read`/`case.write` against `permission-service` (`X-DMS-Principal` required). The two purely internal machine-to-machine callbacks (`GET /cases/due-for-archival`, `PUT /cases/{id}/archived`) remain deliberately ungated, see ADR 0070 "Decision".

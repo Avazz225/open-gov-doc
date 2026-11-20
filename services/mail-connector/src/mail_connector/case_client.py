@@ -1,4 +1,5 @@
 import httpx
+from dms_common import acting_headers
 
 # RBAC (Post-Roadmap Phase 19 Session 5, ADR 0070) - since this session
 # case-service checks `case.read`/`case.write` against permission-service and
@@ -52,8 +53,11 @@ class CaseClient:
     ) -> None:
         response = await self._client.post(
             f"/cases/{case_id}/documents",
-            json={"document_id": document_id, "added_by": added_by},
-            headers=_SYSTEM_PRINCIPAL_HEADERS,
+            json={"document_id": document_id},
+            # P85-S3 (ADR 0240): as `mail-connector` (a known service
+            # principal - `system:mail-connector` isn't one), on behalf of the
+            # mailbox's user.
+            headers=acting_headers("mail-connector", added_by or None),
         )
         response.raise_for_status()
 

@@ -35,7 +35,9 @@ def test_demo_mode_allows_read_but_blocks_write(
     assert read_response.status_code == 200
 
     write_response = client.post(
-        f"/process-definitions/{definition_id}/instances", json={"created_by": "alice"}
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
     )
     assert write_response.status_code == 403
 
@@ -51,7 +53,9 @@ def test_unlicensed_blocks_read_and_write(client, monkeypatch, manual_task_bpmn,
     assert read_response.status_code == 403
 
     write_response = client.post(
-        f"/process-definitions/{definition_id}/instances", json={"created_by": "alice"}
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
     )
     assert write_response.status_code == 403
 
@@ -64,6 +68,8 @@ def test_licensed_status_allows_read_and_write(client, monkeypatch, no_tasks_bpm
     ).json()["id"]
 
     write_response = client.post(
-        f"/process-definitions/{definition_id}/instances", json={"created_by": "alice"}
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
     )
     assert write_response.status_code == 201

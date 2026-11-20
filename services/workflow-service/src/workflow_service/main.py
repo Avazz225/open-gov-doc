@@ -11,7 +11,13 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 import httpx
-from dms_common import configure_logging
+from dms_common import (
+    ActingIdentity,
+    acting_headers,
+    configure_logging,
+    log_ignored_actor_field,
+    require_acting_identity,
+)
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
 from dms_metrics_client import (
@@ -96,6 +102,13 @@ _XDOMEA_CASE_HANDOFF_PROCESS_TYPE = "xdomea.case_handoff"
 _connector_http_client = httpx.Client()
 
 
+# Reserved process-data key (P85-S3, ADR 0240): the acting identity that
+# completed the most recent user task. A connector call sends it as
+# `X-DMS-On-Behalf-Of`, so its target records the human behind the automated
+# step (e.g. ocr-service's reviewer) instead of reading a body field.
+LAST_COMPLETED_BY_KEY = "dms_last_completed_by"
+
+
 def _handle_connector_task(extensions: dict[str, str], data: dict) -> dict:
     """Registered with `spiff_adapter.ConnectorServiceTask` (7.1 "triggering a
     connector call", P12-S2) - deliberately the only place in this service
@@ -129,7 +142,9 @@ def _handle_connector_task(extensions: dict[str, str], data: dict) -> dict:
         # convention this service already uses for its own document_client
         # (`_SYSTEM_PRINCIPAL_HEADERS`). Additive only: no existing target
         # checks this header except `migration-service` since this session.
-        headers={"X-DMS-Principal": "workflow-service"},
+        # P85-S3 (ADR 0240): plus, when a person completed the step before
+        # this call, `X-DMS-On-Behalf-Of` naming them.
+        headers=acting_headers("workflow-service", data.get(LAST_COMPLETED_BY_KEY)),
         timeout=settings.connector_call_timeout_seconds,
     )
     response.raise_for_status()
@@ -1289,8 +1304,17 @@ async def start_instance(
     payload: ProcessInstanceCreate,
     x_dms_maintenance_active: str = Header(default="false"),
     x_dms_principal: str = Header(default=""),
+    identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> ProcessInstanceOut:
+    log_ignored_actor_field(
+        logger,
+        route="POST /process-definitions/{id}/instances",
+        field="created_by",
+        value=payload.created_by,
+        identity=identity,
+    )
+    actor_created_by = identity.actor
     await _reject_during_maintenance(x_dms_maintenance_active)
     await _require_workflow_permission(x_dms_principal, access_type="write")
     # P68-S1 (correction of P66-S2, incidental discovery during this
@@ -1323,7 +1347,7 @@ async def start_instance(
         instance = await repository.start_instance(
             session,
             process_definition_id,
-            created_by=payload.created_by,
+            created_by=actor_created_by,
             business_key=payload.business_key,
             initial_data=payload.initial_data,
             instance_id=payload.instance_id,
@@ -1346,15 +1370,15 @@ async def start_instance(
     await publish_event(
         "workflow.instance.started",
         subject=instance.id,
-        payload={"process_definition_id": process_definition_id, "created_by": payload.created_by},
-        actor=payload.created_by,
+        payload={"process_definition_id": process_definition_id, "created_by": actor_created_by},
+        actor=actor_created_by,
     )
     if instance.status == "completed":
         await publish_event(
             "workflow.instance.completed",
             subject=instance.id,
             payload={"business_key": instance.business_key},
-            actor=payload.created_by,
+            actor=actor_created_by,
         )
     await _dispatch_pending_federation_tasks(session, instance.id)
     await session.commit()
@@ -1590,9 +1614,9 @@ async def _resolve_business_key_scope(
 async def _require_delegation_if_on_behalf_of(
     session: AsyncSession, instance_id: str, payload: TaskCompleteRequest, x_dms_principal: str
 ) -> None:
-    """Deputizing during absence (4.4a, P14-S11) - ``completed_by`` remains
-    an unvalidated free-text field (an existing, deliberate gap, see
-    docs/services/workflow-service.md), but a completion "on behalf of"
+    """Deputizing during absence (4.4a, P14-S11) - ``completed_by`` is the
+    acting identity since P85-S3 (ADR 0240; before, an unvalidated free-text
+    field), and a completion "on behalf of"
     requires a REAL delegation checked against the Permission Service: the
     calling identity for this comes from the gateway-injected
     ``X-DMS-Principal`` header, NOT from the freely choosable
@@ -1714,21 +1738,29 @@ async def claim_task(
     payload: TaskClaimCreate,
     x_dms_maintenance_active: str = Header(default="false"),
     x_dms_principal: str = Header(default=""),
+    identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> TaskClaimOut:
     """Minimal task-claim mechanism (14.2/8, Post-Roadmap Phase 31 Session
     10, ADR 0121) - the prerequisite for the org-hierarchy access grant
     below, which needs a real assignee to resolve a supervisor/org-unit
     FROM (workflow-service had no assignee concept at all before this, see
-    `models.TaskClaim`). `payload.principal_id` is deliberately an explicit
-    field, not always `X-DMS-Principal` - unlike `POST /delegations`
-    (self-service), a claim can be made on someone else's behalf (e.g. by
-    an admin distributing work), same posture as `TaskCompleteRequest.
-    completed_by` being free-form rather than forced to the caller."""
+    `models.TaskClaim`). Since P85-S3 (ADR 0240) a claim is always made by
+    and for the acting identity - `payload.principal_id` is ignored. Handing
+    work to someone else is `POST .../reassign`, which checks that the
+    caller is the claimant or their supervisor."""
+    log_ignored_actor_field(
+        logger,
+        route="POST /instances/{id}/tasks/{task}/claim",
+        field="principal_id",
+        value=payload.principal_id,
+        identity=identity,
+    )
+    actor_principal_id = identity.actor
     await _reject_during_maintenance(x_dms_maintenance_active)
     await _require_workflow_permission(x_dms_principal, access_type="write")
     try:
-        claim = await repository.claim_task(session, instance_id, task_id, payload.principal_id)
+        claim = await repository.claim_task(session, instance_id, task_id, actor_principal_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except repository.TaskNotReadyError as exc:
@@ -1927,19 +1959,34 @@ async def complete_task(
     payload: TaskCompleteRequest,
     x_dms_maintenance_active: str = Header(default="false"),
     x_dms_principal: str = Header(default=""),
+    identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> ProcessInstanceOut:
+    log_ignored_actor_field(
+        logger,
+        route="POST /instances/{id}/tasks/{task}/complete",
+        field="completed_by",
+        value=payload.completed_by,
+        identity=identity,
+    )
+    actor_completed_by = identity.actor
     await _reject_during_maintenance(x_dms_maintenance_active)
     await _require_workflow_permission(x_dms_principal, access_type="write")
     try:
         await _require_valid_signature_if_needed(session, instance_id, task_id, payload)
         await _reject_manual_federated_completion(session, instance_id, task_id)
-        await _require_delegation_if_on_behalf_of(session, instance_id, payload, x_dms_principal)
+        await _require_delegation_if_on_behalf_of(session, instance_id, payload, identity.actor)
         await _require_claim_authorization_if_claimed(
-            session, instance_id, task_id, payload, x_dms_principal
+            session, instance_id, task_id, payload, identity.actor
         )
         instance = await repository.complete_task(
-            session, instance_id, task_id, completed_by=payload.completed_by, data=payload.data
+            session,
+            instance_id,
+            task_id,
+            completed_by=actor_completed_by,
+            # Who finished the step (P85-S3, ADR 0240): a connector call that
+            # follows acts on behalf of this person, see _handle_connector_task.
+            data={**payload.data, LAST_COMPLETED_BY_KEY: actor_completed_by},
         )
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -1963,8 +2010,8 @@ async def complete_task(
     await publish_event(
         "workflow.task.completed",
         subject=instance_id,
-        payload={"task_id": task_id, "completed_by": payload.completed_by},
-        actor=payload.completed_by,
+        payload={"task_id": task_id, "completed_by": actor_completed_by},
+        actor=actor_completed_by,
         on_behalf_of=payload.on_behalf_of_principal_id,
     )
     if instance.status == "completed":
@@ -1972,7 +2019,7 @@ async def complete_task(
             "workflow.instance.completed",
             subject=instance_id,
             payload={"business_key": instance.business_key},
-            actor=payload.completed_by,
+            actor=actor_completed_by,
             on_behalf_of=payload.on_behalf_of_principal_id,
         )
     await _dispatch_pending_federation_tasks(session, instance_id)

@@ -6,7 +6,12 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 
 import httpx
-from dms_common import configure_logging
+from dms_common import (
+    ActingIdentity,
+    configure_logging,
+    log_ignored_actor_field,
+    require_acting_identity,
+)
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
 from dms_metrics_client import (
@@ -267,9 +272,16 @@ async def get_session() -> AsyncIterator[AsyncSession]:
 
 
 async def publish_event(
-    event_type: str, subject: str, payload: dict, actor: str | None = None
+    event_type: str,
+    subject: str,
+    payload: dict,
+    actor: str | None = None,
+    on_behalf_of: str | None = None,
 ) -> None:
+    """`on_behalf_of` (P85-S3, ADR 0240): the person a service acted for -
+    then `actor` is the service, as for delegations."""
     event = Event(
+        on_behalf_of=on_behalf_of,
         event_type=event_type,
         service_name=settings.service_name,
         subject=subject,
@@ -480,16 +492,26 @@ async def download_page_image(
 async def mark_ocr_result_reviewed(
     ocr_result_id: str,
     body: OcrResultReviewedIn,
+    identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> OcrResultOut:
     """Connector-call callback from the `ocr_review.bpmn` review workflow
     (Phase 45 Session 3) - fires once a human completes the Manual Task.
-    Deliberately ungated (no `X-DMS-Principal` check), same precedent as
-    migration-service's own `/transfers/{id}/steps/*` connector-call
-    targets: `workflow-service`'s `_handle_connector_task` sends no
-    principal header at all, so gating this like every other endpoint
-    would make it permanently unreachable via the one path that's actually
-    meant to call it."""
+    Not permission-gated (a connector-call target, same precedent as
+    migration-service's `/transfers/{id}/steps/*`). Since P85-S3 (ADR 0240)
+    the reviewer is the acting identity: workflow-service calls as itself,
+    on behalf of the person who completed the review task
+    (`X-DMS-On-Behalf-Of`); `body.reviewed_by` is ignored. Without any
+    principal the call is a 401 - workflow-service has sent one since
+    ADR 0173."""
+    log_ignored_actor_field(
+        logger,
+        route="POST /ocr-results/{id}/reviewed",
+        field="reviewed_by",
+        value=body.reviewed_by,
+        identity=identity,
+    )
+    reviewed_by = identity.actor
     try:
         result = await repository.get_ocr_result(session, ocr_result_id)
     except repository.NotFoundError as exc:
@@ -500,7 +522,7 @@ async def mark_ocr_result_reviewed(
             detail=f"OCR-Ergebnis hat Status {result.status!r}, nur 'needs_review' kann "
             "als geprüft markiert werden",
         )
-    await repository.mark_reviewed(session, result, reviewed_by=body.reviewed_by)
+    await repository.mark_reviewed(session, result, reviewed_by=reviewed_by)
     await session.commit()
     await publish_event(
         "ocr.reviewed",
@@ -508,8 +530,9 @@ async def mark_ocr_result_reviewed(
         {
             "version_number": result.version_number,
             "ocr_result_id": result.id,
-            "reviewed_by": body.reviewed_by,
+            "reviewed_by": reviewed_by,
         },
-        actor=body.reviewed_by or "system:ocr-service",
+        actor=identity.principal,
+        on_behalf_of=identity.on_behalf_of,
     )
     return result
