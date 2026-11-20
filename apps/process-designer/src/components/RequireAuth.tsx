@@ -16,7 +16,7 @@ import { ThemeSwitcher } from "./ThemeSwitcher";
 // ungated) - only saving/deleting are additionally hidden behind
 // `RequireCapability`, see there.
 export function RequireAuth({ children }: { children: ReactNode }) {
-  const { user, isLoading } = useAuth();
+  const { user, isLoading, logout } = useAuth();
   const router = useRouter();
   const { t } = useI18n();
 
@@ -40,9 +40,20 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   return (
     <>
       <MaintenanceBanner />
-      <div className="flex items-center gap-4 px-6 py-2">
+      {/* P83-S7 (punch list item 10): the same header cluster as reviewer-ui/
+          migration-console - language, theme, the signed-in user and log out,
+          right-aligned over a rule. It wraps as a group on narrow screens. */}
+      <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2 border-b border-border px-6 py-3">
         <LocaleSwitcher />
         <ThemeSwitcher />
+        {user && <span className="whitespace-nowrap">{user.username}</span>}
+        <button
+          type="button"
+          onClick={logout}
+          className="whitespace-nowrap rounded-md border border-border bg-hover-bg px-3 py-1 text-fg transition-colors hover:bg-accent-bg"
+        >
+          {t("common.logout")}
+        </button>
       </div>
       {children}
     </>

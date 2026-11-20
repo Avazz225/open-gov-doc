@@ -15,7 +15,7 @@ export function ThemeSwitcher() {
   const { theme, setTheme } = useTheme();
 
   return (
-    <label className="flex flex-col gap-1 text-sm text-fg">
+    <label className="flex items-center gap-1 text-sm text-fg">
       {t("theme.label")}
       <select
         value={theme}

@@ -12,7 +12,7 @@ export function LocaleSwitcher() {
   const { t } = useI18n();
   const { locale, setLocale } = useLocale();
   return (
-    <label className="flex flex-col gap-1 text-sm text-fg">
+    <label className="flex items-center gap-1 text-sm text-fg">
       {t("locale.label")}
       <select
         value={locale}

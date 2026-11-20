@@ -109,7 +109,7 @@ export function InstanceDetail({
   const fieldLabel = "text-sm font-medium text-fg";
   const th = "border-b border-border px-2 py-2 text-left";
   const td = "border-b border-border px-2 py-2 text-left";
-  const badge = "badge-hc-border inline-block rounded-full bg-accent-bg px-2 py-[0.1rem] text-xs text-accent";
+  const badge = "badge-hc-border inline-block rounded-full bg-accent-bg px-2 py-[0.1rem] text-xs text-accent whitespace-nowrap";
   const inlineForm = "mt-2 flex max-w-[420px] flex-col gap-2 rounded-sm border border-border p-3";
 
   return (

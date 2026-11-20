@@ -1,17 +1,20 @@
 "use client";
 
 import Link from "next/link";
+import { ChevronRight } from "lucide-react";
 import { GROUPS, visibleItems } from "@/components/AdminSidebar";
 import { useI18n } from "@/i18n";
 import { useAuth } from "@/lib/auth-context";
 
-// Role-dependent dashboard (Concept 8 "customizability... role-dependent
-// dashboards", P69-S2, ADR 0201): reuses `AdminSidebar`'s own
-// `GROUPS`/`visibleItems` data and capability filter verbatim, rather than
-// inventing a second authorization mechanism - a group with no items
-// visible to the current principal (e.g. a domain admin who only holds
-// `admin.storage`) simply does not render a widget for it, same as it
-// already does not render a sidebar entry for it.
+// The home page's area launcher (P83-S7, craft-lens punch list item 7).
+//
+// It does repeat the sidebar's areas - deliberately kept rather than dropped:
+// with narrow-width support as a goal (ADR 0237 Decision 6), the sidebar
+// collapses on small screens and this launcher becomes the way in. What the
+// review actually objected to was unstyled, underlined, bulleted link lists;
+// these are now cards in the shared material with tappable rows (>= 40px,
+// hover fill, a chevron for "leads on"), the same visibility rules as the
+// sidebar.
 export function DashboardWidgets() {
   const { t } = useI18n();
   const { permissions } = useAuth();
@@ -26,18 +29,30 @@ export function DashboardWidgets() {
   }
 
   return (
-    <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-4">
+    <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-4">
       {widgets.map(({ group, items }) => (
-        <div className="rounded-lg border border-border p-4" key={group.id}>
-          <h2 className="mt-0 text-lg">{t(group.labelKey)}</h2>
-          <ul className="m-0 pl-4">
+        <section
+          className="rounded-lg border border-border bg-surface p-2 shadow-sm"
+          key={group.id}
+          aria-labelledby={`launcher-${group.id}`}
+        >
+          <h2 id={`launcher-${group.id}`} className="m-0 px-3 pt-2 pb-1 text-sm font-semibold text-surface-fg">
+            {t(group.labelKey)}
+          </h2>
+          <ul className="m-0 list-none p-0">
             {items.map((item) => (
               <li key={item.href}>
-                <Link href={item.href}>{t(item.labelKey)}</Link>
+                <Link
+                  href={item.href}
+                  className="flex min-h-10 items-center justify-between gap-3 rounded-md px-3 py-2 text-sm text-fg no-underline transition-colors hover:bg-hover-bg focus-visible:outline-2 focus-visible:outline-accent"
+                >
+                  <span>{t(item.labelKey)}</span>
+                  <ChevronRight size={16} strokeWidth={1.75} aria-hidden="true" className="flex-none opacity-50" />
+                </Link>
               </li>
             ))}
           </ul>
-        </div>
+        </section>
       ))}
     </div>
   );

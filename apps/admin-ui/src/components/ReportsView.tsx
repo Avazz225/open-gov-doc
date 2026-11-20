@@ -180,7 +180,17 @@ function DocumentVolumeSection({ token }: { token: string }) {
             {entries.map((entry, index) => (
               <tr key={index}>
                 <td>{entry.period}</td>
-                <td>{entry.folder_id ?? "—"}</td>
+                <td>
+                  {/* P83-S7 (item 6): a raw UUID is not the row's title - shown
+                      short and monospaced, the full id on hover */}
+                  {entry.folder_id ? (
+                    <code className="font-mono text-xs opacity-80" title={entry.folder_id}>
+                      {entry.folder_id.slice(0, 8)}
+                    </code>
+                  ) : (
+                    "—"
+                  )}
+                </td>
                 <td>{entry.count}</td>
               </tr>
             ))}

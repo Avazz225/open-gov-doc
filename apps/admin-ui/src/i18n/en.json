@@ -948,8 +948,8 @@
     "version": "Version",
     "address": "Address",
     "status": "Status",
-    "healthy": "healthy",
-    "down": "down",
+    "healthy": "Healthy",
+    "down": "Down",
     "empty": "No instances registered."
   },
   "license": {

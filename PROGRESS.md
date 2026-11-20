@@ -2,7 +2,45 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P83-S6 (sixth session of Phase 83): `user-ui` punch-list items 2–5 + 9. Full
+**Last completed:** P83-S7 (seventh session of Phase 83): punch-list items 5–7 + 10 in admin-ui,
+reviewer-ui, process-designer and migration-console, plus item 6's user-ui part. This closes the
+P83-S1 craft-lens punch list except item 12 (narrow widths → S9/S10+). Full record:
+`IMPLEMENTATION_PLAN.md`'s P83-S7 entry and the "Phase 83 Session 7" sections in
+`docs/services/{admin-ui,reviewer-ui,process-designer,migration-console}.md`.
+
+**What changed:**
+- **No columns of primary buttons.** reviewer-ui's "Freigeben" and admin-ui's query-console
+  "Genehmigen" are secondary, and "Vorgang öffnen" is a text link.
+- **No raw values as content:**
+  - migration-console statuses are translated in pill and filter;
+  - admin-ui's registry labels are translated (they were English in German);
+  - ✓/— became Ja/Nein;
+  - folder ids are short and monospaced where no name exists;
+  - user-ui approvals resolve object names, with a short-id fallback;
+  - dates follow the UI language;
+  - pills never wrap. "Nicht erreichbar" wrapped live.
+- **admin-ui home:** the launcher is kept and restyled into tappable card rows. It becomes the
+  navigation once the sidebar collapses on small screens (ADR 0237 Decision 6).
+- **process-designer** has the shared header (language, theme, user, log out).
+
+**Checks:**
+- `tsc`/`eslint` clean.
+- vitest: user-ui 306, admin-ui 314, reviewer-ui 60, process-designer 60, migration-console 25. Two
+  tests now assert labels instead of raw values.
+- Images rebuilt. Live across seven views: no raw enums, no primary buttons in rows. Remaining UUIDs are
+  data: test names, business keys, principal ids.
+
+**Open:** reviewer-ui shows principal ids under "Beantragt von" (no name lookup available there). The
+stack was stopped afterwards.
+
+**Next session:** **P83-S8**, repair the stale Playwright e2e specs. Replace the CSS-class locators
+removed in P75-S4 (`.error-text`, `table.data-table`, `ul.entry-list`, …) with role/label locators in
+every app's `e2e/`, and run them all against the stack. Run them with Node from nvm and
+`npx playwright test` per app; Playwright 1.48 uses the cached chromium-1140.
+
+---
+
+Earlier P83-S6 summary, kept for context (sixth session of Phase 83): `user-ui` punch-list items 2–5 + 9. Full
 record: `IMPLEMENTATION_PLAN.md`'s P83-S6 entry and `docs/services/user-ui.md` ("Icons, header title,
 list rows").
 
@@ -25,13 +63,7 @@ with keyboard focus and on touch.
 **Noted for S7:** item 6 (raw identifiers) also applies to `user-ui`'s approvals rows, which show UUIDs.
 admin-ui shows ✓/— for a yes/no value. The stack was stopped afterwards.
 
-**Next session:** **P83-S7**, items 5–7 + 10 in `admin-ui`/`reviewer-ui`/`process-designer`/
-`migration-console`, plus item 6's `user-ui` part:
-- primary-button columns;
-- raw identifiers/enums as content, including user-ui approvals UUIDs, admin ✓/—, and the fixed
-  `"de-DE"` date locale;
-- admin-ui's home duplicating the sidebar;
-- process-designer's missing shared header.
+**Next session (at the time):** P83-S7. It was done next; see the entry above.
 
 ---
 

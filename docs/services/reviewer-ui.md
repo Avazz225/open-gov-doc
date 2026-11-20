@@ -29,6 +29,21 @@ text alternative live under `login.illustration.*`.
 The build wiring is the same four additions as user-ui: `lucide-react` `0.468.0`, `resolve.modules`,
 tsconfig `paths` and the Dockerfile `COPY`. `tests/login-illustration.test.tsx` covers the gating.
 
+## Row actions, dates (Phase 83 Session 7)
+
+**Row actions:**
+- The four-eyes inbox's per-row "Freigeben" is secondary; a column of filled primaries left the eye
+  nowhere to land.
+- In the task inbox, "Vorgang öffnen" reads as a text link: it is navigation, not a third button on
+  every row.
+
+**Other fixes:**
+- Dates follow the UI language; they were fixed to `"de-DE"`.
+- Status pills never wrap.
+
+**Known, not changed:** "Beantragt von" shows principal ids. Some test users' ids are UUIDs. reviewer-ui
+has no principal-name lookup, and adding one needs user-directory access; see the plan.
+
 ## Pages
 
 | Route | Purpose |

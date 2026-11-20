@@ -15,7 +15,7 @@ import { useAuth } from "@/lib/auth-context";
 const TERMINAL_SUCCESS = new Set(["released", "deleted", "dry_run_completed"]);
 const POLL_INTERVAL_MS = 5_000;
 
-const BADGE_BASE = "badge-hc-border inline-block rounded-full px-2 py-[0.1rem] text-xs";
+const BADGE_BASE = "badge-hc-border inline-block rounded-full px-2 py-[0.1rem] text-xs whitespace-nowrap";
 
 function statusBadgeClass(status: string): string {
   if (status === "failed") return `${BADGE_BASE} bg-danger-bg text-danger`;
@@ -39,7 +39,14 @@ const PHASE_FIELDS: { key: keyof Transfer; labelKey: string }[] = [
 // docs/services/migration-console.md "Deliberate Boundaries").
 export function TransferConsole() {
   const { accessToken } = useAuth();
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
+  // P83-S7 (punch list item 6): statuses show as translated labels, never as
+  // raw enum values; an unknown future value falls back to the raw value
+  const statusLabel = (status: string) => {
+    const key = `transfers.status.${status}`;
+    const label = t(key);
+    return label === key ? status : label;
+  };
 
   const [installations, setInstallations] = useState<PairedInstallation[]>([]);
   const [transfers, setTransfers] = useState<Transfer[]>([]);
@@ -156,7 +163,7 @@ export function TransferConsole() {
           "failed",
         ].map((status) => (
           <option key={status} value={status}>
-            {status}
+            {statusLabel(status)}
           </option>
         ))}
       </select>
@@ -259,10 +266,16 @@ export function TransferConsole() {
               <Fragment key={transfer.id}>
                 <tr>
                   <td className={td}>{transfer.id.slice(0, 8)}</td>
-                  <td className={td}>{transfer.source_folder_id}</td>
+                  {/* P83-S7 (item 6): short and monospaced like the id column, the
+                      full folder id on hover - not a raw UUID as content */}
+                  <td className={td}>
+                    <code className="font-mono text-xs opacity-80" title={transfer.source_folder_id}>
+                      {transfer.source_folder_id.slice(0, 8)}
+                    </code>
+                  </td>
                   <td className={td}>{installationName(transfer.target_installation_id)}</td>
                   <td className={td}>
-                    <span className={statusBadgeClass(transfer.status)}>{transfer.status}</span>
+                    <span className={statusBadgeClass(transfer.status)}>{statusLabel(transfer.status)}</span>
                     {transfer.dry_run && (
                       <>
                         {" "}
@@ -305,7 +318,7 @@ export function TransferConsole() {
                           if (!value) return null;
                           return (
                             <li key={key}>
-                              {t(labelKey)}: {new Date(value as string).toLocaleString("de-DE")}
+                              {t(labelKey)}: {new Date(value as string).toLocaleString(locale)}
                             </li>
                           );
                         })}

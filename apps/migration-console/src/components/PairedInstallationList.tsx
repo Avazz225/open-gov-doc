@@ -15,7 +15,7 @@ import { useAuth } from "@/lib/auth-context";
 // row here is a possible target installation for `TransferConsole`.
 export function PairedInstallationList() {
   const { accessToken } = useAuth();
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
 
   const [installations, setInstallations] = useState<PairedInstallation[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -172,7 +172,7 @@ export function PairedInstallationList() {
               <tr key={installation.id}>
                 <td className={td}>{installation.display_name}</td>
                 <td className={td}>{installation.base_url}</td>
-                <td className={`${td} whitespace-nowrap`}>{new Date(installation.created_at).toLocaleString("de-DE")}</td>
+                <td className={`${td} whitespace-nowrap`}>{new Date(installation.created_at).toLocaleString(locale)}</td>
                 <td className={td}>
                   <button
                     type="button"

@@ -3145,13 +3145,41 @@ work has to be read against that baseline (see DoD).
     trash, cases, dark, 700px): no emoji visible anywhere, the heading follows the view, no page errors.
   - **Noted for S7:** item 6 also applies to `user-ui` (approvals show raw UUIDs as row titles), and
     admin-ui's archival table shows typographic ✓/— for a yes/no value.
-- **P83-S7 — items 5–7 + 10 in `admin-ui`/`reviewer-ui`/`process-designer`/`migration-console`**
-  (plus item 6's `user-ui` part):
-  - primary-button columns;
-  - raw identifiers/enums as content: also `user-ui`'s approvals rows, and admin-ui's ✓/— yes/no cells
-    (plus the fixed `"de-DE"` date locale);
-  - `admin-ui`'s home duplicating the sidebar;
-  - `process-designer`'s missing shared header.
+- **P83-S7 — items 5–7 + 10 in `admin-ui`/`reviewer-ui`/`process-designer`/`migration-console`, plus
+  item 6's `user-ui` part**: ✅ **Done.**
+  - **Item 5, primary-button columns:**
+    - reviewer-ui's four-eyes "Freigeben", admin-ui's query-console "Genehmigen" (found by a check that
+      requires the `.map(` block to still be open; form submits in expanded rows correctly stay
+      primary) and S6's user-ui/Poststelle cases are now secondary.
+    - reviewer-ui's "Vorgang öffnen" is a text link (navigation has no surface).
+  - **Item 6, raw values:**
+    - migration-console statuses get translated labels in the pill *and* the filter (both were raw), and
+      the source folder id is short and monospaced.
+    - admin-ui's registry labels were English in both languages, now translated. ✓/— became
+      `common.yes`/`no`, and report folder ids are short.
+    - user-ui approvals resolve the object's *name* via `getDocument`/`getFolder` and fall back to a short
+      monospaced id. In the test stack the fallback shows, because the objects are no longer readable.
+    - The fixed `"de-DE"` dates (reviewer-ui, migration-console) follow the UI language.
+    - Found live: the longer German "Nicht erreichbar" wrapped inside its pill. Every `.badge` and
+      Tailwind pill constant is now `nowrap`.
+  - **Item 7, admin-ui home: decided differently than S1 assumed.** The launcher is *kept* but restyled:
+    shared-material cards with tappable ≥ 40px rows and chevrons, instead of underlined bullet lists. With
+    narrow-width support a goal (ADR 0237 Decision 6), the sidebar will collapse on small screens and the
+    launcher becomes the way in.
+  - **Item 10:** process-designer got the shared header cluster (language, theme, user, log out, over a
+    rule, wrapping as a group), and its switchers' labels now sit inline.
+  - **Checks:** `tsc`/`eslint` clean. vitest: user-ui 306 (+1 name-resolution test), admin-ui 314,
+    reviewer-ui 60, process-designer 60, migration-console 25. Two tests asserted raw values ("healthy",
+    "copied") and now assert the labels, plus the raw value's absence. Images rebuilt.
+  - **Live check across seven views:** no raw enums, no primary buttons in rows. Full UUIDs remain only
+    where they are *data*: test process-definition names, real business keys of test runs, and principal
+    ids.
+  - **Left open:**
+    - reviewer-ui's "Beantragt von" shows principal ids, some of them UUIDs for test users. A name lookup
+      needs user-directory access reviewer-ui doesn't have, so it is a candidate for its own small
+      session.
+    - process-designer's header is right-aligned with nothing on its left; the page's own tabs sit
+      below. That is acceptable, and S9's narrow-width pass revisits header layouts anyway.
 - **P83-S8 — Repair the stale Playwright e2e specs**: replace class locators removed in P75-S4 with
   role/label-based ones in every app's `e2e/`, and run them all against the stack (green, or each failure
   explained).

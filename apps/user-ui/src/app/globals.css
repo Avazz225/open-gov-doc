@@ -404,6 +404,8 @@ body {
    kein Diff-Viewer, nur ein Badge/Tooltip für die bereits geladenen Felder. */
 .badge {
   display: inline-block;
+  /* A pill is one unit: it never wraps (P83-S7, found live on "Nicht erreichbar") */
+  white-space: nowrap;
   padding: 0.1rem var(--dms-space-2);
   border-radius: var(--dms-radius-full);
   font-size: var(--dms-font-size-xs);

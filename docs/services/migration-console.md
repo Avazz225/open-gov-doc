@@ -29,6 +29,17 @@ text alternative live under `login.illustration.*`.
 The build wiring is the same four additions as user-ui: `lucide-react` `0.468.0`, `resolve.modules`,
 tsconfig `paths` and the Dockerfile `COPY`. `tests/login-illustration.test.tsx` covers the gating.
 
+## Status labels, short ids, dates (Phase 83 Session 7)
+
+**Status labels.** Transfer statuses show as translated labels (`transfers.status.<value>`, e.g.
+"Testlauf abgeschlossen", "Quelle gelöscht"). This applies to the row pill and the status filter, which
+both showed raw enum values before. An unknown future value falls back to the raw value.
+
+**Other fixes:**
+- The source folder id shows short and monospaced, like the id column, with the full id on hover.
+- Dates follow the UI language; they were fixed to `"de-DE"` even in English.
+- Pills never wrap.
+
 ## Pages
 
 | Route | Purpose |

@@ -13,7 +13,7 @@ import { useAuth } from "@/lib/auth-context";
 
 type StatusFilter = "" | "pending" | "approved" | "rejected";
 
-const BADGE_BASE = "badge-hc-border inline-block rounded-full px-2 py-[0.1rem] text-xs";
+const BADGE_BASE = "badge-hc-border inline-block rounded-full px-2 py-[0.1rem] text-xs whitespace-nowrap";
 
 function statusBadgeClass(status: string): string {
   if (status === "approved") return `${BADGE_BASE} bg-success-bg text-success`;
@@ -31,7 +31,7 @@ function statusBadgeClass(status: string): string {
 // to be adapted for every new action type added to the system).
 export function ApprovalList() {
   const { accessToken, user } = useAuth();
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("pending");
   const [requests, setRequests] = useState<ApprovalRequest[]>([]);
@@ -159,7 +159,7 @@ export function ApprovalList() {
                 <tr>
                   <td className={td}>{request.action_type}</td>
                   <td className={td}>{request.initiated_by}</td>
-                  <td className={`${td} whitespace-nowrap`}>{new Date(request.created_at).toLocaleString("de-DE")}</td>
+                  <td className={`${td} whitespace-nowrap`}>{new Date(request.created_at).toLocaleString(locale)}</td>
                   <td className={td}>
                     <span className={statusBadgeClass(request.status)}>
                       {t(`approvalList.status${request.status[0].toUpperCase()}${request.status.slice(1)}`)}
@@ -184,7 +184,7 @@ export function ApprovalList() {
                             type="button"
                             disabled={busyId === request.id}
                             onClick={() => handleApprove(request)}
-                            className={primaryBtn}
+                            className={secondaryBtn}
                           >
                             {t("approvalList.approveButton")}
                           </button>

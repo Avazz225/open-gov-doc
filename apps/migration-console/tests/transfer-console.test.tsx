@@ -93,7 +93,9 @@ describe("TransferConsole", () => {
     renderConsole();
 
     await waitFor(() => expect(screen.getByText("Filiale Nord")).toBeInTheDocument());
-    expect(screen.getByText("copied", { selector: "span" })).toBeInTheDocument();
+    // P83-S7: the status shows as its translated label, never the raw enum
+    expect(screen.getByText("Kopiert", { selector: "span" })).toBeInTheDocument();
+    expect(screen.queryByText("copied", { selector: "span" })).not.toBeInTheDocument();
     expect(screen.getByText("2/4 kopiert, 0 verifiziert")).toBeInTheDocument();
   });
 

@@ -163,6 +163,9 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
 
   const secondaryBtn =
     "rounded-md border border-border bg-hover-bg px-3 py-1 text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap";
+  // A link has no surface at rest (craft): accent text, underline on hover
+  const linkBtn =
+    "border-0 bg-transparent p-0 text-accent underline-offset-2 hover:underline cursor-pointer whitespace-nowrap";
   const primaryBtn =
     "rounded-md border-0 bg-accent px-3 py-1 text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap";
   const fieldInput =
@@ -170,7 +173,7 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
   const fieldLabel = "text-sm font-medium text-fg";
   const th = "border-b border-border px-2 py-2 text-left";
   const td = "border-b border-border px-2 py-2 text-left";
-  const badge = "badge-hc-border inline-block rounded-full bg-accent-bg px-2 py-[0.1rem] text-xs text-accent";
+  const badge = "badge-hc-border inline-block rounded-full bg-accent-bg px-2 py-[0.1rem] text-xs text-accent whitespace-nowrap";
   const inlineForm = "mt-2 flex max-w-[420px] flex-col gap-2 rounded-sm border border-border p-3";
 
   return (
@@ -254,10 +257,12 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
                           ADR 0109) - `instance_id` was already fetched for
                           `completeTask` above, but never shown/linked until
                           now. */}
+                      {/* P83-S7 (item 5): opening the Vorgang is navigation, so it
+                          reads as a link, not a third button on every row */}
                       <button
                         type="button"
                         onClick={() => onOpenInstance(task.instance_id)}
-                        className={secondaryBtn}
+                        className={linkBtn}
                       >
                         {t("taskList.instanceLink")}
                       </button>

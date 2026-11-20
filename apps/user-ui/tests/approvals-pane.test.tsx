@@ -7,6 +7,8 @@ import { I18nProvider } from "@/i18n";
 const listApprovalRequestsMock = vi.fn();
 const approveApprovalRequestMock = vi.fn();
 const rejectApprovalRequestMock = vi.fn();
+const getDocumentMock = vi.fn();
+const getFolderMock = vi.fn();
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
@@ -15,6 +17,8 @@ vi.mock("@/lib/api", async () => {
     listApprovalRequests: (...args: unknown[]) => listApprovalRequestsMock(...args),
     approveApprovalRequest: (...args: unknown[]) => approveApprovalRequestMock(...args),
     rejectApprovalRequest: (...args: unknown[]) => rejectApprovalRequestMock(...args),
+    getDocument: (...args: unknown[]) => getDocumentMock(...args),
+    getFolder: (...args: unknown[]) => getFolderMock(...args),
   };
 });
 
@@ -31,6 +35,28 @@ describe("ApprovalsPane", () => {
     listApprovalRequestsMock.mockReset();
     approveApprovalRequestMock.mockReset();
     rejectApprovalRequestMock.mockReset();
+    // Default: names cannot be resolved, so rows fall back to the short id
+    getDocumentMock.mockReset().mockRejectedValue(new Error("not readable"));
+    getFolderMock.mockReset().mockRejectedValue(new Error("not readable"));
+  });
+
+  it("shows the object's name as the row title, and a short id when it cannot be resolved (P83-S7)", async () => {
+    const longFolderId = "5d02b942-0a98-4ffb-8d3e-0f7d98b3f116";
+    listApprovalRequestsMock.mockImplementation(async (_token: string, params: { actionType: string }) =>
+      params.actionType === "document.delete"
+        ? [{ id: "req-1", action_type: "document.delete", initiated_by: "alice", payload: { document_id: "doc-1" }, status: "pending", approved_by: null, rejected_by: null, reason: null, created_at: "2026-01-02T00:00:00Z", decided_at: null }]
+        : [{ id: "req-2", action_type: "folder.delete", initiated_by: "alice", payload: { folder_id: longFolderId }, status: "pending", approved_by: null, rejected_by: null, reason: null, created_at: "2026-01-01T00:00:00Z", decided_at: null }]
+    );
+    getDocumentMock.mockResolvedValue({ id: "doc-1", title: "Rechnung_Mai.pdf" });
+
+    renderPane("bob");
+
+    expect(await screen.findByText("Rechnung_Mai.pdf")).toBeInTheDocument();
+    expect(getDocumentMock).toHaveBeenCalledWith("token-123", "doc-1");
+    const shortId = await screen.findByText(longFolderId.slice(0, 8));
+    expect(shortId.tagName).toBe("CODE");
+    expect(shortId.getAttribute("title")).toBe(longFolderId);
+    expect(screen.queryByText(longFolderId)).not.toBeInTheDocument();
   });
 
   it("shows an empty-state message when there are no pending requests", async () => {

@@ -5,6 +5,8 @@ import { useI18n } from "@/i18n";
 import {
   ApiError,
   approveApprovalRequest,
+  getDocument,
+  getFolder,
   listApprovalRequests,
   rejectApprovalRequest,
   type ApprovalRequest,
@@ -32,6 +34,10 @@ export function ApprovalsPane({
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // P83-S7 (punch list item 6): the object's name instead of its raw UUID as
+  // the row title. Resolved once per object; null = could not be resolved
+  // (e.g. no read permission), which falls back to a short monospaced id.
+  const [names, setNames] = useState<Record<string, string | null>>({});
 
   const reload = useCallback(async () => {
     if (!token) return;
@@ -57,6 +63,31 @@ export function ApprovalsPane({
   useEffect(() => {
     reload();
   }, [reload]);
+
+  useEffect(() => {
+    const missing = requests.filter((r) => !(objectId(r) in names));
+    if (!token || missing.length === 0) return;
+    let cancelled = false;
+    Promise.allSettled(
+      missing.map((r) =>
+        r.action_type === "document.delete"
+          ? getDocument(token, objectId(r)).then((d) => d.title)
+          : getFolder(token, objectId(r)).then((f) => f.name)
+      )
+    ).then((results) => {
+      if (cancelled) return;
+      setNames((prev) => {
+        const next = { ...prev };
+        results.forEach((result, i) => {
+          next[objectId(missing[i])] = result.status === "fulfilled" ? result.value : null;
+        });
+        return next;
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [requests, names, token]);
 
   async function handleApprove(request: ApprovalRequest) {
     setBusyId(request.id);
@@ -112,7 +143,14 @@ export function ApprovalsPane({
                   {request.action_type === "document.delete"
                     ? t("approvals.typeDocument")
                     : t("approvals.typeFolder")}{" "}
-                  {objectId(request)} — {t("approvals.requestedBy", { name: request.initiated_by })}
+                  {names[objectId(request)] ? (
+                    <span>{names[objectId(request)]}</span>
+                  ) : (
+                    <code className="font-mono text-xs opacity-80" title={objectId(request)}>
+                      {objectId(request).slice(0, 8)}
+                    </code>
+                  )}{" "}
+                  — {t("approvals.requestedBy", { name: request.initiated_by })}
                 </span>
                 {/* P83-S6 (item 5): row actions are secondary - a filled primary on
                     every row left the eye nowhere to land */}

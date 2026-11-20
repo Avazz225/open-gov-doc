@@ -948,8 +948,8 @@
     "version": "Version",
     "address": "Adresse",
     "status": "Status",
-    "healthy": "healthy",
-    "down": "down",
+    "healthy": "Erreichbar",
+    "down": "Nicht erreichbar",
     "empty": "Keine Instanzen registriert."
   },
   "license": {

@@ -28,6 +28,23 @@ text alternative live under `login.illustration.*`.
 The build wiring is the same four additions as user-ui: `lucide-react` `0.468.0`, `resolve.modules`,
 tsconfig `paths` and the Dockerfile `COPY`. `tests/login-illustration.test.tsx` covers the gating.
 
+## Home launcher, registry labels, short ids (Phase 83 Session 7)
+
+**Home launcher.** The home page's area cards (`DashboardWidgets`) were unstyled, underlined, bulleted
+link lists that repeated the sidebar. They are now cards in the shared material with tappable rows
+(≥ 40px, hover fill, a chevron for "leads on").
+
+The launcher is *kept*, deliberately. Narrow-width support is a goal (ADR 0237 Decision 6), the sidebar
+will collapse on small screens, and this launcher then becomes the way in.
+
+**Other fixes:**
+- Registry status labels are translated ("Erreichbar"/"Nicht erreichbar"; they were English in both
+  languages).
+- The archival table's yes/no cells use `common.yes`/`no` instead of ✓/—.
+- The reports' folder ids show short and monospaced, with the full id on hover.
+- The query console's per-row "Genehmigen" is secondary.
+- Status pills (`.badge`) never wrap.
+
 ## Pages
 
 | Route | Purpose |

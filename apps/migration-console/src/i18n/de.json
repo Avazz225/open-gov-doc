@@ -94,6 +94,19 @@
     "phaseVerified": "Verifiziert",
     "phaseReleased": "Freigegeben",
     "phaseDeletionScheduled": "Löschung geplant",
-    "phaseDeleted": "Quelle gelöscht"
+    "phaseDeleted": "Quelle gelöscht",
+    "status": {
+      "pending": "Wartend",
+      "pending_approval": "Wartet auf Freigabe",
+      "started": "Gestartet",
+      "locked": "Gesperrt",
+      "copied": "Kopiert",
+      "verified": "Verifiziert",
+      "released": "Freigegeben",
+      "deletion_scheduled": "Löschung geplant",
+      "deleted": "Quelle gelöscht",
+      "dry_run_completed": "Testlauf abgeschlossen",
+      "failed": "Fehlgeschlagen"
+    }
   }
 }

@@ -284,7 +284,7 @@ function DocumentArchivalSection() {
                     )}
                 </td>
                 <td>{transfer.archive_format ?? "—"}</td>
-                <td>{transfer.encrypted ? "✓" : "—"}</td>
+                <td>{transfer.encrypted ? t("common.yes") : t("common.no")}</td>
                 <td className="whitespace-nowrap">{transfer.released_at ? new Date(transfer.released_at).toLocaleString() : "—"}</td>
                 <td>
                   {transfer.dehydrated_at ? new Date(transfer.dehydrated_at).toLocaleString() : "—"}
@@ -522,7 +522,7 @@ function CaseArchivalSection() {
                       </p>
                     )}
                 </td>
-                <td>{transfer.encrypted ? "✓" : "—"}</td>
+                <td>{transfer.encrypted ? t("common.yes") : t("common.no")}</td>
                 <td className="whitespace-nowrap">{transfer.released_at ? new Date(transfer.released_at).toLocaleString() : "—"}</td>
                 <td>
                   {transfer.status === "released" && (

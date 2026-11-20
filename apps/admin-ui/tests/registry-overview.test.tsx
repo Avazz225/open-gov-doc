@@ -69,8 +69,9 @@ describe("RegistryOverview", () => {
     renderRegistryOverview();
 
     expect(await screen.findByText("storage-service")).toBeInTheDocument();
-    expect(screen.getByText("healthy")).toBeInTheDocument();
-    expect(screen.getByText("down")).toBeInTheDocument();
+    // P83-S7: translated status labels, no longer the raw English words
+    expect(screen.getByText("Erreichbar")).toBeInTheDocument();
+    expect(screen.getByText("Nicht erreichbar")).toBeInTheDocument();
   });
 
   it("shows an empty state when no instances are registered", async () => {

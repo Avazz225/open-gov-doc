@@ -32,6 +32,13 @@ text alternative live under `login.illustration.*`.
 The build wiring is the same four additions as user-ui: `lucide-react` `0.468.0`, `resolve.modules`,
 tsconfig `paths` and the Dockerfile `COPY`. `tests/login-illustration.test.tsx` covers the gating.
 
+## Shared header (Phase 83 Session 7)
+
+The authenticated header now has the same cluster as reviewer-ui/migration-console: language, theme,
+the signed-in user and log out, right-aligned over a rule. It wraps as a group on narrow screens. Before,
+only the two selects showed, stacked label-over-select, with no user or log out. The switchers' labels
+now sit inline like in the other apps.
+
 ## Pages
 
 | Route | Purpose |

@@ -614,7 +614,7 @@ function ManipulationSection() {
                           <button
                             type="button"
                             onClick={() => handleApprove(approval.id)}
-                            className={primaryBtn}
+                            className={secondaryBtn}
                           >
                             {t("queryConsole.approveButton")}
                           </button>

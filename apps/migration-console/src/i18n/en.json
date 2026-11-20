@@ -94,6 +94,19 @@
     "phaseVerified": "Verified",
     "phaseReleased": "Released",
     "phaseDeletionScheduled": "Deletion scheduled",
-    "phaseDeleted": "Source deleted"
+    "phaseDeleted": "Source deleted",
+    "status": {
+      "pending": "Pending",
+      "pending_approval": "Awaiting approval",
+      "started": "Started",
+      "locked": "Locked",
+      "copied": "Copied",
+      "verified": "Verified",
+      "released": "Released",
+      "deletion_scheduled": "Deletion scheduled",
+      "deleted": "Source deleted",
+      "dry_run_completed": "Dry run completed",
+      "failed": "Failed"
+    }
   }
 }
