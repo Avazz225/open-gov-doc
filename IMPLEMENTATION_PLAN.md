@@ -3274,8 +3274,28 @@ work has to be read against that baseline (see DoD).
       `display.test.tsx`.
     - Three images rebuilt.
     - e2e reviewer-ui 6/6 (new `narrow.spec.ts`), migration-console 5/5, process-designer 7/7.
-- **P83-S12 — Narrow widths: `admin-ui`**: sidebar drawer, account menu, scroll containers on all tables,
-  one-column forms.
+- **P83-S12 — Narrow widths: `admin-ui`**: ✅ **Done.**
+  - **Drawer** (`NavDrawer.tsx`) below 768px, behind a menu button left of the title.
+    - It is a modal dialog: focus moves in and is trapped, Escape and the backdrop close it, the page is
+      scroll-locked, and focus returns to the opener.
+    - It closes on navigation and when the window grows past 768px.
+    - The sidebar got `variant="drawer"` with ≥ 40px rows.
+  - **Account menu** below 1024px. `AccountMenu` got a `leading` render slot for admin-ui's installation
+    switcher (all four copies identical). The three switchers got the `touch` form. The title truncates
+    in one line.
+  - **All 38 `.data-table`s** are wrapped in `dms-scroll-x`, by script. `layout.css` now sets the cover
+    color inside `.bg-surface` automatically. `.form-grid` is one column below 640px.
+  - **Found and fixed in `layout.css`:** the scroll covers were opaque for only 12.8px of the 14px
+    shadow, which left a faint trace beside tables that fit. They are now opaque for 16px.
+  - **Measured:** before, 509–983px wide at 390px. After, no page overflow on all 32 routes at
+    390/768/1024px (96/96). At 1024/1400px the content area is pixel-identical; the sidebar differs only
+    by anti-aliasing.
+  - **Checks:**
+    - `tsc`/`eslint` clean.
+    - vitest admin-ui 318 (+4 `nav-drawer.test.tsx`).
+    - Four images rebuilt.
+    - e2e admin-ui 8/8 (new `narrow.spec.ts`), reviewer-ui 6/6, migration-console 5/5, process-designer
+      7/7.
 - **P83-S13 — Narrow widths: `user-ui`**: single-pane mode instead of dockview below 768 px, narrow header,
   stacked approval rows.
 

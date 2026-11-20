@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { ChevronDown, CircleUserRound } from "lucide-react";
 import { useI18n } from "@/i18n";
 import { useAuth } from "@/lib/auth-context";
@@ -16,6 +16,8 @@ import { ThemeSwitcher } from "./ThemeSwitcher";
 // hidden one out of the accessibility tree and the tab order.
 // `inlineFrom="lg"` (P83-S11) moves the switch to 1024px for a header whose
 // row is too full at 768px (reviewer-ui: four tabs plus the cluster).
+// `leading` (P83-S12) renders app-specific controls first in both forms -
+// admin-ui's installation switcher; it receives `touch` for the popover.
 // Duplicated per app on purpose (ADR 0006: no shared JS between apps); the
 // same file exists in every app that has this header.
 // Literal class names per breakpoint - Tailwind only generates classes it
@@ -25,7 +27,13 @@ const BREAKPOINT_CLASSES = {
   lg: { inline: "hidden lg:flex", menu: "lg:hidden" },
 } as const;
 
-export function AccountMenu({ inlineFrom = "md" }: { inlineFrom?: "md" | "lg" }) {
+export function AccountMenu({
+  inlineFrom = "md",
+  leading,
+}: {
+  inlineFrom?: "md" | "lg";
+  leading?: (touch: boolean) => ReactNode;
+}) {
   const { user, logout } = useAuth();
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
@@ -58,6 +66,7 @@ export function AccountMenu({ inlineFrom = "md" }: { inlineFrom?: "md" | "lg" })
   return (
     <>
       <div className={`${BREAKPOINT_CLASSES[inlineFrom].inline} flex-none items-center gap-4`}>
+        {leading?.(false)}
         <LocaleSwitcher />
         <ThemeSwitcher />
         {user && <span className="whitespace-nowrap">{user.username}</span>}
@@ -86,6 +95,7 @@ export function AccountMenu({ inlineFrom = "md" }: { inlineFrom?: "md" | "lg" })
             className="absolute right-0 top-full z-50 mt-2 flex w-64 flex-col gap-3 rounded-lg border border-border bg-bg p-3 shadow-lg"
           >
             {user && <p className="m-0 truncate font-semibold">{user.username}</p>}
+            {leading?.(true)}
             <LocaleSwitcher touch />
             <ThemeSwitcher touch />
             <button type="button" onClick={logout} className={`${logoutBtn} min-h-10 w-full`}>

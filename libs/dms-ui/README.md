@@ -51,5 +51,6 @@ into the `components` layer so Tailwind utilities on the same element still win:
   - Uses `!important` on cell padding/border inside the media query only, because Tailwind utilities
     sit in a later layer.
 
-Consumed by `migration-console` and `process-designer` since P83-S10 and by `reviewer-ui` since P83-S11.
-admin-ui and user-ui follow in P83-S12/S13.
+Consumed by `migration-console` and `process-designer` since P83-S10, `reviewer-ui` since P83-S11 and
+`admin-ui` since P83-S12. user-ui follows in P83-S13. Inside a `.bg-surface` element the scroll covers take
+the surface color automatically (P83-S12).

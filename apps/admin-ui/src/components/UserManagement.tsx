@@ -389,30 +389,32 @@ export function UserManagement() {
           </button>
         </form>
 
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>{t("users.username")}</th>
-              <th>{t("users.email")}</th>
-              <th>{t("users.enabledColumn")}</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {users.map((u) => (
-              <tr key={u.id}>
-                <td>{u.username}</td>
-                <td>{u.email}</td>
-                <td>{u.enabled ? t("users.enabledYes") : t("users.enabledNo")}</td>
-                <td>
-                  <button type="button" onClick={() => handleDeleteUser(u.id)} className={secondaryBtn}>
-                    {t("common.delete")}
-                  </button>
-                </td>
+        <div className="dms-scroll-x">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>{t("users.username")}</th>
+                <th>{t("users.email")}</th>
+                <th>{t("users.enabledColumn")}</th>
+                <th />
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {users.map((u) => (
+                <tr key={u.id}>
+                  <td>{u.username}</td>
+                  <td>{u.email}</td>
+                  <td>{u.enabled ? t("users.enabledYes") : t("users.enabledNo")}</td>
+                  <td>
+                    <button type="button" onClick={() => handleDeleteUser(u.id)} className={secondaryBtn}>
+                      {t("common.delete")}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
         {users.length === 0 && <p className="italic opacity-70">{t("users.empty")}</p>}
       </section>
 
@@ -451,22 +453,24 @@ export function UserManagement() {
         </form>
         {rolePending && <p className="text-sm opacity-80">{t("roles.pendingApproval")}</p>}
 
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>{t("roles.name")}</th>
-              <th>{t("roleAssignments.role")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {roles.map((r) => (
-              <tr key={r.id}>
-                <td>{r.name}</td>
-                <td>{r.permissions.join(", ")}</td>
+        <div className="dms-scroll-x">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>{t("roles.name")}</th>
+                <th>{t("roleAssignments.role")}</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {roles.map((r) => (
+                <tr key={r.id}>
+                  <td>{r.name}</td>
+                  <td>{r.permissions.join(", ")}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
         {roles.length === 0 && <p className="italic opacity-70">{t("roles.empty")}</p>}
       </section>
 
@@ -506,95 +510,97 @@ export function UserManagement() {
           </button>
         </form>
 
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>{t("groups.name")}</th>
-              <th>{t("groups.description")}</th>
-              <th>{t("groups.isOrgUnit")}</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {groups.map((g) => (
-              <Fragment key={g.id}>
-                <tr>
-                  <td>{g.name}</td>
-                  <td>{g.description || "—"}</td>
-                  <td>
-                    <button
-                      type="button"
-                      onClick={() => handleToggleOrgUnit(g)}
-                      disabled={orgUnitTogglingId !== null}
-                      aria-pressed={g.is_org_unit}
-                      className={secondaryBtn}
-                    >
-                      {orgUnitTogglingId === g.id ? (
-                        t("common.loading")
-                      ) : (
-                        <span className={`badge ${g.is_org_unit ? "ok" : "down"}`}>
-                          {g.is_org_unit ? t("common.yes") : t("common.no")}
-                        </span>
-                      )}
-                    </button>
-                  </td>
-                  <td>
-                    <button type="button" onClick={() => toggleGroupExpand(g.id)} className={secondaryBtn}>
-                      {expandedGroupId === g.id
-                        ? t("groups.membersToggleHide")
-                        : t("groups.membersToggleShow")}
-                    </button>{" "}
-                    <button type="button" onClick={() => handleDeleteGroup(g.id)} className={secondaryBtn}>
-                      {t("common.delete")}
-                    </button>
-                  </td>
-                </tr>
-                {expandedGroupId === g.id && (
+        <div className="dms-scroll-x">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>{t("groups.name")}</th>
+                <th>{t("groups.description")}</th>
+                <th>{t("groups.isOrgUnit")}</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {groups.map((g) => (
+                <Fragment key={g.id}>
                   <tr>
-                    <td colSpan={4}>
-                      <form
-                        aria-label={t("groups.addMemberFormLabel")}
-                        className="form-grid"
-                        onSubmit={(e) => handleAddMember(e, g.id)}
+                    <td>{g.name}</td>
+                    <td>{g.description || "—"}</td>
+                    <td>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleOrgUnit(g)}
+                        disabled={orgUnitTogglingId !== null}
+                        aria-pressed={g.is_org_unit}
+                        className={secondaryBtn}
                       >
-                        <label>
-                          {t("groups.memberPrincipalId")}
-                          <input
-                            value={newMemberPrincipalId}
-                            onChange={(e) => setNewMemberPrincipalId(e.target.value)}
-                            required
-                            className={fieldInput}
-                          />
-                        </label>
-                        <button type="submit" className={primaryBtn}>
-                          {t("groups.addMember")}
-                        </button>
-                      </form>
-                      {(membersByGroup[g.id]?.length ?? 0) === 0 ? (
-                        <p className="italic opacity-70">{t("groups.membersEmpty")}</p>
-                      ) : (
-                        <ul>
-                          {membersByGroup[g.id]!.map((m) => (
-                            <li key={m.id}>
-                              {m.principal_id}{" "}
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveMember(g.id, m.principal_id)}
-                                className={secondaryBtn}
-                              >
-                                {t("groups.removeMember")}
-                              </button>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
+                        {orgUnitTogglingId === g.id ? (
+                          t("common.loading")
+                        ) : (
+                          <span className={`badge ${g.is_org_unit ? "ok" : "down"}`}>
+                            {g.is_org_unit ? t("common.yes") : t("common.no")}
+                          </span>
+                        )}
+                      </button>
+                    </td>
+                    <td>
+                      <button type="button" onClick={() => toggleGroupExpand(g.id)} className={secondaryBtn}>
+                        {expandedGroupId === g.id
+                          ? t("groups.membersToggleHide")
+                          : t("groups.membersToggleShow")}
+                      </button>{" "}
+                      <button type="button" onClick={() => handleDeleteGroup(g.id)} className={secondaryBtn}>
+                        {t("common.delete")}
+                      </button>
                     </td>
                   </tr>
-                )}
-              </Fragment>
-            ))}
-          </tbody>
-        </table>
+                  {expandedGroupId === g.id && (
+                    <tr>
+                      <td colSpan={4}>
+                        <form
+                          aria-label={t("groups.addMemberFormLabel")}
+                          className="form-grid"
+                          onSubmit={(e) => handleAddMember(e, g.id)}
+                        >
+                          <label>
+                            {t("groups.memberPrincipalId")}
+                            <input
+                              value={newMemberPrincipalId}
+                              onChange={(e) => setNewMemberPrincipalId(e.target.value)}
+                              required
+                              className={fieldInput}
+                            />
+                          </label>
+                          <button type="submit" className={primaryBtn}>
+                            {t("groups.addMember")}
+                          </button>
+                        </form>
+                        {(membersByGroup[g.id]?.length ?? 0) === 0 ? (
+                          <p className="italic opacity-70">{t("groups.membersEmpty")}</p>
+                        ) : (
+                          <ul>
+                            {membersByGroup[g.id]!.map((m) => (
+                              <li key={m.id}>
+                                {m.principal_id}{" "}
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveMember(g.id, m.principal_id)}
+                                  className={secondaryBtn}
+                                >
+                                  {t("groups.removeMember")}
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
         {groups.length === 0 && <p className="italic opacity-70">{t("groups.empty")}</p>}
       </section>
 
@@ -639,32 +645,34 @@ export function UserManagement() {
           </button>
         </form>
 
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>{t("orgHierarchy.principalId")}</th>
-              <th>{t("orgHierarchy.supervisorPrincipalId")}</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {supervisorAssignments.map((a) => (
-              <tr key={a.id}>
-                <td>{a.principal_id}</td>
-                <td>{a.supervisor_principal_id}</td>
-                <td>
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteSupervisorAssignment(a.id)}
-                    className={secondaryBtn}
-                  >
-                    {t("common.delete")}
-                  </button>
-                </td>
+        <div className="dms-scroll-x">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>{t("orgHierarchy.principalId")}</th>
+                <th>{t("orgHierarchy.supervisorPrincipalId")}</th>
+                <th />
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {supervisorAssignments.map((a) => (
+                <tr key={a.id}>
+                  <td>{a.principal_id}</td>
+                  <td>{a.supervisor_principal_id}</td>
+                  <td>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteSupervisorAssignment(a.id)}
+                      className={secondaryBtn}
+                    >
+                      {t("common.delete")}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
         {supervisorAssignments.length === 0 && (
           <p className="italic opacity-70">{t("orgHierarchy.empty")}</p>
         )}
@@ -792,40 +800,42 @@ export function UserManagement() {
         </form>
         {assignmentPending && <p className="text-sm opacity-80">{t("roleAssignments.pendingApproval")}</p>}
 
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>{t("roleAssignments.typeColumn")}</th>
-              <th>{t("roleAssignments.userColumn")}</th>
-              <th>{t("roleAssignments.roleColumn")}</th>
-              <th>{t("roleAssignments.resourceColumn")}</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {assignments.map((a) => (
-              <tr key={a.id}>
-                <td>
-                  {a.principal_type === "group"
-                    ? t("roleAssignments.principalTypeGroup")
-                    : t("roleAssignments.principalTypeUser")}
-                </td>
-                <td>
-                  {a.principal_type === "group"
-                    ? (groups.find((g) => g.id === a.principal_id)?.name ?? a.principal_id)
-                    : a.principal_id}
-                </td>
-                <td>{roleName(a.role_id)}</td>
-                <td>{a.resource_id}</td>
-                <td>
-                  <button type="button" onClick={() => handleDeleteAssignment(a.id)} className={secondaryBtn}>
-                    {t("roleAssignments.remove")}
-                  </button>
-                </td>
+        <div className="dms-scroll-x">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>{t("roleAssignments.typeColumn")}</th>
+                <th>{t("roleAssignments.userColumn")}</th>
+                <th>{t("roleAssignments.roleColumn")}</th>
+                <th>{t("roleAssignments.resourceColumn")}</th>
+                <th />
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {assignments.map((a) => (
+                <tr key={a.id}>
+                  <td>
+                    {a.principal_type === "group"
+                      ? t("roleAssignments.principalTypeGroup")
+                      : t("roleAssignments.principalTypeUser")}
+                  </td>
+                  <td>
+                    {a.principal_type === "group"
+                      ? (groups.find((g) => g.id === a.principal_id)?.name ?? a.principal_id)
+                      : a.principal_id}
+                  </td>
+                  <td>{roleName(a.role_id)}</td>
+                  <td>{a.resource_id}</td>
+                  <td>
+                    <button type="button" onClick={() => handleDeleteAssignment(a.id)} className={secondaryBtn}>
+                      {t("roleAssignments.remove")}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
         {assignments.length === 0 && <p className="italic opacity-70">{t("roleAssignments.empty")}</p>}
       </section>
     </>

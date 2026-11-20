@@ -168,34 +168,36 @@ function DocumentVolumeSection({ token }: { token: string }) {
       ) : entries.length === 0 ? (
         <p className="italic opacity-70">{t("reports.empty")}</p>
       ) : (
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>{t("reports.period")}</th>
-              <th>{t("reports.folderId")}</th>
-              <th>{t("reports.count")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {entries.map((entry, index) => (
-              <tr key={index}>
-                <td>{entry.period}</td>
-                <td>
-                  {/* P83-S7 (item 6): a raw UUID is not the row's title - shown
-                      short and monospaced, the full id on hover */}
-                  {entry.folder_id ? (
-                    <code className="font-mono text-xs opacity-80" title={entry.folder_id}>
-                      {entry.folder_id.slice(0, 8)}
-                    </code>
-                  ) : (
-                    "—"
-                  )}
-                </td>
-                <td>{entry.count}</td>
+        <div className="dms-scroll-x">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>{t("reports.period")}</th>
+                <th>{t("reports.folderId")}</th>
+                <th>{t("reports.count")}</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {entries.map((entry, index) => (
+                <tr key={index}>
+                  <td>{entry.period}</td>
+                  <td>
+                    {/* P83-S7 (item 6): a raw UUID is not the row's title - shown
+                        short and monospaced, the full id on hover */}
+                    {entry.folder_id ? (
+                      <code className="font-mono text-xs opacity-80" title={entry.folder_id}>
+                        {entry.folder_id.slice(0, 8)}
+                      </code>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                  <td>{entry.count}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </section>
   );
@@ -243,26 +245,28 @@ function OpenWorkflowTasksSection({ token }: { token: string }) {
       ) : entries.length === 0 ? (
         <p className="italic opacity-70">{t("reports.empty")}</p>
       ) : (
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>{t("reports.instanceId")}</th>
-              <th>{t("reports.businessKey")}</th>
-              <th>{t("reports.taskName")}</th>
-              <th>{t("reports.lane")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {entries.map((entry) => (
-              <tr key={`${entry.instance_id}-${entry.task_id}`}>
-                <td>{entry.instance_id}</td>
-                <td>{entry.business_key ?? "—"}</td>
-                <td>{entry.task_name}</td>
-                <td>{entry.lane ?? "—"}</td>
+        <div className="dms-scroll-x">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>{t("reports.instanceId")}</th>
+                <th>{t("reports.businessKey")}</th>
+                <th>{t("reports.taskName")}</th>
+                <th>{t("reports.lane")}</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {entries.map((entry) => (
+                <tr key={`${entry.instance_id}-${entry.task_id}`}>
+                  <td>{entry.instance_id}</td>
+                  <td>{entry.business_key ?? "—"}</td>
+                  <td>{entry.task_name}</td>
+                  <td>{entry.lane ?? "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </section>
   );
@@ -310,24 +314,26 @@ function StorageUsageSection({ token }: { token: string }) {
       ) : entries.length === 0 ? (
         <p className="italic opacity-70">{t("reports.empty")}</p>
       ) : (
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>{t("reports.backend")}</th>
-              <th>{t("reports.objectCount")}</th>
-              <th>{t("reports.totalSizeBytes")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {entries.map((entry) => (
-              <tr key={entry.backend}>
-                <td>{entry.backend}</td>
-                <td>{entry.object_count}</td>
-                <td className="whitespace-nowrap">{entry.total_size_bytes.toLocaleString()}</td>
+        <div className="dms-scroll-x">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>{t("reports.backend")}</th>
+                <th>{t("reports.objectCount")}</th>
+                <th>{t("reports.totalSizeBytes")}</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {entries.map((entry) => (
+                <tr key={entry.backend}>
+                  <td>{entry.backend}</td>
+                  <td>{entry.object_count}</td>
+                  <td className="whitespace-nowrap">{entry.total_size_bytes.toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </section>
   );
@@ -388,24 +394,26 @@ function UserActivitySection({ token }: { token: string }) {
       ) : entries.length === 0 ? (
         <p className="italic opacity-70">{t("reports.empty")}</p>
       ) : (
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>{t("reports.actor")}</th>
-              <th>{t("reports.eventType")}</th>
-              <th>{t("reports.count")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {entries.map((entry) => (
-              <tr key={`${entry.actor}-${entry.event_type}`}>
-                <td>{entry.actor}</td>
-                <td>{entry.event_type}</td>
-                <td>{entry.count}</td>
+        <div className="dms-scroll-x">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>{t("reports.actor")}</th>
+                <th>{t("reports.eventType")}</th>
+                <th>{t("reports.count")}</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {entries.map((entry) => (
+                <tr key={`${entry.actor}-${entry.event_type}`}>
+                  <td>{entry.actor}</td>
+                  <td>{entry.event_type}</td>
+                  <td>{entry.count}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </section>
   );
@@ -519,50 +527,52 @@ function ReportScheduleSection({ token }: { token: string }) {
       ) : schedules.length === 0 ? (
         <p className="italic opacity-70">{t("reports.schedulesEmpty")}</p>
       ) : (
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>{t("reports.reportType")}</th>
-              <th>{t("reports.format")}</th>
-              <th>{t("reports.frequency")}</th>
-              <th>{t("reports.recipientEmail")}</th>
-              <th>{t("reports.nextRunAt")}</th>
-              <th>{t("reports.lastStatus")}</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {schedules.map((schedule) => (
-              <tr key={schedule.id}>
-                <td>{schedule.report_type}</td>
-                <td>{schedule.format}</td>
-                <td>{schedule.frequency}</td>
-                <td>{schedule.recipient_email}</td>
-                <td className="whitespace-nowrap">{new Date(schedule.next_run_at).toLocaleString()}</td>
-                <td>
-                  {schedule.last_status == null ? (
-                    <span className="text-sm opacity-80">{t("reports.lastStatusNeverRun")}</span>
-                  ) : schedule.last_status === "sent" ? (
-                    <span className="badge ok">{t("reports.lastStatusSent")}</span>
-                  ) : (
-                    <span className="badge down" title={schedule.last_error ?? undefined}>
-                      {t("reports.lastStatusFailed")}
-                    </span>
-                  )}
-                </td>
-                <td>
-                  <button
-                    type="button"
-                    onClick={() => handleDelete(schedule.id)}
-                    className={secondaryBtn}
-                  >
-                    {t("reports.deleteSchedule")}
-                  </button>
-                </td>
+        <div className="dms-scroll-x">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>{t("reports.reportType")}</th>
+                <th>{t("reports.format")}</th>
+                <th>{t("reports.frequency")}</th>
+                <th>{t("reports.recipientEmail")}</th>
+                <th>{t("reports.nextRunAt")}</th>
+                <th>{t("reports.lastStatus")}</th>
+                <th></th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {schedules.map((schedule) => (
+                <tr key={schedule.id}>
+                  <td>{schedule.report_type}</td>
+                  <td>{schedule.format}</td>
+                  <td>{schedule.frequency}</td>
+                  <td>{schedule.recipient_email}</td>
+                  <td className="whitespace-nowrap">{new Date(schedule.next_run_at).toLocaleString()}</td>
+                  <td>
+                    {schedule.last_status == null ? (
+                      <span className="text-sm opacity-80">{t("reports.lastStatusNeverRun")}</span>
+                    ) : schedule.last_status === "sent" ? (
+                      <span className="badge ok">{t("reports.lastStatusSent")}</span>
+                    ) : (
+                      <span className="badge down" title={schedule.last_error ?? undefined}>
+                        {t("reports.lastStatusFailed")}
+                      </span>
+                    )}
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(schedule.id)}
+                      className={secondaryBtn}
+                    >
+                      {t("reports.deleteSchedule")}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </section>
   );

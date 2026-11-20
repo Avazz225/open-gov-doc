@@ -219,36 +219,38 @@ export function AuditTraceSettings() {
         ) : overrides.length === 0 ? (
           <p className="italic opacity-70">{t("auditTraceSettings.overridesEmpty")}</p>
         ) : (
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>{t("auditTraceSettings.role")}</th>
-                <th>{t("auditTraceSettings.logViewed")}</th>
-                <th>{t("auditTraceSettings.logDownloaded")}</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {overrides.map((override) => (
-                <tr key={override.role}>
-                  <td>{override.role}</td>
-                  <td>{t(`auditTraceSettings.triState${cap(valueToTriState(override.log_viewed))}`)}</td>
-                  <td>
-                    {t(`auditTraceSettings.triState${cap(valueToTriState(override.log_downloaded))}`)}
-                  </td>
-                  <td>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteOverride(override.role)}
-                      className={secondaryBtn}
-                    >
-                      {t("auditTraceSettings.deleteOverride")}
-                    </button>
-                  </td>
+          <div className="dms-scroll-x">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>{t("auditTraceSettings.role")}</th>
+                  <th>{t("auditTraceSettings.logViewed")}</th>
+                  <th>{t("auditTraceSettings.logDownloaded")}</th>
+                  <th></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {overrides.map((override) => (
+                  <tr key={override.role}>
+                    <td>{override.role}</td>
+                    <td>{t(`auditTraceSettings.triState${cap(valueToTriState(override.log_viewed))}`)}</td>
+                    <td>
+                      {t(`auditTraceSettings.triState${cap(valueToTriState(override.log_downloaded))}`)}
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteOverride(override.role)}
+                        className={secondaryBtn}
+                      >
+                        {t("auditTraceSettings.deleteOverride")}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </section>
     </div>

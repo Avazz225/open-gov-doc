@@ -734,35 +734,37 @@ export function ObjectTypeEditor() {
         </form>
       </section>
 
-      <table className="data-table">
-        <thead>
-          <tr>
-            <th>{t("objectTypes.nameColumn")}</th>
-            <th>{t("objectTypes.appliesToColumn")}</th>
-            <th>{t("objectTypes.attributesColumn")}</th>
-            <th>{t("objectTypes.iconColumn")}</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {objectTypes.map((ot) => (
-            <tr key={ot.id}>
-              <td>{ot.name}</td>
-              <td>{ot.applies_to}</td>
-              <td>{ot.attributes.length}</td>
-              <td>{ot.icon ? iconLabel(t, ot.icon) : "—"}</td>
-              <td className="flex gap-3">
-                <button type="button" onClick={() => startEdit(ot)} className={secondaryBtn}>
-                  {t("objectTypes.edit")}
-                </button>
-                <button type="button" onClick={() => handleDelete(ot.id)} className={secondaryBtn}>
-                  {t("common.delete")}
-                </button>
-              </td>
+      <div className="dms-scroll-x">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>{t("objectTypes.nameColumn")}</th>
+              <th>{t("objectTypes.appliesToColumn")}</th>
+              <th>{t("objectTypes.attributesColumn")}</th>
+              <th>{t("objectTypes.iconColumn")}</th>
+              <th />
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {objectTypes.map((ot) => (
+              <tr key={ot.id}>
+                <td>{ot.name}</td>
+                <td>{ot.applies_to}</td>
+                <td>{ot.attributes.length}</td>
+                <td>{ot.icon ? iconLabel(t, ot.icon) : "—"}</td>
+                <td className="flex gap-3">
+                  <button type="button" onClick={() => startEdit(ot)} className={secondaryBtn}>
+                    {t("objectTypes.edit")}
+                  </button>
+                  <button type="button" onClick={() => handleDelete(ot.id)} className={secondaryBtn}>
+                    {t("common.delete")}
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       {objectTypes.length === 0 && <p className="italic opacity-70">{t("objectTypes.empty")}</p>}
     </>
   );

@@ -44,24 +44,26 @@ function DifferingItem({ name, fields }: { name: string; fields: Record<string, 
   return (
     <details>
       <summary>{name}</summary>
-      <table className="data-table">
-        <thead>
-          <tr>
-            <th>{t("configCompare.diffField")}</th>
-            <th>{t("configCompare.diffBase")}</th>
-            <th>{t("configCompare.diffCompare")}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {fieldNames.map((field) => (
-            <tr key={field}>
-              <td>{field}</td>
-              <td>{formatDeltaValue(fields[field].base)}</td>
-              <td>{formatDeltaValue(fields[field].compare)}</td>
+      <div className="dms-scroll-x">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>{t("configCompare.diffField")}</th>
+              <th>{t("configCompare.diffBase")}</th>
+              <th>{t("configCompare.diffCompare")}</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {fieldNames.map((field) => (
+              <tr key={field}>
+                <td>{field}</td>
+                <td>{formatDeltaValue(fields[field].base)}</td>
+                <td>{formatDeltaValue(fields[field].compare)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </details>
   );
 }

@@ -132,39 +132,41 @@ function NotificationFailuresSection() {
       {items.length === 0 ? (
         <p className="italic opacity-70">{t("processingFailures.notificationEmpty")}</p>
       ) : (
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>{t("processingFailures.channel")}</th>
-              <th>{t("processingFailures.recipient")}</th>
-              <th>{t("processingFailures.attempts")}</th>
-              <th>{t("processingFailures.errorMessage")}</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((item) => (
-              <tr key={item.id}>
-                <td>{item.channel}</td>
-                <td>{item.recipient}</td>
-                <td>{item.attempts}</td>
-                <td>{item.error ?? "—"}</td>
-                <td>
-                  <button
-                    type="button"
-                    onClick={() => handleRetry(item)}
-                    disabled={retryingId !== null}
-                    className={secondaryBtn}
-                  >
-                    {retryingId === item.id
-                      ? t("common.loading")
-                      : t("processingFailures.retry")}
-                  </button>
-                </td>
+        <div className="dms-scroll-x">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>{t("processingFailures.channel")}</th>
+                <th>{t("processingFailures.recipient")}</th>
+                <th>{t("processingFailures.attempts")}</th>
+                <th>{t("processingFailures.errorMessage")}</th>
+                <th />
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {items.map((item) => (
+                <tr key={item.id}>
+                  <td>{item.channel}</td>
+                  <td>{item.recipient}</td>
+                  <td>{item.attempts}</td>
+                  <td>{item.error ?? "—"}</td>
+                  <td>
+                    <button
+                      type="button"
+                      onClick={() => handleRetry(item)}
+                      disabled={retryingId !== null}
+                      className={secondaryBtn}
+                    >
+                      {retryingId === item.id
+                        ? t("common.loading")
+                        : t("processingFailures.retry")}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
@@ -232,41 +234,43 @@ function RenditionFailuresSection() {
       {items.length === 0 ? (
         <p className="italic opacity-70">{t("processingFailures.renditionEmpty")}</p>
       ) : (
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>{t("processingFailures.documentId")}</th>
-              <th>{t("processingFailures.versionNumber")}</th>
-              <th>{t("processingFailures.renditionType")}</th>
-              <th>{t("processingFailures.attempts")}</th>
-              <th>{t("processingFailures.errorMessage")}</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((item) => (
-              <tr key={item.id}>
-                <td>{item.document_id}</td>
-                <td>{item.version_number}</td>
-                <td>{item.rendition_type}</td>
-                <td>{item.attempts}</td>
-                <td>{item.error_message ?? "—"}</td>
-                <td>
-                  <button
-                    type="button"
-                    onClick={() => handleRetry(item)}
-                    disabled={retryingId !== null}
-                    className={secondaryBtn}
-                  >
-                    {retryingId === item.id
-                      ? t("common.loading")
-                      : t("processingFailures.retry")}
-                  </button>
-                </td>
+        <div className="dms-scroll-x">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>{t("processingFailures.documentId")}</th>
+                <th>{t("processingFailures.versionNumber")}</th>
+                <th>{t("processingFailures.renditionType")}</th>
+                <th>{t("processingFailures.attempts")}</th>
+                <th>{t("processingFailures.errorMessage")}</th>
+                <th />
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {items.map((item) => (
+                <tr key={item.id}>
+                  <td>{item.document_id}</td>
+                  <td>{item.version_number}</td>
+                  <td>{item.rendition_type}</td>
+                  <td>{item.attempts}</td>
+                  <td>{item.error_message ?? "—"}</td>
+                  <td>
+                    <button
+                      type="button"
+                      onClick={() => handleRetry(item)}
+                      disabled={retryingId !== null}
+                      className={secondaryBtn}
+                    >
+                      {retryingId === item.id
+                        ? t("common.loading")
+                        : t("processingFailures.retry")}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
@@ -334,39 +338,41 @@ function OcrResultFailuresSection() {
       {items.length === 0 ? (
         <p className="italic opacity-70">{t("processingFailures.ocrEmpty")}</p>
       ) : (
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>{t("processingFailures.documentId")}</th>
-              <th>{t("processingFailures.versionNumber")}</th>
-              <th>{t("processingFailures.attempts")}</th>
-              <th>{t("processingFailures.errorMessage")}</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((item) => (
-              <tr key={item.id}>
-                <td>{item.document_id}</td>
-                <td>{item.version_number}</td>
-                <td>{item.attempts}</td>
-                <td>{item.error_message ?? "—"}</td>
-                <td>
-                  <button
-                    type="button"
-                    onClick={() => handleRetry(item)}
-                    disabled={retryingId !== null}
-                    className={secondaryBtn}
-                  >
-                    {retryingId === item.id
-                      ? t("common.loading")
-                      : t("processingFailures.retry")}
-                  </button>
-                </td>
+        <div className="dms-scroll-x">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>{t("processingFailures.documentId")}</th>
+                <th>{t("processingFailures.versionNumber")}</th>
+                <th>{t("processingFailures.attempts")}</th>
+                <th>{t("processingFailures.errorMessage")}</th>
+                <th />
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {items.map((item) => (
+                <tr key={item.id}>
+                  <td>{item.document_id}</td>
+                  <td>{item.version_number}</td>
+                  <td>{item.attempts}</td>
+                  <td>{item.error_message ?? "—"}</td>
+                  <td>
+                    <button
+                      type="button"
+                      onClick={() => handleRetry(item)}
+                      disabled={retryingId !== null}
+                      className={secondaryBtn}
+                    >
+                      {retryingId === item.id
+                        ? t("common.loading")
+                        : t("processingFailures.retry")}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
@@ -456,48 +462,50 @@ function HandoverFailuresSection() {
       {items.length === 0 ? (
         <p className="italic opacity-70">{t("processingFailures.handoverEmpty")}</p>
       ) : (
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>{t("processingFailures.handoverFrom")}</th>
-              <th>{t("processingFailures.handoverTo")}</th>
-              <th>{t("processingFailures.handoverProcessType")}</th>
-              <th>{t("processingFailures.handoverLeg")}</th>
-              <th>{t("processingFailures.attempts")}</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((item) => {
-              const isResultLeg = item.status === "result_delivery_failed";
-              return (
-                <tr key={item.id}>
-                  <td>{item.from_installation_id}</td>
-                  <td>{item.to_installation_id}</td>
-                  <td>{item.process_type}</td>
-                  <td>
-                    {isResultLeg
-                      ? t("processingFailures.handoverLegResult")
-                      : t("processingFailures.handoverLegForward")}
-                  </td>
-                  <td>{isResultLeg ? item.result_attempts : item.attempts}</td>
-                  <td>
-                    <button
-                      type="button"
-                      onClick={() => handleRetry(item)}
-                      disabled={retryingId !== null || operatorKey.length === 0}
-                      className={secondaryBtn}
-                    >
-                      {retryingId === item.id
-                        ? t("common.loading")
-                        : t("processingFailures.retry")}
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <div className="dms-scroll-x">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>{t("processingFailures.handoverFrom")}</th>
+                <th>{t("processingFailures.handoverTo")}</th>
+                <th>{t("processingFailures.handoverProcessType")}</th>
+                <th>{t("processingFailures.handoverLeg")}</th>
+                <th>{t("processingFailures.attempts")}</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item) => {
+                const isResultLeg = item.status === "result_delivery_failed";
+                return (
+                  <tr key={item.id}>
+                    <td>{item.from_installation_id}</td>
+                    <td>{item.to_installation_id}</td>
+                    <td>{item.process_type}</td>
+                    <td>
+                      {isResultLeg
+                        ? t("processingFailures.handoverLegResult")
+                        : t("processingFailures.handoverLegForward")}
+                    </td>
+                    <td>{isResultLeg ? item.result_attempts : item.attempts}</td>
+                    <td>
+                      <button
+                        type="button"
+                        onClick={() => handleRetry(item)}
+                        disabled={retryingId !== null || operatorKey.length === 0}
+                        className={secondaryBtn}
+                      >
+                        {retryingId === item.id
+                          ? t("common.loading")
+                          : t("processingFailures.retry")}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

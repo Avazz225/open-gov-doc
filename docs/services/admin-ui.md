@@ -45,6 +45,30 @@ will collapse on small screens, and this launcher then becomes the way in.
 - The query console's per-row "Genehmigen" is secondary.
 - Status pills (`.badge`) never wrap.
 
+## Narrow widths (Phase 83 Session 12, [ADR 0238](../adr/0238-narrow-width-patterns-for-all-apps.md))
+
+Before, the sidebar kept its width at 390px and left the content about 145px, so every page was 509–983px
+wide. Wide tables overflowed at 768px too. Now no page of all 32 routes overflows at 390, 768 or 1024px.
+
+- **Drawer below 768px** (`components/NavDrawer.tsx`). A menu button left of the title opens the
+  sidebar (`AdminSidebar variant="drawer"`, rows ≥ 40px) as a modal dialog:
+  - focus moves in and is trapped, and Escape and the backdrop close it;
+  - the page behind is scroll-locked, and focus returns to the menu button;
+  - it closes when a link navigates, and when the window grows past 768px.
+
+  From 768px the sidebar column is unchanged. The home launcher (P83-S7) stays the landing page's way
+  in.
+- **Account menu below 1024px** (`AccountMenu inlineFrom="lg"`, the same file as in the other apps). The
+  installation switcher comes first through its `leading` slot. All three switchers got the `touch`
+  form. The title truncates in one line (`text-xl` narrow) instead of the header wrapping.
+- **All 38 `.data-table`s** sit in a `dms-scroll-x` wrapper. Inside a `bg-surface` card the scroll covers
+  take the surface color automatically (`layout.css`).
+- **`.form-grid`** goes to one column below 640px. Main padding drops to 16px.
+
+At 1024 and 1400px the content area is pixel-identical before/after. `e2e/narrow.spec.ts` covers no
+overflow on the wide-table pages, drawer open/close/focus and navigation, and the account menu.
+`tests/nav-drawer.test.tsx` covers the dialog behavior.
+
 ## Pages
 
 | Route | Purpose |

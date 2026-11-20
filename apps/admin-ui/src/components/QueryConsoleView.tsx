@@ -173,28 +173,30 @@ function QueryEventsSection() {
         ) : events.length === 0 ? (
           <p className="italic opacity-70">{t("queryConsole.empty")}</p>
         ) : (
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>{t("queryConsole.occurredAt")}</th>
-                <th>{t("queryConsole.eventType")}</th>
-                <th>{t("queryConsole.actor")}</th>
-                <th>{t("queryConsole.subject")}</th>
-                <th>{t("queryConsole.serviceName")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {events.map((entry) => (
-                <tr key={entry.id}>
-                  <td className="whitespace-nowrap">{new Date(entry.occurred_at).toLocaleString()}</td>
-                  <td>{entry.event_type}</td>
-                  <td>{entry.actor ?? "—"}</td>
-                  <td>{entry.subject ?? "—"}</td>
-                  <td>{entry.service_name}</td>
+          <div className="dms-scroll-x">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>{t("queryConsole.occurredAt")}</th>
+                  <th>{t("queryConsole.eventType")}</th>
+                  <th>{t("queryConsole.actor")}</th>
+                  <th>{t("queryConsole.subject")}</th>
+                  <th>{t("queryConsole.serviceName")}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {events.map((entry) => (
+                  <tr key={entry.id}>
+                    <td className="whitespace-nowrap">{new Date(entry.occurred_at).toLocaleString()}</td>
+                    <td>{entry.event_type}</td>
+                    <td>{entry.actor ?? "—"}</td>
+                    <td>{entry.subject ?? "—"}</td>
+                    <td>{entry.service_name}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </section>
     </div>
@@ -590,78 +592,80 @@ function ManipulationSection() {
         {pendingApprovals.length === 0 ? (
           <p className="italic opacity-70">{t("queryConsole.pendingApprovalsEmpty")}</p>
         ) : (
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>{t("queryConsole.actionTypeLabel")}</th>
-                <th>{t("queryConsole.initiatedBy")}</th>
-                <th>{t("queryConsole.createdAt")}</th>
-                <th>{t("queryConsole.parameters")}</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {pendingApprovals.map((approval) => (
-                <Fragment key={approval.id}>
-                  <tr>
-                    <td>{approval.action_type}</td>
-                    <td>{approval.initiated_by}</td>
-                    <td className="whitespace-nowrap">{new Date(approval.created_at).toLocaleString()}</td>
-                    <td>{JSON.stringify(approval.payload)}</td>
-                    <td>
-                      {rejectingId !== approval.id && (
-                        <div className="flex gap-3">
-                          <button
-                            type="button"
-                            onClick={() => handleApprove(approval.id)}
-                            className={secondaryBtn}
-                          >
-                            {t("queryConsole.approveButton")}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleStartReject(approval.id)}
-                            className={secondaryBtn}
-                          >
-                            {t("queryConsole.rejectButton")}
-                          </button>
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                  {rejectingId === approval.id && (
+          <div className="dms-scroll-x">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>{t("queryConsole.actionTypeLabel")}</th>
+                  <th>{t("queryConsole.initiatedBy")}</th>
+                  <th>{t("queryConsole.createdAt")}</th>
+                  <th>{t("queryConsole.parameters")}</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {pendingApprovals.map((approval) => (
+                  <Fragment key={approval.id}>
                     <tr>
-                      <td colSpan={5}>
-                        <form
-                          aria-label={t("queryConsole.rejectFormLabel")}
-                          className="form-grid"
-                          onSubmit={(e) => handleConfirmReject(e, approval.id)}
-                        >
-                          <label>
-                            {t("queryConsole.rejectReasonLabel")}
-                            <input
-                              value={rejectReason}
-                              onChange={(e) => setRejectReason(e.target.value)}
-                              placeholder={t("queryConsole.rejectReasonPlaceholder")}
-                              className={fieldInput}
-                            />
-                          </label>
+                      <td>{approval.action_type}</td>
+                      <td>{approval.initiated_by}</td>
+                      <td className="whitespace-nowrap">{new Date(approval.created_at).toLocaleString()}</td>
+                      <td>{JSON.stringify(approval.payload)}</td>
+                      <td>
+                        {rejectingId !== approval.id && (
                           <div className="flex gap-3">
-                            <button type="submit" className={primaryBtn}>
-                              {t("queryConsole.rejectConfirm")}
+                            <button
+                              type="button"
+                              onClick={() => handleApprove(approval.id)}
+                              className={secondaryBtn}
+                            >
+                              {t("queryConsole.approveButton")}
                             </button>
-                            <button type="button" onClick={handleCancelReject} className={secondaryBtn}>
-                              {t("queryConsole.rejectCancel")}
+                            <button
+                              type="button"
+                              onClick={() => handleStartReject(approval.id)}
+                              className={secondaryBtn}
+                            >
+                              {t("queryConsole.rejectButton")}
                             </button>
                           </div>
-                        </form>
+                        )}
                       </td>
                     </tr>
-                  )}
-                </Fragment>
-              ))}
-            </tbody>
-          </table>
+                    {rejectingId === approval.id && (
+                      <tr>
+                        <td colSpan={5}>
+                          <form
+                            aria-label={t("queryConsole.rejectFormLabel")}
+                            className="form-grid"
+                            onSubmit={(e) => handleConfirmReject(e, approval.id)}
+                          >
+                            <label>
+                              {t("queryConsole.rejectReasonLabel")}
+                              <input
+                                value={rejectReason}
+                                onChange={(e) => setRejectReason(e.target.value)}
+                                placeholder={t("queryConsole.rejectReasonPlaceholder")}
+                                className={fieldInput}
+                              />
+                            </label>
+                            <div className="flex gap-3">
+                              <button type="submit" className={primaryBtn}>
+                                {t("queryConsole.rejectConfirm")}
+                              </button>
+                              <button type="button" onClick={handleCancelReject} className={secondaryBtn}>
+                                {t("queryConsole.rejectCancel")}
+                              </button>
+                            </div>
+                          </form>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </section>
     </div>

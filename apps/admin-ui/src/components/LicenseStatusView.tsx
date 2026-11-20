@@ -74,59 +74,61 @@ export function LicenseStatusView() {
       ) : status && !status.installed ? (
         <p className="italic opacity-70">{t("license.notInstalled")}</p>
       ) : status ? (
-        <table className="data-table" style={{ marginBottom: "1rem" }}>
-          <tbody>
-            <tr>
-              <th>{t("license.status")}</th>
-              <td>
-                <span className={`badge ${status.valid ? "ok" : "down"}`}>
-                  {status.valid ? t("license.valid") : t("license.invalid")}
-                </span>
-                {!status.valid && status.invalid_reason && ` (${status.invalid_reason})`}
-              </td>
-            </tr>
-            <tr>
-              <th>{t("license.expiresAt")}</th>
-              <td>
-                {status.expires_at ? new Date(status.expires_at).toLocaleString() : "-"}
-                {status.days_remaining !== null &&
-                  ` (${t("license.daysRemaining", { count: status.days_remaining })})`}
-              </td>
-            </tr>
-            <tr>
-              <th>{t("license.userModel")}</th>
-              <td>{status.user_model ?? "-"}</td>
-            </tr>
-            <tr>
-              <th>{t("license.users")}</th>
-              <td>{formatDimension(status.users)}</td>
-            </tr>
-            <tr>
-              <th>{t("license.storage")}</th>
-              <td>{formatDimension(status.storage_gb)}</td>
-            </tr>
-            <tr>
-              <th>{t("license.documents")}</th>
-              <td>{formatDimension(status.documents)}</td>
-            </tr>
-            <tr>
-              <th>{t("license.licensedComponents")}</th>
-              <td>
-                {status.licensed_components === null
-                  ? t("license.allComponents")
-                  : status.licensed_components.join(", ") || "-"}
-              </td>
-            </tr>
-            {status.limits_exceeded.length > 0 && (
+        <div className="dms-scroll-x">
+          <table className="data-table" style={{ marginBottom: "1rem" }}>
+            <tbody>
               <tr>
-                <th>{t("license.limitsExceeded")}</th>
+                <th>{t("license.status")}</th>
                 <td>
-                  <span className="badge down">{status.limits_exceeded.join(", ")}</span>
+                  <span className={`badge ${status.valid ? "ok" : "down"}`}>
+                    {status.valid ? t("license.valid") : t("license.invalid")}
+                  </span>
+                  {!status.valid && status.invalid_reason && ` (${status.invalid_reason})`}
                 </td>
               </tr>
-            )}
-          </tbody>
-        </table>
+              <tr>
+                <th>{t("license.expiresAt")}</th>
+                <td>
+                  {status.expires_at ? new Date(status.expires_at).toLocaleString() : "-"}
+                  {status.days_remaining !== null &&
+                    ` (${t("license.daysRemaining", { count: status.days_remaining })})`}
+                </td>
+              </tr>
+              <tr>
+                <th>{t("license.userModel")}</th>
+                <td>{status.user_model ?? "-"}</td>
+              </tr>
+              <tr>
+                <th>{t("license.users")}</th>
+                <td>{formatDimension(status.users)}</td>
+              </tr>
+              <tr>
+                <th>{t("license.storage")}</th>
+                <td>{formatDimension(status.storage_gb)}</td>
+              </tr>
+              <tr>
+                <th>{t("license.documents")}</th>
+                <td>{formatDimension(status.documents)}</td>
+              </tr>
+              <tr>
+                <th>{t("license.licensedComponents")}</th>
+                <td>
+                  {status.licensed_components === null
+                    ? t("license.allComponents")
+                    : status.licensed_components.join(", ") || "-"}
+                </td>
+              </tr>
+              {status.limits_exceeded.length > 0 && (
+                <tr>
+                  <th>{t("license.limitsExceeded")}</th>
+                  <td>
+                    <span className="badge down">{status.limits_exceeded.join(", ")}</span>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       ) : null}
 
       <form onSubmit={handleUpload}>

@@ -235,32 +235,34 @@ export function UserTracking() {
             </button>
           </form>
 
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>{t("userTracking.occurredAt")}</th>
-                <th>{t("userTracking.principalId")}</th>
-                <th>{t("userTracking.username")}</th>
-                <th>{t("userTracking.eventType")}</th>
-                <th>{t("userTracking.authMethod")}</th>
-                <th>{t("userTracking.clientIp")}</th>
-                <th>{t("userTracking.userAgent")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sessions.map((s) => (
-                <tr key={s.id}>
-                  <td className="whitespace-nowrap">{new Date(s.occurred_at).toLocaleString()}</td>
-                  <td>{s.principal_id}</td>
-                  <td>{s.username}</td>
-                  <td>{s.event_type}</td>
-                  <td>{s.auth_method}</td>
-                  <td>{s.client_ip ?? "-"}</td>
-                  <td>{s.user_agent ?? "-"}</td>
+          <div className="dms-scroll-x">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>{t("userTracking.occurredAt")}</th>
+                  <th>{t("userTracking.principalId")}</th>
+                  <th>{t("userTracking.username")}</th>
+                  <th>{t("userTracking.eventType")}</th>
+                  <th>{t("userTracking.authMethod")}</th>
+                  <th>{t("userTracking.clientIp")}</th>
+                  <th>{t("userTracking.userAgent")}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {sessions.map((s) => (
+                  <tr key={s.id}>
+                    <td className="whitespace-nowrap">{new Date(s.occurred_at).toLocaleString()}</td>
+                    <td>{s.principal_id}</td>
+                    <td>{s.username}</td>
+                    <td>{s.event_type}</td>
+                    <td>{s.auth_method}</td>
+                    <td>{s.client_ip ?? "-"}</td>
+                    <td>{s.user_agent ?? "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           {sessions.length === 0 && (
             <p className="italic opacity-70">{t("userTracking.sessionsEmpty")}</p>
           )}

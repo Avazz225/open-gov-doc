@@ -144,40 +144,42 @@ export function EmailTemplates() {
           {templates.length === 0 ? (
             <p className="italic opacity-70">{t("emailTemplates.empty")}</p>
           ) : (
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>{t("emailTemplates.useCase")}</th>
-                  <th>{t("emailTemplates.domain")}</th>
-                  <th>{t("emailTemplates.subject")}</th>
-                  <th>{t("emailTemplates.updatedAt")}</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {templates.map((template) => (
-                  <tr key={template.id}>
-                    <td>{template.use_case}</td>
-                    <td>{template.recipient_domain_pattern ?? t("emailTemplates.domainCatchall")}</td>
-                    <td>{template.subject_template}</td>
-                    <td className="whitespace-nowrap">{new Date(template.updated_at).toLocaleString()}</td>
-                    <td className="flex gap-3">
-                      <button type="button" onClick={() => handleEdit(template)} className={secondaryBtn}>
-                        {t("emailTemplates.edit")}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={deletingId !== null}
-                        onClick={() => handleDelete(template)}
-                        className={secondaryBtn}
-                      >
-                        {t("common.delete")}
-                      </button>
-                    </td>
+            <div className="dms-scroll-x">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>{t("emailTemplates.useCase")}</th>
+                    <th>{t("emailTemplates.domain")}</th>
+                    <th>{t("emailTemplates.subject")}</th>
+                    <th>{t("emailTemplates.updatedAt")}</th>
+                    <th />
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {templates.map((template) => (
+                    <tr key={template.id}>
+                      <td>{template.use_case}</td>
+                      <td>{template.recipient_domain_pattern ?? t("emailTemplates.domainCatchall")}</td>
+                      <td>{template.subject_template}</td>
+                      <td className="whitespace-nowrap">{new Date(template.updated_at).toLocaleString()}</td>
+                      <td className="flex gap-3">
+                        <button type="button" onClick={() => handleEdit(template)} className={secondaryBtn}>
+                          {t("emailTemplates.edit")}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={deletingId !== null}
+                          onClick={() => handleDelete(template)}
+                          className={secondaryBtn}
+                        >
+                          {t("common.delete")}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </>
       )}

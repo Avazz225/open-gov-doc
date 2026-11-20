@@ -86,37 +86,39 @@ export function SignatureConfig() {
       {providers.length === 0 ? (
         <p className="italic opacity-70">{t("signatureConfig.empty")}</p>
       ) : (
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>{t("signatureConfig.connectorId")}</th>
-              <th>{t("signatureConfig.type")}</th>
-              <th>{t("signatureConfig.levels")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {providers.map((provider) => (
-              <tr key={provider.id}>
-                <td>{provider.id}</td>
-                <td>{provider.type}</td>
-                <td>
-                  {ALL_LEVELS.map((level) => (
-                    <label key={level} className="checkbox-label">
-                      <input
-                        type="checkbox"
-                        className={checkbox}
-                        checked={provider.levels.includes(level)}
-                        disabled={savingId !== null}
-                        onChange={() => handleToggleLevel(provider, level)}
-                      />
-                      {level.toUpperCase()}
-                    </label>
-                  ))}
-                </td>
+        <div className="dms-scroll-x">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>{t("signatureConfig.connectorId")}</th>
+                <th>{t("signatureConfig.type")}</th>
+                <th>{t("signatureConfig.levels")}</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {providers.map((provider) => (
+                <tr key={provider.id}>
+                  <td>{provider.id}</td>
+                  <td>{provider.type}</td>
+                  <td>
+                    {ALL_LEVELS.map((level) => (
+                      <label key={level} className="checkbox-label">
+                        <input
+                          type="checkbox"
+                          className={checkbox}
+                          checked={provider.levels.includes(level)}
+                          disabled={savingId !== null}
+                          onChange={() => handleToggleLevel(provider, level)}
+                        />
+                        {level.toUpperCase()}
+                      </label>
+                    ))}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

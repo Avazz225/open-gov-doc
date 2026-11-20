@@ -79,44 +79,46 @@ export function InstallationManager() {
         </form>
       </section>
 
-      <table className="data-table">
-        <thead>
-          <tr>
-            <th>{t("installations.nameColumn")}</th>
-            <th>{t("installations.gatewayUrlColumn")}</th>
-            <th>{t("installations.statusColumn")}</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {installations.map((installation) => (
-            <tr key={installation.id}>
-              <td>{installation.name}</td>
-              <td>{installation.gatewayBaseUrl}</td>
-              <td>
-                {installation.id === activeInstallation.id && (
-                  <span className="badge ok">{t("installations.active")}</span>
-                )}
-              </td>
-              <td className="flex gap-3">
-                {installation.id !== activeInstallation.id && (
-                  <button type="button" className={secondaryBtn} onClick={() => switchInstallation(installation.id)}>
-                    {t("installations.switchTo")}
-                  </button>
-                )}
-                <button
-                  type="button"
-                  className={secondaryBtn}
-                  onClick={() => removeInstallation(installation.id)}
-                  disabled={installations.length <= 1}
-                >
-                  {t("common.delete")}
-                </button>
-              </td>
+      <div className="dms-scroll-x">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>{t("installations.nameColumn")}</th>
+              <th>{t("installations.gatewayUrlColumn")}</th>
+              <th>{t("installations.statusColumn")}</th>
+              <th />
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {installations.map((installation) => (
+              <tr key={installation.id}>
+                <td>{installation.name}</td>
+                <td>{installation.gatewayBaseUrl}</td>
+                <td>
+                  {installation.id === activeInstallation.id && (
+                    <span className="badge ok">{t("installations.active")}</span>
+                  )}
+                </td>
+                <td className="flex gap-3">
+                  {installation.id !== activeInstallation.id && (
+                    <button type="button" className={secondaryBtn} onClick={() => switchInstallation(installation.id)}>
+                      {t("installations.switchTo")}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className={secondaryBtn}
+                    onClick={() => removeInstallation(installation.id)}
+                    disabled={installations.length <= 1}
+                  >
+                    {t("common.delete")}
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </>
   );
 }

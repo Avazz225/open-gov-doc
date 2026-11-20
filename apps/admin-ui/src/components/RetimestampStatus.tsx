@@ -63,34 +63,36 @@ export function RetimestampStatus() {
       ) : signatures.length === 0 ? (
         <p className="italic opacity-70">{t("retimestampStatus.empty")}</p>
       ) : (
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>{t("retimestampStatus.documentColumn")}</th>
-              <th>{t("retimestampStatus.levelColumn")}</th>
-              <th>{t("retimestampStatus.connectorColumn")}</th>
-              <th>{t("retimestampStatus.signerColumn")}</th>
-              <th>{t("retimestampStatus.signedAtColumn")}</th>
-              <th>{t("retimestampStatus.lastTimestampedColumn")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {signatures.map((signature) => (
-              <tr key={signature.id}>
-                <td>{signature.document_id}</td>
-                <td>{signature.level}</td>
-                <td>{signature.connector_id}</td>
-                <td>{signature.signer_display_name}</td>
-                <td className="whitespace-nowrap">{new Date(signature.signed_at).toLocaleString()}</td>
-                <td>
-                  {signature.last_timestamped_at
-                    ? new Date(signature.last_timestamped_at).toLocaleString()
-                    : "-"}
-                </td>
+        <div className="dms-scroll-x">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>{t("retimestampStatus.documentColumn")}</th>
+                <th>{t("retimestampStatus.levelColumn")}</th>
+                <th>{t("retimestampStatus.connectorColumn")}</th>
+                <th>{t("retimestampStatus.signerColumn")}</th>
+                <th>{t("retimestampStatus.signedAtColumn")}</th>
+                <th>{t("retimestampStatus.lastTimestampedColumn")}</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {signatures.map((signature) => (
+                <tr key={signature.id}>
+                  <td>{signature.document_id}</td>
+                  <td>{signature.level}</td>
+                  <td>{signature.connector_id}</td>
+                  <td>{signature.signer_display_name}</td>
+                  <td className="whitespace-nowrap">{new Date(signature.signed_at).toLocaleString()}</td>
+                  <td>
+                    {signature.last_timestamped_at
+                      ? new Date(signature.last_timestamped_at).toLocaleString()
+                      : "-"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

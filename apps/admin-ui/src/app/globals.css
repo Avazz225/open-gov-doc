@@ -23,6 +23,8 @@
    come after tokens.css (references its variables) - see that file's own
    header comment. */
 @import "../../../../libs/dms-ui/tailwind-preset.css";
+/* Narrow-width helpers: scroll container, tab strip, stacked rows (P83-S12, ADR 0238) */
+@import "../../../../libs/dms-ui/layout.css" layer(components);
 
 /* Post-Roadmap Phase 75 Session 4 (found live via computed-style probing
    while verifying office-addin's rollout, not just a screenshot check -
@@ -101,6 +103,14 @@
   align-items: end;
 }
 
+/* One column below 640px (P83-S12, ADR 0238 Decision 7): auto-fit would
+   still squeeze two 160px fields side by side on a phone. */
+@media (max-width: 639.98px) {
+  .form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .form-grid label {
   display: flex;
   flex-direction: column;
@@ -147,6 +157,8 @@
   flex: 1;
 }
 
+/* Every .data-table sits in a .dms-scroll-x wrapper (P83-S12, ADR 0238
+   Decision 4), so a wide table scrolls inside its own box. */
 .data-table {
   width: 100%;
   border-collapse: collapse;

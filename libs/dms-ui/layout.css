@@ -13,6 +13,8 @@
    (`local`) and hide the shadows (`scroll`) once an edge is reached.
    The shadows are backgrounds, so content painted on top (text, pills)
    covers them; they read in the gaps between cells, which is enough.
+   The covers stay fully opaque for 16px, wider than the 14px shadow, so a
+   table that fits shows no trace of it (found in P83-S12).
    A container on a surface other than the page sets --dms-scroll-cover to
    that surface's color so the covers match. */
 .dms-scroll-x {
@@ -21,10 +23,16 @@
   overflow-x: auto;
   overscroll-behavior-x: contain;
   background:
-    linear-gradient(to right, var(--dms-scroll-cover) 40%, transparent) left / 32px 100% no-repeat local,
-    linear-gradient(to left, var(--dms-scroll-cover) 40%, transparent) right / 32px 100% no-repeat local,
+    linear-gradient(to right, var(--dms-scroll-cover) 50%, transparent) left / 32px 100% no-repeat local,
+    linear-gradient(to left, var(--dms-scroll-cover) 50%, transparent) right / 32px 100% no-repeat local,
     linear-gradient(to right, var(--dms-scroll-shadow), transparent) left / 14px 100% no-repeat scroll,
     linear-gradient(to left, var(--dms-scroll-shadow), transparent) right / 14px 100% no-repeat scroll;
+}
+
+/* On a card surface the covers take the surface's color automatically
+   (P83-S12), so no call site has to set --dms-scroll-cover by hand. */
+.bg-surface .dms-scroll-x {
+  --dms-scroll-cover: var(--dms-surface);
 }
 
 /* A tab strip: one row that never wraps; it scrolls inside .dms-scroll-x

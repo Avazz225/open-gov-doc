@@ -113,39 +113,41 @@ export function ApprovalSettings() {
           {configs.length === 0 ? (
             <p className="italic opacity-70">{t("approvalSettings.empty")}</p>
           ) : (
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>{t("approvalSettings.actionType")}</th>
-                  <th>{t("approvalSettings.requiresApproval")}</th>
-                  <th>{t("approvalSettings.requiredPermission")}</th>
-                  <th>{t("approvalSettings.updatedAt")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {configs.map((config) => (
-                  <tr key={config.action_type}>
-                    <td>{config.action_type}</td>
-                    <td>
-                      <label className="checkbox-label">
-                        <input
-                          type="checkbox"
-                          checked={config.requires_approval}
-                          disabled={togglingActionType !== null}
-                          onChange={() => handleToggle(config)}
-                          className={checkbox}
-                        />
-                        {config.requires_approval
-                          ? t("approvalSettings.active")
-                          : t("approvalSettings.inactive")}
-                      </label>
-                    </td>
-                    <td>{config.required_permission ?? "—"}</td>
-                    <td className="whitespace-nowrap">{new Date(config.updated_at).toLocaleString()}</td>
+            <div className="dms-scroll-x">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>{t("approvalSettings.actionType")}</th>
+                    <th>{t("approvalSettings.requiresApproval")}</th>
+                    <th>{t("approvalSettings.requiredPermission")}</th>
+                    <th>{t("approvalSettings.updatedAt")}</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {configs.map((config) => (
+                    <tr key={config.action_type}>
+                      <td>{config.action_type}</td>
+                      <td>
+                        <label className="checkbox-label">
+                          <input
+                            type="checkbox"
+                            checked={config.requires_approval}
+                            disabled={togglingActionType !== null}
+                            onChange={() => handleToggle(config)}
+                            className={checkbox}
+                          />
+                          {config.requires_approval
+                            ? t("approvalSettings.active")
+                            : t("approvalSettings.inactive")}
+                        </label>
+                      </td>
+                      <td>{config.required_permission ?? "—"}</td>
+                      <td className="whitespace-nowrap">{new Date(config.updated_at).toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </>
       )}

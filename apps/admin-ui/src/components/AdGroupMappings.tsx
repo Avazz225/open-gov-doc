@@ -232,28 +232,30 @@ export function AdGroupMappings() {
         </form>
         {mappingPending && <p className="text-sm opacity-80">{t("adGroupMappings.pendingApproval")}</p>}
 
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>{t("adGroupMappings.adGroupName")}</th>
-              <th>{t("adGroupMappings.role")}</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {mappings.map((m) => (
-              <tr key={m.id}>
-                <td>{m.ad_group_name}</td>
-                <td>{m.role_name}</td>
-                <td>
-                  <button type="button" onClick={() => handleDeleteMapping(m.id)} className={secondaryBtn}>
-                    {t("common.delete")}
-                  </button>
-                </td>
+        <div className="dms-scroll-x">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>{t("adGroupMappings.adGroupName")}</th>
+                <th>{t("adGroupMappings.role")}</th>
+                <th />
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {mappings.map((m) => (
+                <tr key={m.id}>
+                  <td>{m.ad_group_name}</td>
+                  <td>{m.role_name}</td>
+                  <td>
+                    <button type="button" onClick={() => handleDeleteMapping(m.id)} className={secondaryBtn}>
+                      {t("common.delete")}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
         {mappings.length === 0 && <p className="italic opacity-70">{t("adGroupMappings.mappingsEmpty")}</p>}
       </section>
 
@@ -303,32 +305,34 @@ export function AdGroupMappings() {
         </form>
         {compositeRulePending && <p className="text-sm opacity-80">{t("adGroupMappings.pendingApproval")}</p>}
 
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>{t("adGroupMappings.adGroupNames")}</th>
-              <th>{t("adGroupMappings.role")}</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {compositeRules.map((rule) => (
-              <tr key={rule.id}>
-                <td>{rule.ad_group_names.join(", ")}</td>
-                <td>{rule.role_name}</td>
-                <td>
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteCompositeRule(rule.id)}
-                    className={secondaryBtn}
-                  >
-                    {t("common.delete")}
-                  </button>
-                </td>
+        <div className="dms-scroll-x">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>{t("adGroupMappings.adGroupNames")}</th>
+                <th>{t("adGroupMappings.role")}</th>
+                <th />
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {compositeRules.map((rule) => (
+                <tr key={rule.id}>
+                  <td>{rule.ad_group_names.join(", ")}</td>
+                  <td>{rule.role_name}</td>
+                  <td>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteCompositeRule(rule.id)}
+                      className={secondaryBtn}
+                    >
+                      {t("common.delete")}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
         {compositeRules.length === 0 && (
           <p className="italic opacity-70">{t("adGroupMappings.compositeRulesEmpty")}</p>
         )}

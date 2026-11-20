@@ -57,28 +57,30 @@ export function TeamspacesAdmin() {
       {teamspaces.length === 0 ? (
         <p className="italic opacity-70">{t("teamspacesAdmin.empty")}</p>
       ) : (
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>{t("teamspacesAdmin.name")}</th>
-              <th>{t("teamspacesAdmin.description")}</th>
-              <th>{t("teamspacesAdmin.createdBy")}</th>
-              <th>{t("teamspacesAdmin.memberCount")}</th>
-              <th>{t("teamspacesAdmin.createdAt")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {teamspaces.map((teamspace) => (
-              <tr key={teamspace.id}>
-                <td>{teamspace.name}</td>
-                <td>{teamspace.description || "—"}</td>
-                <td>{teamspace.created_by}</td>
-                <td>{teamspace.member_count}</td>
-                <td className="whitespace-nowrap">{new Date(teamspace.created_at).toLocaleString()}</td>
+        <div className="dms-scroll-x">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>{t("teamspacesAdmin.name")}</th>
+                <th>{t("teamspacesAdmin.description")}</th>
+                <th>{t("teamspacesAdmin.createdBy")}</th>
+                <th>{t("teamspacesAdmin.memberCount")}</th>
+                <th>{t("teamspacesAdmin.createdAt")}</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {teamspaces.map((teamspace) => (
+                <tr key={teamspace.id}>
+                  <td>{teamspace.name}</td>
+                  <td>{teamspace.description || "—"}</td>
+                  <td>{teamspace.created_by}</td>
+                  <td>{teamspace.member_count}</td>
+                  <td className="whitespace-nowrap">{new Date(teamspace.created_at).toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

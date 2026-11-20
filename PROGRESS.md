@@ -2,7 +2,36 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P83-S11 (eleventh session of Phase 83): reviewer-ui at narrow widths. Full record:
+**Last completed:** P83-S12 (twelfth session of Phase 83): admin-ui at narrow widths. Full record:
+`IMPLEMENTATION_PLAN.md`'s P83-S12 entry and the matching section in `docs/services/admin-ui.md`.
+
+**What changed:**
+- Below 768px the sidebar is a modal drawer (`NavDrawer.tsx`): focus trap, Escape/backdrop, scroll
+  lock, focus return, and it closes on navigation.
+- Below 1024px the account menu takes over; the installation switcher sits in its new `leading` slot.
+- All 38 tables sit in scroll containers, and forms go to one column below 640px.
+- `layout.css`: covers on card surfaces are automatic, and the covers are now fully opaque beyond the
+  shadow width (a faint trace showed beside tables that fit).
+
+**Checks:**
+- No page overflow on all 32 routes at 390/768/1024px. Desktop content is pixel-identical.
+- `tsc`/`eslint` clean.
+- vitest 318.
+- e2e admin-ui 8/8, reviewer-ui 6/6, migration-console 5/5, process-designer 7/7.
+
+**Open:** the suspected permission-cache race (S8) and reviewer-ui's principal-name lookup. The stack was
+stopped afterwards.
+
+**Next session:** **P83-S13**, user-ui at narrow widths:
+- single-pane mode instead of dockview below 768px (Explorer · Vorschau · Metadaten switcher; opening a
+  document switches to Vorschau; saved layout untouched; "Standardanordnung" hidden);
+- the narrow header;
+- stacked approval rows;
+- the `layout.css` import.
+
+---
+
+Earlier P83-S11 summary, kept for context (eleventh session of Phase 83): reviewer-ui at narrow widths. Full record:
 `IMPLEMENTATION_PLAN.md`'s P83-S11 entry and the matching section in `docs/services/reviewer-ui.md`.
 
 **What changed:**
@@ -23,7 +52,7 @@
 **Open:** the suspected permission-cache race (S8) and reviewer-ui's principal-name lookup ("Beantragt
 von" still shows principal ids, some of them UUIDs). The stack was stopped afterwards.
 
-**Next session:** **P83-S12**, admin-ui at narrow widths:
+**Next session (at the time):** P83-S12. It was done next; see the entry above. Original note:, admin-ui at narrow widths:
 - sidebar drawer below 768px;
 - account menu (copy `AccountMenu.tsx` plus the `touch` switchers, check how admin-ui's header differs);
 - `dms-scroll-x` on all 24 tables, with `--dms-scroll-cover` for tables on card surfaces;

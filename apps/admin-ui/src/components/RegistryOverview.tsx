@@ -46,32 +46,34 @@ export function RegistryOverview() {
       {isLoading ? (
         <p>{t("common.loading")}</p>
       ) : (
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>{t("registry.serviceType")}</th>
-              <th>{t("registry.instance")}</th>
-              <th>{t("registry.version")}</th>
-              <th>{t("registry.address")}</th>
-              <th>{t("registry.status")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {instances.map((i) => (
-              <tr key={i.instance_id}>
-                <td>{i.service_type}</td>
-                <td>{i.instance_id}</td>
-                <td>{i.version}</td>
-                <td>{i.address}</td>
-                <td>
-                  <span className={`badge ${i.healthy ? "ok" : "down"}`}>
-                    {i.healthy ? t("registry.healthy") : t("registry.down")}
-                  </span>
-                </td>
+        <div className="dms-scroll-x">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>{t("registry.serviceType")}</th>
+                <th>{t("registry.instance")}</th>
+                <th>{t("registry.version")}</th>
+                <th>{t("registry.address")}</th>
+                <th>{t("registry.status")}</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {instances.map((i) => (
+                <tr key={i.instance_id}>
+                  <td>{i.service_type}</td>
+                  <td>{i.instance_id}</td>
+                  <td>{i.version}</td>
+                  <td>{i.address}</td>
+                  <td>
+                    <span className={`badge ${i.healthy ? "ok" : "down"}`}>
+                      {i.healthy ? t("registry.healthy") : t("registry.down")}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
       {!isLoading && instances.length === 0 && (
         <p className="italic opacity-70">{t("registry.empty")}</p>

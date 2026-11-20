@@ -8,16 +8,19 @@ const OPTIONS: { value: Locale; label: string }[] = [
   { value: "en", label: "English" },
 ];
 
-export function LocaleSwitcher() {
+// `touch` (P83-S12, as in the other apps since P83-S10): the larger form
+// inside the narrow-width account menu - label and control across the
+// menu's width, control at least 40px tall (ADR 0238 Decision 7).
+export function LocaleSwitcher({ touch = false }: { touch?: boolean }) {
   const { t } = useI18n();
   const { locale, setLocale } = useLocale();
   return (
-    <label className="flex items-center gap-2 text-sm text-fg">
+    <label className={`flex items-center gap-2 text-sm text-fg${touch ? " justify-between" : ""}`}>
       {t("locale.label")}
       <select
         value={locale}
         onChange={(event) => setLocale(event.target.value as Locale)}
-        className="rounded-md border border-border bg-bg px-1 py-0.5 text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg"
+        className={`rounded-md border border-border bg-bg text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg ${touch ? "min-h-10 px-2" : "px-1 py-0.5"}`}
       >
         {OPTIONS.map((option) => (
           <option key={option.value} value={option.value}>

@@ -254,69 +254,71 @@ function DocumentArchivalSection() {
       {transfers.length === 0 ? (
         <p className="italic opacity-70">{t("archivalTransfers.empty")}</p>
       ) : (
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>{t("archivalTransfers.documentId")}</th>
-              <th>{t("archivalTransfers.status")}</th>
-              <th>{t("archivalTransfers.archiveFormat")}</th>
-              <th>{t("archivalTransfers.encrypted")}</th>
-              <th>{t("archivalTransfers.releasedAt")}</th>
-              <th>{t("archivalTransfers.dehydratedAt")}</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {transfers.map((transfer) => (
-              <tr key={transfer.id}>
-                <td>{transfer.document_id}</td>
-                <td>
-                  <span
-                    className={`badge ${transfer.status === "failed" || transfer.status === "failed_permanent" ? "down" : "ok"}`}
-                  >
-                    {statusLabel(t, transfer.status)}
-                  </span>
-                  {(transfer.status === "failed" || transfer.status === "failed_permanent") &&
-                    transfer.error_message && (
-                      <p className="text-sm opacity-80">
-                        {t("archivalTransfers.errorMessage")}: {transfer.error_message}
-                      </p>
-                    )}
-                </td>
-                <td>{transfer.archive_format ?? "—"}</td>
-                <td>{transfer.encrypted ? t("common.yes") : t("common.no")}</td>
-                <td className="whitespace-nowrap">{transfer.released_at ? new Date(transfer.released_at).toLocaleString() : "—"}</td>
-                <td>
-                  {transfer.dehydrated_at ? new Date(transfer.dehydrated_at).toLocaleString() : "—"}
-                </td>
-                <td>
-                  {RETRIEVABLE_STATUSES.has(transfer.status) && (
-                    <button
-                      type="button"
-                      onClick={() => handleRetrieve(transfer)}
-                      disabled={retrievingId !== null}
-                      className={secondaryBtn}
-                    >
-                      {retrievingId === transfer.id
-                        ? t("common.loading")
-                        : t("archivalTransfers.retrieve")}
-                    </button>
-                  )}
-                  {transfer.status === "failed_permanent" && (
-                    <button
-                      type="button"
-                      onClick={() => handleRetry(transfer)}
-                      disabled={retryingId !== null}
-                      className={secondaryBtn}
-                    >
-                      {retryingId === transfer.id ? t("common.loading") : t("archivalTransfers.retry")}
-                    </button>
-                  )}
-                </td>
+        <div className="dms-scroll-x">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>{t("archivalTransfers.documentId")}</th>
+                <th>{t("archivalTransfers.status")}</th>
+                <th>{t("archivalTransfers.archiveFormat")}</th>
+                <th>{t("archivalTransfers.encrypted")}</th>
+                <th>{t("archivalTransfers.releasedAt")}</th>
+                <th>{t("archivalTransfers.dehydratedAt")}</th>
+                <th />
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {transfers.map((transfer) => (
+                <tr key={transfer.id}>
+                  <td>{transfer.document_id}</td>
+                  <td>
+                    <span
+                      className={`badge ${transfer.status === "failed" || transfer.status === "failed_permanent" ? "down" : "ok"}`}
+                    >
+                      {statusLabel(t, transfer.status)}
+                    </span>
+                    {(transfer.status === "failed" || transfer.status === "failed_permanent") &&
+                      transfer.error_message && (
+                        <p className="text-sm opacity-80">
+                          {t("archivalTransfers.errorMessage")}: {transfer.error_message}
+                        </p>
+                      )}
+                  </td>
+                  <td>{transfer.archive_format ?? "—"}</td>
+                  <td>{transfer.encrypted ? t("common.yes") : t("common.no")}</td>
+                  <td className="whitespace-nowrap">{transfer.released_at ? new Date(transfer.released_at).toLocaleString() : "—"}</td>
+                  <td>
+                    {transfer.dehydrated_at ? new Date(transfer.dehydrated_at).toLocaleString() : "—"}
+                  </td>
+                  <td>
+                    {RETRIEVABLE_STATUSES.has(transfer.status) && (
+                      <button
+                        type="button"
+                        onClick={() => handleRetrieve(transfer)}
+                        disabled={retrievingId !== null}
+                        className={secondaryBtn}
+                      >
+                        {retrievingId === transfer.id
+                          ? t("common.loading")
+                          : t("archivalTransfers.retrieve")}
+                      </button>
+                    )}
+                    {transfer.status === "failed_permanent" && (
+                      <button
+                        type="button"
+                        onClick={() => handleRetry(transfer)}
+                        disabled={retryingId !== null}
+                        className={secondaryBtn}
+                      >
+                        {retryingId === transfer.id ? t("common.loading") : t("archivalTransfers.retry")}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
@@ -495,63 +497,65 @@ function CaseArchivalSection() {
       {transfers.length === 0 ? (
         <p className="italic opacity-70">{t("archivalTransfers.caseEmpty")}</p>
       ) : (
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>{t("archivalTransfers.caseId")}</th>
-              <th>{t("archivalTransfers.status")}</th>
-              <th>{t("archivalTransfers.encrypted")}</th>
-              <th>{t("archivalTransfers.releasedAt")}</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {transfers.map((transfer) => (
-              <tr key={transfer.id}>
-                <td>{transfer.case_id}</td>
-                <td>
-                  <span
-                    className={`badge ${transfer.status === "failed" || transfer.status === "failed_permanent" ? "down" : "ok"}`}
-                  >
-                    {caseStatusLabel(t, transfer.status)}
-                  </span>
-                  {(transfer.status === "failed" || transfer.status === "failed_permanent") &&
-                    transfer.error_message && (
-                      <p className="text-sm opacity-80">
-                        {t("archivalTransfers.errorMessage")}: {transfer.error_message}
-                      </p>
-                    )}
-                </td>
-                <td>{transfer.encrypted ? t("common.yes") : t("common.no")}</td>
-                <td className="whitespace-nowrap">{transfer.released_at ? new Date(transfer.released_at).toLocaleString() : "—"}</td>
-                <td>
-                  {transfer.status === "released" && (
-                    <button
-                      type="button"
-                      onClick={() => handleDownload(transfer)}
-                      disabled={downloadingId !== null}
-                      className={secondaryBtn}
-                    >
-                      {downloadingId === transfer.id
-                        ? t("common.loading")
-                        : t("archivalTransfers.caseDownload")}
-                    </button>
-                  )}
-                  {transfer.status === "failed_permanent" && (
-                    <button
-                      type="button"
-                      onClick={() => handleRetry(transfer)}
-                      disabled={retryingId !== null}
-                      className={secondaryBtn}
-                    >
-                      {retryingId === transfer.id ? t("common.loading") : t("archivalTransfers.retry")}
-                    </button>
-                  )}
-                </td>
+        <div className="dms-scroll-x">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>{t("archivalTransfers.caseId")}</th>
+                <th>{t("archivalTransfers.status")}</th>
+                <th>{t("archivalTransfers.encrypted")}</th>
+                <th>{t("archivalTransfers.releasedAt")}</th>
+                <th />
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {transfers.map((transfer) => (
+                <tr key={transfer.id}>
+                  <td>{transfer.case_id}</td>
+                  <td>
+                    <span
+                      className={`badge ${transfer.status === "failed" || transfer.status === "failed_permanent" ? "down" : "ok"}`}
+                    >
+                      {caseStatusLabel(t, transfer.status)}
+                    </span>
+                    {(transfer.status === "failed" || transfer.status === "failed_permanent") &&
+                      transfer.error_message && (
+                        <p className="text-sm opacity-80">
+                          {t("archivalTransfers.errorMessage")}: {transfer.error_message}
+                        </p>
+                      )}
+                  </td>
+                  <td>{transfer.encrypted ? t("common.yes") : t("common.no")}</td>
+                  <td className="whitespace-nowrap">{transfer.released_at ? new Date(transfer.released_at).toLocaleString() : "—"}</td>
+                  <td>
+                    {transfer.status === "released" && (
+                      <button
+                        type="button"
+                        onClick={() => handleDownload(transfer)}
+                        disabled={downloadingId !== null}
+                        className={secondaryBtn}
+                      >
+                        {downloadingId === transfer.id
+                          ? t("common.loading")
+                          : t("archivalTransfers.caseDownload")}
+                      </button>
+                    )}
+                    {transfer.status === "failed_permanent" && (
+                      <button
+                        type="button"
+                        onClick={() => handleRetry(transfer)}
+                        disabled={retryingId !== null}
+                        className={secondaryBtn}
+                      >
+                        {retryingId === transfer.id ? t("common.loading") : t("archivalTransfers.retry")}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

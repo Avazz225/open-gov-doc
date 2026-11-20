@@ -209,68 +209,70 @@ export function FleetManagementView() {
           {installations.length === 0 ? (
             <p className="italic opacity-70">{t("fleetManagement.empty")}</p>
           ) : (
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>{t("fleetManagement.displayName")}</th>
-                  <th>{t("fleetManagement.gatewayBaseUrl")}</th>
-                  <th>{t("fleetManagement.status")}</th>
-                  <th>{t("fleetManagement.license")}</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {installations.map((inst) => {
-                  const status = statuses[inst.id];
-                  return (
-                    <tr key={inst.id}>
-                      <td>{inst.display_name}</td>
-                      <td>{inst.gateway_base_url}</td>
-                      <td>
-                        {status
-                          ? status.reachable
-                            ? t("fleetManagement.statusReachable")
-                            : t("fleetManagement.statusUnreachable")
-                          : t("fleetManagement.statusUnknown")}
-                      </td>
-                      <td>
-                        <div className="flex gap-2">
-                          <input
-                            value={licenseTokenById[inst.id] ?? ""}
-                            onChange={(e) =>
-                              setLicenseTokenById((prev) => ({
-                                ...prev,
-                                [inst.id]: e.target.value,
-                              }))
-                            }
-                            placeholder={t("fleetManagement.licenseTokenPlaceholder")}
-                            className={fieldInput}
-                          />
+            <div className="dms-scroll-x">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>{t("fleetManagement.displayName")}</th>
+                    <th>{t("fleetManagement.gatewayBaseUrl")}</th>
+                    <th>{t("fleetManagement.status")}</th>
+                    <th>{t("fleetManagement.license")}</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {installations.map((inst) => {
+                    const status = statuses[inst.id];
+                    return (
+                      <tr key={inst.id}>
+                        <td>{inst.display_name}</td>
+                        <td>{inst.gateway_base_url}</td>
+                        <td>
+                          {status
+                            ? status.reachable
+                              ? t("fleetManagement.statusReachable")
+                              : t("fleetManagement.statusUnreachable")
+                            : t("fleetManagement.statusUnknown")}
+                        </td>
+                        <td>
+                          <div className="flex gap-2">
+                            <input
+                              value={licenseTokenById[inst.id] ?? ""}
+                              onChange={(e) =>
+                                setLicenseTokenById((prev) => ({
+                                  ...prev,
+                                  [inst.id]: e.target.value,
+                                }))
+                              }
+                              placeholder={t("fleetManagement.licenseTokenPlaceholder")}
+                              className={fieldInput}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handlePushLicense(inst.id)}
+                              disabled={busyId !== null || !licenseTokenById[inst.id]}
+                              className={secondaryBtn}
+                            >
+                              {t("fleetManagement.pushLicense")}
+                            </button>
+                          </div>
+                        </td>
+                        <td>
                           <button
                             type="button"
-                            onClick={() => handlePushLicense(inst.id)}
-                            disabled={busyId !== null || !licenseTokenById[inst.id]}
+                            onClick={() => handleDelete(inst.id)}
+                            disabled={busyId !== null}
                             className={secondaryBtn}
                           >
-                            {t("fleetManagement.pushLicense")}
+                            {busyId === inst.id ? t("common.loading") : t("fleetManagement.delete")}
                           </button>
-                        </div>
-                      </td>
-                      <td>
-                        <button
-                          type="button"
-                          onClick={() => handleDelete(inst.id)}
-                          disabled={busyId !== null}
-                          className={secondaryBtn}
-                        >
-                          {busyId === inst.id ? t("common.loading") : t("fleetManagement.delete")}
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
         </>
       )}

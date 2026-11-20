@@ -221,7 +221,9 @@ function loadCollapsedGroups(): Record<string, boolean> {
 // of the previous flat top-nav links. Only two groups so far ("Management",
 // "Installations"), but already built generically, since more groups will
 // be added as functionality grows (later phases).
-export function AdminSidebar() {
+// `variant="drawer"` (P83-S12): the same navigation inside NavDrawer below
+// 768px - no column width or rule, and rows at least 40px tall for touch.
+export function AdminSidebar({ variant = "column" }: { variant?: "column" | "drawer" }) {
   const { t } = useI18n();
   const pathname = usePathname();
   const { permissions } = useAuth();
@@ -239,13 +241,18 @@ export function AdminSidebar() {
     });
   }
 
+  const isDrawer = variant === "drawer";
+  const rowSize = isDrawer ? "flex min-h-10 items-center px-2 py-2" : "block px-2 py-1";
   const linkClass = (active: boolean) =>
     active
-      ? "block rounded-sm bg-accent-bg px-2 py-1 font-semibold text-inherit no-underline"
-      : "block rounded-sm px-2 py-1 text-inherit no-underline hover:bg-hover-bg";
+      ? `${rowSize} rounded-sm bg-accent-bg font-semibold text-inherit no-underline`
+      : `${rowSize} rounded-sm text-inherit no-underline hover:bg-hover-bg`;
 
   return (
-    <nav className="w-[220px] flex-shrink-0 border-r border-border px-3 py-4" aria-label={t("nav.ariaLabel")}>
+    <nav
+      className={isDrawer ? "px-3 pb-4" : "w-[220px] flex-shrink-0 border-r border-border px-3 py-4"}
+      aria-label={t("nav.ariaLabel")}
+    >
       {GROUPS.map((group) => {
         const groupItems = visibleItems(group.items, permissions);
         if (groupItems.length === 0) return null;
@@ -254,7 +261,9 @@ export function AdminSidebar() {
           <div className="mb-2" key={group.id}>
             <button
               type="button"
-              className="block w-full cursor-pointer border-0 bg-transparent px-1 py-2 text-left font-semibold text-fg opacity-85"
+              className={`block w-full cursor-pointer border-0 bg-transparent px-1 py-2 text-left font-semibold text-fg opacity-85${
+                isDrawer ? " min-h-10" : ""
+              }`}
               aria-expanded={!isCollapsed}
               onClick={() => toggleGroup(group.id)}
             >

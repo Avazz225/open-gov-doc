@@ -80,7 +80,9 @@
     "reports": "Standardberichte",
     "queryConsole": "Query-Konsole",
     "groupLicense": "Lizenz",
-    "license": "Lizenzstatus"
+    "license": "Lizenzstatus",
+    "openMenu": "Navigation öffnen",
+    "closeMenu": "Navigation schließen"
   },
   "home": {
     "title": "OG Doc Admin",
@@ -991,5 +993,8 @@
     "statusColumn": "Status",
     "active": "aktiv",
     "switchTo": "Wechseln"
+  },
+  "account": {
+    "menuLabel": "Konto: {name}"
   }
 }

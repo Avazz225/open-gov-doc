@@ -209,30 +209,32 @@ export function ForensicTraceView() {
         ) : entries.length === 0 ? (
           <p className="italic opacity-70">{t("forensicTrace.empty")}</p>
         ) : (
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>{t("forensicTrace.occurredAt")}</th>
-                <th>{t("forensicTrace.eventType")}</th>
-                <th>{t("forensicTrace.category")}</th>
-                <th>{t("forensicTrace.actor")}</th>
-                <th>{t("forensicTrace.subject")}</th>
-                <th>{t("forensicTrace.serviceName")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {entries.map((entry) => (
-                <tr key={entry.id}>
-                  <td className="whitespace-nowrap">{new Date(entry.occurred_at).toLocaleString()}</td>
-                  <td>{entry.event_type}</td>
-                  <td>{t(`forensicTrace.category${capitalize(entry.category)}`)}</td>
-                  <td>{entry.actor ?? "—"}</td>
-                  <td>{entry.subject ?? "—"}</td>
-                  <td>{entry.service_name}</td>
+          <div className="dms-scroll-x">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>{t("forensicTrace.occurredAt")}</th>
+                  <th>{t("forensicTrace.eventType")}</th>
+                  <th>{t("forensicTrace.category")}</th>
+                  <th>{t("forensicTrace.actor")}</th>
+                  <th>{t("forensicTrace.subject")}</th>
+                  <th>{t("forensicTrace.serviceName")}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {entries.map((entry) => (
+                  <tr key={entry.id}>
+                    <td className="whitespace-nowrap">{new Date(entry.occurred_at).toLocaleString()}</td>
+                    <td>{entry.event_type}</td>
+                    <td>{t(`forensicTrace.category${capitalize(entry.category)}`)}</td>
+                    <td>{entry.actor ?? "—"}</td>
+                    <td>{entry.subject ?? "—"}</td>
+                    <td>{entry.service_name}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </section>
     </div>

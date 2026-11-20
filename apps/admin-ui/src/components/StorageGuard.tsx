@@ -171,84 +171,86 @@ export function StorageGuard() {
         <p className="italic opacity-70">{t("storageGuard.unreachable")}</p>
       ) : (
         <>
-          <table className="data-table" style={{ marginBottom: "1rem" }}>
-            <thead>
-              <tr>
-                <th>{t("storageGuard.targetId")}</th>
-                <th>{t("storageGuard.deviceId")}</th>
-                <th>{t("storageGuard.verifiedAt")}</th>
-                <th>{t("storageGuard.pendingCopies")}</th>
-                <th>{t("storageGuard.objectLockMode")}</th>
-                <th>{t("storageGuard.archiveRole")}</th>
-                <th>{t("storageGuard.decommissioned")}</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {statusEntries.map((entry) => (
-                <tr key={entry.target_id}>
-                  <td>{entry.target_id}</td>
-                  <td>{entry.device_id ?? t("storageGuard.deviceIdUnknown")}</td>
-                  <td className="whitespace-nowrap">{entry.verified_at ? new Date(entry.verified_at).toLocaleString() : "-"}</td>
-                  <td>
-                    <span className={`badge ${entry.pending_copies > 0 ? "down" : "ok"}`}>
-                      {entry.pending_copies > 0
-                        ? t("storageGuard.resyncing", { count: entry.pending_copies })
-                        : t("storageGuard.inSync")}
-                    </span>
-                  </td>
-                  <td>
-                    <label className="checkbox-label">
-                      <input
-                        type="checkbox"
-                        checked={entry.object_lock_mode === "governance"}
-                        disabled={updatingTarget !== null}
-                        onChange={() => handleToggleObjectLockMode(entry)}
-                        className={checkbox}
-                      />
-                      {t("storageGuard.objectLockModeGovernance")}
-                    </label>
-                  </td>
-                  <td>
-                    <label className="checkbox-label">
-                      <input
-                        type="checkbox"
-                        checked={entry.role === "archive"}
-                        disabled={updatingTarget !== null}
-                        onChange={() => handleToggleArchiveRole(entry)}
-                        className={checkbox}
-                      />
-                      {t("storageGuard.archiveRoleLabel")}
-                    </label>
-                  </td>
-                  <td>
-                    <label className="checkbox-label">
-                      <input
-                        type="checkbox"
-                        checked={entry.decommissioned}
-                        disabled={updatingTarget !== null}
-                        onChange={() => handleToggleDecommissioned(entry)}
-                        className={checkbox}
-                      />
-                      {t("storageGuard.decommissionedLabel")}
-                    </label>
-                  </td>
-                  <td>
-                    <button
-                      type="button"
-                      onClick={() => handleReidentify(entry.target_id)}
-                      disabled={reidentifyingTarget !== null}
-                      className={secondaryBtn}
-                    >
-                      {reidentifyingTarget === entry.target_id
-                        ? t("common.loading")
-                        : t("storageGuard.reidentify")}
-                    </button>
-                  </td>
+          <div className="dms-scroll-x">
+            <table className="data-table" style={{ marginBottom: "1rem" }}>
+              <thead>
+                <tr>
+                  <th>{t("storageGuard.targetId")}</th>
+                  <th>{t("storageGuard.deviceId")}</th>
+                  <th>{t("storageGuard.verifiedAt")}</th>
+                  <th>{t("storageGuard.pendingCopies")}</th>
+                  <th>{t("storageGuard.objectLockMode")}</th>
+                  <th>{t("storageGuard.archiveRole")}</th>
+                  <th>{t("storageGuard.decommissioned")}</th>
+                  <th />
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {statusEntries.map((entry) => (
+                  <tr key={entry.target_id}>
+                    <td>{entry.target_id}</td>
+                    <td>{entry.device_id ?? t("storageGuard.deviceIdUnknown")}</td>
+                    <td className="whitespace-nowrap">{entry.verified_at ? new Date(entry.verified_at).toLocaleString() : "-"}</td>
+                    <td>
+                      <span className={`badge ${entry.pending_copies > 0 ? "down" : "ok"}`}>
+                        {entry.pending_copies > 0
+                          ? t("storageGuard.resyncing", { count: entry.pending_copies })
+                          : t("storageGuard.inSync")}
+                      </span>
+                    </td>
+                    <td>
+                      <label className="checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={entry.object_lock_mode === "governance"}
+                          disabled={updatingTarget !== null}
+                          onChange={() => handleToggleObjectLockMode(entry)}
+                          className={checkbox}
+                        />
+                        {t("storageGuard.objectLockModeGovernance")}
+                      </label>
+                    </td>
+                    <td>
+                      <label className="checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={entry.role === "archive"}
+                          disabled={updatingTarget !== null}
+                          onChange={() => handleToggleArchiveRole(entry)}
+                          className={checkbox}
+                        />
+                        {t("storageGuard.archiveRoleLabel")}
+                      </label>
+                    </td>
+                    <td>
+                      <label className="checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={entry.decommissioned}
+                          disabled={updatingTarget !== null}
+                          onChange={() => handleToggleDecommissioned(entry)}
+                          className={checkbox}
+                        />
+                        {t("storageGuard.decommissionedLabel")}
+                      </label>
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        onClick={() => handleReidentify(entry.target_id)}
+                        disabled={reidentifyingTarget !== null}
+                        className={secondaryBtn}
+                      >
+                        {reidentifyingTarget === entry.target_id
+                          ? t("common.loading")
+                          : t("storageGuard.reidentify")}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           {statusEntries.length === 0 && <p className="italic opacity-70">{t("storageGuard.empty")}</p>}
 
           <form onSubmit={handleSubmit}>

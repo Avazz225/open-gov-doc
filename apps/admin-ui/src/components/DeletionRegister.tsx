@@ -101,38 +101,40 @@ export function DeletionRegister() {
       {entries.length === 0 ? (
         <p className="italic opacity-70">{t("deletionRegister.empty")}</p>
       ) : (
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>{t("deletionRegister.type")}</th>
-              <th>{t("deletionRegister.documentId")}</th>
-              <th>{t("deletionRegister.trigger")}</th>
-              <th>{t("deletionRegister.reason")}</th>
-              <th>{t("deletionRegister.triggeredBy")}</th>
-              <th>{t("deletionRegister.occurredAt")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {entries.map((entry) => (
-              <tr key={entry.key}>
-                <td>
-                  {entry.type === "document"
-                    ? t("deletionRegister.typeDocument")
-                    : t("deletionRegister.typeFolder")}
-                </td>
-                <td>{entry.objectId}</td>
-                <td>
-                  {entry.trigger === "forced_deletion"
-                    ? t("deletionRegister.triggerForcedDeletion")
-                    : t("deletionRegister.triggerTrashExpiry")}
-                </td>
-                <td>{entry.reason ?? "—"}</td>
-                <td>{entry.triggeredBy ?? "—"}</td>
-                <td className="whitespace-nowrap">{new Date(entry.occurredAt).toLocaleString()}</td>
+        <div className="dms-scroll-x">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>{t("deletionRegister.type")}</th>
+                <th>{t("deletionRegister.documentId")}</th>
+                <th>{t("deletionRegister.trigger")}</th>
+                <th>{t("deletionRegister.reason")}</th>
+                <th>{t("deletionRegister.triggeredBy")}</th>
+                <th>{t("deletionRegister.occurredAt")}</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {entries.map((entry) => (
+                <tr key={entry.key}>
+                  <td>
+                    {entry.type === "document"
+                      ? t("deletionRegister.typeDocument")
+                      : t("deletionRegister.typeFolder")}
+                  </td>
+                  <td>{entry.objectId}</td>
+                  <td>
+                    {entry.trigger === "forced_deletion"
+                      ? t("deletionRegister.triggerForcedDeletion")
+                      : t("deletionRegister.triggerTrashExpiry")}
+                  </td>
+                  <td>{entry.reason ?? "—"}</td>
+                  <td>{entry.triggeredBy ?? "—"}</td>
+                  <td className="whitespace-nowrap">{new Date(entry.occurredAt).toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

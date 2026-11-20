@@ -299,28 +299,30 @@ export function ConfigPackages() {
       {importResult && importResult.result && (
         <div className="rounded-lg border border-border p-4 mb-6">
           <h2>{t("configPackages.applyResultTitle")}</h2>
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>{t("configPackages.resultCategory")}</th>
-                <th>{t("configPackages.resultCreated")}</th>
-                <th>{t("configPackages.resultUpdated")}</th>
-                <th>{t("configPackages.resultSkipped")}</th>
-                <th>{t("configPackages.resultErrors")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {Object.entries(importResult.result.results).map(([category, result]) => (
-                <tr key={category}>
-                  <td>{category}</td>
-                  <td>{result.created}</td>
-                  <td>{result.updated}</td>
-                  <td>{result.skipped}</td>
-                  <td>{result.errors.length > 0 ? result.errors.join("; ") : "—"}</td>
+          <div className="dms-scroll-x">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>{t("configPackages.resultCategory")}</th>
+                  <th>{t("configPackages.resultCreated")}</th>
+                  <th>{t("configPackages.resultUpdated")}</th>
+                  <th>{t("configPackages.resultSkipped")}</th>
+                  <th>{t("configPackages.resultErrors")}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {Object.entries(importResult.result.results).map(([category, result]) => (
+                  <tr key={category}>
+                    <td>{category}</td>
+                    <td>{result.created}</td>
+                    <td>{result.updated}</td>
+                    <td>{result.skipped}</td>
+                    <td>{result.errors.length > 0 ? result.errors.join("; ") : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>

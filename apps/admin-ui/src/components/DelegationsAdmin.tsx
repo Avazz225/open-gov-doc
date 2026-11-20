@@ -125,51 +125,53 @@ export function DelegationsAdmin() {
       {visibleDelegations.length === 0 ? (
         <p className="italic opacity-70">{t("delegationsAdmin.empty")}</p>
       ) : (
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>{t("delegationsAdmin.delegator")}</th>
-              <th>{t("delegationsAdmin.deputy")}</th>
-              <th>{t("delegationsAdmin.origin")}</th>
-              <th>{t("delegationsAdmin.startsAt")}</th>
-              <th>{t("delegationsAdmin.endsAt")}</th>
-              <th>{t("delegationsAdmin.status")}</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {visibleDelegations.map((delegation) => (
-              <tr key={delegation.id}>
-                <td>{delegation.delegator_principal_id}</td>
-                <td>{delegation.deputy_principal_id}</td>
-                <td>{originLabel(t, delegation)}</td>
-                <td className="whitespace-nowrap">{new Date(delegation.starts_at).toLocaleString()}</td>
-                <td className="whitespace-nowrap">{new Date(delegation.ends_at).toLocaleString()}</td>
-                <td>
-                  <span
-                    className={`badge ${isActive(delegation) ? "ok" : "down"}`}
-                  >
-                    {statusLabel(t, delegation)}
-                  </span>
-                </td>
-                <td>
-                  {isActive(delegation) && (
-                    <button
-                      type="button"
-                      className={secondaryBtn}
-                      onClick={() => handleRevoke(delegation)}
-                      disabled={revokingId !== null}
-                    >
-                      {revokingId === delegation.id
-                        ? t("common.loading")
-                        : t("delegationsAdmin.revoke")}
-                    </button>
-                  )}
-                </td>
+        <div className="dms-scroll-x">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>{t("delegationsAdmin.delegator")}</th>
+                <th>{t("delegationsAdmin.deputy")}</th>
+                <th>{t("delegationsAdmin.origin")}</th>
+                <th>{t("delegationsAdmin.startsAt")}</th>
+                <th>{t("delegationsAdmin.endsAt")}</th>
+                <th>{t("delegationsAdmin.status")}</th>
+                <th />
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {visibleDelegations.map((delegation) => (
+                <tr key={delegation.id}>
+                  <td>{delegation.delegator_principal_id}</td>
+                  <td>{delegation.deputy_principal_id}</td>
+                  <td>{originLabel(t, delegation)}</td>
+                  <td className="whitespace-nowrap">{new Date(delegation.starts_at).toLocaleString()}</td>
+                  <td className="whitespace-nowrap">{new Date(delegation.ends_at).toLocaleString()}</td>
+                  <td>
+                    <span
+                      className={`badge ${isActive(delegation) ? "ok" : "down"}`}
+                    >
+                      {statusLabel(t, delegation)}
+                    </span>
+                  </td>
+                  <td>
+                    {isActive(delegation) && (
+                      <button
+                        type="button"
+                        className={secondaryBtn}
+                        onClick={() => handleRevoke(delegation)}
+                        disabled={revokingId !== null}
+                      >
+                        {revokingId === delegation.id
+                          ? t("common.loading")
+                          : t("delegationsAdmin.revoke")}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
