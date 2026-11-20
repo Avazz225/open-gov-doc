@@ -256,10 +256,11 @@ async def test_handle_inbound_xdomea_handoff_imports_and_sends_confirmation(
         package_base64=base64.b64encode(package_bytes).decode("ascii"),
     )
 
-    async def fake_list_installations(self):
-        return [origin]
+    # The inbound path resolves the origin by id since P84-S2.
+    async def fake_get_installation(self, installation_id):
+        return origin if installation_id == origin["id"] else None
 
-    monkeypatch.setattr(FederationHubClient, "list_installations", fake_list_installations)
+    monkeypatch.setattr(FederationHubClient, "get_installation", fake_get_installation)
 
     sent = {}
 
@@ -362,10 +363,11 @@ async def test_handle_inbound_xdomea_handoff_sends_failure_confirmation_on_impor
         identity=identity, origin=origin, package_base64=base64.b64encode(b"x").decode("ascii")
     )
 
-    async def fake_list_installations(self):
-        return [origin]
+    # The inbound path resolves the origin by id since P84-S2.
+    async def fake_get_installation(self, installation_id):
+        return origin if installation_id == origin["id"] else None
 
-    monkeypatch.setattr(FederationHubClient, "list_installations", fake_list_installations)
+    monkeypatch.setattr(FederationHubClient, "get_installation", fake_get_installation)
 
     sent = {}
 

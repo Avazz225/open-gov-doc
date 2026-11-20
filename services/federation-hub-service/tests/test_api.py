@@ -111,6 +111,18 @@ def test_ca_certificate_endpoint_returns_a_valid_self_signed_certificate(client)
     assert second_response.json()["ca_certificate_pem"] == ca_certificate_pem
 
 
+def test_get_installation_by_id(client):
+    """P84-S2: single lookup by id, independent of the list's paging."""
+    installation, _ = register_installation(client)
+
+    response = client.get(f"/installations/{installation['id']}")
+    assert response.status_code == 200
+    assert response.json()["id"] == installation["id"]
+    assert response.json()["public_key_pem"] == installation["public_key_pem"]
+
+    assert client.get("/installations/no-such-installation").status_code == 404
+
+
 def test_register_installation_response_includes_a_valid_certificate(client):
     from cryptography import x509
 

@@ -962,8 +962,12 @@ async def federated_search_inbound(request: Request) -> list[dict]:
     body = await request.body()
     caller_installation_id = request.headers.get("X-Installation-Id", "")
     signature = request.headers.get("X-Installation-Signature", "")
-    installations = await app.state.federation_hub_client.list_installations()
-    caller = next((inst for inst in installations if inst["id"] == caller_installation_id), None)
+    # By id (P84-S2): the hub's list is paged, a list search missed callers.
+    caller = (
+        await app.state.federation_hub_client.get_installation(caller_installation_id)
+        if caller_installation_id
+        else None
+    )
     if (
         caller is None
         or caller.get("revoked_at") is not None

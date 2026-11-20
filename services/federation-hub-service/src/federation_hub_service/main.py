@@ -430,6 +430,24 @@ async def list_installations(
     return await repository.list_installations(session, limit=limit, offset=offset)
 
 
+@app.get("/installations/{installation_id}", response_model=InstallationOut)
+async def get_installation(
+    installation_id: str, session: AsyncSession = Depends(get_session)
+) -> InstallationOut:
+    """One installation by id (P84-S2), open like the list above. Callers
+    that need a single, known installation (a federated task's target, a
+    handover's origin, a signed request's caller) used to fetch the list
+    and search it - but the list is paged (default 100, ordered by id), so
+    on a hub with more installations some targets were never found. That
+    also made workflow-service's federation test flaky in full runs."""
+    installation = await repository.get_installation(session, installation_id)
+    if installation is None:
+        raise HTTPException(
+            status_code=404, detail=f"installation_id {installation_id!r} unbekannt"
+        )
+    return installation
+
+
 @app.delete("/installations/{installation_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def deregister_installation(
     installation_id: str,

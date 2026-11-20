@@ -641,8 +641,8 @@ async def _dispatch_outbound_federated_task(
         )
         return
 
-    installations = await app.state.federation_client.list_installations()
-    target = next((i for i in installations if i["id"] == target_installation_id), None)
+    # By id (P84-S2): the hub's list is paged, a list search missed targets.
+    target = await app.state.federation_client.get_installation(target_installation_id)
     if target is None:
         logger.warning(
             "federated_task_unknown_target",
@@ -741,8 +741,7 @@ async def _dispatch_federated_return_task(
         )
         return
 
-    installations = await app.state.federation_client.list_installations()
-    origin = next((i for i in installations if i["id"] == inbound.origin_installation_id), None)
+    origin = await app.state.federation_client.get_installation(inbound.origin_installation_id)
     if origin is None:
         logger.warning(
             "federated_return_task_unknown_origin",
@@ -847,7 +846,9 @@ async def _is_active_superuser(x_dms_principal: str) -> bool:
     try:
         active, superuser_principal_id = await app.state.auth_client.get_active_superuser()
     except Exception:
-        logger.warning("superuser_status_check_failed - auth-service nicht erreichbar?", exc_info=True)
+        logger.warning(
+            "superuser_status_check_failed - auth-service nicht erreichbar?", exc_info=True
+        )
         return False
     return active and bool(x_dms_principal) and superuser_principal_id == x_dms_principal
 
@@ -2222,8 +2223,7 @@ async def _handle_inbound_xdomea_handoff(
     )
     await session.commit()
 
-    installations = await app.state.federation_client.list_installations()
-    origin = next((i for i in installations if i["id"] == payload["from_installation_id"]), None)
+    origin = await app.state.federation_client.get_installation(payload["from_installation_id"])
     if origin is not None:
         encrypted_result = federation_crypto.encrypt_for(
             origin["public_key_pem"].encode("utf-8"), result_dict

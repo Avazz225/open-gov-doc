@@ -3472,13 +3472,26 @@ regression runs at each phase close.
     - the other four suites green (32/32 overall);
     - ruff clean for permission-service (format also fixed its old `logger.warning` line);
     - image rebuilt.
-- **P84-S2 — Federation installation lookup by id.**
-  - **Hub:** new `GET /installations/{installation_id}`, open like the list, plus a paging client helper
-    for the callers that really need the full list.
-  - **Callers:** workflow-service `_dispatch_outbound_federated_task` and auth-service's caller lookup use
-    the single-id call; auth-service `eligible_peers` pages.
-  - **Tests:** regression tests with more than 100 installations. This removes the "flaky"
-    `test_dispatch_records_delivery_failed_for_unreachable_target` at its root.
+- **P84-S2 — Federation installation lookup by id.** ✅ **Done.**
+  - **Hub:** `GET /installations/{installation_id}` (open, `404` if unknown).
+  - **Clients (workflow-service, auth-service):** both got `get_installation()`, and their
+    `list_installations()` now walks every page (`limit`/`offset`, page size 100).
+  - **Callers by id:** workflow-service dispatch (target), the return path and the result path (origin),
+    and auth-service's signed inbound directory search (caller).
+  - **Callers on the full list:** the process-designer address-book proxy and `eligible_peers` (both used
+    to see only the first 100).
+  - **Root cause:** the "flaky" `test_dispatch_records_delivery_failed_for_unreachable_target` failed
+    once the full run had registered more than 100 installations, and a random target id sorted past
+    position 100. It is now 240/240 in workflow-service.
+  - **Tests:**
+    - hub 91 (+1 get-by-id);
+    - workflow-service 240 (+2 paging/by-id with a mock hub of 237 installations);
+    - auth-service 164 (+2 same);
+    - the xdomea inbound tests now mock `get_installation`;
+    - `test_workflow_service_registers_with_federation_hub` compares against the whole list. It had
+      relied on the old first-page truncation, and failing on the fix confirmed it.
+  - **Checks:** ruff clean for all three services; images rebuilt; process-designer e2e 7/7 against the
+    new workflow-service.
 - **P84-S3 — Infra ports to loopback** (ADR 0230 follow-up).
   - Bind Postgres, Keycloak, NATS, MinIO, Azurite, Mailpit, Redis, Prometheus, cAdvisor and Grafana in
     `infra/docker-compose.yml` to `127.0.0.1`, like the 31 backend services already are.

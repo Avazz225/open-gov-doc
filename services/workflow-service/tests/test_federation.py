@@ -169,8 +169,10 @@ def test_verify_body_rejects_tampered_body():
 
 
 async def test_workflow_service_registers_with_federation_hub(client):
+    # The whole address book, not the hub's default first page of 100: since
+    # P84-S2 the proxy walks every page, so a bare GET would now be a subset.
     async with httpx.AsyncClient(base_url=FEDERATION_HUB_SERVICE_URL) as hub:
-        installations = (await hub.get("/installations")).json()
+        installations = (await hub.get("/installations", params={"limit": 100_000})).json()
     assert len(installations) >= 1
 
     response = client.get("/federation/installations")

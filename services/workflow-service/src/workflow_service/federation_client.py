@@ -1,8 +1,12 @@
 import json
+from urllib.parse import quote
 
 import httpx
 
 from workflow_service import federation_crypto
+
+# Page size for walking the hub's paged installation list (P84-S2).
+INSTALLATIONS_PAGE_SIZE = 100
 
 
 def _signed_headers(installation_id: str, private_key_pem: bytes, body: bytes) -> dict[str, str]:
@@ -93,10 +97,32 @@ class FederationHubClient:
         response.raise_for_status()
         return response.json()
 
-    async def list_installations(self) -> list[dict]:
-        response = await self._client.get("/installations")
+    async def get_installation(self, installation_id: str) -> dict | None:
+        """One installation by id, ``None`` if the hub doesn't know it
+        (P84-S2). Use this, not the list, to resolve a single known
+        installation - the list is paged on the hub."""
+        response = await self._client.get(f"/installations/{quote(installation_id, safe='')}")
+        if response.status_code == 404:
+            return None
         response.raise_for_status()
         return response.json()
+
+    async def list_installations(self) -> list[dict]:
+        """The hub's whole address book. The hub pages its list (default 100,
+        ordered by id); until P84-S2 this read only the first page, so
+        installations sorting past position 100 were silently missing."""
+        installations: list[dict] = []
+        offset = 0
+        while True:
+            response = await self._client.get(
+                "/installations", params={"limit": INSTALLATIONS_PAGE_SIZE, "offset": offset}
+            )
+            response.raise_for_status()
+            page = response.json()
+            installations.extend(page)
+            if len(page) < INSTALLATIONS_PAGE_SIZE:
+                return installations
+            offset += INSTALLATIONS_PAGE_SIZE
 
     async def create_handover(
         self,

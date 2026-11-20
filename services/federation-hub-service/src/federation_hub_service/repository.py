@@ -212,6 +212,11 @@ async def revoke_installation(
     return installation
 
 
+async def get_installation(session: AsyncSession, installation_id: str) -> Installation | None:
+    """P84-S2 - see `main.get_installation`."""
+    return await session.get(Installation, installation_id)
+
+
 async def list_installations(
     session: AsyncSession, *, limit: int = 100, offset: int = 0
 ) -> list[Installation]:
