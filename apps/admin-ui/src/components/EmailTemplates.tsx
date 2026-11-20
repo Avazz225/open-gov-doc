@@ -125,9 +125,9 @@ export function EmailTemplates() {
   const selectedUseCase = useCases.find((entry) => entry.use_case === formUseCase);
 
   const primaryBtn =
-    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap";
   const secondaryBtn =
-    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap";
   const fieldInput =
     "box-border w-full rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg disabled:cursor-not-allowed disabled:opacity-60";
 
@@ -160,7 +160,7 @@ export function EmailTemplates() {
                     <td>{template.use_case}</td>
                     <td>{template.recipient_domain_pattern ?? t("emailTemplates.domainCatchall")}</td>
                     <td>{template.subject_template}</td>
-                    <td>{new Date(template.updated_at).toLocaleString()}</td>
+                    <td className="whitespace-nowrap">{new Date(template.updated_at).toLocaleString()}</td>
                     <td className="flex gap-3">
                       <button type="button" onClick={() => handleEdit(template)} className={secondaryBtn}>
                         {t("emailTemplates.edit")}

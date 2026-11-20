@@ -145,6 +145,38 @@ Tests: `tests/login-illustration.test.tsx` covers the gating rules (narrow, no `
 dark, a runtime switch to high contrast), with `next/dynamic` stubbed. The illustration's own motion
 and framing are verified with Stageshow's `film.mjs --gate`, not Vitest.
 
+## Empty-state illustrations (Phase 83 Session 4, [ADR 0237](../adr/0237-stageshow-adoption-illustrations-and-craft-lens.md))
+
+Two empty states show a small still above their unchanged sentence:
+- **Empty preview pane** ("Kein Dokument ausgewählt."): a selected explorer row and the document page it
+  opens (`libs/dms-showcase/user-ui-empty-preview`).
+- **Empty "Vorlagen"** ("Noch keine Vorlagen."): a folder subtree and the structure template captured
+  from it, drawn as dashed outlines because templates capture structure only
+  (`libs/dms-showcase/user-ui-empty-vorlagen`).
+
+Both are wordless gray art with one accent. Inside a functional pane, a real filename could read as if a
+document were actually there; the sentence below carries the meaning. Both are `unframed`, meaning whole
+objects, centered, with no crop: dockview panes are user-resizable, and a crop there would read as a
+rendering fault.
+
+The host is `src/components/EmptyStateIllustration.tsx` (`<EmptyState kind="preview" | "vorlagen">`
+wrapping the pane's own sentence):
+- It is gated by the width available **inside the pane** (`ResizeObserver` on the empty-state block),
+  not the viewport. From 304px the 320px stage renders at 0.95 scale or more, so it stays crisp;
+  narrower, only the sentence shows and the module is never loaded. The picture's box is reserved
+  (aspect ratio) while the module loads, so the sentence never jumps.
+- The metadata pane under the preview uses the same `<EmptyState>` without a picture, so the two stacked
+  "Kein Dokument ausgewählt." read as one family (centered).
+- It renders nothing in high contrast.
+- The picture is `aria-hidden`. The sentence is the only text, unchanged.
+
+The resolved-theme hook moved to `src/lib/illustration-theme.ts`, shared with `LoginIllustration`.
+`tests/empty-state-illustration.test.tsx` covers the rules.
+
+Deliberately **not** illustrated: the other empty states (metadata pane, Papierkorb, Favoriten, …).
+They keep their sentence only, because illustrating every empty state is the "too much" failure mode at
+page level.
+
 ## Preview (2.4/3.9, connected to the Rendering Service since P5-S2, additionally to the OCR Service since P5-S3, additionally client-side direct text display since P5d-S2, additionally `substitute_text` rendition display + multi-page navigation since a bugfixing pass after P7-S0, additionally native image/PDF/HTML preview + Word-like view for Office documents since a further user-feedback pass, additionally engine-dependent PDF branching + separate image text extract since an OCR user-feedback pass)
 
 `components/PreviewPane.tsx` first loads the version list (`listDocumentVersions()`) when a document is opened (`useEffect`, dependency `activeDocument?.id`) and sets the selection to `current_version_number`; a second effect (dependency `[activeDocument?.id, selectedVersion, versions]`) decides based on the `content_type` of the selected version (from the same version list, a server-side-sniffed value since P5d-S1 instead of a client header):

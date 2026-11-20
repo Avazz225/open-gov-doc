@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "@/i18n";
+import { EmptyState } from "./EmptyStateIllustration";
 import {
   ApiError,
   applyFolderTemplate,
@@ -110,9 +111,9 @@ export function VorlagenPane({ token, createdBy }: { token: string; createdBy: s
   }
 
   const primaryBtn =
-    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap";
   const secondaryBtn =
-    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap";
   const fieldInput =
     "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
 
@@ -168,7 +169,10 @@ export function VorlagenPane({ token, createdBy }: { token: string; createdBy: s
       {isLoading ? (
         <p>{t("common.loading")}</p>
       ) : templates.length === 0 ? (
-        <p className="italic opacity-70">{t("vorlagen.empty")}</p>
+        // P83-S4: empty-state picture above the unchanged sentence (ADR 0237)
+        <EmptyState kind="vorlagen">
+          <p className="italic opacity-70">{t("vorlagen.empty")}</p>
+        </EmptyState>
       ) : (
         <ul className="entry-list">
           {templates.map((template) => (

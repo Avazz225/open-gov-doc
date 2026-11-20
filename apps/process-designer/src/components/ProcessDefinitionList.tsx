@@ -97,7 +97,7 @@ export function ProcessDefinitionList() {
   }
 
   const secondaryBtn =
-    "rounded-md border border-border bg-hover-bg px-3 py-1 text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+    "rounded-md border border-border bg-hover-bg px-3 py-1 text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap";
   const th = "border-b border-border px-2 py-2 text-left";
   const td = "border-b border-border px-2 py-2 text-left";
 
@@ -139,7 +139,7 @@ export function ProcessDefinitionList() {
                   <td className={td}>{definition.name}</td>
                   <td className={td}>{definition.version}</td>
                   <td className={td}>{definition.bpmn_process_id}</td>
-                  <td className={td}>{new Date(definition.updated_at).toLocaleString()}</td>
+                  <td className={`${td} whitespace-nowrap`}>{new Date(definition.updated_at).toLocaleString()}</td>
                   <td className={`${td} flex gap-3`}>
                     <Link href={`/designer/?id=${definition.id}`}>
                       <button type="button" className={secondaryBtn}>

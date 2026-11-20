@@ -21,13 +21,13 @@ test("resolves the Office.js gate and reaches the login form", async ({ page }) 
   // Proves OfficeGate actually resolved past its loading state, not just
   // "didn't crash": RequireAuth (rendered as OfficeGate's `children`) only
   // ever reaches its login redirect once OfficeGate has stopped blocking.
-  await expect(page.getByRole("heading", { name: "Anmelden" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "OG Doc" })).toBeVisible();
   await expect(page.getByText("Add-in wird initialisiert...")).toHaveCount(0);
 });
 
 test("logs in and reaches the authenticated task-pane shell", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Anmelden" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "OG Doc" })).toBeVisible();
 
   await page.locator("#username").fill(TEST_USERNAME);
   await page.locator("#password").fill(TEST_PASSWORD);

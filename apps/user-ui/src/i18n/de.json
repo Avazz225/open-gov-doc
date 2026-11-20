@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "OG Doc",
-    "description": "Dokumenten-Navigation, Upload/Download (User-UI, Konzept 8)"
+    "description": "Dokumenten-Navigation, Upload/Download (User-UI)"
   },
   "common": {
     "logout": "Abmelden",
@@ -18,7 +18,7 @@
     "text": "Systemweite Notfallsperre aktiv - nur der aktivierte Superuser ist handlungsfähig."
   },
   "login": {
-    "heading": "Anmelden",
+    "heading": "OG Doc",
     "username": "Benutzername",
     "password": "Passwort",
     "submit": "Anmelden",
@@ -265,7 +265,7 @@
   "recordsQuarantineOverview": {
     "paneLabel": "Schriftgutquarantäne (installationsweit)",
     "heading": "Schriftgutquarantäne (installationsweit)",
-    "hint": "Alle aktuell unter Schriftgutquarantäne stehenden Dokumente über die gesamte Installation hinweg (14.2). Neu unter Quarantäne stellen geschieht weiterhin am jeweiligen Dokument selbst.",
+    "hint": "Alle aktuell unter Schriftgutquarantäne stehenden Dokumente über die gesamte Installation hinweg. Neu unter Quarantäne stellen geschieht weiterhin am jeweiligen Dokument selbst.",
     "empty": "Aktuell ist kein Dokument unter Quarantäne.",
     "documentGone": "Dokument nicht mehr abrufbar",
     "setBy": "gesetzt von {setBy}",
@@ -291,7 +291,7 @@
   "approvals": {
     "paneLabel": "Genehmigungen",
     "heading": "Offene Löschanträge",
-    "hint": "Vier-Augen-Prinzip für Löschanträge (5.2, seit P7-S1c) - die genehmigende Person darf nicht mit der antragstellenden Person identisch sein.",
+    "hint": "Vier-Augen-Prinzip für Löschanträge - die genehmigende Person darf nicht mit der antragstellenden Person identisch sein.",
     "empty": "Keine offenen Löschanträge.",
     "loadError": "Löschanträge konnten nicht geladen werden",
     "decisionError": "Entscheidung konnte nicht gespeichert werden",
@@ -305,7 +305,7 @@
   "favorites": {
     "paneLabel": "Favoriten",
     "heading": "Favoriten/Merkliste",
-    "hint": "Schnelles Wiederfinden häufig gebrauchter Dokumente, Ordner und Umlaufmappen (seit P7-S1d, Umlaufmappen seit Phase 45 Session 2).",
+    "hint": "Schnelles Wiederfinden häufig gebrauchter Dokumente, Ordner und Umlaufmappen.",
     "empty": "Noch keine Favoriten.",
     "loadError": "Favoriten konnten nicht geladen werden",
     "removeError": "Favorit konnte nicht entfernt werden",
@@ -319,7 +319,7 @@
   "teamspaces": {
     "paneLabel": "Team-Arbeitsbereiche",
     "heading": "Team-Arbeitsbereiche",
-    "hint": "Selbstverwaltete, dauerhafte Gruppenbereiche - eigene Ordner/Dokumente, gemeinsame Termine und Kontakte (2.5).",
+    "hint": "Selbstverwaltete, dauerhafte Gruppenbereiche - eigene Ordner/Dokumente, gemeinsame Termine und Kontakte.",
     "empty": "Noch keine Team-Arbeitsbereiche - lege unten den ersten an.",
     "loadError": "Team-Arbeitsbereiche konnten nicht geladen werden",
     "createError": "Anlegen fehlgeschlagen",
@@ -367,7 +367,7 @@
     "openButton": "Sammelbearbeitung",
     "clearSelection": "Auswahl aufheben",
     "heading": "Sammelbearbeitung ({count} Objekte)",
-    "hint": "Nur ausgefüllte Felder werden übernommen - leer gelassene Felder bleiben je Objekt unverändert (8, 4.5).",
+    "hint": "Nur ausgefüllte Felder werden übernommen - leer gelassene Felder bleiben je Objekt unverändert.",
     "leaveBlankPlaceholder": "unverändert lassen",
     "notHomogeneous": "Nur Dokumente ODER nur Ordner desselben Objekttyps können gemeinsam bearbeitet werden.",
     "noObjectType": "Die ausgewählten Objekte haben keinen Objekttyp - keine gemeinsamen Attribute zum Bearbeiten.",
@@ -380,7 +380,7 @@
   "trash": {
     "paneLabel": "Papierkorb",
     "heading": "Papierkorb",
-    "hint": "Zur Löschung markierte Dokumente und Ordner (5.2) - erst nach endgültiger Löschung sind sie unwiederbringlich weg.",
+    "hint": "Zur Löschung markierte Dokumente und Ordner - erst nach endgültiger Löschung sind sie unwiederbringlich weg.",
     "scopeLabel": "Papierkorb-Ansicht",
     "scopePersonal": "Eigene Löschmarkierungen",
     "scopeAdmin": "Vollständiger Papierkorb",
@@ -398,7 +398,7 @@
   "quarantine": {
     "paneLabel": "Quarantäne",
     "heading": "Quarantäne",
-    "hint": "Uploads, die den verpflichtenden Virenscan nicht bestanden haben (10.3) - hier landen sie statt im regulären Bestand. Freigabe nach Klärung eines Fehlalarms legt das Dokument nachträglich an; endgültiges Löschen entfernt den Inhalt unwiderruflich.",
+    "hint": "Uploads, die den verpflichtenden Virenscan nicht bestanden haben - hier landen sie statt im regulären Bestand. Freigabe nach Klärung eines Fehlalarms legt das Dokument nachträglich an; endgültiges Löschen entfernt den Inhalt unwiderruflich.",
     "release": "Freigeben",
     "releaseTitleLabel": "Titel",
     "releaseFolderLabel": "Zielordner (optional)",
@@ -415,7 +415,7 @@
   "poststelle": {
     "paneLabel": "Posteingang/Postausgang",
     "heading": "Posteingang/Postausgang",
-    "hint": "Externe Korrespondenz, die noch keinem Vorgang zugeordnet ist (2.5) - nach Sichtung wandert ein Element in den Aktenplan oder eine Umlaufmappe.",
+    "hint": "Externe Korrespondenz, die noch keinem Vorgang zugeordnet ist - nach Sichtung wandert ein Element in den Aktenplan oder eine Umlaufmappe.",
     "tabLabel": "Ansicht",
     "inbox": "Posteingang",
     "outbox": "Postausgang",
@@ -457,7 +457,7 @@
     "routeSubmit": "Weiterleiten",
     "routeLogEntry": "{from} → {to} (von {by})",
     "postbuch": "Postbuch",
-    "postbuchHint": "Durchsuchbares Register jeder Weiterleitung zwischen Postfächern (14.2) - über alle Nachrichten hinweg, nicht nur die einer einzelnen.",
+    "postbuchHint": "Durchsuchbares Register jeder Weiterleitung zwischen Postfächern - über alle Nachrichten hinweg, nicht nur die einer einzelnen.",
     "postbuchEmpty": "Noch keine Weiterleitungen.",
     "postbuchLoadError": "Postbuch konnte nicht geladen werden",
     "postbuchMailboxLabel": "Postfach",
@@ -471,7 +471,7 @@
   "kontakte": {
     "paneLabel": "Kontakte",
     "heading": "Kontakte",
-    "hint": "Verzeichnis zum Auffinden anderer Mitarbeitender (2.5) - primär innerhalb dieser Installation, optional installationsübergreifend, sofern konfiguriert.",
+    "hint": "Verzeichnis zum Auffinden anderer Mitarbeitender - primär innerhalb dieser Installation, optional installationsübergreifend, sofern konfiguriert.",
     "searchPlaceholder": "Name, Benutzername oder E-Mail",
     "searchLabel": "Suche",
     "search": "Suchen",
@@ -483,7 +483,7 @@
   "aussonderung": {
     "paneLabel": "Aussonderung",
     "heading": "Aussonderung",
-    "hint": "Bereits ausgesonderte, aber noch innerhalb der Übergangsfrist befindliche Akten/Umlaufmappen (5.6) - hier durchsuch-/einsehbar, statt nur indirekt über Audit-Trail-Verweise auffindbar zu sein. Nach Ablauf der Übergangsfrist verschwindet ein Dokument automatisch aus dieser Sicht.",
+    "hint": "Bereits ausgesonderte, aber noch innerhalb der Übergangsfrist befindliche Akten/Umlaufmappen - hier durchsuch-/einsehbar, statt nur indirekt über Audit-Trail-Verweise auffindbar zu sein. Nach Ablauf der Übergangsfrist verschwindet ein Dokument automatisch aus dieser Sicht.",
     "searchPlaceholder": "Titel oder Kennzeichen/Vorgangsnummer",
     "searchLabel": "Suche",
     "search": "Suchen",
@@ -501,7 +501,7 @@
   "cases": {
     "paneLabel": "Umlaufmappen",
     "heading": "Umlaufmappen",
-    "hint": "Übersicht über alle Umlaufmappen (2.3) - Auswahl einer Zeile öffnet die Detailansicht mit ihren Dokumenten sowie dem Export/Import für die Behörden-/Justizübergabe (14.2).",
+    "hint": "Übersicht über alle Umlaufmappen - Auswahl einer Zeile öffnet die Detailansicht mit ihren Dokumenten sowie dem Export/Import für die Behörden-/Justizübergabe.",
     "statusFilterLabel": "Status",
     "statusAll": "Alle",
     "statusOpen": "Offen",
@@ -552,10 +552,10 @@
     "paneLabel": "Hand-Ordner/Arbeitsvorrat",
     "heading": "Hand-Ordner/Arbeitsvorrat (installationsweit)",
     "referencesHeading": "Hand-Ordner-Referenzen",
-    "referencesHint": "Alle Dokument-Referenzen in Hand-Ordnern (14.2) über die gesamte Installation hinweg - nur sichtbar für Ordner, auf die eine Leseberechtigung besteht.",
+    "referencesHint": "Alle Dokument-Referenzen in Hand-Ordnern über die gesamte Installation hinweg - nur sichtbar für Ordner, auf die eine Leseberechtigung besteht.",
     "referencesEmpty": "Keine (für Sie sichtbaren) Hand-Ordner-Referenzen vorhanden.",
     "workTrayHeading": "Arbeitsvorrat (unregistrierte Dokumente)",
-    "workTrayHint": "Noch unregistrierte Entwurfs-Dokumente (14.2) über alle Ordner hinweg - z. B. in einem Team-Arbeitsbereich als Arbeitsvorrat genutzt.",
+    "workTrayHint": "Noch unregistrierte Entwurfs-Dokumente über alle Ordner hinweg - z. B. in einem Team-Arbeitsbereich als Arbeitsvorrat genutzt.",
     "workTrayEmpty": "Keine unregistrierten Dokumente vorhanden.",
     "folderColumn": "Ordner",
     "documentColumn": "Dokument",
@@ -566,7 +566,7 @@
   "vorlagen": {
     "paneLabel": "Vorlagen",
     "heading": "Vorlagen",
-    "hint": "Struktur-Vorlagen (2.5/7.3, z. B. Aktenplan-Rohbau) - ein Ordner-Teilbaum als benannte, wiederverwendbare Vorlage. Erfasst nur Struktur (Namen, Objekttypen), keine Attributwerte - ein Rohbau wird nach dem Anwenden erst befüllt.",
+    "hint": "Struktur-Vorlagen (z. B. Aktenplan-Rohbau) - ein Ordner-Teilbaum als benannte, wiederverwendbare Vorlage. Erfasst nur Struktur (Namen, Objekttypen), keine Attributwerte - ein Rohbau wird nach dem Anwenden erst befüllt.",
     "sourceFolderLabel": "Quellordner-ID",
     "sourceFolderPlaceholder": "Ordner-ID des zu erfassenden Teilbaums",
     "nameLabel": "Name",
@@ -595,7 +595,7 @@
   "delegations": {
     "paneLabel": "Stellvertretung",
     "heading": "Stellvertretung bei Abwesenheit",
-    "hint": "Hinterlege eine oder mehrere Personen als Stellvertretung für einen befristeten Zeitraum (4.4a) - eine Stellvertretung handelt weiterhin unter dem eigenen Konto, kein Einloggen als eine andere Person.",
+    "hint": "Hinterlege eine oder mehrere Personen als Stellvertretung für einen befristeten Zeitraum - eine Stellvertretung handelt weiterhin unter dem eigenen Konto, kein Einloggen als eine andere Person.",
     "loadError": "Stellvertretungen konnten nicht geladen werden",
     "createError": "Anlegen fehlgeschlagen - Nutzername unbekannt oder ungültiger Zeitraum",
     "revokeError": "Widerrufen fehlgeschlagen",

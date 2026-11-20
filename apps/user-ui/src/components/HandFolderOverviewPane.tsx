@@ -95,7 +95,7 @@ export function HandFolderOverviewPane({
   }
 
   const secondaryBtn =
-    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap";
 
   return (
     <section className="hand-folder-overview-pane" aria-label={t("handFolderOverview.paneLabel")}>
@@ -137,7 +137,7 @@ export function HandFolderOverviewPane({
                     </button>
                   </td>
                   <td>{ref.added_by}</td>
-                  <td>{new Date(ref.added_at).toLocaleString()}</td>
+                  <td className="whitespace-nowrap">{new Date(ref.added_at).toLocaleString()}</td>
                 </tr>
               ))}
             </tbody>

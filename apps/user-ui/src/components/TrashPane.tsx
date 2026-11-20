@@ -142,7 +142,7 @@ export function TrashPane({ token }: { token: string }) {
   const isEmpty = documents.length === 0 && folders.length === 0;
 
   const secondaryBtn =
-    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap";
 
   return (
     <section className="trash-pane" aria-label={t("trash.paneLabel")}>

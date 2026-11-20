@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "OG Doc Reviewer",
-    "description": "Approval tasks and four-eyes approvals (concept 8)"
+    "description": "Approval tasks and four-eyes approvals"
   },
   "common": {
     "logout": "Log out",
@@ -24,7 +24,7 @@
     "text": "System-wide emergency lockdown active - only the activated superuser can act."
   },
   "login": {
-    "heading": "Log in",
+    "heading": "OG Doc Reviewer",
     "username": "Username",
     "password": "Password",
     "submit": "Log in",
@@ -42,7 +42,7 @@
   },
   "taskList": {
     "heading": "Approval tasks",
-    "hint": "Manual/signature tasks ready across all running process instances (7.1). Federated steps (7.4) are not shown here - they complete automatically via the federation hub.",
+    "hint": "Manual/signature tasks ready across all running process instances. Federated steps are not shown here - they complete automatically via the federation hub.",
     "nameColumn": "Task",
     "processColumn": "Process",
     "businessKeyColumn": "Related object",
@@ -56,7 +56,7 @@
     "onBehalfOfLabel": "On behalf of",
     "onBehalfOfSelf": "For myself",
     "signatureIdLabel": "Signature ID",
-    "signatureIdHint": "Required for a signature task (3.10) - ID of a signature already created by the signature service, matching the document.",
+    "signatureIdHint": "Required for a signature task - ID of a signature already created by the signature service, matching the document.",
     "dataLabel": "Additional process data (JSON, optional)",
     "dataInvalid": "Not valid JSON",
     "submit": "Complete",
@@ -68,7 +68,7 @@
     "claimedByLabel": "Claimed by {principalId}",
     "releaseClaimButton": "Release",
     "grantFormLabel": "Grant access",
-    "grantHeading": "Org hierarchy: temporary access grant (14.2)",
+    "grantHeading": "Org hierarchy: temporary access grant",
     "grantKindLabel": "Grant to",
     "grantKindSupervisor": "Direct supervisor",
     "grantKindSupervisorChain": "Entire supervisor chain",
@@ -82,7 +82,7 @@
   },
   "teamTaskList": {
     "heading": "Team tasks",
-    "hint": "Open tasks claimed by direct reports, plus unclaimed tasks on instances a direct report created (14.2, org hierarchy). To act on someone's behalf, use the access grant/deputization within the tasks themselves - only assign/reassign is possible here, not completion.",
+    "hint": "Open tasks claimed by direct reports, plus unclaimed tasks on instances a direct report created (org hierarchy). To act on someone's behalf, use the access grant/deputization within the tasks themselves - only assign/reassign is possible here, not completion.",
     "claimedByColumn": "Claimed by",
     "statusColumn": "Status",
     "statusClaimed": "Claimed by {principalId}",
@@ -113,7 +113,7 @@
     "loadError": "Instance could not be loaded."
   },
   "approvalList": {
-    "heading": "Four-eyes approvals (4.3)",
+    "heading": "Four-eyes approvals",
     "hint": "Generic approval inbox across all action types - whoever made a request themselves cannot approve it.",
     "statusFilterLabel": "Status",
     "statusAll": "All",
@@ -141,7 +141,7 @@
   "cases": {
     "paneLabel": "Cases",
     "heading": "Cases",
-    "hint": "Overview of all case binders (14.2) - selecting a row opens the detail view with its documents.",
+    "hint": "Overview of all case binders - selecting a row opens the detail view with its documents.",
     "statusFilterLabel": "Status",
     "statusAll": "All",
     "statusOpen": "Open",

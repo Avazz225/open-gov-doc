@@ -12,8 +12,8 @@ second branch runs on into the fade.
 Signatur, Signatur erforderlich, Mindestniveau, AES.
 
 **Honest simplification:** bpmn-js renders the panel's own group chrome (Preact, English). The panel
-here shows its content in OG Doc's words. The group label "Signatur" has its own key until
-`signatureTask.groupLabel` loses "(3.10)" (P83-S1 punch list item 1).
+here shows its content in OG Doc's words. The group label "Signatur" now comes from the real
+`signatureTask.groupLabel` (P83-S5 stripped its "(3.10)"; until then it had its own key).
 
 **Gate** (CHROME_PATH = Chrome for Testing 153, ADR 0237 Decision 5): `--still --reduced` in light and dark gives `film: no-issues-detected`. No line is excused.
 

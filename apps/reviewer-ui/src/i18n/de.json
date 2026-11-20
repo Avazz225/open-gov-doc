@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "OG Doc Reviewer",
-    "description": "Freigabeaufgaben und Vier-Augen-Freigaben (Konzept 8)"
+    "description": "Freigabeaufgaben und Vier-Augen-Freigaben"
   },
   "common": {
     "logout": "Abmelden",
@@ -24,7 +24,7 @@
     "text": "Systemweite Notfallsperre aktiv - nur der aktivierte Superuser ist handlungsfähig."
   },
   "login": {
-    "heading": "Anmelden",
+    "heading": "OG Doc Reviewer",
     "username": "Benutzername",
     "password": "Passwort",
     "submit": "Anmelden",
@@ -42,7 +42,7 @@
   },
   "taskList": {
     "heading": "Freigabeaufgaben",
-    "hint": "Bereite Manual-/Signatur-Tasks über alle laufenden Prozessinstanzen hinweg (7.1). Föderierte Schritte (7.4) werden hier nicht angezeigt - sie schließen sich automatisch über den Federation Hub ab.",
+    "hint": "Bereite Manual-/Signatur-Tasks über alle laufenden Prozessinstanzen hinweg. Föderierte Schritte werden hier nicht angezeigt - sie schließen sich automatisch über den Federation Hub ab.",
     "nameColumn": "Aufgabe",
     "processColumn": "Prozess",
     "businessKeyColumn": "Bezugsobjekt",
@@ -56,7 +56,7 @@
     "onBehalfOfLabel": "Im Auftrag von",
     "onBehalfOfSelf": "Für mich selbst",
     "signatureIdLabel": "Signatur-ID",
-    "signatureIdHint": "Pflicht bei einem Signatur-Task (3.10) - ID einer beim Signature Service bereits erzeugten, zum Dokument passenden Signatur.",
+    "signatureIdHint": "Pflicht bei einem Signatur-Task - ID einer beim Signature Service bereits erzeugten, zum Dokument passenden Signatur.",
     "dataLabel": "Zusätzliche Prozessdaten (JSON, optional)",
     "dataInvalid": "Kein gültiges JSON",
     "submit": "Abschließen",
@@ -68,7 +68,7 @@
     "claimedByLabel": "Beansprucht von {principalId}",
     "releaseClaimButton": "Freigeben",
     "grantFormLabel": "Zugriffsfreigabe erteilen",
-    "grantHeading": "Organisations-Hierarchie: temporäre Zugriffsfreigabe (14.2)",
+    "grantHeading": "Organisations-Hierarchie: temporäre Zugriffsfreigabe",
     "grantKindLabel": "Freigabe für",
     "grantKindSupervisor": "Direkte/n Vorgesetzte/n",
     "grantKindSupervisorChain": "Gesamte Vorgesetztenkette",
@@ -82,7 +82,7 @@
   },
   "teamTaskList": {
     "heading": "Team-Aufgaben",
-    "hint": "Offene Aufgaben, die von direkt unterstellten Personen beansprucht wurden, sowie unbeanspruchte Aufgaben auf Vorgängen, die eine direkt unterstellte Person angelegt hat (14.2, Organisations-Hierarchie). Zum Bearbeiten im Auftrag siehe die Zugriffsfreigabe/Stellvertretung in den Aufgaben selbst - hier nur Zuweisen/Neu-Zuweisen möglich, kein Abschließen.",
+    "hint": "Offene Aufgaben, die von direkt unterstellten Personen beansprucht wurden, sowie unbeanspruchte Aufgaben auf Vorgängen, die eine direkt unterstellte Person angelegt hat (Organisations-Hierarchie). Zum Bearbeiten im Auftrag siehe die Zugriffsfreigabe/Stellvertretung in den Aufgaben selbst - hier nur Zuweisen/Neu-Zuweisen möglich, kein Abschließen.",
     "claimedByColumn": "Beansprucht von",
     "statusColumn": "Status",
     "statusClaimed": "Beansprucht von {principalId}",
@@ -113,7 +113,7 @@
     "loadError": "Vorgang konnte nicht geladen werden."
   },
   "approvalList": {
-    "heading": "Vier-Augen-Freigaben (4.3)",
+    "heading": "Vier-Augen-Freigaben",
     "hint": "Generische Freigabe-Inbox über alle Aktionstypen hinweg - wer eine Anfrage selbst gestellt hat, kann sie nicht auch freigeben.",
     "statusFilterLabel": "Status",
     "statusAll": "Alle",
@@ -141,7 +141,7 @@
   "cases": {
     "paneLabel": "Vorgänge",
     "heading": "Vorgänge",
-    "hint": "Übersicht über alle Umlaufmappen (14.2) - Auswahl einer Zeile öffnet die Detailansicht mit ihren Dokumenten.",
+    "hint": "Übersicht über alle Umlaufmappen - Auswahl einer Zeile öffnet die Detailansicht mit ihren Dokumenten.",
     "statusFilterLabel": "Status",
     "statusAll": "Alle",
     "statusOpen": "Offen",

@@ -24,9 +24,9 @@ import {
 import { useAuth } from "@/lib/auth-context";
 
 const primaryBtn =
-  "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap";
 const secondaryBtn =
-  "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+  "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap";
 const fieldInput =
   "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
 
@@ -313,7 +313,7 @@ function StorageUsageSection({ token }: { token: string }) {
               <tr key={entry.backend}>
                 <td>{entry.backend}</td>
                 <td>{entry.object_count}</td>
-                <td>{entry.total_size_bytes.toLocaleString()}</td>
+                <td className="whitespace-nowrap">{entry.total_size_bytes.toLocaleString()}</td>
               </tr>
             ))}
           </tbody>
@@ -528,7 +528,7 @@ function ReportScheduleSection({ token }: { token: string }) {
                 <td>{schedule.format}</td>
                 <td>{schedule.frequency}</td>
                 <td>{schedule.recipient_email}</td>
-                <td>{new Date(schedule.next_run_at).toLocaleString()}</td>
+                <td className="whitespace-nowrap">{new Date(schedule.next_run_at).toLocaleString()}</td>
                 <td>
                   {schedule.last_status == null ? (
                     <span className="text-sm opacity-80">{t("reports.lastStatusNeverRun")}</span>

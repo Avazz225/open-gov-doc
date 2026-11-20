@@ -67,3 +67,18 @@ describe("OfficeGate host-locale detection", () => {
     expect(screen.getByTestId("i18n-locale").textContent).toBe("de");
   });
 });
+
+// P83-S5: outside Word, office.js resolves onReady() without a host - the
+// gate shows a hint instead of rendering a task pane that would fail.
+describe("OfficeGate outside an Office client", () => {
+  it("shows the not-in-Word hint and never renders the children", async () => {
+    installOfficeMock({ displayLanguage: "de-DE" });
+    (globalThis as unknown as { Office: { onReady: () => Promise<unknown> } }).Office.onReady = () =>
+      Promise.resolve({ host: null, platform: null });
+
+    renderGated();
+
+    expect(await screen.findByRole("status")).toHaveTextContent("nur innerhalb von Microsoft Word");
+    expect(screen.queryByTestId("context-locale")).toBeNull();
+  });
+});

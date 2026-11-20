@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { useI18n } from "@/i18n";
+import { EmptyState } from "./EmptyStateIllustration";
 import {
   ApiError,
   type DocumentSummary,
@@ -114,7 +115,11 @@ export function MetadataPanel({
   if (!activeDocument) {
     return (
       <section className="metadata-panel" aria-label={t("metadata.paneLabel")}>
-        <p className="italic opacity-70">{t("metadata.noSelection")}</p>
+        {/* P83-S4: the same centered empty state as the preview pane above
+            it, without a picture (one illustrated empty state per screen) */}
+        <EmptyState>
+          <p className="italic opacity-70">{t("metadata.noSelection")}</p>
+        </EmptyState>
       </section>
     );
   }
@@ -166,9 +171,9 @@ export function MetadataPanel({
   }
 
   const primaryBtn =
-    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap";
   const secondaryBtn =
-    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap";
   const fieldInput =
     "box-border w-full rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg disabled:cursor-not-allowed disabled:opacity-60";
 

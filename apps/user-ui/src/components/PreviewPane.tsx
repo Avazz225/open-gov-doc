@@ -25,6 +25,7 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { RedactionModal } from "./RedactionModal";
+import { EmptyState } from "./EmptyStateIllustration";
 
 function triggerBrowserDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
@@ -626,7 +627,11 @@ export function PreviewPane({
   if (!activeDocument) {
     return (
       <section className="preview-pane" aria-label={t("preview.paneLabel")}>
-        <p className="italic opacity-70">{t("preview.noSelection")}</p>
+        {/* P83-S4: an empty-state picture above the sentence when the pane is
+            wide enough (ADR 0237) - the sentence itself is unchanged */}
+        <EmptyState kind="preview">
+          <p className="italic opacity-70">{t("preview.noSelection")}</p>
+        </EmptyState>
       </section>
     );
   }
@@ -642,9 +647,9 @@ export function PreviewPane({
   // screen-reader users. The title of the respective document makes each
   // instance distinguishable.
   const primaryBtn =
-    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap";
   const secondaryBtn =
-    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap";
   const fieldInput =
     "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
 

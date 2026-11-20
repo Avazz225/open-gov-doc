@@ -21,11 +21,19 @@ export function OfficeGate({ children }: { children: ReactNode }) {
   const { t } = useI18n();
   const { setLocale } = useLocale();
   const [ready, setReady] = useState(false);
+  const [notInHost, setNotInHost] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     waitForOfficeReady()
-      .then(() => {
+      .then(({ inHost }) => {
+        // Outside Word (a plain browser tab) office.js resolves without a
+        // host: show a hint instead of a task pane that would fail on its
+        // first Office.context call (P83-S5).
+        if (!inHost) {
+          setNotInHost(true);
+          return;
+        }
         setLocale(resolveLocaleFromDisplayLanguage(getHostDisplayLanguage()));
         setReady(true);
       })
@@ -36,6 +44,13 @@ export function OfficeGate({ children }: { children: ReactNode }) {
     return (
       <p className="p-3 text-sm text-danger" role="alert">
         {error}
+      </p>
+    );
+  }
+  if (notInHost) {
+    return (
+      <p className="p-3 text-sm" role="status">
+        {t("officeGate.notInHost")}
       </p>
     );
   }

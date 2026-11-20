@@ -101,9 +101,9 @@ export function ApprovalList() {
   }
 
   const secondaryBtn =
-    "rounded-md border border-border bg-hover-bg px-3 py-1 text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+    "rounded-md border border-border bg-hover-bg px-3 py-1 text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap";
   const primaryBtn =
-    "rounded-md border-0 bg-accent px-3 py-1 text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+    "rounded-md border-0 bg-accent px-3 py-1 text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap";
   const fieldInput =
     "box-border w-full rounded-md border border-border bg-bg px-2 py-1.5 text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
   const th = "border-b border-border px-2 py-2 text-left";
@@ -159,7 +159,7 @@ export function ApprovalList() {
                 <tr>
                   <td className={td}>{request.action_type}</td>
                   <td className={td}>{request.initiated_by}</td>
-                  <td className={td}>{new Date(request.created_at).toLocaleString("de-DE")}</td>
+                  <td className={`${td} whitespace-nowrap`}>{new Date(request.created_at).toLocaleString("de-DE")}</td>
                   <td className={td}>
                     <span className={statusBadgeClass(request.status)}>
                       {t(`approvalList.status${request.status[0].toUpperCase()}${request.status.slice(1)}`)}

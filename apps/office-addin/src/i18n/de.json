@@ -1,14 +1,14 @@
 {
   "meta": {
     "title": "OG Doc - Office-Add-in",
-    "description": "Word-Add-in für OG Doc: Öffnen/Speichern, Metadaten, Workflows, Vorlagenbibliothek (Konzept 3.3a)"
+    "description": "Word-Add-in für OG Doc: Öffnen/Speichern, Metadaten, Workflows, Vorlagenbibliothek"
   },
   "common": {
     "loading": "Lade...",
     "logout": "Abmelden"
   },
   "login": {
-    "heading": "Anmelden",
+    "heading": "OG Doc",
     "username": "Benutzername",
     "password": "Passwort",
     "submit": "Anmelden",
@@ -17,7 +17,8 @@
   },
   "officeGate": {
     "loading": "Add-in wird initialisiert...",
-    "error": "Office.js konnte nicht initialisiert werden - dieses Add-in muss innerhalb von Word ausgeführt werden."
+    "error": "Office.js konnte nicht initialisiert werden - dieses Add-in muss innerhalb von Word ausgeführt werden.",
+    "notInHost": "Dieses Add-in läuft nur innerhalb von Microsoft Word. Öffne OG Doc in Word über den Add-in-Bereich."
   },
   "documentPicker": {
     "heading": "Aus OG Doc öffnen",

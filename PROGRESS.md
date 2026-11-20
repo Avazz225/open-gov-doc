@@ -2,7 +2,94 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P83-S3 (third session of Phase 83). All five apps that get one now have a login
+**Last completed:** P83-S5 (fifth session of Phase 83), the first craft-lens fix session. It covered
+P83-S1 punch-list items 1, 8, 11 and 13 across all six apps. Full record: `IMPLEMENTATION_PLAN.md`'s
+P83-S5 entry, `docs/services/office-addin.md`, and ADR 0237 Decision 6.
+
+**User decision recorded:** narrow-width/mobile support becomes a goal for the back-office apps too
+(punch list item 12; ADR 0237, Decision 6). It is scheduled as P83-S9 (assessment + ADR) and P83-S10+.
+
+**Item 1, plan/concept references in user-facing strings:**
+- 145 hits verified by hand and stripped by a controlled script that keeps real text in the same
+  parentheses.
+- A second, broader sweep caught "(8, 4.5)" and English "concept 8".
+- Hardcoded JSX had none.
+- A stale claim was corrected: admin-ui's deletion register called the backup policy "still missing",
+  but backup/restore has existed since P11 and reconciles against that register.
+- process-designer's illustration uses the real `signatureTask.groupLabel` again.
+
+**Item 8, labels wrapping inside buttons:**
+- `whitespace-nowrap` on all 113 `primaryBtn`/`secondaryBtn` constants and 21 date/number cells.
+- user-ui's explorer toolbar, found live: `flex-wrap` plus nowrap buttons, so whole buttons wrap,
+  never a label. That is the pattern for the mobile work.
+
+**Item 11:** every login card shows its app's product name. The English meta title of migration-console
+was German and is fixed.
+
+**Item 13 turned out to be a real crash.** office.js nulls `history.replaceState`/`pushState`, which
+crashed the Next.js router on load, likely inside Word too, and invisible to the mocked e2e.
+- It is fixed by saving and restoring the methods around a synchronous office.js `<script>`.
+- Outside Word, a "nur innerhalb von Microsoft Word" hint is shown.
+- Built export: 0 crashes in 8 loads. Not verified in a real Word client.
+
+**Checks:**
+- `tsc`/`eslint` clean in six apps.
+- vitest: user-ui 304, admin-ui 314, reviewer-ui 60, process-designer 60, migration-console 25,
+  office-addin 23. One admin-ui test asserted the old placeholder with its plan reference and was
+  updated.
+- Six images rebuilt. Live: headings right, no visible plan references (the only matches are test-data
+  folder names "P55-S2 Verify"), no wrapping labels.
+
+**Found, not fixed (→ P83-S8):** running the Playwright e2e for the first time in a long while showed
+that migration-console's and reviewer-ui's specs (3 failures each) still use CSS-class locators
+(`.error-text`, `table.data-table`, `ul.entry-list`) removed by the Tailwind migration in P75-S4. They
+have been stale since then. The e2e assertions S5 itself touched were updated and pass; office-addin's
+e2e passes. How to run e2e here: Node from nvm, `npx playwright test` in the app (Playwright 1.48 uses
+the cached `chromium-1140`).
+
+**Next session:** **P83-S6**, `user-ui` items 2–5 + 9:
+- one icon set instead of emoji (46 in 8 files);
+- the header title follows the active pane;
+- left-aligned explorer names;
+- no columns of primary buttons;
+- the remaining native-looking controls.
+
+Build everything so it already holds at narrow widths.
+
+---
+
+Earlier P83-S4 summary, kept for context (fourth session of Phase 83). Two `user-ui` empty states got a quiet still
+above their unchanged sentence. This closes the illustration half of Phase 83 except the README hero
+(last session). Full record: `IMPLEMENTATION_PLAN.md`'s P83-S4 entry,
+`libs/dms-showcase/user-ui-empty-{preview,vorlagen}/REHEARSAL.md`, and ADR 0237's "Empty-state stills"
+note.
+
+**The two stills:**
+- **Empty preview pane:** a selected row and the page it opens.
+- **Empty "Vorlagen":** a real folder subtree, and in front of it the same shape as accent outlines,
+  showing "structure only" without a word.
+
+Both are wordless gray art (a real filename in a functional pane would read as if a document were open)
+and `unframed` (a recorded developer call: in a resizable pane a crop reads as a fault).
+
+**Host:** `<EmptyState kind>` is gated by the *content width inside the pane* (`ResizeObserver`,
+≥ 304px, so the scale is ≥ 0.95), not the viewport. It renders nothing in high contrast, the picture is
+`aria-hidden`, and its box is reserved while loading. The metadata pane uses the same centered empty
+state without a picture.
+
+**Review:** a fresh-eye subagent review found and I fixed:
+- shadows cut by a too-short stage, against framing.md's one condition for unframed;
+- my first width gate (280px of pane width, about 0.75 scale), whose host comment had the maths wrong;
+- dark-mode "holes";
+- the Vorlagen payoff being the faintest ink while the accent sat on an off-meaning glyph.
+
+**Checks:** gate clean on both stills, light and dark; `tsc`/`eslint` clean; `vitest` 304/304 (+6); image
+rebuilt. Live at 1400 (light/dark)/900/700/600: the picture shows exactly where the content width is
+≥ 304px. The stack, the playground and its copies were stopped/removed afterwards.
+
+**Next session (at the time):** P83-S5. It was done next; see the entry above.
+
+Earlier P83-S3 summary, kept for context: all five apps that get one now have a login
 illustration: `admin-ui`, `reviewer-ui`, `process-designer` and `migration-console` joined `user-ui`.
 `office-addin` gets none (ADR 0237). Full record: `IMPLEMENTATION_PLAN.md`'s P83-S3 entry, each
 `libs/dms-showcase/<app>-login/REHEARSAL.md`, and ADR 0237 (slot table rows "built P83-S3", Decision 5
@@ -46,10 +133,7 @@ Every story uses only what the real product shows. Where the ADR's plan would ha
 
 The stack, the playground and its copies were stopped/removed afterwards.
 
-**Next session:** **P83-S4** — the two `user-ui` empty-state stills from ADR 0237's slot table: the
-empty preview pane ("Kein Dokument ausgewählt") and empty "Vorlagen". Onboarding was dropped in S1.
-These render *inside* real panes, which differs from the login slots. They need a `compact` design if
-the pane can be narrower than 600px, and must not change the pane's functional controls.
+**Next session (at the time):** P83-S4. It was done next; see the entry above.
 
 Earlier P83-S2 summary, kept for context: it set up `libs/dms-showcase` and built the first
 illustration, on the `user-ui` login page. Full record: `IMPLEMENTATION_PLAN.md`'s P83-S2 entry,

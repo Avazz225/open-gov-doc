@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "OG Doc Process Designer",
-    "description": "Graphical BPMN 2.0 modeling (Process Designer, concept 7.1/8)"
+    "description": "Graphical BPMN 2.0 modeling (Process Designer)"
   },
   "common": {
     "logout": "Log out",
@@ -29,7 +29,7 @@
     "text": "System-wide emergency lockdown active - only the activated superuser can act."
   },
   "login": {
-    "heading": "Log in",
+    "heading": "OG Doc Process Designer",
     "username": "Username",
     "password": "Password",
     "submit": "Log in",
@@ -39,8 +39,7 @@
       "alt": "Illustration: an invoice process in the designer; the step Sign approval is selected and requires a signature of at least level AES.",
       "process": "Invoice approval",
       "review": "Review invoice",
-      "sign": "Sign approval",
-      "group": "Signature"
+      "sign": "Sign approval"
     }
   },
   "nav": {
@@ -99,7 +98,7 @@
     "loadError": "Decision table could not be loaded"
   },
   "signatureTask": {
-    "groupLabel": "Signature (3.10)",
+    "groupLabel": "Signature",
     "requiredLabel": "Signature required",
     "levelLabel": "Minimum level",
     "levelSes": "SES",

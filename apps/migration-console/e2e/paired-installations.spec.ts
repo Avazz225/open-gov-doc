@@ -12,7 +12,7 @@ test("creates a paired installation, shows the one-time API key, and deletes it 
   await loginViaUi(page);
   await page.getByRole("link", { name: "Gepaarte Installationen" }).click();
   await expect(page).toHaveURL(/\/paired-installations/);
-  await expect(page.getByRole("heading", { name: "Gepaarte Installationen (7.2)" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Gepaarte Installationen" })).toBeVisible();
 
   await page.getByRole("button", { name: "Installation paaren" }).click();
   await page.locator("#display-name").fill(pairedInstallationName);

@@ -19,9 +19,9 @@ import {
 import { useAuth } from "@/lib/auth-context";
 
 const primaryBtn =
-  "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap";
 const secondaryBtn =
-  "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+  "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap";
 const fieldInput =
   "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
 const checkbox = "h-4 w-4 rounded border-border accent-accent";
@@ -285,7 +285,7 @@ function DocumentArchivalSection() {
                 </td>
                 <td>{transfer.archive_format ?? "—"}</td>
                 <td>{transfer.encrypted ? "✓" : "—"}</td>
-                <td>{transfer.released_at ? new Date(transfer.released_at).toLocaleString() : "—"}</td>
+                <td className="whitespace-nowrap">{transfer.released_at ? new Date(transfer.released_at).toLocaleString() : "—"}</td>
                 <td>
                   {transfer.dehydrated_at ? new Date(transfer.dehydrated_at).toLocaleString() : "—"}
                 </td>
@@ -523,7 +523,7 @@ function CaseArchivalSection() {
                     )}
                 </td>
                 <td>{transfer.encrypted ? "✓" : "—"}</td>
-                <td>{transfer.released_at ? new Date(transfer.released_at).toLocaleString() : "—"}</td>
+                <td className="whitespace-nowrap">{transfer.released_at ? new Date(transfer.released_at).toLocaleString() : "—"}</td>
                 <td>
                   {transfer.status === "released" && (
                     <button

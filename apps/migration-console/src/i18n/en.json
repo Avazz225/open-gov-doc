@@ -1,7 +1,7 @@
 {
   "meta": {
-    "title": "OG Doc Migrations-Konsole",
-    "description": "Installation pairing and transfer operations (concept 7.2/8)"
+    "title": "OG Doc Migration Console",
+    "description": "Installation pairing and transfer operations"
   },
   "common": {
     "logout": "Log out",
@@ -27,7 +27,7 @@
     "text": "System-wide emergency lockdown active - only the activated superuser can act."
   },
   "login": {
-    "heading": "Log in",
+    "heading": "OG Doc Migration Console",
     "username": "Username",
     "password": "Password",
     "submit": "Log in",
@@ -43,8 +43,8 @@
     "pairedInstallations": "Paired installations"
   },
   "pairedInstallations": {
-    "heading": "Paired installations (7.2)",
-    "hint": "Direct installation pairing instead of hub mediation (ADR 0034) - each row is a possible target installation for a transfer.",
+    "heading": "Paired installations",
+    "hint": "Direct installation pairing instead of hub mediation - each row is a possible target installation for a transfer.",
     "newButton": "Pair installation",
     "nameColumn": "Name",
     "baseUrlColumn": "Gateway address",
@@ -60,7 +60,7 @@
     "deleteConfirm": "Really remove this pairing?"
   },
   "transfers": {
-    "heading": "Transfers (7.2)",
+    "heading": "Transfers",
     "hint": "Migration/handover operations between this and a paired installation - itself running as an auditable, resumable workflow (workflow-service).",
     "statusFilterLabel": "Status",
     "statusAll": "All",
@@ -81,7 +81,7 @@
     "retentionDaysLabel": "Deletion delay in days (empty = default)",
     "submit": "Start transfer",
     "submitting": "Starting...",
-    "pendingApprovalNotice": "Four-eyes approval required (4.3) - request {id} was created, the transfer starts after approval.",
+    "pendingApprovalNotice": "Four-eyes approval required - request {id} was created, the transfer starts after approval.",
     "startError": "Transfer could not be started",
     "detailHeading": "Transfer details",
     "documentsProgress": "{copied}/{total} copied, {verified} verified",

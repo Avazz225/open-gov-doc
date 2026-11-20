@@ -81,7 +81,7 @@ export function RetimestampStatus() {
                 <td>{signature.level}</td>
                 <td>{signature.connector_id}</td>
                 <td>{signature.signer_display_name}</td>
-                <td>{new Date(signature.signed_at).toLocaleString()}</td>
+                <td className="whitespace-nowrap">{new Date(signature.signed_at).toLocaleString()}</td>
                 <td>
                   {signature.last_timestamped_at
                     ? new Date(signature.last_timestamped_at).toLocaleString()

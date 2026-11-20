@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "OG Doc Migrations-Konsole",
-    "description": "Installations-Paarung und Transfer-Vorgänge (Konzept 7.2/8)"
+    "description": "Installations-Paarung und Transfer-Vorgänge"
   },
   "common": {
     "logout": "Abmelden",
@@ -27,7 +27,7 @@
     "text": "Systemweite Notfallsperre aktiv - nur der aktivierte Superuser ist handlungsfähig."
   },
   "login": {
-    "heading": "Anmelden",
+    "heading": "OG Doc Migrations-Konsole",
     "username": "Benutzername",
     "password": "Passwort",
     "submit": "Anmelden",
@@ -43,8 +43,8 @@
     "pairedInstallations": "Gepaarte Installationen"
   },
   "pairedInstallations": {
-    "heading": "Gepaarte Installationen (7.2)",
-    "hint": "Direkte Installations-Paarung statt Hub-Vermittlung (ADR 0034) - jede Zeile ist eine mögliche Ziel-Installation für einen Transfer.",
+    "heading": "Gepaarte Installationen",
+    "hint": "Direkte Installations-Paarung statt Hub-Vermittlung - jede Zeile ist eine mögliche Ziel-Installation für einen Transfer.",
     "newButton": "Installation paaren",
     "nameColumn": "Name",
     "baseUrlColumn": "Gateway-Adresse",
@@ -60,7 +60,7 @@
     "deleteConfirm": "Diese Paarung wirklich entfernen?"
   },
   "transfers": {
-    "heading": "Transfers (7.2)",
+    "heading": "Transfers",
     "hint": "Migrations-/Übergabevorgänge zwischen dieser und einer gepaarten Installation - läuft selbst als auditierbarer, resumable Workflow (workflow-service).",
     "statusFilterLabel": "Status",
     "statusAll": "Alle",
@@ -81,7 +81,7 @@
     "retentionDaysLabel": "Löschfrist in Tagen (leer = Standard)",
     "submit": "Transfer starten",
     "submitting": "Starte...",
-    "pendingApprovalNotice": "Vier-Augen-Freigabe erforderlich (4.3) - Anfrage {id} wurde erstellt, der Transfer startet nach Freigabe.",
+    "pendingApprovalNotice": "Vier-Augen-Freigabe erforderlich - Anfrage {id} wurde erstellt, der Transfer startet nach Freigabe.",
     "startError": "Transfer konnte nicht gestartet werden",
     "detailHeading": "Transfer-Details",
     "documentsProgress": "{copied}/{total} kopiert, {verified} verifiziert",

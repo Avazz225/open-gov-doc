@@ -1,0 +1,70 @@
+/* user-ui empty preview pane: a selected explorer row and the page it opens
+   (P83-S4). Shared tokens and the card come from ../look-ogdoc.css
+   (className="og og-empty-preview"). Unframed: whole objects, centered in
+   the 320x192 stage, each edge's margin at least as deep as the shadows
+   (objects span x 54..266, y 16..164). */
+
+/* The page: portrait, a sheet of paper, the hero */
+.og-empty-preview .og-page {
+  position: absolute;
+  left: 150px;
+  top: 16px;
+  width: 116px;
+  height: 148px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 14px;
+  border: 1px solid var(--og-border);
+  border-radius: 6px;
+  background: var(--og-surface);
+  box-shadow: var(--ss-shadow-ground);
+}
+
+/* On dark the page is a lighter, raised sheet - never a hole in the pane */
+.og-empty-preview .ss-stage[data-theme="dark"] .og-page {
+  background: color-mix(in srgb, var(--og-surface) 92%, #fff);
+}
+
+.og-empty-preview .og-page__lines {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+/* The list card straddles the page's left edge; its top sits well below
+   the page's title bar (y 32..40), never on it */
+.og-empty-preview .og-list-card {
+  left: 54px;
+  top: 58px;
+  width: 132px;
+  padding: 6px;
+}
+
+/* In front of the raised page on dark: one step lighter still */
+.og-empty-preview .ss-stage[data-theme="dark"] .og-list-card {
+  --og-card-bg: color-mix(in srgb, var(--og-surface) 84%, #fff);
+}
+
+.og-empty-preview .og-mini-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 5px;
+}
+
+.og-empty-preview .og-mini-icon {
+  flex: none;
+  color: var(--ss-icon-faint);
+}
+
+/* The one accent: the selection, an opaque step of the accent */
+.og-empty-preview .og-mini-row[data-selected] {
+  background: color-mix(in srgb, var(--ss-accent) 12%, var(--og-card-bg));
+}
+
+.og-empty-preview .og-mini-row[data-selected] .og-mini-icon {
+  color: var(--ss-accent);
+}

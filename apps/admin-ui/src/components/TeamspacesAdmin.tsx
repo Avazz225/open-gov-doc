@@ -74,7 +74,7 @@ export function TeamspacesAdmin() {
                 <td>{teamspace.description || "—"}</td>
                 <td>{teamspace.created_by}</td>
                 <td>{teamspace.member_count}</td>
-                <td>{new Date(teamspace.created_at).toLocaleString()}</td>
+                <td className="whitespace-nowrap">{new Date(teamspace.created_at).toLocaleString()}</td>
               </tr>
             ))}
           </tbody>

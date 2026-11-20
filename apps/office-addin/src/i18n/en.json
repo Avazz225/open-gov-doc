@@ -1,14 +1,14 @@
 {
   "meta": {
     "title": "OG Doc - Office Add-in",
-    "description": "Word add-in for OG Doc: open/save, metadata, workflows, template library (concept 3.3a)"
+    "description": "Word add-in for OG Doc: open/save, metadata, workflows, template library"
   },
   "common": {
     "loading": "Loading...",
     "logout": "Log out"
   },
   "login": {
-    "heading": "Log in",
+    "heading": "OG Doc",
     "username": "Username",
     "password": "Password",
     "submit": "Log in",
@@ -17,7 +17,8 @@
   },
   "officeGate": {
     "loading": "Initializing add-in...",
-    "error": "Office.js could not be initialized - this add-in must run inside Word."
+    "error": "Office.js could not be initialized - this add-in must run inside Word.",
+    "notInHost": "This add-in only runs inside Microsoft Word. Open OG Doc in Word from the add-ins area."
   },
   "documentPicker": {
     "heading": "Open from OG Doc",

@@ -78,9 +78,7 @@ export function LoginIllustration() {
             export: t("designer.exportButton"),
             review: t("login.illustration.review"),
             sign: t("login.illustration.sign"),
-            // Own key until the real "signatureTask.groupLabel" loses its
-            // concept reference (P83-S1 punch list item 1)
-            group: t("login.illustration.group"),
+            group: t("signatureTask.groupLabel"),
             required: t("signatureTask.requiredLabel"),
             levelLabel: t("signatureTask.levelLabel"),
           }}

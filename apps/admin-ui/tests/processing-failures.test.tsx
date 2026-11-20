@@ -307,7 +307,7 @@ describe("ProcessingFailuresView", () => {
     // an incidental discovery while getting the frontend regression green
     // for P63-S3, unrelated to that session's own scope.
     fireEvent.change(
-      screen.getByPlaceholderText("Erforderlich für 'Erneut versuchen' (Phase 44 Session 1, ADR 0162)"),
+      screen.getByPlaceholderText("Erforderlich für 'Erneut versuchen'"),
       { target: { value: "test-operator-key" } }
     );
     fireEvent.click(screen.getByRole("button", { name: "Erneut versuchen" }));

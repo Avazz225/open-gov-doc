@@ -16,12 +16,14 @@ package, no workspace tooling.
 | `kit/` | Stageshow kit, vendored (see below) |
 | `LICENSE`, `NOTICE.md` | Stageshow's MIT license and notices, kept beside the copy |
 | `look-ogdoc.css` | The OG Doc look shared by every illustration (since P83-S3; see below) |
-| `sync-playground.sh` | Mirrors every `*-login/` illustration into the stageshow playground for filming |
+| `sync-playground.sh` | Mirrors every illustration folder (any subfolder with a `.tsx`, except `kit/`) into the stageshow playground for filming |
 | `user-ui-login/` | `user-ui` login illustration (P83-S2): `UserUiLogin.tsx`, `user-ui-login.css`, `REHEARSAL.md` |
 | `admin-ui-login/` | `admin-ui` login illustration (P83-S3): object-type editor, Kennzeichen format and its effect |
 | `reviewer-ui-login/` | `reviewer-ui` login illustration (P83-S3): a four-eyes request approved (plays once) |
 | `process-designer-login/` | `process-designer` login illustration (P83-S3): a signature task and its required level |
 | `migration-console-login/` | `migration-console` login illustration (P83-S3): a finished transfer and its timeline |
+| `user-ui-empty-preview/` | `user-ui` empty preview pane still (P83-S4): a selected row and the page it opens; wordless, unframed |
+| `user-ui-empty-vorlagen/` | `user-ui` empty Vorlagen still (P83-S4): a folder subtree and the template captured from it; wordless, unframed |
 
 Every Stage sets `className="og og-<name>"`. **`look-ogdoc.css`** (scope `.og`) holds what all
 illustrations share (ADR 0237, Decision 3 as amended):
@@ -73,12 +75,12 @@ theme). See `apps/user-ui/src/components/LoginIllustration.tsx`.
 Edit here, and film in the stageshow playground (`~/.claude/skills/stageshow`, `npm run dev`):
 
 1. Run `bash libs/dms-showcase/sync-playground.sh` (via `bash`: the repo does not track the executable
-   bit, `core.fileMode = false`). It copies every `*-login/` folder to
-   `examples/og-<app>/`, with the imports rewritten (`'../kit'` → `'../../kit'`, `'../look-ogdoc.css'` →
+   bit, `core.fileMode = false`). It copies every illustration folder to
+   `examples/og-<name>/` (the folder name without `-login`, e.g. `og-admin-ui`, `og-user-ui-empty-preview`), with the imports rewritten (`'../kit'` → `'../../kit'`, `'../look-ogdoc.css'` →
    `'./look-ogdoc.css'`). This folder stays the only source; never edit the playground copy. If Vite was
    already running before a *new* folder appeared, restart it, because its example glob only picks up
    files that existed when it started.
-2. Film it with `node scripts/film.mjs "<preview>/?capture=og-<app>" --select '#example' --gate`.
+2. Film it with `node scripts/film.mjs "<preview>/?capture=og-<name>" --select '#example' --gate`.
    This needs Node from nvm and
    `CHROME_PATH=~/.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell`
    (Chrome 153). Not the older `chromium-1140` build: it lacks `text-box` and reports false button-label

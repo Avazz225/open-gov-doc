@@ -18,8 +18,14 @@ describe("lib/office", () => {
     state = installOfficeMock();
   });
 
-  it("resolves once Office.onReady resolves", async () => {
-    await expect(waitForOfficeReady()).resolves.toBeUndefined();
+  it("resolves once Office.onReady resolves, inside a host", async () => {
+    await expect(waitForOfficeReady()).resolves.toEqual({ inHost: true });
+  });
+
+  it("reports no host when office.js resolves outside an Office client", async () => {
+    (globalThis as unknown as { Office: { onReady: () => Promise<unknown> } }).Office.onReady = () =>
+      Promise.resolve({ host: null, platform: null });
+    await expect(waitForOfficeReady()).resolves.toEqual({ inHost: false });
   });
 
   it("has no linked document by default", () => {

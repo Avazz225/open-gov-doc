@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "OG Doc",
-    "description": "Document navigation, upload/download (User UI, concept 8)"
+    "description": "Document navigation, upload/download (User UI)"
   },
   "common": {
     "logout": "Log out",
@@ -18,7 +18,7 @@
     "text": "System-wide emergency lockdown active - only the activated superuser can act."
   },
   "login": {
-    "heading": "Log in",
+    "heading": "OG Doc",
     "username": "Username",
     "password": "Password",
     "submit": "Log in",
@@ -265,7 +265,7 @@
   "recordsQuarantineOverview": {
     "paneLabel": "Records quarantine (installation-wide)",
     "heading": "Records quarantine (installation-wide)",
-    "hint": "All documents currently under records quarantine across the entire installation (14.2). Placing a new document under quarantine still happens on the document itself.",
+    "hint": "All documents currently under records quarantine across the entire installation. Placing a new document under quarantine still happens on the document itself.",
     "empty": "No document is currently under quarantine.",
     "documentGone": "Document no longer available",
     "setBy": "set by {setBy}",
@@ -291,7 +291,7 @@
   "approvals": {
     "paneLabel": "Approvals",
     "heading": "Open deletion requests",
-    "hint": "Four-eyes principle for deletion requests (5.2, since P7-S1c) - the approving person may not be the same as the requesting person.",
+    "hint": "Four-eyes principle for deletion requests - the approving person may not be the same as the requesting person.",
     "empty": "No open deletion requests.",
     "loadError": "Deletion requests could not be loaded",
     "decisionError": "Decision could not be saved",
@@ -305,7 +305,7 @@
   "favorites": {
     "paneLabel": "Favorites",
     "heading": "Favorites/watchlist",
-    "hint": "Quickly find frequently used documents, folders, and case binders (since P7-S1d, case binders since Phase 45 Session 2).",
+    "hint": "Quickly find frequently used documents, folders, and case binders.",
     "empty": "No favorites yet.",
     "loadError": "Favorites could not be loaded",
     "removeError": "Favorite could not be removed",
@@ -319,7 +319,7 @@
   "teamspaces": {
     "paneLabel": "Team workspaces",
     "heading": "Team workspaces",
-    "hint": "Self-managed, persistent group areas - own folders/documents, shared appointments and contacts (2.5).",
+    "hint": "Self-managed, persistent group areas - own folders/documents, shared appointments and contacts.",
     "empty": "No team workspaces yet - create the first one below.",
     "loadError": "Team workspaces could not be loaded",
     "createError": "Failed to create",
@@ -367,7 +367,7 @@
     "openButton": "Bulk edit",
     "clearSelection": "Clear selection",
     "heading": "Bulk edit ({count} objects)",
-    "hint": "Only filled-in fields are applied - fields left blank stay unchanged per object (8, 4.5).",
+    "hint": "Only filled-in fields are applied - fields left blank stay unchanged per object.",
     "leaveBlankPlaceholder": "leave unchanged",
     "notHomogeneous": "Only documents OR only folders of the same object type can be edited together.",
     "noObjectType": "The selected objects have no object type - no shared attributes to edit.",
@@ -380,7 +380,7 @@
   "trash": {
     "paneLabel": "Trash",
     "heading": "Trash",
-    "hint": "Documents and folders marked for deletion (5.2) - only irretrievably gone after final deletion.",
+    "hint": "Documents and folders marked for deletion - only irretrievably gone after final deletion.",
     "scopeLabel": "Trash view",
     "scopePersonal": "Own deletion markers",
     "scopeAdmin": "Full trash",
@@ -398,7 +398,7 @@
   "quarantine": {
     "paneLabel": "Quarantine",
     "heading": "Quarantine",
-    "hint": "Uploads that failed the mandatory virus scan (10.3) - they end up here instead of in the regular collection. Releasing after clearing a false positive creates the document retroactively; final deletion removes the content irrevocably.",
+    "hint": "Uploads that failed the mandatory virus scan - they end up here instead of in the regular collection. Releasing after clearing a false positive creates the document retroactively; final deletion removes the content irrevocably.",
     "release": "Release",
     "releaseTitleLabel": "Title",
     "releaseFolderLabel": "Target folder (optional)",
@@ -415,7 +415,7 @@
   "poststelle": {
     "paneLabel": "Inbox/outbox",
     "heading": "Inbox/outbox",
-    "hint": "External correspondence not yet assigned to any case (2.5) - after review, an item moves into the filing plan or a case binder.",
+    "hint": "External correspondence not yet assigned to any case - after review, an item moves into the filing plan or a case binder.",
     "tabLabel": "View",
     "inbox": "Inbox",
     "outbox": "Outbox",
@@ -457,7 +457,7 @@
     "routeSubmit": "Forward",
     "routeLogEntry": "{from} → {to} (by {by})",
     "postbuch": "Postbuch",
-    "postbuchHint": "Searchable register of every forward between mailboxes (14.2) - across all messages, not just one mailbox's own.",
+    "postbuchHint": "Searchable register of every forward between mailboxes - across all messages, not just one mailbox's own.",
     "postbuchEmpty": "No forwards yet.",
     "postbuchLoadError": "Postbuch could not be loaded",
     "postbuchMailboxLabel": "Mailbox",
@@ -471,7 +471,7 @@
   "kontakte": {
     "paneLabel": "Contacts",
     "heading": "Contacts",
-    "hint": "Directory for finding other staff (2.5) - primarily within this installation, optionally across installations if configured.",
+    "hint": "Directory for finding other staff - primarily within this installation, optionally across installations if configured.",
     "searchPlaceholder": "Name, username, or email",
     "searchLabel": "Search",
     "search": "Search",
@@ -483,7 +483,7 @@
   "aussonderung": {
     "paneLabel": "Records disposal",
     "heading": "Records disposal",
-    "hint": "Cases/case binders already released for disposal but still within the transition period (5.6) - searchable/viewable here instead of being findable only indirectly via audit-trail references. Once the transition period expires, a document automatically disappears from this view.",
+    "hint": "Cases/case binders already released for disposal but still within the transition period - searchable/viewable here instead of being findable only indirectly via audit-trail references. Once the transition period expires, a document automatically disappears from this view.",
     "searchPlaceholder": "Title or file reference number/case number",
     "searchLabel": "Search",
     "search": "Search",
@@ -501,7 +501,7 @@
   "cases": {
     "paneLabel": "Case binders",
     "heading": "Case binders",
-    "hint": "Overview of all case binders (2.3) - selecting a row opens the detail view with its documents plus export/import for the government/judicial handover (14.2).",
+    "hint": "Overview of all case binders - selecting a row opens the detail view with its documents plus export/import for the government/judicial handover.",
     "statusFilterLabel": "Status",
     "statusAll": "All",
     "statusOpen": "Open",
@@ -552,10 +552,10 @@
     "paneLabel": "Hand folders/work tray",
     "heading": "Hand folders/work tray (installation-wide)",
     "referencesHeading": "Hand-folder references",
-    "referencesHint": "All document references in hand folders (14.2) across the entire installation - only visible for folders you have read access to.",
+    "referencesHint": "All document references in hand folders across the entire installation - only visible for folders you have read access to.",
     "referencesEmpty": "No hand-folder references visible to you exist.",
     "workTrayHeading": "Work tray (unregistered documents)",
-    "workTrayHint": "Not-yet-registered draft documents (14.2) across all folders - e.g. used as a work tray within a team workspace.",
+    "workTrayHint": "Not-yet-registered draft documents across all folders - e.g. used as a work tray within a team workspace.",
     "workTrayEmpty": "No unregistered documents exist.",
     "folderColumn": "Folder",
     "documentColumn": "Document",
@@ -566,7 +566,7 @@
   "vorlagen": {
     "paneLabel": "Templates",
     "heading": "Templates",
-    "hint": "Structure templates (2.5/7.3, e.g. a filing-plan skeleton) - a folder subtree as a named, reusable template. Captures only structure (names, object types), no attribute values - a skeleton is only populated after being applied.",
+    "hint": "Structure templates (e.g. a filing-plan skeleton) - a folder subtree as a named, reusable template. Captures only structure (names, object types), no attribute values - a skeleton is only populated after being applied.",
     "sourceFolderLabel": "Source folder ID",
     "sourceFolderPlaceholder": "Folder ID of the subtree to capture",
     "nameLabel": "Name",
@@ -595,7 +595,7 @@
   "delegations": {
     "paneLabel": "Delegation",
     "heading": "Delegation during absence",
-    "hint": "Designate one or more people as a delegate for a fixed period (4.4a) - a delegate continues to act under their own account, not by logging in as someone else.",
+    "hint": "Designate one or more people as a delegate for a fixed period - a delegate continues to act under their own account, not by logging in as someone else.",
     "loadError": "Delegations could not be loaded",
     "createError": "Failed to create - username unknown or invalid period",
     "revokeError": "Failed to revoke",

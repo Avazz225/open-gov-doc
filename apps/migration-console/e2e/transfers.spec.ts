@@ -11,7 +11,7 @@ test("loads the transfer console and the status filter reloads without error", a
   page,
 }) => {
   await loginViaUi(page);
-  await expect(page.getByRole("heading", { name: "Transfers (7.2)" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Transfers" })).toBeVisible();
   await expect(errorAlert(page)).toHaveCount(0);
 
   for (const status of ["failed", "released", ""]) {

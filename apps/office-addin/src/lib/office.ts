@@ -16,8 +16,13 @@ export interface LinkedDocument {
   versionNumber: number;
 }
 
-export async function waitForOfficeReady(): Promise<void> {
-  await Office.onReady();
+/** Resolves once office.js is ready. `inHost` is false when the page runs
+ *  outside an Office client: office.js still resolves `onReady()` in a plain
+ *  browser, but with no host - and every `Office.context.document` call after
+ *  that would fail (P83-S5). */
+export async function waitForOfficeReady(): Promise<{ inHost: boolean }> {
+  const info = await Office.onReady();
+  return { inHost: Boolean(info?.host) };
 }
 
 // UI display language (8, Phase 47 Session 2, ADR 0167) - this add-in

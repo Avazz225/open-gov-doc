@@ -99,7 +99,7 @@ export function DelegationsAdmin() {
     : delegations;
 
   const secondaryBtn =
-    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap";
   const checkbox = "h-4 w-4 rounded border-border accent-accent";
 
   return (
@@ -143,8 +143,8 @@ export function DelegationsAdmin() {
                 <td>{delegation.delegator_principal_id}</td>
                 <td>{delegation.deputy_principal_id}</td>
                 <td>{originLabel(t, delegation)}</td>
-                <td>{new Date(delegation.starts_at).toLocaleString()}</td>
-                <td>{new Date(delegation.ends_at).toLocaleString()}</td>
+                <td className="whitespace-nowrap">{new Date(delegation.starts_at).toLocaleString()}</td>
+                <td className="whitespace-nowrap">{new Date(delegation.ends_at).toLocaleString()}</td>
                 <td>
                   <span
                     className={`badge ${isActive(delegation) ? "ok" : "down"}`}

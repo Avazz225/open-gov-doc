@@ -3,7 +3,7 @@ import { TEST_USERNAME, TEST_PASSWORD, errorAlert, loginViaUi } from "./fixtures
 
 test("logs in with valid credentials and reaches the transfer console", async ({ page }) => {
   await loginViaUi(page);
-  await expect(page.getByRole("heading", { name: "Transfers (7.2)" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Transfers" })).toBeVisible();
 });
 
 test("shows an error and stays on the login page for wrong credentials", async ({ page }) => {

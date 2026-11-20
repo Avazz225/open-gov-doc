@@ -19,8 +19,11 @@ if [[ "${1:-}" == "--clean" ]]; then
   exit 0
 fi
 
-for dir in "$here"/*-login; do
-  [[ -d "$dir" ]] || continue
+# Every illustration folder (any subfolder holding a .tsx, except the kit)
+for dir in "$here"/*/; do
+  dir="${dir%/}"
+  [[ "$(basename "$dir")" == "kit" ]] && continue
+  compgen -G "$dir/*.tsx" >/dev/null || continue
   name="og-$(basename "$dir" -login)"
   target="$examples/$name"
   rm -rf "$target"

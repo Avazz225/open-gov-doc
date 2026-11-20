@@ -72,9 +72,9 @@ export function PairedInstallationList() {
   }
 
   const secondaryBtn =
-    "rounded-md border border-border bg-hover-bg px-3 py-1 text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+    "rounded-md border border-border bg-hover-bg px-3 py-1 text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap";
   const primaryBtn =
-    "rounded-md border-0 bg-accent px-3 py-1 text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+    "rounded-md border-0 bg-accent px-3 py-1 text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap";
   const fieldInput =
     "box-border w-full rounded-md border border-border bg-bg px-2 py-1.5 text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
   const fieldLabel = "text-sm font-medium text-fg";
@@ -172,7 +172,7 @@ export function PairedInstallationList() {
               <tr key={installation.id}>
                 <td className={td}>{installation.display_name}</td>
                 <td className={td}>{installation.base_url}</td>
-                <td className={td}>{new Date(installation.created_at).toLocaleString("de-DE")}</td>
+                <td className={`${td} whitespace-nowrap`}>{new Date(installation.created_at).toLocaleString("de-DE")}</td>
                 <td className={td}>
                   <button
                     type="button"

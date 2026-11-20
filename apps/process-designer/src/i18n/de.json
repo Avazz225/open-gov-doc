@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "OG Doc Process Designer",
-    "description": "Grafische BPMN-2.0-Modellierung (Process Designer, Konzept 7.1/8)"
+    "description": "Grafische BPMN-2.0-Modellierung (Process Designer)"
   },
   "common": {
     "logout": "Abmelden",
@@ -29,7 +29,7 @@
     "text": "Systemweite Notfallsperre aktiv - nur der aktivierte Superuser ist handlungsfähig."
   },
   "login": {
-    "heading": "Anmelden",
+    "heading": "OG Doc Process Designer",
     "username": "Benutzername",
     "password": "Passwort",
     "submit": "Anmelden",
@@ -39,8 +39,7 @@
       "alt": "Illustration: Ein Rechnungsprozess im Designer; der Schritt Freigabe zeichnen ist ausgewählt und verlangt eine Signatur mit Mindestniveau AES.",
       "process": "Rechnungsfreigabe",
       "review": "Rechnung prüfen",
-      "sign": "Freigabe zeichnen",
-      "group": "Signatur"
+      "sign": "Freigabe zeichnen"
     }
   },
   "nav": {
@@ -99,7 +98,7 @@
     "loadError": "Entscheidungstabelle konnte nicht geladen werden"
   },
   "signatureTask": {
-    "groupLabel": "Signatur (3.10)",
+    "groupLabel": "Signatur",
     "requiredLabel": "Signatur erforderlich",
     "levelLabel": "Mindestniveau",
     "levelSes": "SES",

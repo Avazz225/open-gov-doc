@@ -2939,7 +2939,9 @@ work has to be read against that baseline (see DoD).
   - S5: items 1 + 8 + 11 + 13, all apps (strings and small fixes).
   - S6: `user-ui` items 2–5 + 9.
   - S7: items 5–7 + 10 in `admin-ui`/`reviewer-ui`/`process-designer`/`migration-console`.
-  - Item 12 waits for the user.
+  - ~~Item 12 waits for the user.~~ **Decided by the user on 2026-11-20: yes.** Narrow-width/mobile
+    support becomes a goal for the back-office apps too. It is scheduled as P83-S9 (assessment + ADR)
+    and P83-S10+ (implementation); see below.
 - **P83-S2 — Kit integration + `--dms-*` look mapping + first illustration (`user-ui` login hero)**: ✅ ~~copy
   the kit to the location ADR 0237 chose; map Stageshow's look tokens onto `libs/dms-ui/tokens.css` per
   `references/looks.md` so illustrations follow light/dark/high-contrast (high-contrast: decide in S1
@@ -3042,12 +3044,107 @@ work has to be read against that baseline (see DoD).
   - Live, in all five apps: pane top = card top = 286; light, dark, reduced and EN render; high contrast
     and 1199px show nothing; no page errors; a real login works. reviewer's cursor confirmed `data-idle`
     at about 7s.
-- **P83-S4 — Empty-state and onboarding illustrations**: the empty-state/onboarding slots from S1's
+- **P83-S4 — Empty-state and onboarding illustrations**: ✅ ~~the empty-state/onboarding slots from S1's
   inventory (stills by default — `static-card`/`loading`/`many-of-one` golds), placed inside the real
-  panes without changing their functional controls.
-- **P83-S5+ — Craft-lens fixes on the real UIs**: apply S1's punch list in the established Tailwind/
-  `--dms-*` formula — small apps first, then `user-ui` and `admin-ui` in their own sessions (same rollout
-  shape as Phases 49/75/77/81). Exact session count is decided by S1's findings, not here.
+  panes without changing their functional controls.~~ **Done.** Onboarding was dropped in S1. Full record:
+  `libs/dms-showcase/user-ui-empty-{preview,vorlagen}/REHEARSAL.md` and ADR 0237's "Empty-state stills"
+  note.
+
+  **The two stills:**
+  - **Empty preview pane:** a selected row (the one accent) and the page it opens.
+  - **Empty "Vorlagen":** a real folder subtree, and in front of it the same shape as accent outlines,
+    because templates capture structure only.
+
+  Both are wordless gray art, `unframed` (in a resizable pane a crop reads as a fault; a recorded
+  developer call), 320×192, and sit above the panes' unchanged sentences.
+
+  **Host:** `src/components/EmptyStateIllustration.tsx` (`<EmptyState kind>`).
+  - It is gated by the **content width inside the pane** (`ResizeObserver`, ≥ 304px, so the stage scales
+    ≥ 0.95), not the viewport.
+  - It renders nothing in high contrast, and the picture is `aria-hidden`.
+  - The picture's box is reserved while it loads.
+  - The metadata pane uses the same centered `<EmptyState>` without a picture.
+  - The theme hook moved to `src/lib/illustration-theme.ts`, shared with `LoginIllustration`.
+
+  `sync-playground.sh` now mirrors any illustration folder, not just `*-login`.
+
+  **Review:** a fresh-eye subagent review found faults in both, and all were fixed:
+  - shadows cut by a too-short stage, against framing.md's one condition for unframed;
+  - my first gate (280px of *pane* width) meant about 0.75 scale and soft lines, and my host comment had
+    the maths wrong;
+  - dark-mode "holes";
+  - near-tangents;
+  - the Vorlagen payoff was the faintest ink, while the accent sat on an off-meaning layout glyph;
+  - stacked preview/metadata empty states were aligned differently.
+
+  **Checks:** gate `no-issues-detected` on both stills in light and dark; `tsc`/`eslint` clean; `vitest`
+  304/304 (+6); image rebuilt. Live at 1400 (light/dark), 900, 700 and 600: the picture shows exactly
+  where the content width is ≥ 304px, with no page errors.
+- **P83-S5 — Punch list items 1 + 8 + 11 + 13, all apps**: ✅ **Done.**
+  - **Item 1, plan/concept references in user-facing strings:**
+    - 145 hits verified by hand (not the ~240 a rough S1 grep suggested) and stripped by a controlled
+      script: a parenthetical is split at commas, reference-only parts are dropped, and real text is kept
+      ("(14.2, Organisations-Hierarchie)" → "(Organisations-Hierarchie)"). Every changed string was
+      reviewed.
+    - A second, broader sweep found what the first pattern missed: "(8, 4.5)" and English
+      "concept 8" (7 strings).
+    - Hardcoded JSX text had none, only code comments.
+    - One stale *claim* was corrected, not just stripped. admin-ui's deletion register said the backup
+      policy was "still missing", but backup/restore exists since P11-S3/S4 and reconciles against that
+      very register.
+    - process-designer's illustration now uses the real `signatureTask.groupLabel` again.
+  - **Item 8, labels wrapping inside buttons:**
+    - `whitespace-nowrap` on all 113 `primaryBtn`/`secondaryBtn` constants (67 files, no unmatched
+      declaration).
+    - 21 date/number table cells made `whitespace-nowrap`.
+    - user-ui's `.explorer-toolbar`, found live: `flex-wrap` plus nowrap buttons, so whole buttons wrap,
+      never a label. That is the pattern the mobile work builds on.
+  - **Item 11, login headings:** each app's `login.heading` is its product name (as admin-ui already
+    had); an installation's branding `productName` still wins. The English meta title of
+    migration-console was German and is fixed.
+  - **Item 13 was a bigger bug than recorded.** office.js nulls `history.replaceState`/`pushState`, which
+    crashed the Next.js router on load (likely inside Word too, and invisible to the mocked e2e).
+    - The methods are now saved and restored around a synchronous office.js `<script>`.
+    - Outside Word, `OfficeGate` shows a "nur innerhalb von Microsoft Word" hint, because office.js
+      resolves `onReady` with no host there.
+    - Built export: 0 crashes in 8 loads.
+  - **Checks:**
+    - `tsc`/`eslint` clean in all six apps.
+    - vitest: user-ui 304, admin-ui 314 (one test expected the old placeholder text, updated),
+      reviewer-ui 60, process-designer 60, migration-console 25, office-addin 23 (+2).
+    - Six images rebuilt. Live, every login heading is right, no plan reference is visible (the only
+      matches are test-data folder names), and no button label wraps.
+  - **Found and recorded, not fixed here (→ P83-S8):** the Playwright e2e specs of migration-console and
+    reviewer-ui (3 failing each) and possibly other apps still use CSS-class locators (`.error-text`,
+    `table.data-table`, `ul.entry-list`) removed by the Tailwind migration in P75-S4. They have been
+    stale since then, unnoticed because no session could run e2e until Node was found in P83-S1.
+    office-addin's 2 specs pass. The four heading assertions S5's own string changes touched were
+    updated and pass.
+  - **Also noted for P83-S7:** dates are formatted with a fixed `"de-DE"` locale even in the English UI
+    (reviewer-ui, migration-console), which belongs with item 6.
+- **P83-S6 — `user-ui` items 2–5 + 9**: one icon set instead of emoji, the header title following the
+  active pane, left-aligned explorer names, no columns of primary buttons, and the remaining
+  native-looking controls ("Papierkorb anzeigen", "Liste/Baum", "Standardanordnung", …). Build them so
+  they already hold at narrow widths (the S5 toolbar pattern).
+- **P83-S7 — items 5–7 + 10 in `admin-ui`/`reviewer-ui`/`process-designer`/`migration-console`**:
+  - primary-button columns;
+  - raw identifiers/enums as content (plus the fixed `"de-DE"` date locale);
+  - `admin-ui`'s home duplicating the sidebar;
+  - `process-designer`'s missing shared header.
+- **P83-S8 — Repair the stale Playwright e2e specs**: replace class locators removed in P75-S4 with
+  role/label-based ones in every app's `e2e/`, and run them all against the stack (green, or each failure
+  explained).
+- **P83-S9 — Narrow-width/mobile assessment + ADR (user decision 2026-11-20)**: screenshot every app at
+  390/768px and decide the patterns once, for all apps:
+  - sidebar → drawer/top navigation;
+  - `user-ui`'s dockview three-pane layout → stacked or tabbed panes on narrow screens;
+  - tables → scroll container vs stacked rows;
+  - the shared header cluster.
+
+  Also decide whether the login illustrations' ≥ 1200px rule needs a compact variant then. The result
+  is an ADR and a per-app session list.
+- **P83-S10+ — Narrow-width/mobile implementation**: per the S9 ADR, small apps first, then `user-ui` and
+  `admin-ui` in their own sessions. Each session gets live screenshots at 390/768/1400px.
 - **P83-Sn (last) — Docs/README hero + phase close**: an OG Doc hero still (and optionally a loop) for
   `README.md`/docs, exported via `film.mjs --still`; then the phase-close regression and the whole-plan
   `graphify update .`.

@@ -156,9 +156,9 @@ export function StorageGuard() {
   }
 
   const primaryBtn =
-    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap";
   const secondaryBtn =
-    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50";
+    "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap";
   const checkbox = "h-4 w-4 rounded border-border accent-accent";
 
   return (
@@ -189,7 +189,7 @@ export function StorageGuard() {
                 <tr key={entry.target_id}>
                   <td>{entry.target_id}</td>
                   <td>{entry.device_id ?? t("storageGuard.deviceIdUnknown")}</td>
-                  <td>{entry.verified_at ? new Date(entry.verified_at).toLocaleString() : "-"}</td>
+                  <td className="whitespace-nowrap">{entry.verified_at ? new Date(entry.verified_at).toLocaleString() : "-"}</td>
                   <td>
                     <span className={`badge ${entry.pending_copies > 0 ? "down" : "ok"}`}>
                       {entry.pending_copies > 0

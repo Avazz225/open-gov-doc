@@ -107,8 +107,8 @@ contain none, and five copies of a ~700 KB kit would drift.
 **Applies to all five login illustrations (P83-S2/S3):** fade crop on the page itself, OG Doc's own pane
 chrome (never an OS window), the login card's material, the pane's top edge level with the card's, and
 labels from each app's own i18n keys wherever the real UI already has them.
-| `user-ui` empty preview pane ("Kein Dokument ausgewählt") | Still, gray art per `craft.md` (empty states are the one place for it) | Fade crop / `static-card` | A selected list row and the preview it opens; no cursor |
-| `user-ui` empty "Vorlagen" | Still | Stacked cards / `stacked-cards` | A folder subtree over the template made from it |
+| `user-ui` empty preview pane ("Kein Dokument ausgewählt") (**built P83-S4**) | Still, gray art per `craft.md` (empty states are the one place for it), **wordless** | ~~Fade crop~~ **Unframed** (see below) / `static-card` | A selected list row (the one accent) and the page it opens; no cursor |
+| `user-ui` empty "Vorlagen" (**built P83-S4**) | Still, gray art, **wordless** | **Unframed** / `stacked-cards` | A folder subtree, and in front of it the template captured from it: its mark (the one accent) and the same shape as dashed outlines, because templates capture structure only |
 | `README.md`/docs hero | Still (`film.mjs --still`) | Wide hero / `linear` | OG Doc explorer + preview, realistic fidelity |
 
 **Not built:**
@@ -119,6 +119,20 @@ labels from each app's own i18n keys wherever the real UI already has them.
   feature to host it, which is out of scope.
 - **The remaining empty states** (Papierkorb, Favoriten, Team-Aufgaben, Umlaufmappen filters): text fixes
   from the punch list only. Illustrating every empty state is the "too much" failure mode at page level.
+
+**Empty-state stills (P83-S4):**
+- **Wordless.** Inside a functional pane, a real filename would read as if a document were actually
+  there; the pane's unchanged sentence carries the meaning.
+- **`unframed`.** `framing.md` leaves unframed to the developer; this is that call. A spot illustration
+  in a user-resizable dockview pane has no page edge to bleed against, and a crop there reads as a
+  rendering fault.
+- **Gated by the width inside the pane, not the viewport.** `ResizeObserver` measures the empty-state
+  block itself, and the picture shows from ≥ 304px of content width. The 320px stage then never scales
+  below 0.95, so 1px lines and 14px icons stay crisp, and no `compact` design is needed (`framing.md`: "a
+  card that already fits needs none"). The first threshold, 280px of *pane* width, was corrected by the
+  review: it meant about 0.75 scale and soft lines.
+- **Each stage is 320×192**, so every edge keeps a margin at least as deep as the shadows. That is
+  `framing.md`'s condition for unframed; the first 176px height clipped them.
 
 **Breakpoint:** login illustrations render side-by-side with the form only at ≥ ~~1024~~ **1200** px. That
 is amended in P83-S2: a 720px stage, a 48px gap and the 384px card fit at 1:1 only from 1200px, and below
@@ -166,6 +180,21 @@ The rules follow from that table:
 - Filming runs against the stageshow playground during development: copy the illustration to
   `examples/<name>/` and use `?capture=<name>`, the skill's "quickest loop". It also runs against the built
   app page once integrated.
+
+## Decision 6 — Narrow widths become a goal (user decision, 2026-11-20, recorded in P83-S5)
+
+The P83-S1 punch list left item 12 (the real apps are unusable at 390px) as an open question for the
+user, because no concept section asks for phone support in the back-office apps. The user decided: yes,
+narrow-width/mobile support is worth having for the back-office apps too.
+
+What this means here:
+- P83-S9 assesses all apps at 390/768px and records the patterns in their own ADR. P83-S10+ implements
+  them.
+- Every fix from P83-S5 on is built so it already holds when narrow. The first instance is S5's toolbar
+  pattern: whole buttons wrap, labels never do.
+- The illustrations keep their current rules until S9 decides otherwise. Logins render only at ≥ 1200px,
+  so the card stands alone on small screens; empty-state stills are gated by pane width. S9 re-checks
+  whether a narrow login should get a `compact` illustration.
 
 ## Consequences
 

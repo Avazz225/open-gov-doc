@@ -587,8 +587,16 @@ body {
 
 .explorer-toolbar {
   display: flex;
+  /* P83-S5: whole buttons wrap to a new line when the pane is narrow - a
+     label never breaks inside its own button (punch list item 8, and the
+     pattern the narrow-width/mobile work builds on) */
+  flex-wrap: wrap;
   gap: var(--dms-space-3);
   margin-bottom: var(--dms-space-3);
+}
+
+.explorer-toolbar button {
+  white-space: nowrap;
 }
 
 /* Baumansicht (2.2a/8, P5b-S4): nutzerseitig umschaltbare Alternative zur

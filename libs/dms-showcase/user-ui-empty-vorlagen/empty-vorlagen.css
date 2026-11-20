@@ -1,0 +1,63 @@
+/* user-ui empty Vorlagen pane: a folder subtree and the structure template
+   captured from it (P83-S4). Shared tokens and the card come from
+   ../look-ogdoc.css (className="og og-empty-vorlagen"). Unframed: whole
+   objects, centered in the 320x192 stage, every edge's margin at least as
+   deep as the shadows (objects span x 32..296, y 16..168). */
+
+/* Rows shared by the tree and its template: one pitch, one indent, so the
+   template reads as the same shape */
+.og-empty-vorlagen .og-tree__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 24px;
+  padding: 0 8px;
+}
+
+/* Sub-folders indent by one icon plus its gap */
+.og-empty-vorlagen .og-tree__row[data-depth="1"] {
+  padding-left: 30px;
+}
+
+/* The real subtree, behind */
+.og-empty-vorlagen .og-tree {
+  left: 32px;
+  top: 16px;
+  width: 144px;
+  padding: 8px 6px;
+  box-shadow: var(--ss-shadow-ground);
+}
+
+/* Small icons are filled (craft.md): solid folders for the real ones */
+.og-empty-vorlagen .og-tree__icon {
+  flex: none;
+  color: var(--ss-icon-faint);
+}
+
+/* The template, in front, overlapping the subtree's lower-right corner by
+   16px - the subtree's own bars end 14px clear of it */
+.og-empty-vorlagen .og-template {
+  left: 160px;
+  top: 56px;
+  width: 136px;
+  padding: 8px 6px;
+}
+
+/* On dark, the template comes forward as a lighter surface */
+.og-empty-vorlagen .ss-stage[data-theme="dark"] .og-template {
+  --og-card-bg: color-mix(in srgb, var(--og-surface) 84%, #fff);
+}
+
+/* The one accent: the captured structure itself - outlined folders and
+   dashed bars, "structure only" */
+.og-empty-vorlagen .og-template__icon {
+  flex: none;
+  color: var(--ss-accent);
+}
+
+.og-empty-vorlagen .og-template__bar {
+  display: block;
+  height: 6px;
+  border: 1.5px dashed var(--ss-accent);
+  border-radius: 3px;
+}

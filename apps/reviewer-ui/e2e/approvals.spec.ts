@@ -13,7 +13,7 @@ test("loads the approval inbox and the status filter reloads without error", asy
   await loginViaUi(page);
   await page.getByRole("link", { name: "Freigaben" }).click();
   await expect(page).toHaveURL(/\/approvals/);
-  await expect(page.getByRole("heading", { name: "Vier-Augen-Freigaben (4.3)" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Vier-Augen-Freigaben" })).toBeVisible();
   await expect(errorAlert(page)).toHaveCount(0);
 
   for (const label of ["Alle", "Freigegeben", "Abgelehnt", "Offen"]) {

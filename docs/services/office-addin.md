@@ -6,6 +6,30 @@
 **No own Postgres schema** — a purely client-side rendered SPA (static export, same pattern as `apps/user-ui`, ADR 0006), no own backend process. Talks to **not a single new endpoint** — full reuse of `document-service`/`workflow-service`/`object-type-service`/`folder-service`/`search-service`/`auth-service`.
 **ADR:** [0045 — Word only, full endpoint reuse, document linking via `document.settings`](../adr/0045-office-addin-word-only-reused-endpoints-settings-linking.md)
 
+## office.js and the Next.js router; outside Word (Phase 83 Session 5)
+
+**office.js sets `window.history.replaceState`/`pushState` to `null`.** This is a known office.js
+behavior. Before P83-S5 it crashed the Next.js router on load ("replaceState is not a function", shown
+as "Application error"), found live in a plain browser. `app/layout.tsx` therefore loads office.js as
+three plain, synchronous `<script>` tags in `<head>`, not `next/script`, so the HTML parser runs them
+strictly in order:
+1. Save the two history methods.
+2. Load office.js from Microsoft's CDN.
+3. Restore whichever methods office.js nulled.
+
+This also matches Microsoft's recommendation to load office.js synchronously in the head. It was
+verified against the built export: 0 crashes in 8 loads.
+
+**Outside an Office client** (a plain browser tab), office.js still resolves `Office.onReady()`, but
+with `host: null`. `waitForOfficeReady()` now returns `{ inHost }`. Without a host, `OfficeGate` shows
+"Dieses Add-in läuft nur innerhalb von Microsoft Word…" (`officeGate.notInHost`) instead of a task pane
+that would fail on its first `Office.context.document` call. Both Office mocks (unit and e2e) report
+`host: "Word"` and are unaffected. `tests/office-gate.test.tsx` and `tests/office-lib.test.ts` cover the
+no-host case.
+
+**Not verified in a real Word client** (none in this environment). The history fix is the established
+workaround for office.js and the Next.js router. A real Word session should confirm it.
+
 ## Location in the Repo
 
 `apps/office-addin/` — Next.js static export + `manifest.xml` (Office add-in manifest, XML format, more broadly compatible than the newer JSON manifest) + `assets/` (icons). `manifest.xml`/`assets/` are **not** a Next.js build output — they are copied separately into the Docker image (see `Dockerfile`).

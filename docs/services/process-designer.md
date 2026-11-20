@@ -26,7 +26,7 @@ The host, `src/components/LoginIllustration.tsx`, is a copy of user-ui's (ADR 00
 - Under reduced motion it shows the final frame.
 - It has one DE/EN text alternative (`login.illustration.alt`), with its content `aria-hidden`.
 
-Labels the real UI already has come from the app's own i18n keys (`nav.processesTab`, `designer.exportButton`, `signatureTask.requiredLabel`/`levelLabel`. The group label *Signatur* has its own key until `signatureTask.groupLabel` loses its "(3.10)" (P83-S1 punch list item 1)). Only the sample data and the
+Labels the real UI already has come from the app's own i18n keys (`nav.processesTab`, `designer.exportButton`, `signatureTask.groupLabel`/`requiredLabel`/`levelLabel`; the group label had its own key until P83-S5 stripped the "(3.10)" from `signatureTask.groupLabel`). Only the sample data and the
 text alternative live under `login.illustration.*`.
 
 The build wiring is the same four additions as user-ui: `lucide-react` `0.468.0`, `resolve.modules`,

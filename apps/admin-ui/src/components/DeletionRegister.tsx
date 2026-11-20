@@ -128,7 +128,7 @@ export function DeletionRegister() {
                 </td>
                 <td>{entry.reason ?? "—"}</td>
                 <td>{entry.triggeredBy ?? "—"}</td>
-                <td>{new Date(entry.occurredAt).toLocaleString()}</td>
+                <td className="whitespace-nowrap">{new Date(entry.occurredAt).toLocaleString()}</td>
               </tr>
             ))}
           </tbody>
