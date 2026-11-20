@@ -47,6 +47,7 @@ async def test_create_document_publishes_event(client, consumer):
         "/documents",
         data={"title": "Vertrag", "created_by": "alice"},
         files={"file": ("vertrag.pdf", b"Inhalt", "application/pdf")},
+        headers={"X-DMS-Principal": "alice"},
     )
     document_id = response.json()["id"]
 
@@ -60,9 +61,14 @@ async def test_force_release_publishes_event(client, consumer):
         "/documents",
         data={"title": "Vertrag", "created_by": "alice"},
         files={"file": ("vertrag.pdf", b"Inhalt", "application/pdf")},
+        headers={"X-DMS-Principal": "alice"},
     )
     document_id = upload.json()["id"]
-    client.post(f"/documents/{document_id}/lock", json={"locked_by": "alice", "session_id": "s1"})
+    client.post(
+        f"/documents/{document_id}/lock",
+        json={"locked_by": "alice", "session_id": "s1"},
+        headers={"X-DMS-Principal": "alice"},
+    )
 
     received, got_message = await _collect_one(consumer, "document.lock.force_released")
 

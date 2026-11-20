@@ -1746,7 +1746,7 @@ async def _require_document_permission(
 async def create_document(
     file: UploadFile = File(...),
     title: str = Form(...),
-    created_by: str = Form(...),
+    created_by: str | None = Form(None),
     folder_id: str | None = Form(None),
     object_type_id: int | None = Form(None),
     attributes: str | None = Form(None),
@@ -1756,8 +1756,13 @@ async def create_document(
     draft: bool = Form(False),
     x_dms_principal: str = Header(default=""),
     x_dms_maintenance_active: str = Header(default="false"),
+    identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> DocumentOut:
+    log_ignored_actor_field(
+        logger, route="POST /documents", field="created_by", value=created_by, identity=identity
+    )
+    actor_created_by = identity.actor
     # Sensor "document.upload.duration" (10.1, P11-S1): start time is only
     # captured if the sensor is currently active - when disabled, even this
     # minimal overhead is avoided entirely.
@@ -1823,7 +1828,7 @@ async def create_document(
             filename=file.filename or title,
             content_type=content_type,
             document_id=None,
-            created_by=created_by,
+            created_by=actor_created_by,
         )
     except ScanRejectedError as exc:
         raise HTTPException(
@@ -1840,7 +1845,7 @@ async def create_document(
         filename=file.filename or title,
         content_type=content_type,
         title=title,
-        created_by=created_by,
+        created_by=actor_created_by,
         folder_id=folder_id,
         object_type_id=object_type_id,
         attributes=parsed_attributes,
@@ -1865,13 +1870,14 @@ async def create_document(
 async def create_document_from_quarantine_release(
     file: UploadFile = File(...),
     title: str = Form(...),
-    created_by: str = Form(...),
+    created_by: str | None = Form(None),
     folder_id: str | None = Form(None),
     object_type_id: int | None = Form(None),
     attributes: str | None = Form(None),
     source_scan_id: str = Form(...),
     x_dms_principal: str = Header(default=""),
     x_dms_roles: str = Header(default=""),
+    identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> DocumentOut:
     """Internal creation path exclusively for virus-scan-service when
@@ -1886,6 +1892,14 @@ async def create_document_from_quarantine_release(
     which forwards the roles of the original caller - no endpoint that
     bypasses the mandatory virus scan should depend on a single check
     alone."""
+    log_ignored_actor_field(
+        logger,
+        route="POST /documents/from-quarantine-release",
+        field="created_by",
+        value=created_by,
+        identity=identity,
+    )
+    actor_created_by = identity.actor
     if not x_dms_principal:
         raise HTTPException(status_code=401, detail="X-DMS-Principal fehlt")
     if not _has_quarantine_release_role(x_dms_roles):
@@ -1922,7 +1936,7 @@ async def create_document_from_quarantine_release(
         filename=file.filename or title,
         content_type=content_type,
         title=title,
-        created_by=created_by,
+        created_by=actor_created_by,
         folder_id=folder_id,
         object_type_id=object_type_id,
         attributes=parsed_attributes,
@@ -2410,6 +2424,7 @@ async def register_document(
     document_id: str,
     payload: DocumentRegisterRequest,
     x_dms_principal: str = Header(default=""),
+    identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> DocumentOut:
     """Draft -> registered transition (post-roadmap phase 31 session 2, ADR
@@ -2422,6 +2437,14 @@ async def register_document(
     Phase 38 Session 4 (previously ungated) - checked against the
     document's own `resource_id` since Post-Roadmap Phase 39 Session 4
     (ADR 0154), previously its containing folder's."""
+    log_ignored_actor_field(
+        logger,
+        route="POST /documents/{id}/register",
+        field="registered_by",
+        value=payload.registered_by,
+        identity=identity,
+    )
+    actor_registered_by = identity.actor
     try:
         document = await repository.get_document(session, document_id)
     except repository.NotFoundError as exc:
@@ -2448,7 +2471,7 @@ async def register_document(
         "document.registered",
         subject=document_id,
         payload={"kennzeichen": kennzeichen},
-        actor=payload.registered_by,
+        actor=actor_registered_by,
     )
     return registered
 
@@ -2458,6 +2481,7 @@ async def promote_document(
     document_id: str,
     payload: DocumentPromoteRequest,
     x_dms_principal: str = Header(default=""),
+    identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> DocumentOut:
     """Work tray promotion (14.2, post-roadmap phase 31 session 7, ADR
@@ -2475,6 +2499,14 @@ async def promote_document(
     docstring previously argued the opposite - "deliberately ungated, like
     register/the PATCH move branch" - now stale since this session gates
     all three consistently)."""
+    log_ignored_actor_field(
+        logger,
+        route="POST /documents/{id}/promote",
+        field="promoted_by",
+        value=payload.promoted_by,
+        identity=identity,
+    )
+    actor_promoted_by = identity.actor
     try:
         document = await repository.get_document(session, document_id)
     except repository.NotFoundError as exc:
@@ -2527,7 +2559,7 @@ async def promote_document(
         "document.promoted",
         subject=document_id,
         payload={"kennzeichen": kennzeichen, "target_folder_id": target_folder_id},
-        actor=payload.promoted_by,
+        actor=actor_promoted_by,
     )
     if is_move:
         # Re-parents the document's own `ResourceNode` (Post-Roadmap Phase
@@ -2565,6 +2597,7 @@ async def set_document_classification_level(
     document_id: str,
     payload: ClassificationLevelUpdate,
     x_dms_principal: str = Header(default=""),
+    identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> DocumentOut:
     """Set or raise a document's classification level (14.2, post-roadmap
@@ -2573,6 +2606,14 @@ async def set_document_classification_level(
     downgrade). Deliberately no way to clear/lower via this endpoint at
     all - declassification is a separate, heavier process this session does
     not build."""
+    log_ignored_actor_field(
+        logger,
+        route="PUT /documents/{id}/classification-level",
+        field="changed_by",
+        value=payload.changed_by,
+        identity=identity,
+    )
+    actor_changed_by = identity.actor
     await _require_classification_permission(x_dms_principal)
     try:
         updated = await repository.set_classification_level(
@@ -2587,7 +2628,7 @@ async def set_document_classification_level(
         "document.classification.changed",
         subject=document_id,
         payload={"classification_level": payload.classification_level, "direction": "raised"},
-        actor=payload.changed_by,
+        actor=actor_changed_by,
     )
     return updated
 
@@ -2627,6 +2668,7 @@ async def declassify_document_classification_level(
     document_id: str,
     payload: DeclassifyRequest,
     x_dms_principal: str = Header(default=""),
+    identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> DeclassifyResult:
     """Lower a document's classification by exactly one rank (14.2, P70-S2,
@@ -2639,6 +2681,14 @@ async def declassify_document_classification_level(
     happens exclusively in `consumer.py`'s `permission.approval.approved`
     handler once a second, distinct person (never the initiator, enforced
     by `permission-service` itself) approves the request."""
+    log_ignored_actor_field(
+        logger,
+        route="POST /documents/{id}/classification-level/declassify",
+        field="changed_by",
+        value=payload.changed_by,
+        identity=identity,
+    )
+    actor_changed_by = identity.actor
     await _require_declassification_permission(x_dms_principal)
     try:
         document = await repository.get_document(session, document_id)
@@ -2650,7 +2700,7 @@ async def declassify_document_classification_level(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     request = await app.state.approval_client.create_request(
         action_type="document.classification.declassify",
-        # `x_dms_principal`, NOT `payload.changed_by` - `changed_by` is an
+        # `x_dms_principal`, NOT `actor_changed_by` - `changed_by` is an
         # opaque attribution/audit-only field (same pattern as
         # `ClassificationLevelUpdate.changed_by` above), but
         # `permission-service`'s `required_permission` check is applied to
@@ -2664,7 +2714,7 @@ async def declassify_document_classification_level(
         payload={
             "document_id": document_id,
             "target_classification_level": target_level,
-            "changed_by": payload.changed_by,
+            "changed_by": actor_changed_by,
             "reason": payload.reason,
         },
     )
@@ -2754,6 +2804,7 @@ async def pseudonymize_document_attribute(
     attribute_name: str,
     payload: PseudonymizeAttributeRequest,
     x_dms_principal: str = Header(default=""),
+    identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> PseudonymizedAttributeOut:
     """Concept 5.2's GDPR-tension fix (Post-Roadmap Phase 41 Session 2,
@@ -2764,6 +2815,14 @@ async def pseudonymize_document_attribute(
     an object type without this flag makes every one of its attributes
     ineligible, on purpose (default-deny, not default-allow, for a
     compliance-relevant action)."""
+    log_ignored_actor_field(
+        logger,
+        route="POST /documents/{id}/attributes/{name}/pseudonymize",
+        field="pseudonymized_by",
+        value=payload.pseudonymized_by,
+        identity=identity,
+    )
+    actor_pseudonymized_by = identity.actor
     await _require_pseudonymization_permission(x_dms_principal)
     try:
         document = await repository.get_document(session, document_id)
@@ -2803,7 +2862,7 @@ async def pseudonymize_document_attribute(
             document_id,
             attribute_name,
             encrypted_value=encrypted_value,
-            pseudonymized_by=payload.pseudonymized_by,
+            pseudonymized_by=actor_pseudonymized_by,
             reason=payload.reason,
         )
     except repository.AlreadyPseudonymizedError as exc:
@@ -2813,7 +2872,7 @@ async def pseudonymize_document_attribute(
         "document.attribute.pseudonymized",
         subject=document_id,
         payload={"attribute_name": attribute_name},
-        actor=payload.pseudonymized_by,
+        actor=actor_pseudonymized_by,
     )
     return vault_entry
 
@@ -2881,6 +2940,7 @@ async def reveal_document_attribute(
     attribute_name: str,
     payload: RevealAttributeRequest,
     x_dms_principal: str = Header(default=""),
+    identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> RevealedAttributeOut:
     """Decrypts and returns the original value of a pseudonymized
@@ -2892,6 +2952,14 @@ async def reveal_document_attribute(
     `_should_log_document_access`'s configurable viewed/downloaded
     logging) - re-exposing personal data is inherently security-relevant
     every single time, not an optionally-quiet business-as-usual read."""
+    log_ignored_actor_field(
+        logger,
+        route="POST /documents/{id}/attributes/{name}/reveal",
+        field="revealed_by",
+        value=payload.revealed_by,
+        identity=identity,
+    )
+    actor_revealed_by = identity.actor
     await _require_reveal_permission(x_dms_principal)
     try:
         vault_entry = await repository.get_pseudonymized_attribute(
@@ -2906,13 +2974,13 @@ async def reveal_document_attribute(
     except crypto.DecryptionError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    await repository.mark_revealed(session, vault_entry.id, revealed_by=payload.revealed_by)
+    await repository.mark_revealed(session, vault_entry.id, revealed_by=actor_revealed_by)
     await session.commit()
     await publish_event(
         "document.attribute.revealed",
         subject=document_id,
         payload={"attribute_name": attribute_name},
-        actor=payload.revealed_by,
+        actor=actor_revealed_by,
     )
     return RevealedAttributeOut(
         document_id=document_id,
@@ -2933,6 +3001,7 @@ async def restore_document_attribute(
     attribute_name: str,
     payload: RestoreAttributeRequest,
     x_dms_principal: str = Header(default=""),
+    identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> RestoredAttributeOut:
     """Un-pseudonymizes an attribute (P62-S2) - ADR 0156's own named,
@@ -2946,6 +3015,14 @@ async def restore_document_attribute(
     `admin.attribute_pseudonymization` - permanently re-exposing the value
     is at least as sensitive as a transient reveal, arguably more so (the
     value stays exposed going forward, not just in this one response)."""
+    log_ignored_actor_field(
+        logger,
+        route="POST /documents/{id}/attributes/{name}/restore",
+        field="restored_by",
+        value=payload.restored_by,
+        identity=identity,
+    )
+    actor_restored_by = identity.actor
     await _require_reveal_permission(x_dms_principal)
     try:
         vault_entry = await repository.get_pseudonymized_attribute(
@@ -2968,13 +3045,13 @@ async def restore_document_attribute(
         "document.attribute.restored",
         subject=document_id,
         payload={"attribute_name": attribute_name},
-        actor=payload.restored_by,
+        actor=actor_restored_by,
     )
     return RestoredAttributeOut(
         document_id=document_id,
         attribute_name=attribute_name,
         value=original_value,
-        restored_by=payload.restored_by,
+        restored_by=actor_restored_by,
         restored_at=datetime.now(UTC),
     )
 
@@ -3091,6 +3168,7 @@ async def redact_document(
     payload: RedactionRequest,
     x_dms_principal: str = Header(default=""),
     x_dms_maintenance_active: str = Header(default="false"),
+    identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> DocumentOut:
     """Document redaction workflow (14.2, post-roadmap phase 31 session 4,
@@ -3114,6 +3192,14 @@ async def redact_document(
     PDF export feature's endpoint (P28, ADR 0107) - creating the redacted
     copy itself is deliberately left as ungated as `POST /documents` already
     is (a pre-existing, documented gap this session doesn't newly introduce)."""
+    log_ignored_actor_field(
+        logger,
+        route="POST /documents/{id}/redact",
+        field="created_by",
+        value=payload.created_by,
+        identity=identity,
+    )
+    actor_created_by = identity.actor
     if not x_dms_principal:
         raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
     # Maintenance mode (4.8), Category A (Phase 51 Session 4, ADR 0152): this
@@ -3143,7 +3229,7 @@ async def redact_document(
         redacted_data = await app.state.rendering_client.redact(
             data=source_data,
             regions=[region.model_dump() for region in payload.regions],
-            x_dms_principal=payload.created_by,
+            x_dms_principal=actor_created_by,
         )
     except RenderingUnavailableError as exc:
         raise HTTPException(
@@ -3169,7 +3255,7 @@ async def redact_document(
         filename=f"{document.title}-geschwaerzt.pdf",
         content_type="application/pdf",
         title=title,
-        created_by=payload.created_by,
+        created_by=actor_created_by,
         folder_id=document.folder_id,
         object_type_id=document.object_type_id,
         attributes=parsed_attributes,
@@ -4245,12 +4331,21 @@ async def checkin_version(
     document_id: str,
     file: UploadFile = File(...),
     expected_base_version_number: int = Form(...),
-    created_by: str = Form(...),
+    created_by: str | None = Form(None),
     comment: str | None = Form(None),
     x_dms_principal: str = Header(default=""),
     x_dms_maintenance_active: str = Header(default="false"),
+    identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> CheckinResult:
+    log_ignored_actor_field(
+        logger,
+        route="POST /documents/{id}/versions",
+        field="created_by",
+        value=created_by,
+        identity=identity,
+    )
+    actor_created_by = identity.actor
     # RBAC (Post-Roadmap Phase 38 Session 4, ADR 0149) - checked before the
     # virus scan/anything else, same "fail fast on auth" convention as
     # `create_document` above. An unknown `document_id` is deliberately let
@@ -4284,7 +4379,7 @@ async def checkin_version(
     # below still re-checks the lock internally, unchanged (cheap,
     # defense-in-depth).
     try:
-        await repository.check_lock_for_checkin(session, document_id, created_by)
+        await repository.check_lock_for_checkin(session, document_id, actor_created_by)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except repository.LockConflictError as exc:
@@ -4299,7 +4394,7 @@ async def checkin_version(
             filename=file.filename or f"version-{expected_base_version_number + 1}",
             content_type=content_type,
             document_id=document_id,
-            created_by=created_by,
+            created_by=actor_created_by,
         )
     except ScanRejectedError as exc:
         raise HTTPException(
@@ -4331,7 +4426,7 @@ async def checkin_version(
             content_type=content_type,
             size_bytes=len(data),
             checksum_sha256=checksum,
-            created_by=created_by,
+            created_by=actor_created_by,
             comment=comment,
         )
     except repository.NotFoundError as exc:
@@ -4346,9 +4441,9 @@ async def checkin_version(
         payload={
             "version_number": version.version_number,
             "is_conflict": is_conflict,
-            "created_by": created_by,
+            "created_by": actor_created_by,
         },
-        actor=created_by,
+        actor=actor_created_by,
     )
     return CheckinResult(version=version, is_conflict=is_conflict)
 
@@ -4387,15 +4482,24 @@ async def acquire_lock(
     document_id: str,
     payload: LockAcquireRequest,
     x_dms_principal: str = Header(default=""),
+    identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> LockOut:
+    log_ignored_actor_field(
+        logger,
+        route="POST /documents/{id}/lock",
+        field="locked_by",
+        value=payload.locked_by,
+        identity=identity,
+    )
+    actor_locked_by = identity.actor
     await _require_document_exists(session, document_id)
     await _require_document_permission(x_dms_principal, document_id, access_type="write")
     try:
         lock = await repository.acquire_lock(
             session,
             document_id,
-            locked_by=payload.locked_by,
+            locked_by=actor_locked_by,
             session_id=payload.session_id,
             timeout_seconds=payload.timeout_seconds or settings.default_lock_timeout_seconds,
         )
@@ -4412,12 +4516,21 @@ async def release_lock(
     document_id: str,
     payload: LockReleaseRequest,
     x_dms_principal: str = Header(default=""),
+    identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> None:
+    log_ignored_actor_field(
+        logger,
+        route="DELETE /documents/{id}/lock",
+        field="released_by",
+        value=payload.released_by,
+        identity=identity,
+    )
+    actor_released_by = identity.actor
     await _require_document_exists(session, document_id)
     await _require_document_permission(x_dms_principal, document_id, access_type="write")
     try:
-        await repository.release_lock(session, document_id, released_by=payload.released_by)
+        await repository.release_lock(session, document_id, released_by=actor_released_by)
     except repository.LockNotHeldError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     await session.commit()

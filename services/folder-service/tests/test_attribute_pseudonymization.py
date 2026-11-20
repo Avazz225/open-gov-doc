@@ -59,6 +59,7 @@ def folder_id(client, object_type_id):
             "object_type_id": object_type_id,
             "attributes": {"SVNR": "123-45-6789", "Bezeichnung": "Testordner"},
         },
+        headers={"X-DMS-Principal": "alice"},
     )
     response.raise_for_status()
     return response.json()["id"]
@@ -129,6 +130,7 @@ def test_pseudonymize_rejects_attribute_with_no_value(client, object_type_id):
             "object_type_id": object_type_id,
             "attributes": {"Bezeichnung": "Testordner"},
         },
+        headers={"X-DMS-Principal": "alice"},
     ).json()["id"]
     response = _pseudonymize(client, folder_id)
     assert response.status_code == 400
@@ -140,7 +142,7 @@ def test_pseudonymize_succeeds_and_overwrites_the_live_value(client, folder_id):
     body = response.json()
     assert body["folder_id"] == folder_id
     assert body["attribute_name"] == "SVNR"
-    assert body["pseudonymized_by"] == "carol"
+    assert body["pseudonymized_by"] == PSEUDONYMIZATION_ADMIN_HEADERS["X-DMS-Principal"]  # P85-S4
     assert body["reason"] == "DSGVO-Löschanfrage"
     assert body["last_revealed_at"] is None
     assert "encrypted_value" not in body
@@ -189,7 +191,7 @@ def test_reveal_returns_the_original_value_without_restoring_it_live(client, fol
     body = response.json()
     assert body["value"] == "123-45-6789"
     assert body["reason"] == "DSGVO-Löschanfrage"
-    assert body["pseudonymized_by"] == "carol"
+    assert body["pseudonymized_by"] == PSEUDONYMIZATION_ADMIN_HEADERS["X-DMS-Principal"]  # P85-S4
 
     folder = client.get(f"/folders/{folder_id}").json()
     assert folder["attributes"]["SVNR"] == "[PSEUDONYMISIERT]"
@@ -205,7 +207,7 @@ def test_reveal_updates_last_revealed_tracking_on_the_listing(client, folder_id)
 
     listing = client.get(f"/folders/{folder_id}/attributes/pseudonymized").json()
     assert len(listing) == 1
-    assert listing[0]["last_revealed_by"] == "dave"
+    assert listing[0]["last_revealed_by"] == REVEAL_ADMIN_HEADERS["X-DMS-Principal"]  # P85-S4
     assert listing[0]["last_revealed_at"] is not None
 
 
@@ -302,7 +304,9 @@ async def test_pseudonymize_eligible_attributes_returns_empty_for_a_folder_witho
     from folder_service import main, repository
 
     folder_id = client.post(
-        "/folders", json={"name": "Ohne Objekttyp", "created_by": "alice"}
+        "/folders",
+        json={"name": "Ohne Objekttyp", "created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
     ).json()["id"]
 
     folder = await repository.get_folder(session, folder_id)

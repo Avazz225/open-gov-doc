@@ -66,6 +66,12 @@ None yet — follows in Phase 11.
 - `uv run pytest services/virus-scan-service/tests` (**38 tests**, previously 32, +6 since **Post-Roadmap Phase 38 Session 2**: 401/403 cases for `/scan`, `GET /scans/{id}`, and `GET /scans` without `status`): engine behavior (EICAR detection incl. embedded signature, factory selection, `ClamdEngine` throws instead of falsely reporting "clean" when the daemon is unreachable), repository (CRUD, filter by `document_id`/`status`, `mark_resolved` for release/deletion), API (`/scan` clean/infected incl. quarantine key, `/scans` endpoints incl. role-gated `status=infected` view, `/scans/{id}/release`/`/purge` incl. role/404/409 cases) — runs against real Postgres/the real Storage Service AND (since P15-S2) the real Document Service, no mocks (same rationale as the other backend services).
 - Document Service tests cover the integration (`test_create_document_rejects_infected_upload`, `test_checkin_rejects_infected_version_without_creating_it`) — an upload with EICAR content is rejected with `422`, no (further) version is created. Since P15-S2, additionally `test_quarantine_release_*` — the internal creation path deliberately accepts the same EICAR content (no re-scan).
 
+## Acting Identity (P85-S4, [ADR 0240](../adr/0240-acting-identity-from-verified-principal.md))
+
+`POST /scan` records the acting identity as `created_by`; the form field is ignored. document-service
+(upload) and mail-connector (attachments) call it on behalf of the uploading or mailbox user
+(`X-DMS-On-Behalf-Of`), so quarantine entries name that person.
+
 ## Open Points
 
 - **`ClamdEngine` not wired up in production**: code exists and is activatable via `DMS_SCAN_ENGINE=clamd`, but no `clamd` container is part of `infra/docker-compose.yml` (rationale: see above/ADR 0010). To be added once an environment with reliable access to the ClamAV signature database is available.

@@ -202,4 +202,22 @@ every touched route, plus the service's suite and ruff.
   Callers: migration-service (workflow start on behalf of the transfer initiator) and mail-connector
   (case references as `mail-connector` on behalf of the mailbox user, instead of the non-service
   principal `system:mail-connector`).
+- **S4 (done):**
+  - **Routes:**
+    - document-service: upload, upload from quarantine release and versions (form `created_by` →
+      `Form(None)`, ignored); register, promote, classification, declassify; pseudonymize, reveal,
+      restore; redact; lock acquire and release;
+    - folder-service: create, pseudonymize, reveal, document references, templates;
+    - virus-scan `/scan`.
+  - **favorite-service:** already compliant (`user_id` = verified `X-DMS-Username`), left keyed by user
+    name.
+  - **Callers on behalf of the user:** mail-connector, archival-service (documents and cases; the case
+    call had been missed in S3), signature-service (the signer's principal instead of a display name),
+    teamspace-service, document-service's virus-scan call. ocr-service acts as itself.
+  - **Shared helper:** `dms_common.on_behalf_headers(service, actor)`, plus `on_behalf_of=` on the
+    connector SDK's `write_document`.
+  - **Federated exception, concretized:** the acting identity is `peer:<installation>/<remote creator>`.
+    It names both, instead of a separate `origin_created_by` field, so there is no schema change.
+  - **Consequence for the UIs:** lock holders and creators are now principals (a user's `sub`), so name
+    display moves to P86-S2.
 

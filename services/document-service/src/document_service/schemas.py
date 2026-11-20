@@ -103,13 +103,15 @@ class LockOut(BaseModel):
 
 
 class LockAcquireRequest(BaseModel):
-    locked_by: str
+    # Ignored since P85-S4 (ADR 0240): the actor is the request principal.
+    locked_by: str | None = None
     session_id: str
     timeout_seconds: float | None = None
 
 
 class LockReleaseRequest(BaseModel):
-    released_by: str
+    # Ignored since P85-S4 (ADR 0240): the actor is the request principal.
+    released_by: str | None = None
 
 
 class LockForceReleaseRequest(BaseModel):
@@ -253,7 +255,8 @@ class ClassificationLevelUpdate(BaseModel):
     `X-DMS-Principal`-based `admin.classification` permission check)."""
 
     classification_level: Literal["VS-NfD", "VS-VERTRAULICH", "GEHEIM", "STRENG GEHEIM"]
-    changed_by: str
+    # Ignored since P85-S4 (ADR 0240): the actor is the request principal.
+    changed_by: str | None = None
 
 
 class DeclassifyRequest(BaseModel):
@@ -265,7 +268,8 @@ class DeclassifyRequest(BaseModel):
     `LockForceReleaseRequest.reason`) - a heavier, human-justified
     administrative action, not a routine one."""
 
-    changed_by: str
+    # Ignored since P85-S4 (ADR 0240): the actor is the request principal.
+    changed_by: str | None = None
     reason: str
 
 
@@ -287,12 +291,14 @@ class PseudonymizeAttributeRequest(BaseModel):
     independent of the `X-DMS-Principal`-based `admin.attribute_
     pseudonymization` permission check)."""
 
-    pseudonymized_by: str
+    # Ignored since P85-S4 (ADR 0240): the actor is the request principal.
+    pseudonymized_by: str | None = None
     reason: str | None = None
 
 
 class RevealAttributeRequest(BaseModel):
-    revealed_by: str
+    # Ignored since P85-S4 (ADR 0240): the actor is the request principal.
+    revealed_by: str | None = None
 
 
 class PseudonymizedAttributeOut(BaseModel):
@@ -328,7 +334,8 @@ class RestoreAttributeRequest(BaseModel):
     - "a small, mechanically obvious follow-up... not built here") -
     `restored_by` mirrors `RevealAttributeRequest.revealed_by`."""
 
-    restored_by: str
+    # Ignored since P85-S4 (ADR 0240): the actor is the request principal.
+    restored_by: str | None = None
 
 
 class RestoredAttributeOut(BaseModel):
@@ -361,7 +368,8 @@ class RedactionRegion(BaseModel):
 
 class RedactionRequest(BaseModel):
     regions: list[RedactionRegion] = Field(min_length=1)
-    created_by: str
+    # Ignored since P85-S4 (ADR 0240): the actor is the request principal.
+    created_by: str | None = None
 
 
 class DocumentRegisterRequest(BaseModel):
@@ -371,7 +379,8 @@ class DocumentRegisterRequest(BaseModel):
     enforcement for this endpoint, consistent with `create_document`/
     `update_document`."""
 
-    registered_by: str
+    # Ignored since P85-S4 (ADR 0240): the actor is the request principal.
+    registered_by: str | None = None
 
 
 class DocumentPromoteRequest(BaseModel):
@@ -380,7 +389,8 @@ class DocumentPromoteRequest(BaseModel):
     atomic action/event - see `promote_document` in main.py. `promoted_by`
     is opaque, same pattern as `registered_by` above."""
 
-    promoted_by: str
+    # Ignored since P85-S4 (ADR 0240): the actor is the request principal.
+    promoted_by: str | None = None
     target_folder_id: str | None = None
 
 

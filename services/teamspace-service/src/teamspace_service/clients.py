@@ -5,6 +5,7 @@ instead creates a real `folder-service` folder when a teamspace is
 created and keeps its `id` as `root_folder_id`."""
 
 import httpx
+from dms_common import on_behalf_headers
 
 
 class FolderServiceClient:
@@ -29,7 +30,10 @@ class FolderServiceClient:
         dedicated object type just for this purpose would be unnecessary
         complexity."""
         response = await self._client.post(
-            "/folders", json={"name": name, "parent_id": "root", "created_by": created_by}
+            "/folders",
+            json={"name": name, "parent_id": "root"},
+            # P85-S4 (ADR 0240): on behalf of the teamspace's creator.
+            headers=on_behalf_headers(self._PRINCIPAL_ID, created_by),
         )
         response.raise_for_status()
         return response.json()

@@ -3652,10 +3652,36 @@ accepted that as a scaffold habit. The user decided to bind all of them to the g
     - case 87, workflow 242, ocr 60, signature 36, migration 21, mail 80, auth 164 (tracking re-run 12 +
       163 from the full run);
     - e2e 32/32; ruff clean; 7 images rebuilt.
-- **P85-S4 — Remaining document/folder routes (23).** Register, promote, classification, pseudonymize,
-  reveal, restore, redact, locks, upload and versions; folder create, references and templates;
-  favorite-service, virus-scan `/scan`, the migration federated exception; all remaining internal
-  callers.
+- **P85-S4 — Remaining document/folder routes (23).** ✅ **Done.**
+  - **document-service (13):** upload, upload from quarantine release and versions (form `created_by`
+    ignored); register, promote, classification, declassify; pseudonymize, reveal, restore; redact;
+    lock acquire and release. **The lock holder is the acting identity.**
+  - **folder-service (7):** create, pseudonymize, reveal, document references, templates.
+  - **virus-scan `/scan`:** takes the acting identity.
+  - **favorite-service:** already bound to the verified username, so unchanged; documented.
+  - **Callers on behalf of the user:**
+    - mail-connector (documents, scan), archival-service (documents and **cases**: an S3 caller that had
+      been missed), signature-service (the signer's principal instead of a display name),
+      teamspace-service (folders), document-service (scan);
+    - ocr-service acts as itself;
+    - webdav/cmis already forward the user principal.
+  - **New shared helper:** `dms_common.on_behalf_headers()`, and the connector SDK's `write_document`
+    got `on_behalf_of`.
+  - **Federated exception:** migration inbound writes on behalf of
+    `peer:<installation>/<remote creator>`, with no schema change.
+  - **Test script:** now also covers `data=` forms and skips tests whose name says they have no
+    principal (the S3 lesson).
+  - **Tests:**
+    - expectations changed where the principal now wins (pseudonymize, reveal, restore, redact, upload
+      event, virus-scan);
+    - new lock test (holder = principal, a foreign release is 403);
+    - an `on_behalf_headers` unit test.
+  - **Results:**
+    - document 426, folder 178, virus-scan 38, teamspace 70, archival 151, mail 80, ocr 60, signature
+      36, migration 21, search 76, case 87, webdav 19, cmis 17, favorite 18, dms-common 8;
+    - e2e 32/32; ruff clean; 11 images rebuilt.
+  - **Added to P86-S2:** lock holders and creators are now principals (a user's `sub`), so the UIs need
+    name display there too.
 - **P85-S5 — Clients and cleanup.**
   - The five UIs and both add-ins stop sending actor fields.
   - The fields are dropped from the request schemas, and the ignore-logging is removed.
@@ -3681,6 +3707,9 @@ accepted that as a scaffold habit. The user decided to bind all of them to the g
 - **P86-S2 — UX bundle.**
   - reviewer-ui "Beantragt von" shows names: copy user-ui's `usePrincipalNames` and `lookupUserById`,
     resolve UUID-shaped ids only, keep the raw id on hover. Apply it to team-task/instance ids too.
+  - Since P85 the recorded actors (lock holders, creators, deleters, approvers) are principals, so a
+    user is their `sub`. Every UI place that shows such a field (lock badges, "erstellt von", trash,
+    approvals, audit views) resolves it the same way.
   - user-ui `ApprovalsPane` gets a reject-reason field.
   - admin-ui `.form-grid`/layout gap polish (deferred since P81-S5).
   - A one-time check, in a narrow browser window, that GitHub honors the README `<picture>` width query.

@@ -207,10 +207,12 @@ def client():
         yield c
 
 
-def upload(client, *, content=b"Hallo Welt", title="Vertrag", created_by="alice", **extra):
+def upload(
+    client, *, content=b"Hallo Welt", title="Vertrag", created_by="alice", headers=None, **extra
+):
     data = {"title": title, "created_by": created_by, **extra}
     files = {"file": ("vertrag.pdf", content, "application/pdf")}
-    return client.post("/documents", data=data, files=files)
+    return client.post("/documents", data=data, files=files, headers=headers)
 
 
 def test_healthz(client):
@@ -278,7 +280,8 @@ def test_create_document_publishes_event_with_actor(client, monkeypatch):
 
     monkeypatch.setattr(app.state.event_bus, "publish", fake_publish)
 
-    response = upload(client, created_by="alice")
+    # The uploader is the principal (P85-S4, ADR 0240), not the form field.
+    response = upload(client, created_by="spoofed-name", headers={"X-DMS-Principal": "alice"})
     assert response.status_code == 201
 
     created_events = [e for e in published if e.event_type == "document.created"]
@@ -369,6 +372,7 @@ def test_versions_batch_returns_current_version_for_each_of_several_documents(cl
         f"/documents/{second['id']}/versions",
         data={"expected_base_version_number": 1, "created_by": "alice"},
         files={"file": ("b.pdf", b"zwei-zwei-neu", "application/pdf")},
+        headers={"X-DMS-Principal": "alice"},
     )
 
     response = client.post(
@@ -453,7 +457,10 @@ def test_download_content_rewrites_external_references_in_html_documents(client)
     )
     files = {"file": ("preview.html", html, "text/html")}
     response = client.post(
-        "/documents", data={"title": "HTML-Dokument", "created_by": "alice"}, files=files
+        "/documents",
+        data={"title": "HTML-Dokument", "created_by": "alice"},
+        files=files,
+        headers={"X-DMS-Principal": "alice"},
     )
     assert response.status_code == 201, response.text
     document_id = response.json()["id"]
@@ -484,7 +491,10 @@ def test_download_content_leaves_non_html_content_byte_identical(client):
     content = b"<img src='https://example.test/pixel.gif'>"
     files = {"file": ("notiz.txt", content, "text/plain")}
     response = client.post(
-        "/documents", data={"title": "Textnotiz", "created_by": "alice"}, files=files
+        "/documents",
+        data={"title": "Textnotiz", "created_by": "alice"},
+        files=files,
+        headers={"X-DMS-Principal": "alice"},
     )
     assert response.status_code == 201, response.text
     document_id = response.json()["id"]
@@ -538,7 +548,7 @@ def test_create_document_rejected_during_maintenance_mode(client):
         "/documents",
         data={"title": "X", "created_by": "alice"},
         files={"file": ("x.pdf", b"data", "application/pdf")},
-        headers={"X-DMS-Maintenance-Active": "true"},
+        headers={"X-DMS-Principal": "alice", "X-DMS-Maintenance-Active": "true"},
     )
     assert response.status_code == 503
 
@@ -553,7 +563,7 @@ def test_checkin_version_rejected_during_maintenance_mode(client):
         "/documents/does-not-exist/versions",
         data={"expected_base_version_number": 1, "created_by": "alice"},
         files={"file": ("v2.pdf", b"v2", "application/pdf")},
-        headers={"X-DMS-Maintenance-Active": "true"},
+        headers={"X-DMS-Principal": "alice", "X-DMS-Maintenance-Active": "true"},
     )
     assert response.status_code == 503
 
@@ -574,6 +584,7 @@ def test_checkin_rejects_infected_version_without_creating_it(client):
         f"/documents/{document_id}/versions",
         data={"expected_base_version_number": 1, "created_by": "alice"},
         files={"file": ("infiziert.pdf", EICAR_SIGNATURE, "application/pdf")},
+        headers={"X-DMS-Principal": "alice"},
     )
 
     assert response.status_code == 422
@@ -594,6 +605,7 @@ def test_checkin_normal_version_and_download(client):
         f"/documents/{document_id}/versions",
         data={"expected_base_version_number": 1, "created_by": "alice"},
         files={"file": ("vertrag.pdf", b"v2", "application/pdf")},
+        headers={"X-DMS-Principal": "alice"},
     )
     assert response.status_code == 201
     result = response.json()
@@ -612,12 +624,14 @@ def test_checkin_stale_base_produces_conflict_copy_without_moving_current(client
         f"/documents/{document_id}/versions",
         data={"expected_base_version_number": 1, "created_by": "bob"},
         files={"file": ("vertrag.pdf", b"bobs-version", "application/pdf")},
+        headers={"X-DMS-Principal": "bob"},
     )
 
     conflict_response = client.post(
         f"/documents/{document_id}/versions",
         data={"expected_base_version_number": 1, "created_by": "alice"},
         files={"file": ("vertrag.pdf", b"alice-stale-version", "application/pdf")},
+        headers={"X-DMS-Principal": "alice"},
     )
     assert conflict_response.status_code == 201
     conflict_result = conflict_response.json()
@@ -635,12 +649,14 @@ def test_lock_conflict_returns_409(client):
     first = client.post(
         f"/documents/{document_id}/lock",
         json={"locked_by": "alice", "session_id": "s1"},
+        headers={"X-DMS-Principal": "alice"},
     )
     assert first.status_code == 201
 
     second = client.post(
         f"/documents/{document_id}/lock",
         json={"locked_by": "bob", "session_id": "s2"},
+        headers={"X-DMS-Principal": "bob"},
     )
     assert second.status_code == 409
 
@@ -653,7 +669,11 @@ def test_checkin_lock_conflict_returns_409_without_scanning_or_uploading(client,
     now runs first; this asserts the scan is never even attempted."""
     body = upload(client, content=b"v1").json()
     document_id = body["id"]
-    client.post(f"/documents/{document_id}/lock", json={"locked_by": "alice", "session_id": "s1"})
+    client.post(
+        f"/documents/{document_id}/lock",
+        json={"locked_by": "alice", "session_id": "s1"},
+        headers={"X-DMS-Principal": "alice"},
+    )
 
     scan_called = False
 
@@ -667,6 +687,7 @@ def test_checkin_lock_conflict_returns_409_without_scanning_or_uploading(client,
         f"/documents/{document_id}/versions",
         data={"expected_base_version_number": 1, "created_by": "bob"},
         files={"file": ("vertrag.pdf", b"v2", "application/pdf")},
+        headers={"X-DMS-Principal": "bob"},
     )
 
     assert response.status_code == 409
@@ -676,7 +697,11 @@ def test_checkin_lock_conflict_returns_409_without_scanning_or_uploading(client,
 def test_release_lock_wrong_holder_returns_403(client):
     body = upload(client).json()
     document_id = body["id"]
-    client.post(f"/documents/{document_id}/lock", json={"locked_by": "alice", "session_id": "s1"})
+    client.post(
+        f"/documents/{document_id}/lock",
+        json={"locked_by": "alice", "session_id": "s1"},
+        headers={"X-DMS-Principal": "alice"},
+    )
 
     response = client.request(
         "DELETE",
@@ -690,7 +715,11 @@ def test_release_lock_wrong_holder_returns_403(client):
 def test_force_release_then_conflicting_checkin(client):
     body = upload(client, content=b"v1").json()
     document_id = body["id"]
-    client.post(f"/documents/{document_id}/lock", json={"locked_by": "alice", "session_id": "s1"})
+    client.post(
+        f"/documents/{document_id}/lock",
+        json={"locked_by": "alice", "session_id": "s1"},
+        headers={"X-DMS-Principal": "alice"},
+    )
 
     force_response = client.post(
         f"/documents/{document_id}/lock/force-release",
@@ -706,6 +735,7 @@ def test_force_release_then_conflicting_checkin(client):
         f"/documents/{document_id}/versions",
         data={"expected_base_version_number": 1, "created_by": "bob"},
         files={"file": ("vertrag.pdf", b"bobs-version", "application/pdf")},
+        headers={"X-DMS-Principal": "bob"},
     )
     assert bob_response.json()["is_conflict"] is False
 
@@ -714,6 +744,7 @@ def test_force_release_then_conflicting_checkin(client):
         f"/documents/{document_id}/versions",
         data={"expected_base_version_number": 1, "created_by": "alice"},
         files={"file": ("vertrag.pdf", b"alice-stale", "application/pdf")},
+        headers={"X-DMS-Principal": "alice"},
     )
     assert alice_response.json()["is_conflict"] is True
 
@@ -722,7 +753,11 @@ def test_force_release_requires_the_document_lock_capability(client):
     """P85-S2 (ADR 0240): force-releasing someone else's lock had no
     permission check at all; now it needs `admin.document_lock`."""
     document_id = upload(client).json()["id"]
-    client.post(f"/documents/{document_id}/lock", json={"locked_by": "alice", "session_id": "s1"})
+    client.post(
+        f"/documents/{document_id}/lock",
+        json={"locked_by": "alice", "session_id": "s1"},
+        headers={"X-DMS-Principal": "alice"},
+    )
 
     unprivileged = client.post(
         f"/documents/{document_id}/lock/force-release",
@@ -753,7 +788,9 @@ def test_force_release_with_approval_required_defers_execution(client):
         body = upload(client, content=b"v1").json()
         document_id = body["id"]
         client.post(
-            f"/documents/{document_id}/lock", json={"locked_by": "alice", "session_id": "s1"}
+            f"/documents/{document_id}/lock",
+            json={"locked_by": "alice", "session_id": "s1"},
+            headers={"X-DMS-Principal": "alice"},
         )
 
         response = client.post(
@@ -1218,7 +1255,11 @@ def test_register_draft_document_assigns_kennzeichen(client):
         draft="true",
     ).json()["id"]
 
-    response = client.post(f"/documents/{document_id}/register", json={"registered_by": "alice"})
+    response = client.post(
+        f"/documents/{document_id}/register",
+        json={"registered_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
 
     assert response.status_code == 200
     body = response.json()
@@ -1229,7 +1270,11 @@ def test_register_draft_document_assigns_kennzeichen(client):
 def test_register_draft_document_without_object_type_just_sets_registered_at(client):
     document_id = upload(client, draft="true").json()["id"]
 
-    response = client.post(f"/documents/{document_id}/register", json={"registered_by": "alice"})
+    response = client.post(
+        f"/documents/{document_id}/register",
+        json={"registered_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
 
     assert response.status_code == 200
     body = response.json()
@@ -1240,13 +1285,21 @@ def test_register_draft_document_without_object_type_just_sets_registered_at(cli
 def test_register_already_registered_document_returns_409(client):
     document_id = upload(client).json()["id"]
 
-    response = client.post(f"/documents/{document_id}/register", json={"registered_by": "alice"})
+    response = client.post(
+        f"/documents/{document_id}/register",
+        json={"registered_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
 
     assert response.status_code == 409
 
 
 def test_register_unknown_document_returns_404(client):
-    response = client.post("/documents/does-not-exist/register", json={"registered_by": "alice"})
+    response = client.post(
+        "/documents/does-not-exist/register",
+        json={"registered_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
     assert response.status_code == 404
 
 
@@ -1276,7 +1329,11 @@ def test_promote_draft_document_without_target_folder_just_registers(client):
     """No `target_folder_id` given - identical outcome to `register`."""
     document_id = upload(client, draft="true").json()["id"]
 
-    response = client.post(f"/documents/{document_id}/promote", json={"promoted_by": "alice"})
+    response = client.post(
+        f"/documents/{document_id}/promote",
+        json={"promoted_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
 
     assert response.status_code == 200
     body = response.json()
@@ -1295,6 +1352,7 @@ def test_promote_draft_document_moves_to_target_folder(client):
     response = client.post(
         f"/documents/{document_id}/promote",
         json={"promoted_by": "alice", "target_folder_id": new_folder["id"]},
+        headers={"X-DMS-Principal": "alice"},
     )
 
     assert response.status_code == 200
@@ -1308,13 +1366,21 @@ def test_promote_draft_document_moves_to_target_folder(client):
 def test_promote_already_registered_document_returns_409(client):
     document_id = upload(client).json()["id"]
 
-    response = client.post(f"/documents/{document_id}/promote", json={"promoted_by": "alice"})
+    response = client.post(
+        f"/documents/{document_id}/promote",
+        json={"promoted_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
 
     assert response.status_code == 409
 
 
 def test_promote_unknown_document_returns_404(client):
-    response = client.post("/documents/does-not-exist/promote", json={"promoted_by": "alice"})
+    response = client.post(
+        "/documents/does-not-exist/promote",
+        json={"promoted_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
     assert response.status_code == 404
 
 
@@ -1324,6 +1390,7 @@ def test_promote_draft_document_unknown_target_folder_returns_400(client):
     response = client.post(
         f"/documents/{document_id}/promote",
         json={"promoted_by": "alice", "target_folder_id": "does-not-exist"},
+        headers={"X-DMS-Principal": "alice"},
     )
 
     assert response.status_code == 400
@@ -1349,6 +1416,7 @@ def test_checkin_content_type_is_sniffed_not_trusted(client):
         f"/documents/{document_id}/versions",
         data={"expected_base_version_number": 1, "created_by": "alice"},
         files={"file": ("daten.json", b'{"a": 1}', "application/pdf")},
+        headers={"X-DMS-Principal": "alice"},
     )
 
     version = client.get(f"/documents/{document_id}/versions/2").json()
@@ -2289,6 +2357,7 @@ def test_checkin_snapshots_classification_level_on_new_version(client):
         f"/documents/{document_id}/versions",
         data={"expected_base_version_number": "1", "created_by": "alice"},
         files={"file": ("vertrag-v2.pdf", b"Neuer Inhalt", "application/pdf")},
+        headers={"X-DMS-Principal": "alice"},
     )
     assert response.status_code == 201
     assert response.json()["version"]["classification_level"] == "VS-VERTRAULICH"
@@ -3470,3 +3539,28 @@ async def test_resource_backfill_runs_and_marks_completed_when_not_yet_marked(se
 
     assert calls == [document.id]
     assert await repository.is_resource_backfill_completed(session) is True
+
+
+def test_lock_holder_is_the_principal_not_the_body_field(client):
+    """P85-S4 (ADR 0240): `locked_by`/`released_by` are ignored - the lock
+    belongs to the acting identity, and only that identity releases it."""
+    document_id = upload(client).json()["id"]
+    lock = client.post(
+        f"/documents/{document_id}/lock",
+        json={"locked_by": "someone-else", "session_id": "s1"},
+        headers={"X-DMS-Principal": "alice"},
+    )
+    assert lock.status_code == 201
+    assert lock.json()["locked_by"] == "alice"
+
+    foreign = client.request(
+        "DELETE",
+        f"/documents/{document_id}/lock",
+        json={"released_by": "alice"},
+        headers={"X-DMS-Principal": "bob"},
+    )
+    assert foreign.status_code == 403
+    own = client.request(
+        "DELETE", f"/documents/{document_id}/lock", json={}, headers={"X-DMS-Principal": "alice"}
+    )
+    assert own.status_code == 204

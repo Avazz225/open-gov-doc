@@ -180,6 +180,15 @@ Concept 9.1 literally names "Migration Service" as an example of a separately li
 component — `registry-service.licensable_components["migration-service"] = "demo"`, same
 `LicenseStatusClient` pattern as `workflow-service`/`webdav-connector`.
 
+## Federated Exception (P85-S4, [ADR 0240](../adr/0240-acting-identity-from-verified-principal.md) Decision 8)
+
+`POST /inbound/transfers/{id}/documents` is called by a peer installation, which authenticates with its
+signature, not by a local principal. migration-service writes the document on behalf of
+`peer:<installation_id>/<remote creator>` (connector SDK `write_document(on_behalf_of=...)`), so the
+local document names both its origin installation and its creator there. This is kept in the attributed
+identity instead of a separate `origin_created_by` field, so there is no schema change. Outbound
+workflow starts act on behalf of the transfer initiator (P85-S3).
+
 ## Tests
 
 Runs, like `webdav-connector`, against the real, running container (no in-process `TestClient`

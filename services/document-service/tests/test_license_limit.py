@@ -115,6 +115,7 @@ def test_checkin_version_blocked_when_storage_limit_exceeded(client, monkeypatch
         f"/documents/{document_id}/versions",
         data={"expected_base_version_number": 1, "created_by": "alice"},
         files={"file": ("vertrag.pdf", b"v2", "application/pdf")},
+        headers={"X-DMS-Principal": "alice"},
     )
 
     assert response.status_code == 403
@@ -136,6 +137,7 @@ def test_checkin_version_allowed_when_storage_limit_not_exceeded(client, monkeyp
         f"/documents/{document_id}/versions",
         data={"expected_base_version_number": 1, "created_by": "alice"},
         files={"file": ("vertrag.pdf", b"v2", "application/pdf")},
+        headers={"X-DMS-Principal": "alice"},
     )
 
     assert response.status_code == 201

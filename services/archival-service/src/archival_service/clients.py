@@ -1,4 +1,5 @@
 import httpx
+from dms_common import on_behalf_headers
 
 
 class DocumentClient:
@@ -39,9 +40,10 @@ class DocumentClient:
         special-cased import path needed)."""
         response = await self._client.post(
             "/documents",
-            data={"title": title, "created_by": created_by, "folder_id": folder_id},
+            data={"title": title, "folder_id": folder_id},
             files={"file": (filename, data, content_type or "application/octet-stream")},
-            headers={"X-DMS-Principal": "archival-service"},
+            # P85-S4 (ADR 0240): on behalf of the importing user.
+            headers=on_behalf_headers("archival-service", created_by),
         )
         response.raise_for_status()
         return response.json()
@@ -262,10 +264,10 @@ class CaseClient:
             json={
                 "name": name,
                 "process_definition_id": process_definition_id,
-                "created_by": created_by,
                 "attributes": attributes,
             },
-            headers=self._SYSTEM_PRINCIPAL_HEADERS,
+            # P85-S4 (ADR 0240): on behalf of the importing user.
+            headers=on_behalf_headers("archival-service", created_by),
         )
         response.raise_for_status()
         return response.json()

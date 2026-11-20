@@ -3,6 +3,7 @@ from dms_common.acting import (
     ActingIdentity,
     acting_headers,
     log_ignored_actor_field,
+    on_behalf_headers,
     require_acting_identity,
     resolve_acting_identity,
 )
@@ -16,6 +17,7 @@ __all__ = [
     "ActingIdentity",
     "acting_headers",
     "log_ignored_actor_field",
+    "on_behalf_headers",
     "require_acting_identity",
     "resolve_acting_identity",
     "BaseServiceSettings",

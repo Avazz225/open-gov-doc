@@ -76,7 +76,6 @@ class DocumentServiceClient:
             f"/documents/{document_id}/versions",
             data={
                 "expected_base_version_number": str(expected_base_version_number),
-                "created_by": created_by,
                 "comment": comment,
             },
             files={"file": (filename, data, content_type)},

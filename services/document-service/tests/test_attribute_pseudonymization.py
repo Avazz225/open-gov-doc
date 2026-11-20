@@ -77,6 +77,7 @@ def document_id(client, object_type_id):
             "attributes": '{"SVNR": "123-45-6789", "Betreff": "Testfall"}',
         },
         files={"file": ("x.pdf", b"%PDF-1.4 test", "application/pdf")},
+        headers={"X-DMS-Principal": "alice"},
     )
     response.raise_for_status()
     return response.json()["id"]
@@ -135,6 +136,7 @@ def test_pseudonymize_rejects_attribute_with_no_value(client, object_type_id):
             "attributes": '{"Betreff": "Testfall"}',
         },
         files={"file": ("x.pdf", b"%PDF-1.4 test", "application/pdf")},
+        headers={"X-DMS-Principal": "alice"},
     ).json()["id"]
     response = _pseudonymize(client, document_id)
     assert response.status_code == 400
@@ -146,7 +148,7 @@ def test_pseudonymize_succeeds_and_overwrites_the_live_value(client, document_id
     body = response.json()
     assert body["document_id"] == document_id
     assert body["attribute_name"] == "SVNR"
-    assert body["pseudonymized_by"] == "carol"
+    assert body["pseudonymized_by"] == PSEUDONYMIZATION_ADMIN_HEADERS["X-DMS-Principal"]  # P85-S4
     assert body["reason"] == "DSGVO-Löschanfrage"
     assert body["last_revealed_at"] is None
     assert "encrypted_value" not in body
@@ -196,7 +198,7 @@ def test_reveal_returns_the_original_value_without_restoring_it_live(client, doc
     body = response.json()
     assert body["value"] == "123-45-6789"
     assert body["reason"] == "DSGVO-Löschanfrage"
-    assert body["pseudonymized_by"] == "carol"
+    assert body["pseudonymized_by"] == PSEUDONYMIZATION_ADMIN_HEADERS["X-DMS-Principal"]  # P85-S4
 
     # The live document attribute stays the placeholder - reveal is
     # transient, not a restore.
@@ -214,7 +216,7 @@ def test_reveal_updates_last_revealed_tracking_on_the_listing(client, document_i
 
     listing = client.get(f"/documents/{document_id}/attributes/pseudonymized").json()
     assert len(listing) == 1
-    assert listing[0]["last_revealed_by"] == "dave"
+    assert listing[0]["last_revealed_by"] == REVEAL_ADMIN_HEADERS["X-DMS-Principal"]  # P85-S4
     assert listing[0]["last_revealed_at"] is not None
 
 
@@ -260,7 +262,7 @@ def test_restore_writes_the_original_value_back_and_deletes_the_vault_entry(clie
     assert body["document_id"] == document_id
     assert body["attribute_name"] == "SVNR"
     assert body["value"] == "123-45-6789"
-    assert body["restored_by"] == "dave"
+    assert body["restored_by"] == REVEAL_ADMIN_HEADERS["X-DMS-Principal"]  # P85-S4
 
     # The live document attribute is genuinely restored, unlike `reveal`.
     document = client.get(f"/documents/{document_id}").json()
@@ -379,6 +381,7 @@ async def test_pseudonymize_eligible_attributes_returns_empty_for_a_document_wit
         "/documents",
         data={"title": "Ohne Objekttyp", "created_by": "alice"},
         files={"file": ("x.pdf", b"%PDF-1.4 test", "application/pdf")},
+        headers={"X-DMS-Principal": "alice"},
     ).json()["id"]
 
     document = await repository.get_document(session, document_id)

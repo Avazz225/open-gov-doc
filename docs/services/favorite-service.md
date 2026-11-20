@@ -60,6 +60,12 @@ Registers itself with the registry on startup (`libs/dms-registry-client`), iden
 - **Live smoke test** (P7-S1d): see `PROGRESS.md` — document/folder favorited via context menu, `FavoritesPane` resolved the names correctly, "Open" navigated correctly for both object types, audit trail showed `favorite.added`/`favorite.removed`.
 - **Live smoke test** (Phase 45 Session 2): case favorited via the star toggle in `user-ui`'s `CasesPane` (both list and detail view), correctly listed in `FavoritesPane` with a resolved case name, "Open" navigated back into the case detail view.
 
+## Acting Identity (P85-S4, [ADR 0240](../adr/0240-acting-identity-from-verified-principal.md))
+
+Already compliant, unchanged: `user_id` must equal the gateway-verified `X-DMS-Username`
+(`_require_own_user_id`), so nobody can create favorites for someone else. Favorites stay keyed by user
+name; rebinding them to the `sub` would orphan existing rows for no security gain.
+
 ## Open Points
 
 - No referential check against document-/folder-/case-service (deliberate, see above) — a favorite on an object deleted in the meantime remains until the user manually removes it.

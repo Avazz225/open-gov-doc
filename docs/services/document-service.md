@@ -668,6 +668,18 @@ trash, `DELETE /documents/{id}`, cascade trash/restore, legal holds (set/release
   mismatch is logged as `actor_field_ignored`.
 - **No principal means `401`.**
 
+**Since P85-S4 the remaining write routes follow the same rule:**
+- **Routes:** upload, upload from quarantine release and new versions (the form field `created_by` is
+  ignored); register, promote, classification and declassify; pseudonymize, reveal and restore; redact;
+  lock acquire and release.
+- **The lock holder is the acting identity.** Releasing and checking in need that same identity. For
+  users that means the token's `sub`, not the user name; showing names in the UIs is P86-S2.
+- **Internal callers that create documents or versions act on behalf of the user:** mail-connector
+  (mailbox user), archival-service (importer), signature-service (the signer's principal, before a
+  display name), teamspace-service (folders, the creator) and the virus-scan call from upload.
+  ocr-service acts as itself.
+- **Inbound migration** writes on behalf of `peer:<installation>/<remote creator>` (ADR 0240 Decision 8).
+
 ## Open Points
 
 - ~~**Reference number display in the frontend** (before the filename, globally or overridable per object type) not yet wired up — follows with P5e-S3.~~ — **closed at P5e-S3**: `apps/user-ui/src/lib/kennzeichen.ts` (`resolveKennzeichenDisplay`/`formatDocumentTitle`) is wired into `ExplorerPane.tsx`/`FolderTree.tsx`, plus admin-ui's `ObjectTypeEditor`/`/kennzeichen-settings/` page. Stale forward-reference, found and struck during Phase 65+'s gap-analysis round.

@@ -6,6 +6,7 @@ from dms_common.acting import (
     PRINCIPAL_HEADER,
     SERVICE_PRINCIPALS,
     acting_headers,
+    on_behalf_headers,
     require_acting_identity,
     resolve_acting_identity,
 )
@@ -65,3 +66,12 @@ def test_service_principals_match_the_services_tree():
         pytest.skip("services/ not available next to libs/")
     names = {p.name for p in services_dir.iterdir() if (p / "src").is_dir()}
     assert names == SERVICE_PRINCIPALS
+
+
+def test_on_behalf_headers_only_for_people():
+    assert on_behalf_headers("mail-connector", "alice") == {
+        PRINCIPAL_HEADER: "mail-connector",
+        ON_BEHALF_OF_HEADER: "alice",
+    }
+    for actor in ["", None, "document-service", "system:retention", "migration-service (von X)"]:
+        assert on_behalf_headers("mail-connector", actor) == {PRINCIPAL_HEADER: "mail-connector"}

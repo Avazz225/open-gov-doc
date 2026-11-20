@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 import httpx
+from dms_common import on_behalf_headers
 
 
 @dataclass
@@ -32,9 +33,9 @@ class VirusScanClient:
         # suite run.
         response = await self._client.post(
             "/scan",
-            data={"created_by": created_by},
             files={"file": (filename, data, content_type or "application/octet-stream")},
-            headers={"X-DMS-Principal": "mail-connector"},
+            # P85-S4 (ADR 0240): on behalf of the mailbox user.
+            headers=on_behalf_headers("mail-connector", created_by),
         )
         response.raise_for_status()
         body = response.json()

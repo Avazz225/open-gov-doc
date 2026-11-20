@@ -402,7 +402,8 @@ async def create_signature(
             expected_base_version_number=source_version_number,
             signed_bytes=signed.signed_pdf_bytes,
             filename=f"signed-{payload.document_id}-v{source_version_number}.pdf",
-            created_by=signer.display_name,
+            # The signer's principal, not a display name (P85-S4, ADR 0240).
+            created_by=identity.actor,
             comment=f"Elektronische Signatur ({payload.level.upper()})",
         )
     except DocumentNotFoundError as exc:

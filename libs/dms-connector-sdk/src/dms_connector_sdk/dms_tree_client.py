@@ -295,6 +295,7 @@ class DmsTreeClient:
         expected_base_version_number: int | None = None,
         comment: str | None = None,
         x_dms_principal: str = "",
+        on_behalf_of: str | None = None,
     ) -> TreeDocument:
         """PUT semantics (WebDAV/CMIS alike): if a document already exists at
         the target path, a new version is checked in instead of creating a
@@ -304,6 +305,10 @@ class DmsTreeClient:
         `checkinComment` (5.4.4.3.28)."""
         media_type = content_type or "application/octet-stream"
         headers = self._principal_headers(x_dms_principal)
+        if on_behalf_of:
+            # P85-S4 (ADR 0240): the client's own principal acts for someone
+            # else - honored by document-service only from a service principal.
+            headers = {**(headers or {}), "X-DMS-On-Behalf-Of": on_behalf_of}
         if existing_document_id is not None:
             data = {
                 "expected_base_version_number": str(expected_base_version_number),

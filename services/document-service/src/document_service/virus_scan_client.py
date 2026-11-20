@@ -1,4 +1,5 @@
 import httpx
+from dms_common import on_behalf_headers
 
 
 class ScanRejectedError(Exception):
@@ -32,7 +33,7 @@ class VirusScanClient:
         created_by: str,
     ) -> None:
         files = {"file": (filename, data, content_type or "application/octet-stream")}
-        form: dict[str, str] = {"created_by": created_by}
+        form: dict[str, str] = {}
         if document_id is not None:
             form["document_id"] = document_id
 
@@ -49,7 +50,8 @@ class VirusScanClient:
                 "/scan",
                 data=form,
                 files=files,
-                headers={"X-DMS-Principal": "document-service"},
+                # P85-S4 (ADR 0240): on behalf of the uploading user.
+                headers=on_behalf_headers("document-service", created_by),
             )
             response.raise_for_status()
         except httpx.HTTPError as exc:

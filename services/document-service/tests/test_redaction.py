@@ -100,7 +100,7 @@ def test_redact_rejected_during_maintenance_mode(client):
     response = client.post(
         "/documents/does-not-exist/redact",
         json={"regions": REGION_BOTTOM_STRIP, "created_by": "alice"},
-        headers={"X-DMS-Maintenance-Active": "true"},
+        headers={"X-DMS-Principal": "alice", "X-DMS-Maintenance-Active": "true"},
     )
     assert response.status_code == 503
 
@@ -134,6 +134,7 @@ def test_redact_rejects_non_pdf_document(client):
         "/documents",
         data={"title": "Notiz", "created_by": "alice"},
         files={"file": ("notiz.txt", b"Hallo", "text/plain")},
+        headers={"X-DMS-Principal": "alice"},
     ).json()["id"]
 
     response = client.post(
@@ -174,7 +175,7 @@ def test_redact_creates_a_new_document_linked_to_the_original(client):
     assert body["derived_from_document_id"] == original["id"]
     assert body["derived_from_version_number"] == original["current_version_number"]
     assert body["derivation_type"] == "redaction"
-    assert body["created_by"] == "bob"
+    assert body["created_by"] == principal  # the principal, not "bob" (P85-S4)
     assert "geschwärzt" in body["title"]
 
 

@@ -2,7 +2,42 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P85-S3: the acting identity in workflow, cases, signatures, OCR review and the
+**Last completed:** P85-S4: the acting identity on the remaining 23 routes (ADR 0240).
+
+**What changed:**
+- **document-service:**
+  - upload, versions, register, promote, classification, pseudonymize/reveal/restore, redact and locks
+    take the principal;
+  - the lock holder is the principal.
+- **folder-service:** create, references and templates take the principal.
+- **virus-scan:** takes the principal.
+- **favorite-service:** was already bound to the verified username.
+- **Internal callers:** mail-connector, archival-service (including its case creation, missed in S3),
+  signature-service (the signer's principal instead of a display name) and teamspace-service act on
+  behalf of the user.
+- **Migration inbound:** writes as `peer:<installation>/<remote creator>`.
+- **New helper:** `dms_common.on_behalf_headers()`.
+
+**Checks:**
+- 15 suites green (document 426, folder 178, and so on).
+- e2e 32/32; ruff clean; 11 images rebuilt.
+
+**Open:**
+- Lock holders and creators are now principals (a user's `sub`); name display in the UIs is added to
+  P86-S2.
+- reviewer-ui principal names and the `<picture>` check (P86-S2).
+
+The stack was stopped afterwards.
+
+**Next session:** **P85-S5**, clients and cleanup:
+- UIs and add-ins stop sending actor fields;
+- the fields are dropped from the request schemas and the `actor_field_ignored` logging is removed;
+- all six e2e suites, docs, and the old `PROGRESS.md` "Authorization" bullet closed;
+- the Phase 85 close regression.
+
+---
+
+Earlier P85-S3 summary, kept for context: the acting identity in workflow, cases, signatures, OCR review and the
 auth-service tracking config (ADR 0240).
 
 **What changed:**
@@ -27,7 +62,7 @@ auth-service tracking config (ADR 0240).
 **Open (carried over):** reviewer-ui principal names and the `<picture>` check (→ P86-S2). The stack was
 stopped afterwards.
 
-**Next session:** **P85-S4**, the remaining 23 routes:
+**Next session (at the time):** P85-S4. It was done next; see the entry above. Original note:, the remaining 23 routes:
 - document-service: register, promote, classification, declassify, pseudonymize/reveal/restore, redact,
   locks, upload/versions;
 - folder-service: create, document references, templates;

@@ -1,4 +1,5 @@
 import httpx
+from dms_common import on_behalf_headers
 
 
 class NotFoundError(Exception):
@@ -68,10 +69,11 @@ class DocumentServiceClient:
             f"/documents/{document_id}/versions",
             data={
                 "expected_base_version_number": str(expected_base_version_number),
-                "created_by": created_by,
                 "comment": comment,
             },
             files={"file": (filename, signed_bytes, "application/pdf")},
+            # P85-S4 (ADR 0240): checked in on behalf of the signer.
+            headers=on_behalf_headers("signature-service", created_by),
         )
         if response.status_code == 404:
             raise NotFoundError(f"document_id {document_id!r} unbekannt")

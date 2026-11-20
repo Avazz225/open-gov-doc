@@ -9,7 +9,8 @@ class FolderCreate(BaseModel):
     parent_id: str = "root"
     object_type_id: int | None = None
     attributes: dict = {}
-    created_by: str
+    # Ignored since P85-S4 (ADR 0240): the actor is the request principal.
+    created_by: str | None = None
 
 
 class FolderUpdate(BaseModel):
@@ -73,12 +74,14 @@ class PseudonymizeAttributeRequest(BaseModel):
     """Trigger pseudonymization of one personal-data attribute (5.2, Phase
     58 Session 1, mirrors document-service's ADR 0156)."""
 
-    pseudonymized_by: str
+    # Ignored since P85-S4 (ADR 0240): the actor is the request principal.
+    pseudonymized_by: str | None = None
     reason: str | None = None
 
 
 class RevealAttributeRequest(BaseModel):
-    revealed_by: str
+    # Ignored since P85-S4 (ADR 0240): the actor is the request principal.
+    revealed_by: str | None = None
 
 
 class PseudonymizedAttributeOut(BaseModel):
@@ -105,11 +108,13 @@ class RevealedAttributeOut(BaseModel):
 
 class FolderDocumentReferenceAdd(BaseModel):
     document_id: str
-    added_by: str
+    # Ignored since P85-S4 (ADR 0240): the actor is the request principal.
+    added_by: str | None = None
 
 
 class FolderDocumentReferenceRemove(BaseModel):
-    removed_by: str
+    # Ignored since P85-S4 (ADR 0240): the actor is the request principal.
+    removed_by: str | None = None
 
 
 class FolderDocumentReferenceOut(BaseModel):
@@ -226,7 +231,8 @@ class FolderTemplateCreate(BaseModel):
     source_folder_id: str
     name: str
     description: str | None = None
-    created_by: str
+    # Ignored since P85-S4 (ADR 0240): the actor is the request principal.
+    created_by: str | None = None
 
 
 class FolderTemplateOut(BaseModel):
@@ -245,7 +251,8 @@ class FolderTemplateDetailOut(FolderTemplateOut):
 
 class FolderTemplateApplyRequest(BaseModel):
     target_parent_id: str
-    created_by: str
+    # Ignored since P85-S4 (ADR 0240): the actor is the request principal.
+    created_by: str | None = None
 
 
 class FolderTemplateApplyResult(BaseModel):

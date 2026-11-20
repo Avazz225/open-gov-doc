@@ -527,8 +527,17 @@ def get_metrics() -> Response:
 async def create_folder(
     payload: FolderCreate,
     x_dms_principal: str = Header(default=""),
+    identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> FolderOut:
+    log_ignored_actor_field(
+        logger,
+        route="POST /folders",
+        field="created_by",
+        value=payload.created_by,
+        identity=identity,
+    )
+    actor_created_by = identity.actor
     try:
         parent_folder = await repository.get_folder(session, payload.parent_id)
     except repository.NotFoundError as exc:
@@ -551,7 +560,7 @@ async def create_folder(
             parent_id=payload.parent_id,
             object_type_id=payload.object_type_id,
             attributes=payload.attributes,
-            created_by=payload.created_by,
+            created_by=actor_created_by,
         )
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -576,7 +585,7 @@ async def create_folder(
             "parent_id": folder.parent_id,
             "resource_type": "folder",
         },
-        actor=payload.created_by,
+        actor=actor_created_by,
     )
     return folder
 
@@ -1109,10 +1118,19 @@ async def pseudonymize_folder_attribute(
     attribute_name: str,
     payload: PseudonymizeAttributeRequest,
     x_dms_principal: str = Header(default=""),
+    identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> PseudonymizedAttributeOut:
     """Mirrors `document_service.main.pseudonymize_document_attribute`
     exactly (5.2, Phase 58 Session 1, ADR 0156's own named Open Point)."""
+    log_ignored_actor_field(
+        logger,
+        route="POST /folders/{id}/attributes/{name}/pseudonymize",
+        field="pseudonymized_by",
+        value=payload.pseudonymized_by,
+        identity=identity,
+    )
+    actor_pseudonymized_by = identity.actor
     await _require_pseudonymization_permission(x_dms_principal)
     try:
         folder = await repository.get_folder(session, folder_id)
@@ -1152,7 +1170,7 @@ async def pseudonymize_folder_attribute(
             folder_id,
             attribute_name,
             encrypted_value=encrypted_value,
-            pseudonymized_by=payload.pseudonymized_by,
+            pseudonymized_by=actor_pseudonymized_by,
             reason=payload.reason,
         )
     except repository.AlreadyPseudonymizedError as exc:
@@ -1162,7 +1180,7 @@ async def pseudonymize_folder_attribute(
         "folder.attribute.pseudonymized",
         subject=folder_id,
         payload={"attribute_name": attribute_name},
-        actor=payload.pseudonymized_by,
+        actor=actor_pseudonymized_by,
     )
     return vault_entry
 
@@ -1219,10 +1237,19 @@ async def reveal_folder_attribute(
     attribute_name: str,
     payload: RevealAttributeRequest,
     x_dms_principal: str = Header(default=""),
+    identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> RevealedAttributeOut:
     """Mirrors `document_service.main.reveal_document_attribute` exactly
     (5.2, Phase 58 Session 1)."""
+    log_ignored_actor_field(
+        logger,
+        route="POST /folders/{id}/attributes/{name}/reveal",
+        field="revealed_by",
+        value=payload.revealed_by,
+        identity=identity,
+    )
+    actor_revealed_by = identity.actor
     await _require_reveal_permission(x_dms_principal)
     try:
         vault_entry = await repository.get_pseudonymized_attribute(
@@ -1237,13 +1264,13 @@ async def reveal_folder_attribute(
     except crypto.DecryptionError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    await repository.mark_revealed(session, vault_entry.id, revealed_by=payload.revealed_by)
+    await repository.mark_revealed(session, vault_entry.id, revealed_by=actor_revealed_by)
     await session.commit()
     await publish_event(
         "folder.attribute.revealed",
         subject=folder_id,
         payload={"attribute_name": attribute_name},
-        actor=payload.revealed_by,
+        actor=actor_revealed_by,
     )
     return RevealedAttributeOut(
         folder_id=folder_id,
@@ -1433,8 +1460,17 @@ async def add_folder_document_reference(
     folder_id: str,
     payload: FolderDocumentReferenceAdd,
     x_dms_principal: str = Header(default=""),
+    identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> FolderDocumentReferenceOut:
+    log_ignored_actor_field(
+        logger,
+        route="POST /folders/{id}/document-references",
+        field="added_by",
+        value=payload.added_by,
+        identity=identity,
+    )
+    actor_added_by = identity.actor
     if not x_dms_principal:
         raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
     try:
@@ -1452,7 +1488,7 @@ async def add_folder_document_reference(
             status_code=400, detail=f"document_id {payload.document_id!r} unbekannt"
         )
     reference = await repository.add_document_reference(
-        session, folder_id, document_id=payload.document_id, added_by=payload.added_by
+        session, folder_id, document_id=payload.document_id, added_by=actor_added_by
     )
     await session.commit()
     await publish_event(
@@ -1460,7 +1496,7 @@ async def add_folder_document_reference(
         subject=folder_id,
         payload={
             "document_id": payload.document_id,
-            "added_by": payload.added_by,
+            "added_by": actor_added_by,
             # Post-Roadmap Phase 35 Session 4 (ADR 0146): search-service's
             # new cross-folder index needs the real `added_at`, not an
             # approximation from when it happened to observe the event -
@@ -1471,7 +1507,7 @@ async def add_folder_document_reference(
             # freely (e.g. `GET /folders/{id}` for folder_name).
             "added_at": reference.added_at.isoformat(),
         },
-        actor=payload.added_by,
+        actor=actor_added_by,
     )
     return _resolve_document_reference(reference, document)
 
@@ -1485,8 +1521,17 @@ async def remove_folder_document_reference(
     document_id: str,
     payload: FolderDocumentReferenceRemove,
     x_dms_principal: str = Header(default=""),
+    identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> FolderDocumentReferenceOut:
+    log_ignored_actor_field(
+        logger,
+        route="DELETE /folders/{id}/document-references/{doc}",
+        field="removed_by",
+        value=payload.removed_by,
+        identity=identity,
+    )
+    actor_removed_by = identity.actor
     if not x_dms_principal:
         raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
     try:
@@ -1498,7 +1543,7 @@ async def remove_folder_document_reference(
     )
     try:
         reference = await repository.remove_document_reference(
-            session, folder_id, document_id, removed_by=payload.removed_by
+            session, folder_id, document_id, removed_by=actor_removed_by
         )
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -1506,8 +1551,8 @@ async def remove_folder_document_reference(
     await publish_event(
         "folder.document_reference.removed",
         subject=folder_id,
-        payload={"document_id": document_id, "removed_by": payload.removed_by},
-        actor=payload.removed_by,
+        payload={"document_id": document_id, "removed_by": actor_removed_by},
+        actor=actor_removed_by,
     )
     document = await app.state.document_client.get(document_id, x_dms_principal=x_dms_principal)
     return _resolve_document_reference(reference, document)
@@ -1789,6 +1834,7 @@ async def put_audit_trace_config(
 async def create_folder_template(
     payload: FolderTemplateCreate,
     x_dms_principal: str = Header(default=""),
+    identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> FolderTemplateOut:
     """Captures the active subtree starting at `payload.source_folder_id`
@@ -1797,6 +1843,14 @@ async def create_folder_template(
     by `folder.read` on `source_folder_id` since Post-Roadmap Phase 38
     Session 4 - the captured structure (names/hierarchy) could otherwise
     leak a teamspace's internal organization to a non-member."""
+    log_ignored_actor_field(
+        logger,
+        route="POST /folder-templates",
+        field="created_by",
+        value=payload.created_by,
+        identity=identity,
+    )
+    actor_created_by = identity.actor
     try:
         structure = await repository.build_template_structure(session, payload.source_folder_id)
     except repository.NotFoundError as exc:
@@ -1807,7 +1861,7 @@ async def create_folder_template(
         name=payload.name,
         description=payload.description,
         structure=structure,
-        created_by=payload.created_by,
+        created_by=actor_created_by,
     )
     await session.commit()
     return template
@@ -1898,6 +1952,7 @@ async def apply_folder_template(
     template_id: str,
     payload: FolderTemplateApplyRequest,
     x_dms_principal: str = Header(default=""),
+    identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> FolderTemplateApplyResult:
     """Applies a structure template below `payload.target_parent_id` -
@@ -1908,6 +1963,14 @@ async def apply_folder_template(
     `target_parent_id` since Post-Roadmap Phase 38 Session 4 - the same
     check `POST /folders` itself applies, since this creates real folders
     there just as directly."""
+    log_ignored_actor_field(
+        logger,
+        route="POST /folder-templates/{id}/apply",
+        field="created_by",
+        value=payload.created_by,
+        identity=identity,
+    )
+    actor_created_by = identity.actor
     try:
         template = await repository.get_template(session, template_id)
     except repository.NotFoundError as exc:
@@ -1934,7 +1997,7 @@ async def apply_folder_template(
             session,
             template,
             target_parent_id=payload.target_parent_id,
-            created_by=payload.created_by,
+            created_by=actor_created_by,
         )
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -1948,6 +2011,6 @@ async def apply_folder_template(
                 "parent_id": folder.parent_id,
                 "resource_type": "folder",
             },
-            actor=payload.created_by,
+            actor=actor_created_by,
         )
     return FolderTemplateApplyResult(root_folder=created[0], created_count=len(created))

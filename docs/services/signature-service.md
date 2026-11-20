@@ -145,6 +145,9 @@ None yet - follows in Phase 11.
 service may act for a user elsewhere, never to sign. The existing binding of `signer_principal_id` to the
 verified `X-DMS-Username` (P59-S3) stays.
 
+**P85-S4:** the signed version is checked in on behalf of the signer's principal; before, the
+`created_by` field carried the signer's display name, which is not an identity.
+
 ## Open Points
 
 - **QES completely unimplemented** - neither a real QTSP connector nor a test case for it exists; a signing attempt with `level="qes"` fails with `400` regardless of object type ("no connector configured"). Requires an external business relationship with an accredited trust service provider, see [ADR 0025](../adr/0025-signature-service-internal-ca-and-connector-plugin.md).

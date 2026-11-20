@@ -46,7 +46,11 @@ async def test_create_publishes_resource_created_matching_permission_service_con
 ):
     received, got_message = await _collect_one(consumer, "folder.resource.created")
 
-    response = client.post("/folders", json={"name": "Projekte", "created_by": "alice"})
+    response = client.post(
+        "/folders",
+        json={"name": "Projekte", "created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
     folder_id = response.json()["id"]
 
     await asyncio.wait_for(got_message.wait(), timeout=5)
@@ -58,10 +62,16 @@ async def test_create_publishes_resource_created_matching_permission_service_con
 
 
 async def test_move_publishes_resource_moved(client, consumer):
-    parent_a = client.post("/folders", json={"name": "A", "created_by": "alice"}).json()
-    parent_b = client.post("/folders", json={"name": "B", "created_by": "alice"}).json()
+    parent_a = client.post(
+        "/folders", json={"name": "A", "created_by": "alice"}, headers={"X-DMS-Principal": "alice"}
+    ).json()
+    parent_b = client.post(
+        "/folders", json={"name": "B", "created_by": "alice"}, headers={"X-DMS-Principal": "alice"}
+    ).json()
     child = client.post(
-        "/folders", json={"name": "Kind", "parent_id": parent_a["id"], "created_by": "alice"}
+        "/folders",
+        json={"name": "Kind", "parent_id": parent_a["id"], "created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
     ).json()
 
     received, got_message = await _collect_one(consumer, "folder.resource.moved")
@@ -73,7 +83,11 @@ async def test_move_publishes_resource_moved(client, consumer):
 
 
 async def test_delete_publishes_resource_deleted(client, consumer):
-    created = client.post("/folders", json={"name": "Leer", "created_by": "alice"}).json()
+    created = client.post(
+        "/folders",
+        json={"name": "Leer", "created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    ).json()
 
     received, got_message = await _collect_one(consumer, "folder.resource.deleted")
 
@@ -94,7 +108,11 @@ async def test_manual_purge_publishes_resource_deleted(client, consumer):
     `folder.resource.deleted`, leaving orphaned `ResourceNode` rows in
     `permission-service` on every one of these paths (ADR 0154's own
     documented, then-untracked finding)."""
-    created = client.post("/folders", json={"name": "Weg", "created_by": "alice"}).json()
+    created = client.post(
+        "/folders",
+        json={"name": "Weg", "created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    ).json()
     client.post(
         f"/folders/{created['id']}/trash",
         json={"deleted_by": "alice"},
@@ -117,7 +135,11 @@ async def test_manual_purge_publishes_resource_deleted(client, consumer):
 
 
 async def test_reconcile_restore_deletion_publishes_resource_deleted(client, consumer):
-    created = client.post("/folders", json={"name": "Weg", "created_by": "alice"}).json()
+    created = client.post(
+        "/folders",
+        json={"name": "Weg", "created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    ).json()
 
     received, got_message = await _collect_one(consumer, "folder.resource.deleted")
 

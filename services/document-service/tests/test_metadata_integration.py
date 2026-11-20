@@ -29,7 +29,11 @@ def real_folder_id():
         timeout=10.0,
         headers={"X-DMS-Principal": "document-service-test-folder-setup"},
     ) as fc:
-        response = fc.post("/folders", json={"name": "Testordner", "created_by": "alice"})
+        response = fc.post(
+            "/folders",
+            json={"name": "Testordner", "created_by": "alice"},
+            headers={"X-DMS-Principal": "alice"},
+        )
         response.raise_for_status()
         folder_id = response.json()["id"]
         yield folder_id
@@ -62,6 +66,7 @@ def test_create_document_with_unknown_folder_returns_400(client):
         "/documents",
         data={"title": "X", "created_by": "alice", "folder_id": "does-not-exist"},
         files={"file": ("x.pdf", b"data", "application/pdf")},
+        headers={"X-DMS-Principal": "alice"},
     )
     assert response.status_code == 400
 
@@ -71,6 +76,7 @@ def test_create_document_with_real_folder_succeeds(client, real_folder_id):
         "/documents",
         data={"title": "X", "created_by": "alice", "folder_id": real_folder_id},
         files={"file": ("x.pdf", b"data", "application/pdf")},
+        headers={"X-DMS-Principal": "alice"},
     )
     assert response.status_code == 201
     assert response.json()["folder_id"] == real_folder_id
@@ -86,6 +92,7 @@ def test_create_document_with_invalid_attributes_returns_400(client, object_type
             "attributes": "{}",
         },
         files={"file": ("x.pdf", b"data", "application/pdf")},
+        headers={"X-DMS-Principal": "alice"},
     )
     assert response.status_code == 400
     assert "Rechnungsnummer" in str(response.json()["detail"])
@@ -101,6 +108,7 @@ def test_create_document_with_valid_attributes_succeeds(client, object_type_id):
             "attributes": '{"Rechnungsnummer": "RE-1"}',
         },
         files={"file": ("x.pdf", b"data", "application/pdf")},
+        headers={"X-DMS-Principal": "alice"},
     )
     assert response.status_code == 201
     assert response.json()["attributes"] == {"Rechnungsnummer": "RE-1"}
@@ -111,6 +119,7 @@ def test_create_document_with_malformed_attributes_json_returns_400(client):
         "/documents",
         data={"title": "X", "created_by": "alice", "attributes": "not-json"},
         files={"file": ("x.pdf", b"data", "application/pdf")},
+        headers={"X-DMS-Principal": "alice"},
     )
     assert response.status_code == 400
 
@@ -166,6 +175,7 @@ def typed_folder_id(folder_type_id):
                 "created_by": "alice",
                 "object_type_id": folder_type_id,
             },
+            headers={"X-DMS-Principal": "alice"},
         )
         response.raise_for_status()
         folder_id = response.json()["id"]
@@ -185,6 +195,7 @@ def test_create_document_under_correct_parent_class_succeeds(
             "folder_id": typed_folder_id,
         },
         files={"file": ("x.pdf", b"data", "application/pdf")},
+        headers={"X-DMS-Principal": "alice"},
     )
     assert response.status_code == 201
 
@@ -201,6 +212,7 @@ def test_create_document_under_wrong_parent_class_is_rejected(
             "folder_id": real_folder_id,
         },
         files={"file": ("x.pdf", b"data", "application/pdf")},
+        headers={"X-DMS-Principal": "alice"},
     )
     assert response.status_code == 400
     assert "Elternordner" in str(response.json()["detail"])
@@ -213,6 +225,7 @@ def test_create_document_without_folder_is_rejected_when_root_not_allowed(
         "/documents",
         data={"title": "X", "created_by": "alice", "object_type_id": restricted_document_type_id},
         files={"file": ("x.pdf", b"data", "application/pdf")},
+        headers={"X-DMS-Principal": "alice"},
     )
     assert response.status_code == 400
 
@@ -243,6 +256,7 @@ def test_create_document_assigns_generated_kennzeichen(client, kennzeichen_objec
         "/documents",
         data={"title": "X", "created_by": "alice", "object_type_id": kennzeichen_object_type_id},
         files={"file": ("x.pdf", b"data", "application/pdf")},
+        headers={"X-DMS-Principal": "alice"},
     )
     assert response.status_code == 201
     assert response.json()["attributes"]["Kennzeichen"].endswith("-001")
@@ -260,6 +274,7 @@ def test_create_document_ignores_client_supplied_kennzeichen_when_generator_conf
             "attributes": '{"Kennzeichen": "FAKE"}',
         },
         files={"file": ("x.pdf", b"data", "application/pdf")},
+        headers={"X-DMS-Principal": "alice"},
     )
     assert response.status_code == 201
     assert response.json()["attributes"]["Kennzeichen"] != "FAKE"
@@ -275,6 +290,7 @@ def test_create_document_without_configured_generator_has_no_kennzeichen(client,
             "attributes": '{"Rechnungsnummer": "RE-1"}',
         },
         files={"file": ("x.pdf", b"data", "application/pdf")},
+        headers={"X-DMS-Principal": "alice"},
     )
     assert response.status_code == 201
     assert "Kennzeichen" not in response.json()["attributes"]

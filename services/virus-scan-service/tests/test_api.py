@@ -139,7 +139,15 @@ def test_scan_reports_clean_for_harmless_content(client):
 
 
 def test_scan_detects_eicar_and_quarantines_it(client):
-    response = scan(client, content=EICAR_SIGNATURE, created_by="alice", document_id="doc-1")
+    # As document-service calls it since P85-S4 (ADR 0240): on behalf of the
+    # uploading user; a body/form `created_by` is ignored.
+    response = scan(
+        client,
+        content=EICAR_SIGNATURE,
+        created_by="spoofed-name",
+        document_id="doc-1",
+        headers={"X-DMS-Principal": "document-service", "X-DMS-On-Behalf-Of": "alice"},
+    )
 
     assert response.status_code == 201
     body = response.json()

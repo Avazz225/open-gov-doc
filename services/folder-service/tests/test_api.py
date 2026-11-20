@@ -96,7 +96,11 @@ def test_inbox_folder_cannot_be_renamed(client):
 
 
 def test_inbox_folder_cannot_be_moved(client):
-    new_parent = client.post("/folders", json={"name": "Ziel", "created_by": "alice"}).json()
+    new_parent = client.post(
+        "/folders",
+        json={"name": "Ziel", "created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    ).json()
     response = client.patch("/folders/inbox", json={"parent_id": new_parent["id"]})
     assert response.status_code == 409
 
@@ -119,7 +123,11 @@ def test_root_folder_cannot_be_renamed(client):
 
 
 def test_root_folder_cannot_be_moved(client):
-    new_parent = client.post("/folders", json={"name": "Ziel", "created_by": "alice"}).json()
+    new_parent = client.post(
+        "/folders",
+        json={"name": "Ziel", "created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    ).json()
     response = client.patch("/folders/root", json={"parent_id": new_parent["id"]})
     assert response.status_code == 409
 
@@ -144,7 +152,11 @@ def test_attribute_only_patch_on_inbox_still_allowed(client):
 
 
 def test_create_folder_defaults_to_root_parent(client):
-    response = client.post("/folders", json={"name": "Projekte", "created_by": "alice"})
+    response = client.post(
+        "/folders",
+        json={"name": "Projekte", "created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
     assert response.status_code == 201
     assert response.json()["parent_id"] == "root"
 
@@ -160,7 +172,11 @@ def test_create_folder_publishes_event_with_actor(client, monkeypatch):
 
     monkeypatch.setattr(app.state.event_bus, "publish", fake_publish)
 
-    response = client.post("/folders", json={"name": "Projekte", "created_by": "alice"})
+    response = client.post(
+        "/folders",
+        json={"name": "Projekte", "created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
     assert response.status_code == 201
 
     created_events = [e for e in published if e.event_type == "folder.resource.created"]
@@ -170,13 +186,19 @@ def test_create_folder_publishes_event_with_actor(client, monkeypatch):
 
 def test_create_folder_unknown_parent_returns_404(client):
     response = client.post(
-        "/folders", json={"name": "X", "parent_id": "nope", "created_by": "alice"}
+        "/folders",
+        json={"name": "X", "parent_id": "nope", "created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
     )
     assert response.status_code == 404
 
 
 def test_list_children(client):
-    created = client.post("/folders", json={"name": "Projekte", "created_by": "alice"}).json()
+    created = client.post(
+        "/folders",
+        json={"name": "Projekte", "created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    ).json()
 
     response = client.get("/folders/root/children")
     assert response.status_code == 200
@@ -184,7 +206,11 @@ def test_list_children(client):
 
 
 def test_update_rename(client):
-    created = client.post("/folders", json={"name": "Alt", "created_by": "alice"}).json()
+    created = client.post(
+        "/folders",
+        json={"name": "Alt", "created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    ).json()
 
     response = client.patch(f"/folders/{created['id']}", json={"name": "Neu"})
     assert response.status_code == 200
@@ -192,7 +218,9 @@ def test_update_rename(client):
 
 
 def test_move_to_self_returns_400(client):
-    created = client.post("/folders", json={"name": "X", "created_by": "alice"}).json()
+    created = client.post(
+        "/folders", json={"name": "X", "created_by": "alice"}, headers={"X-DMS-Principal": "alice"}
+    ).json()
 
     response = client.patch(f"/folders/{created['id']}", json={"parent_id": created["id"]})
     assert response.status_code == 400
@@ -203,9 +231,13 @@ def test_move_into_own_descendant_returns_400(client):
     bug: moving a folder under one of its own deeper descendants (A -> B ->
     A) previously succeeded with 200, creating a cycle that makes both
     folders permanently undeletable."""
-    parent = client.post("/folders", json={"name": "A", "created_by": "alice"}).json()
+    parent = client.post(
+        "/folders", json={"name": "A", "created_by": "alice"}, headers={"X-DMS-Principal": "alice"}
+    ).json()
     child = client.post(
-        "/folders", json={"name": "B", "parent_id": parent["id"], "created_by": "alice"}
+        "/folders",
+        json={"name": "B", "parent_id": parent["id"], "created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
     ).json()
 
     response = client.patch(f"/folders/{parent['id']}", json={"parent_id": child["id"]})
@@ -213,9 +245,15 @@ def test_move_into_own_descendant_returns_400(client):
 
 
 def test_delete_non_empty_folder_returns_409(client):
-    parent = client.post("/folders", json={"name": "Parent", "created_by": "alice"}).json()
+    parent = client.post(
+        "/folders",
+        json={"name": "Parent", "created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    ).json()
     client.post(
-        "/folders", json={"name": "Child", "parent_id": parent["id"], "created_by": "alice"}
+        "/folders",
+        json={"name": "Child", "parent_id": parent["id"], "created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
     )
 
     response = client.delete(f"/folders/{parent['id']}")
@@ -223,7 +261,11 @@ def test_delete_non_empty_folder_returns_409(client):
 
 
 def test_delete_empty_folder(client):
-    created = client.post("/folders", json={"name": "Leer", "created_by": "alice"}).json()
+    created = client.post(
+        "/folders",
+        json={"name": "Leer", "created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    ).json()
 
     response = client.delete(f"/folders/{created['id']}")
     assert response.status_code == 204
@@ -239,7 +281,11 @@ def test_delete_folder_with_active_documents_returns_409(client):
     trash-based path (`POST .../trash`) is unaffected - it cascades onto
     documents itself via `document_client.cascade_trash`, exercised by
     `test_trash_and_restore_folder_calls_document_cascade` above."""
-    created = client.post("/folders", json={"name": "Mit Dokument", "created_by": "alice"}).json()
+    created = client.post(
+        "/folders",
+        json={"name": "Mit Dokument", "created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    ).json()
     app.state.document_client.count_active.return_value = 1
 
     response = client.delete(f"/folders/{created['id']}")
@@ -255,7 +301,11 @@ def test_trash_and_restore_folder_calls_document_cascade(client):
     document-service (5.2, seit P7-S1b) - die reine Kaskaden-Logik
     (deleted_via_folder_id-Filterung etc.) prüft test_retention.py bereits
     direkt gegen das Repository."""
-    parent = client.post("/folders", json={"name": "Akte", "created_by": "alice"}).json()
+    parent = client.post(
+        "/folders",
+        json={"name": "Akte", "created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    ).json()
 
     trash_response = client.post(
         f"/folders/{parent['id']}/trash",
@@ -287,7 +337,9 @@ def test_trash_folder_rejected_during_maintenance_mode(client):
     `workflow-service`'s `test_start_instance_rejected_during_maintenance_
     mode`. Fires before the document-service cascade this check exists to
     guard - the folder remains untouched afterward."""
-    created = client.post("/folders", json={"name": "X", "created_by": "alice"}).json()
+    created = client.post(
+        "/folders", json={"name": "X", "created_by": "alice"}, headers={"X-DMS-Principal": "alice"}
+    ).json()
 
     response = client.post(
         f"/folders/{created['id']}/trash",
@@ -302,7 +354,9 @@ def test_trash_folder_rejected_during_maintenance_mode(client):
 def test_restore_folder_rejected_during_maintenance_mode(client):
     """Same as above, for the other endpoint that cascades into
     document-service (`cascade_restore`)."""
-    created = client.post("/folders", json={"name": "X", "created_by": "alice"}).json()
+    created = client.post(
+        "/folders", json={"name": "X", "created_by": "alice"}, headers={"X-DMS-Principal": "alice"}
+    ).json()
     client.post(
         f"/folders/{created['id']}/trash",
         json={"deleted_by": "alice"},
@@ -327,7 +381,11 @@ def test_trash_folder_with_approval_required_defers_execution(client):
         headers={"X-DMS-Principal": ROLE_ADMIN_PRINCIPAL_ID},
     )
     try:
-        created = client.post("/folders", json={"name": "X", "created_by": "alice"}).json()
+        created = client.post(
+            "/folders",
+            json={"name": "X", "created_by": "alice"},
+            headers={"X-DMS-Principal": "alice"},
+        ).json()
 
         response = client.post(
             f"/folders/{created['id']}/trash",
@@ -352,7 +410,9 @@ def test_trash_folder_with_approval_required_defers_execution(client):
 
 
 def test_restore_folder_not_deleted_returns_409(client):
-    created = client.post("/folders", json={"name": "X", "created_by": "alice"}).json()
+    created = client.post(
+        "/folders", json={"name": "X", "created_by": "alice"}, headers={"X-DMS-Principal": "alice"}
+    ).json()
     response = client.post(f"/folders/{created['id']}/restore")
     assert response.status_code == 409
 
@@ -363,8 +423,16 @@ def test_restore_unknown_folder_returns_404(client):
 
 
 def test_list_deleted_folders_shows_only_trash(client):
-    kept = client.post("/folders", json={"name": "Bleibt", "created_by": "alice"}).json()
-    deleted = client.post("/folders", json={"name": "Weg", "created_by": "alice"}).json()
+    kept = client.post(
+        "/folders",
+        json={"name": "Bleibt", "created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    ).json()
+    deleted = client.post(
+        "/folders",
+        json={"name": "Weg", "created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    ).json()
     client.post(
         f"/folders/{deleted['id']}/trash",
         json={"deleted_by": "alice"},
@@ -388,7 +456,11 @@ def test_trash_folder_persists_deleted_by(client):
     """P15-S0-Fund: `deleted_by` wurde bislang entgegengenommen, aber nie
     tatsächlich gespeichert - Voraussetzung für den persönlichen Papierkorb
     (2.5, P15-S1)."""
-    created = client.post("/folders", json={"name": "Weg", "created_by": "alice"}).json()
+    created = client.post(
+        "/folders",
+        json={"name": "Weg", "created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    ).json()
     client.post(
         f"/folders/{created['id']}/trash",
         json={"deleted_by": "alice"},
@@ -405,8 +477,16 @@ def test_trash_folder_persists_deleted_by(client):
 
 
 def test_list_deleted_folders_personal_scope_hides_other_users_items(client):
-    own = client.post("/folders", json={"name": "Eigener", "created_by": "alice"}).json()
-    other = client.post("/folders", json={"name": "Fremder", "created_by": "bob"}).json()
+    own = client.post(
+        "/folders",
+        json={"name": "Eigener", "created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    ).json()
+    other = client.post(
+        "/folders",
+        json={"name": "Fremder", "created_by": "bob"},
+        headers={"X-DMS-Principal": "bob"},
+    ).json()
     client.post(
         f"/folders/{own['id']}/trash",
         json={"deleted_by": "alice"},
@@ -438,7 +518,11 @@ def test_list_deleted_folders_personal_scope_without_principal_returns_401(clien
 
 
 def test_list_deleted_folders_admin_scope_requires_role(client):
-    created = client.post("/folders", json={"name": "Weg", "created_by": "alice"}).json()
+    created = client.post(
+        "/folders",
+        json={"name": "Weg", "created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    ).json()
     client.post(
         f"/folders/{created['id']}/trash",
         json={"deleted_by": "alice"},
@@ -456,7 +540,9 @@ def test_list_deleted_folders_admin_scope_requires_role(client):
 
 
 def test_purge_folder_not_in_trash_returns_409(client):
-    created = client.post("/folders", json={"name": "X", "created_by": "alice"}).json()
+    created = client.post(
+        "/folders", json={"name": "X", "created_by": "alice"}, headers={"X-DMS-Principal": "alice"}
+    ).json()
     response = client.post(f"/folders/{created['id']}/purge", headers=DELETION_ADMIN_HEADERS)
     assert response.status_code == 409
 
@@ -482,7 +568,11 @@ def test_purge_folder_without_principal_returns_401(client):
 
 
 def test_purge_folder_without_admin_role_returns_403(client):
-    created = client.post("/folders", json={"name": "Weg", "created_by": "alice"}).json()
+    created = client.post(
+        "/folders",
+        json={"name": "Weg", "created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    ).json()
     client.post(
         f"/folders/{created['id']}/trash",
         json={"deleted_by": "alice"},
@@ -493,7 +583,11 @@ def test_purge_folder_without_admin_role_returns_403(client):
 
 
 def test_purge_folder_with_admin_role_hard_deletes(client):
-    created = client.post("/folders", json={"name": "Weg", "created_by": "alice"}).json()
+    created = client.post(
+        "/folders",
+        json={"name": "Weg", "created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    ).json()
     client.post(
         f"/folders/{created['id']}/trash",
         json={"deleted_by": "alice"},
@@ -519,8 +613,16 @@ def test_purge_folder_with_remaining_child_row_returns_409(client):
     Unterordner wird beim Trashen des Elternordners mitkaskadiert (bleibt
     aber als Zeile bestehen), ein physisches Entfernen des Elternordners
     würde sonst mit einer FK-Violation fehlschlagen."""
-    parent = client.post("/folders", json={"name": "Eltern", "created_by": "alice"}).json()
-    client.post("/folders", json={"name": "Kind", "parent_id": parent["id"], "created_by": "alice"})
+    parent = client.post(
+        "/folders",
+        json={"name": "Eltern", "created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    ).json()
+    client.post(
+        "/folders",
+        json={"name": "Kind", "parent_id": parent["id"], "created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
     client.post(
         f"/folders/{parent['id']}/trash",
         json={"deleted_by": "alice"},
@@ -532,7 +634,9 @@ def test_purge_folder_with_remaining_child_row_returns_409(client):
 
 
 def test_put_retention_sets_fields(client):
-    created = client.post("/folders", json={"name": "X", "created_by": "alice"}).json()
+    created = client.post(
+        "/folders", json={"name": "X", "created_by": "alice"}, headers={"X-DMS-Principal": "alice"}
+    ).json()
 
     response = client.put(
         f"/folders/{created['id']}/retention",
@@ -550,7 +654,9 @@ def test_put_retention_requires_reason_when_configured(client):
         json={"deletion_reason_required": True, "reminder_lead_days": None},
         headers=RETENTION_ADMIN_HEADERS,
     )
-    created = client.post("/folders", json={"name": "X", "created_by": "alice"}).json()
+    created = client.post(
+        "/folders", json={"name": "X", "created_by": "alice"}, headers={"X-DMS-Principal": "alice"}
+    ).json()
 
     response = client.put(
         f"/folders/{created['id']}/retention",
@@ -576,7 +682,9 @@ def test_put_retention_unknown_folder_returns_404(client):
 
 
 def test_put_retention_without_permission_is_403(client):
-    created = client.post("/folders", json={"name": "X", "created_by": "alice"}).json()
+    created = client.post(
+        "/folders", json={"name": "X", "created_by": "alice"}, headers={"X-DMS-Principal": "alice"}
+    ).json()
     response = client.put(
         f"/folders/{created['id']}/retention",
         json={"retention_until": None, "full_deletion": False, "reason": None},
@@ -597,7 +705,9 @@ DELETION_ADMIN_HEADERS = {"X-DMS-Principal": "folder-service-test-deletion-admin
 
 
 def test_create_legal_hold_without_permission_is_403(client):
-    created = client.post("/folders", json={"name": "X", "created_by": "alice"}).json()
+    created = client.post(
+        "/folders", json={"name": "X", "created_by": "alice"}, headers={"X-DMS-Principal": "alice"}
+    ).json()
     response = client.post(
         "/legal-holds",
         json={"folder_id": created["id"], "set_by": "alice", "reason": "Rechtsstreit"},
@@ -607,7 +717,9 @@ def test_create_legal_hold_without_permission_is_403(client):
 
 
 def test_legal_hold_lifecycle(client):
-    created = client.post("/folders", json={"name": "X", "created_by": "alice"}).json()
+    created = client.post(
+        "/folders", json={"name": "X", "created_by": "alice"}, headers={"X-DMS-Principal": "alice"}
+    ).json()
 
     create_response = client.post(
         "/legal-holds",
@@ -632,7 +744,9 @@ def test_legal_hold_lifecycle(client):
 
 
 def test_release_legal_hold_twice_returns_409(client):
-    created = client.post("/folders", json={"name": "X", "created_by": "alice"}).json()
+    created = client.post(
+        "/folders", json={"name": "X", "created_by": "alice"}, headers={"X-DMS-Principal": "alice"}
+    ).json()
     hold_id = client.post(
         "/legal-holds",
         json={"folder_id": created["id"], "set_by": "alice", "reason": None},
@@ -662,7 +776,9 @@ def test_create_legal_hold_unknown_folder_returns_404(client):
 
 
 def test_deletion_register_lists_entries(client):
-    created = client.post("/folders", json={"name": "X", "created_by": "alice"}).json()
+    created = client.post(
+        "/folders", json={"name": "X", "created_by": "alice"}, headers={"X-DMS-Principal": "alice"}
+    ).json()
     client.put(
         f"/folders/{created['id']}/retention",
         json={"retention_until": None, "full_deletion": True, "reason": "Aufgeräumt"},
@@ -674,7 +790,9 @@ def test_deletion_register_lists_entries(client):
 
 
 def test_reconcile_restore_deletion_requires_admin_role(client):
-    created = client.post("/folders", json={"name": "X", "created_by": "alice"}).json()
+    created = client.post(
+        "/folders", json={"name": "X", "created_by": "alice"}, headers={"X-DMS-Principal": "alice"}
+    ).json()
     response = client.post(
         f"/folders/{created['id']}/reconcile-restore-deletion",
         json={"original_entry_id": "led-1", "reason": None},
@@ -686,7 +804,9 @@ def test_reconcile_restore_deletion_requires_admin_role(client):
 def test_reconcile_restore_deletion_performs_real_forced_deletion(client):
     """10.4/P11-S4: derselbe Mechanismus wie die ursprüngliche Zwangslöschung
     - Ordner ist danach wirklich weg, mit echtem DeletionRegisterEntry."""
-    created = client.post("/folders", json={"name": "X", "created_by": "alice"}).json()
+    created = client.post(
+        "/folders", json={"name": "X", "created_by": "alice"}, headers={"X-DMS-Principal": "alice"}
+    ).json()
 
     response = client.post(
         f"/folders/{created['id']}/reconcile-restore-deletion",
@@ -743,7 +863,11 @@ def test_get_folder_publishes_viewed_event(client, monkeypatch):
     """P71-S2: forensic-trace coverage gap closed - mirrors
     `document_service.get_document`'s own `document.viewed` exactly, only
     on the single retrieval, never on `GET /folders/{id}/children`."""
-    folder_id = client.post("/folders", json={"name": "Akten", "created_by": "alice"}).json()["id"]
+    folder_id = client.post(
+        "/folders",
+        json={"name": "Akten", "created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    ).json()["id"]
 
     published: list[Event] = []
 
@@ -764,8 +888,16 @@ def test_list_children_does_not_publish_viewed_event(client, monkeypatch):
     """The listing route must NOT fire `folder.viewed` per child - same
     "avoid dozens of events per listing" reasoning as document-service's
     own precedent."""
-    parent_id = client.post("/folders", json={"name": "Eltern", "created_by": "alice"}).json()["id"]
-    client.post("/folders", json={"name": "Kind", "created_by": "alice", "parent_id": parent_id})
+    parent_id = client.post(
+        "/folders",
+        json={"name": "Eltern", "created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    ).json()["id"]
+    client.post(
+        "/folders",
+        json={"name": "Kind", "created_by": "alice", "parent_id": parent_id},
+        headers={"X-DMS-Principal": "alice"},
+    )
 
     published: list[Event] = []
 
@@ -784,7 +916,11 @@ def test_get_folder_does_not_publish_viewed_event_when_disabled(client, monkeypa
     client.put(
         "/audit-trace-config", json={"log_viewed": False}, headers=FOLDER_CONFIG_ADMIN_HEADERS
     )
-    folder_id = client.post("/folders", json={"name": "Akten2", "created_by": "alice"}).json()["id"]
+    folder_id = client.post(
+        "/folders",
+        json={"name": "Akten2", "created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    ).json()["id"]
 
     published: list[Event] = []
 
@@ -868,6 +1004,7 @@ def _create_folder(client, *, name, parent_id="root", object_type_id=None):
             "attributes": {},
             "created_by": "alice",
         },
+        headers={"X-DMS-Principal": "alice"},
     )
     assert response.status_code == 201
     return response.json()
@@ -885,6 +1022,7 @@ def test_create_and_list_folder_template(client):
             "description": "Standard-Struktur",
             "created_by": "alice",
         },
+        headers={"X-DMS-Principal": "alice"},
     )
     assert response.status_code == 201
     template = response.json()
@@ -903,6 +1041,7 @@ def test_create_folder_template_unknown_source_returns_404(client):
             "description": None,
             "created_by": "alice",
         },
+        headers={"X-DMS-Principal": "alice"},
     )
     assert response.status_code == 404
 
@@ -918,6 +1057,7 @@ def test_get_folder_template_returns_structure(client):
             "description": None,
             "created_by": "alice",
         },
+        headers={"X-DMS-Principal": "alice"},
     ).json()
 
     response = client.get(f"/folder-templates/{template['id']}")
@@ -944,6 +1084,7 @@ def test_delete_folder_template(client):
             "description": None,
             "created_by": "alice",
         },
+        headers={"X-DMS-Principal": "alice"},
     ).json()
 
     response = client.delete(f"/folder-templates/{template['id']}")
@@ -968,12 +1109,14 @@ def test_apply_folder_template_creates_folders_under_target(client):
             "description": None,
             "created_by": "alice",
         },
+        headers={"X-DMS-Principal": "alice"},
     ).json()
     target = _create_folder(client, name="Neues Projekt")
 
     response = client.post(
         f"/folder-templates/{template['id']}/apply",
         json={"target_parent_id": target["id"], "created_by": "bob"},
+        headers={"X-DMS-Principal": "bob"},
     )
 
     assert response.status_code == 200
@@ -995,6 +1138,7 @@ def test_apply_folder_template_unknown_template_returns_404(client):
     response = client.post(
         "/folder-templates/does-not-exist/apply",
         json={"target_parent_id": target["id"], "created_by": "bob"},
+        headers={"X-DMS-Principal": "bob"},
     )
     assert response.status_code == 404
 
@@ -1036,11 +1180,13 @@ def test_apply_folder_template_unknown_target_returns_404(client):
             "description": None,
             "created_by": "alice",
         },
+        headers={"X-DMS-Principal": "alice"},
     ).json()
 
     response = client.post(
         f"/folder-templates/{template['id']}/apply",
         json={"target_parent_id": "does-not-exist", "created_by": "bob"},
+        headers={"X-DMS-Principal": "bob"},
     )
 
     assert response.status_code == 404

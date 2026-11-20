@@ -45,6 +45,7 @@ def test_create_folder_with_invalid_attributes_is_rejected(client, object_type_i
     response = client.post(
         "/folders",
         json={"name": "Projekt X", "created_by": "alice", "object_type_id": object_type_id},
+        headers={"X-DMS-Principal": "alice"},
     )
     assert response.status_code == 400
     assert "Projektnummer" in str(response.json()["detail"])
@@ -59,6 +60,7 @@ def test_create_folder_with_valid_attributes_succeeds(client, object_type_id):
             "object_type_id": object_type_id,
             "attributes": {"Projektnummer": "P-001"},
         },
+        headers={"X-DMS-Principal": "alice"},
     )
     assert response.status_code == 201
 
@@ -75,6 +77,7 @@ def test_update_folder_attributes_without_move_is_validated(client, object_type_
             "object_type_id": object_type_id,
             "attributes": {"Projektnummer": "P-001"},
         },
+        headers={"X-DMS-Principal": "alice"},
     ).json()
 
     response = client.patch(f"/folders/{folder['id']}", json={"attributes": {}})
@@ -92,6 +95,7 @@ def test_update_folder_attributes_without_move_accepts_valid_attributes(client, 
             "object_type_id": object_type_id,
             "attributes": {"Projektnummer": "P-001"},
         },
+        headers={"X-DMS-Principal": "alice"},
     ).json()
 
     response = client.patch(
@@ -117,6 +121,7 @@ def test_update_folder_name_only_without_move_is_still_validated_against_existin
             "object_type_id": object_type_id,
             "attributes": {"Projektnummer": "P-001"},
         },
+        headers={"X-DMS-Principal": "alice"},
     ).json()
 
     response = client.patch(f"/folders/{folder['id']}", json={"name": "Projekt Y"})
@@ -126,7 +131,11 @@ def test_update_folder_name_only_without_move_is_still_validated_against_existin
 
 
 def test_update_folder_without_object_type_is_unaffected(client):
-    folder = client.post("/folders", json={"name": "Untypisiert", "created_by": "alice"}).json()
+    folder = client.post(
+        "/folders",
+        json={"name": "Untypisiert", "created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    ).json()
 
     response = client.patch(f"/folders/{folder['id']}", json={"attributes": {"anything": "goes"}})
 
@@ -173,7 +182,9 @@ def second_level_type_id(top_level_type_id):
 
 def test_create_folder_with_root_only_type_at_root_succeeds(client, top_level_type_id):
     response = client.post(
-        "/folders", json={"name": "Top", "created_by": "alice", "object_type_id": top_level_type_id}
+        "/folders",
+        json={"name": "Top", "created_by": "alice", "object_type_id": top_level_type_id},
+        headers={"X-DMS-Principal": "alice"},
     )
     assert response.status_code == 201
 
@@ -181,7 +192,11 @@ def test_create_folder_with_root_only_type_at_root_succeeds(client, top_level_ty
 def test_create_folder_with_root_only_type_under_another_folder_is_rejected(
     client, top_level_type_id
 ):
-    other = client.post("/folders", json={"name": "Anderer", "created_by": "alice"}).json()
+    other = client.post(
+        "/folders",
+        json={"name": "Anderer", "created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    ).json()
     response = client.post(
         "/folders",
         json={
@@ -190,6 +205,7 @@ def test_create_folder_with_root_only_type_under_another_folder_is_rejected(
             "object_type_id": top_level_type_id,
             "parent_id": other["id"],
         },
+        headers={"X-DMS-Principal": "alice"},
     )
     assert response.status_code == 400
     assert "Elternordner" in str(response.json()["detail"])
@@ -199,7 +215,9 @@ def test_create_folder_under_correct_parent_class_succeeds(
     client, top_level_type_id, second_level_type_id
 ):
     top = client.post(
-        "/folders", json={"name": "Top", "created_by": "alice", "object_type_id": top_level_type_id}
+        "/folders",
+        json={"name": "Top", "created_by": "alice", "object_type_id": top_level_type_id},
+        headers={"X-DMS-Principal": "alice"},
     ).json()
     response = client.post(
         "/folders",
@@ -209,12 +227,17 @@ def test_create_folder_under_correct_parent_class_succeeds(
             "object_type_id": second_level_type_id,
             "parent_id": top["id"],
         },
+        headers={"X-DMS-Principal": "alice"},
     )
     assert response.status_code == 201
 
 
 def test_create_folder_under_wrong_parent_class_is_rejected(client, second_level_type_id):
-    wrong_parent = client.post("/folders", json={"name": "Falsch", "created_by": "alice"}).json()
+    wrong_parent = client.post(
+        "/folders",
+        json={"name": "Falsch", "created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    ).json()
     response = client.post(
         "/folders",
         json={
@@ -223,6 +246,7 @@ def test_create_folder_under_wrong_parent_class_is_rejected(client, second_level
             "object_type_id": second_level_type_id,
             "parent_id": wrong_parent["id"],
         },
+        headers={"X-DMS-Principal": "alice"},
     )
     assert response.status_code == 400
 
@@ -231,7 +255,9 @@ def test_move_folder_to_disallowed_parent_is_rejected(
     client, top_level_type_id, second_level_type_id
 ):
     top = client.post(
-        "/folders", json={"name": "Top", "created_by": "alice", "object_type_id": top_level_type_id}
+        "/folders",
+        json={"name": "Top", "created_by": "alice", "object_type_id": top_level_type_id},
+        headers={"X-DMS-Principal": "alice"},
     ).json()
     second = client.post(
         "/folders",
@@ -241,8 +267,13 @@ def test_move_folder_to_disallowed_parent_is_rejected(
             "object_type_id": second_level_type_id,
             "parent_id": top["id"],
         },
+        headers={"X-DMS-Principal": "alice"},
     ).json()
-    other_top = client.post("/folders", json={"name": "AndererTop", "created_by": "alice"}).json()
+    other_top = client.post(
+        "/folders",
+        json={"name": "AndererTop", "created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    ).json()
 
     response = client.patch(f"/folders/{second['id']}", json={"parent_id": other_top["id"]})
     assert response.status_code == 400
@@ -252,10 +283,12 @@ def test_move_folder_to_allowed_parent_succeeds(client, top_level_type_id, secon
     top1 = client.post(
         "/folders",
         json={"name": "Top1", "created_by": "alice", "object_type_id": top_level_type_id},
+        headers={"X-DMS-Principal": "alice"},
     ).json()
     top2 = client.post(
         "/folders",
         json={"name": "Top2", "created_by": "alice", "object_type_id": top_level_type_id},
+        headers={"X-DMS-Principal": "alice"},
     ).json()
     second = client.post(
         "/folders",
@@ -265,6 +298,7 @@ def test_move_folder_to_allowed_parent_succeeds(client, top_level_type_id, secon
             "object_type_id": second_level_type_id,
             "parent_id": top1["id"],
         },
+        headers={"X-DMS-Principal": "alice"},
     ).json()
 
     response = client.patch(f"/folders/{second['id']}", json={"parent_id": top2["id"]})
@@ -273,7 +307,11 @@ def test_move_folder_to_allowed_parent_succeeds(client, top_level_type_id, secon
 
 
 def test_folder_without_object_type_is_unaffected_by_parent_constraints(client):
-    response = client.post("/folders", json={"name": "Untypisiert", "created_by": "alice"})
+    response = client.post(
+        "/folders",
+        json={"name": "Untypisiert", "created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
     assert response.status_code == 201
 
 
@@ -289,6 +327,7 @@ def test_apply_folder_template_with_root_only_type_succeeds_at_root(client, top_
     source = client.post(
         "/folders",
         json={"name": "Vorlagequelle", "created_by": "alice", "object_type_id": top_level_type_id},
+        headers={"X-DMS-Principal": "alice"},
     ).json()
     template = client.post(
         "/folder-templates",
@@ -298,11 +337,13 @@ def test_apply_folder_template_with_root_only_type_succeeds_at_root(client, top_
             "description": None,
             "created_by": "alice",
         },
+        headers={"X-DMS-Principal": "alice"},
     ).json()
 
     response = client.post(
         f"/folder-templates/{template['id']}/apply",
         json={"target_parent_id": "root", "created_by": "bob"},
+        headers={"X-DMS-Principal": "bob"},
     )
 
     assert response.status_code == 200
@@ -319,7 +360,9 @@ def test_apply_folder_template_rejects_invalid_nesting(
     before this fix, `apply_template` bypassed this check entirely and
     would have silently created a structurally invalid folder."""
     top = client.post(
-        "/folders", json={"name": "Top", "created_by": "alice", "object_type_id": top_level_type_id}
+        "/folders",
+        json={"name": "Top", "created_by": "alice", "object_type_id": top_level_type_id},
+        headers={"X-DMS-Principal": "alice"},
     ).json()
     second = client.post(
         "/folders",
@@ -329,6 +372,7 @@ def test_apply_folder_template_rejects_invalid_nesting(
             "object_type_id": second_level_type_id,
             "parent_id": top["id"],
         },
+        headers={"X-DMS-Principal": "alice"},
     ).json()
     template = client.post(
         "/folder-templates",
@@ -338,11 +382,13 @@ def test_apply_folder_template_rejects_invalid_nesting(
             "description": None,
             "created_by": "alice",
         },
+        headers={"X-DMS-Principal": "alice"},
     ).json()
 
     response = client.post(
         f"/folder-templates/{template['id']}/apply",
         json={"target_parent_id": "root", "created_by": "bob"},
+        headers={"X-DMS-Principal": "bob"},
     )
 
     assert response.status_code == 400
@@ -391,6 +437,7 @@ def test_create_folder_rejects_a_reference_attribute_pointing_at_a_nonexistent_f
             "object_type_id": reference_type_id,
             "attributes": {"Verweis": "00000000-0000-0000-0000-000000000000"},
         },
+        headers={"X-DMS-Principal": "alice"},
     )
     assert response.status_code == 422
 
@@ -407,6 +454,7 @@ def test_create_folder_accepts_a_reference_attribute_pointing_at_an_existing_fol
             "object_type_id": reference_type_id,
             "attributes": {"Verweis": "root"},
         },
+        headers={"X-DMS-Principal": "alice"},
     )
     assert response.status_code == 201
     assert response.json()["attributes"]["Verweis"] == "root"
@@ -423,6 +471,7 @@ def test_update_folder_rejects_a_reference_attribute_pointing_at_a_nonexistent_f
             "object_type_id": reference_type_id,
             "attributes": {"Verweis": "root"},
         },
+        headers={"X-DMS-Principal": "alice"},
     ).json()
 
     response = client.patch(

@@ -5,7 +5,13 @@ import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from dms_common import MaxBodySizeMiddleware, configure_logging
+from dms_common import (
+    ActingIdentity,
+    MaxBodySizeMiddleware,
+    configure_logging,
+    log_ignored_actor_field,
+    require_acting_identity,
+)
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
 from dms_metrics_client import (
@@ -182,6 +188,7 @@ async def scan_upload(
     document_id: str | None = Form(None),
     created_by: str | None = Form(None),
     x_dms_principal: str = Header(default=""),
+    identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> ScanResultOut:
     """Mandatory scan before an upload is released (10.3, ADR 0010) - the
@@ -196,6 +203,10 @@ async def scan_upload(
     "everyone" regardless of whether the principal string identifies a
     real registered account (same reasoning as reporting-service's
     scheduler principal, same session)."""
+    log_ignored_actor_field(
+        logger, route="POST /scan", field="created_by", value=created_by, identity=identity
+    )
+    actor_created_by = identity.actor
     await _require_scan_permission(
         x_dms_principal, permission="virus_scan.write", access_type="write"
     )
@@ -223,7 +234,7 @@ async def scan_upload(
         threat_name=verdict.threat_name,
         engine=settings.scan_engine,
         quarantine_object_key=quarantine_key,
-        created_by=created_by,
+        created_by=actor_created_by,
     )
     await session.commit()
     await publish_event(
@@ -234,9 +245,9 @@ async def scan_upload(
             "filename": result.filename,
             "status": result.status,
             "threat_name": result.threat_name,
-            "created_by": created_by,
+            "created_by": actor_created_by,
         },
-        actor=created_by,
+        actor=actor_created_by,
     )
     return result
 

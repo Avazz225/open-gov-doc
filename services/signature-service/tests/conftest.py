@@ -176,6 +176,7 @@ async def pdf_document(sample_pdf_bytes):
             "/documents",
             data={"title": "Signatur-Testdokument", "created_by": "alice"},
             files={"file": ("sample.pdf", sample_pdf_bytes, "application/pdf")},
+            headers={"X-DMS-Principal": "alice"},
         )
         response.raise_for_status()
         document = response.json()
@@ -194,6 +195,7 @@ async def non_pdf_document():
             "/documents",
             data={"title": "Textdokument", "created_by": "alice"},
             files={"file": ("test.txt", b"Kein PDF", "text/plain")},
+            headers={"X-DMS-Principal": "alice"},
         )
         response.raise_for_status()
         document = response.json()
@@ -272,6 +274,7 @@ async def pdf_document_with_required_level(sample_pdf_bytes, aes_required_object
                 "object_type_id": str(aes_required_object_type),
             },
             files={"file": ("sample.pdf", sample_pdf_bytes, "application/pdf")},
+            headers={"X-DMS-Principal": "alice"},
         )
         response.raise_for_status()
         document = response.json()

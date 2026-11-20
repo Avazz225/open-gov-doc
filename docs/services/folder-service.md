@@ -238,6 +238,12 @@ Folder trash and legal holds (set/release) record the request principal as the a
   all, and the user only as a body field.
 - **Service and `system:*` actors** (retention poll, approval execution) act as `folder-service` itself.
 
+## Acting Identity, remaining routes (P85-S4, [ADR 0240](../adr/0240-acting-identity-from-verified-principal.md))
+
+Folder create, pseudonymize/reveal, document references (add/remove) and folder templates (create/apply)
+record the request principal; the body fields are optional and ignored. teamspace-service creates
+teamspace root folders on behalf of the teamspace's creator.
+
 ## Open Points
 
 - ~~**`DELETE /folders/{id}` (raw hard-delete fallback) only ever checked for contained subfolders, never contained documents** — `repository.delete_folder()`'s not-empty check is a purely local `list_children` query; documents live in `document-service`, a different service, and were never consulted at all on this path (unlike the regular `POST .../trash` path, which cascades onto documents via a synchronous `document_client.cascade_trash` call). A real orphaning risk: a folder with active documents could be hard-deleted directly, leaving those documents referencing a nonexistent `folder_id`. First named at P4-S4, re-surfaced during the Phase 44+ gap-analysis round (see `docs/services/user-ui.md`'s "Open Points").~~ — **closed in Phase 51 Session 3**: `delete_folder` now also calls `document_client.count_active([folder_id])` (the same client method the forced-deletion path already used) and rejects with `409` if it returns non-zero, before proceeding to the local-only `repository.delete_folder()` check. Live-verified against the real running stack: a folder with one active document now returns `409` on `DELETE`; the same folder deletes cleanly (`204`) once its document is trashed (`count_active` returns `0`) or removed.

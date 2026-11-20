@@ -1,4 +1,5 @@
 import httpx
+from dms_common import on_behalf_headers
 
 
 class DocumentClient:
@@ -32,13 +33,15 @@ class DocumentClient:
         created_by: str,
         folder_id: str | None,
     ) -> dict:
-        form: dict = {"title": title, "created_by": created_by}
+        form: dict = {"title": title}
         if folder_id is not None:
             form["folder_id"] = folder_id
         response = await self._client.post(
             "/documents",
             data=form,
             files={"file": (filename, data, content_type or "application/octet-stream")},
+            # P85-S4 (ADR 0240): on behalf of the mailbox user.
+            headers=on_behalf_headers("mail-connector", created_by),
         )
         response.raise_for_status()
         return response.json()

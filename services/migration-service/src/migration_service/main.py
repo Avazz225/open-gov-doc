@@ -855,7 +855,7 @@ async def inbound_push_document(
     authorization: str | None = Header(default=None),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    await _authenticate(authorization, session)
+    peer = await _authenticate(authorization, session)
     await _get_inbound_transfer_or_404(session, transfer_id)
     content = await file.read()
     document = await asyncio.to_thread(
@@ -865,6 +865,12 @@ async def inbound_push_document(
         content=content,
         content_type=file.content_type,
         created_by=created_by,
+        # Federated exception (P85-S4, ADR 0240 Decision 8): the caller is a
+        # peer installation (signature-authenticated), not a local principal.
+        # migration-service writes on behalf of "peer:<installation>/<remote
+        # creator>", so the document names both where it came from and who
+        # created it there - instead of the bare remote name in a body field.
+        on_behalf_of=f"peer:{peer.id}/{created_by}",
         existing_document_id=existing_target_document_id,
         expected_base_version_number=expected_base_version_number,
     )

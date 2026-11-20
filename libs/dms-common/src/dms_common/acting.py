@@ -120,6 +120,22 @@ def acting_headers(service_principal: str, on_behalf_of: str | None = None) -> d
     return headers
 
 
+def on_behalf_headers(service_principal: str, actor: str | None) -> dict[str, str]:
+    """Headers for a service call made because of ``actor``: on behalf of
+    them when ``actor`` is a person, as the service itself when ``actor`` is
+    empty, a service principal, a ``system:*`` job or a service-labelled
+    string like ``"migration-service (von X)"`` (P85-S4, ADR 0240)."""
+    actor = (actor or "").strip()
+    if (
+        not actor
+        or actor in SERVICE_PRINCIPALS
+        or actor.startswith("system:")
+        or any(actor.startswith(f"{name} ") for name in SERVICE_PRINCIPALS)
+    ):
+        return acting_headers(service_principal)
+    return acting_headers(service_principal, on_behalf_of=actor)
+
+
 def log_ignored_actor_field(
     logger: logging.Logger, *, route: str, field: str, value: str | None, identity: ActingIdentity
 ) -> None:

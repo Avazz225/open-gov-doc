@@ -31,7 +31,11 @@ def real_folder_id():
         timeout=10.0,
         headers={"X-DMS-Principal": "document-service-test-folder-setup"},
     ) as fc:
-        response = fc.post("/folders", json={"name": "Testordner-PerDoc", "created_by": "alice"})
+        response = fc.post(
+            "/folders",
+            json={"name": "Testordner-PerDoc", "created_by": "alice"},
+            headers={"X-DMS-Principal": "alice"},
+        )
         response.raise_for_status()
         folder_id = response.json()["id"]
         yield folder_id
@@ -43,6 +47,7 @@ def _upload(client, *, title: str) -> str:
         "/documents",
         data={"title": title, "created_by": "alice"},
         files={"file": (f"{title}.txt", b"Inhalt", "text/plain")},
+        headers={"X-DMS-Principal": "alice"},
     )
     response.raise_for_status()
     return response.json()["id"]
