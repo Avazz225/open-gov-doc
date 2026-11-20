@@ -1,7 +1,16 @@
 from datetime import datetime
 
 from dms_db_base import make_declarative_base
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 Base = make_declarative_base("permission")
@@ -132,6 +141,13 @@ class EffectivePermissionCache(Base):
     granularly per affected subtree. A deliberate simplification for the
     initial version; the result stays correct, only the rebuild after a
     change is somewhat broader than strictly necessary.
+
+    ``generation`` (P84-S1, ADR 0239): the cache generation the entry was
+    computed under. An entry only counts as a hit while it equals the
+    current ``PermissionCacheGeneration.generation``. That closes the race
+    where a recompute that started before a permission change commits its
+    (now stale) row after the invalidating DELETE ran - the row survives,
+    but carries an old generation and is ignored.
     """
 
     __tablename__ = "effective_permission_cache"
@@ -141,6 +157,19 @@ class EffectivePermissionCache(Base):
     roles: Mapped[list[str]] = mapped_column(JSON)
     permissions: Mapped[list[str]] = mapped_column(JSON)
     computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    generation: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+
+
+class PermissionCacheGeneration(Base):
+    """Single-row counter (P84-S1, ADR 0239), bumped by every cache
+    invalidation in the same transaction as the permission change itself.
+    Readers take no lock: they read the current value before computing and
+    stamp their cache row with it, see ``EffectivePermissionCache``."""
+
+    __tablename__ = "permission_cache_generation"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    generation: Mapped[int] = mapped_column(BigInteger, default=0)
 
 
 class Delegation(Base):

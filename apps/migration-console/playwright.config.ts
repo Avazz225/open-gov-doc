@@ -8,12 +8,10 @@ import { defineConfig, devices } from "@playwright/test";
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: false,
-  // One worker (P83-S8): the paired-installations fixture grants a role to
-  // the shared test account for the length of one test. A parallel worker's
-  // login can recompute that account's effective permissions concurrently
-  // and leave a pre-grant entry in permission-service's materialized cache,
-  // so the grant appears not to apply. The suite is four short tests.
-  workers: 1,
+  // The role the suite needs is granted once per run and revoked at its end
+  // (P84-S1, e2e/role-grant.ts) - safe with any number of workers.
+  globalSetup: "./e2e/global-setup.ts",
+  globalTeardown: "./e2e/global-teardown.ts",
   retries: 0,
   reporter: [["list"]],
   use: {

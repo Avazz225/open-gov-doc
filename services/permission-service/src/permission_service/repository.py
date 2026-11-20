@@ -13,6 +13,7 @@ from permission_service.models import (
     EffectivePermissionCache,
     Group,
     GroupMembership,
+    PermissionCacheGeneration,
     ResourceNode,
     Role,
     RoleAssignment,
@@ -55,11 +56,40 @@ class SupervisorCycleError(Exception):
     (P31-S9) - see ``create_supervisor_assignment``."""
 
 
+CACHE_GENERATION_ROW_ID = 1
+
+
 async def invalidate_cache(session: AsyncSession) -> None:
     """Clears the entire materialized cache (see the docstring on
     ``EffectivePermissionCache`` for the rationale behind the coarse
-    granularity)."""
+    granularity) and bumps the cache generation (P84-S1, ADR 0239).
+
+    The bump is what makes invalidation race-free: a concurrent recompute
+    that read the old generation may still insert its row after the DELETE
+    below (or commit a row the DELETE could not see yet), but that row
+    carries the old generation and ``get_effective_permissions`` treats it
+    as a miss. The upsert also creates the counter row if it is missing.
+    Concurrent writers serialize on that one row lock, readers never touch
+    it with a lock."""
+    await session.execute(
+        pg_insert(PermissionCacheGeneration)
+        .values(id=CACHE_GENERATION_ROW_ID, generation=1)
+        .on_conflict_do_update(
+            index_elements=["id"],
+            set_={"generation": PermissionCacheGeneration.generation + 1},
+        )
+    )
     await session.execute(delete(EffectivePermissionCache))
+
+
+async def current_cache_generation(session: AsyncSession) -> int:
+    """The current cache generation; 0 before the first invalidation ever."""
+    value = await session.scalar(
+        select(PermissionCacheGeneration.generation).where(
+            PermissionCacheGeneration.id == CACHE_GENERATION_ROW_ID
+        )
+    )
+    return value or 0
 
 
 async def ensure_root_resource(session: AsyncSession) -> None:
@@ -967,8 +997,16 @@ async def _collect_effective_roles(
 async def get_effective_permissions(
     session: AsyncSession, principal_id: str, resource_id: str
 ) -> EffectivePermissionCache:
-    cached = await session.get(EffectivePermissionCache, (principal_id, resource_id))
-    if cached is not None:
+    # The generation is read BEFORE anything else (P84-S1, ADR 0239): if a
+    # permission change commits while this request computes, the entry
+    # written below carries the old generation and is ignored from then on.
+    # `populate_existing` because an earlier lookup in the same session may
+    # already hold a now-outdated row in the identity map.
+    generation = await current_cache_generation(session)
+    cached = await session.get(
+        EffectivePermissionCache, (principal_id, resource_id), populate_existing=True
+    )
+    if cached is not None and cached.generation == generation:
         return cached
 
     roles = await _collect_effective_roles(session, principal_id, resource_id)
@@ -983,27 +1021,45 @@ async def get_effective_permissions(
     # resource_id)` can both compute a fresh entry and both attempt an
     # INSERT, the second failing on the composite primary key. Same
     # `INSERT ... ON CONFLICT DO NOTHING` + re-read pattern already
-    # established for object-type-service's counter rows (P5e-S1) - no
-    # `SELECT ... FOR UPDATE` needed here (unlike there), since a cache
-    # entry is never incremented, only ever (re)computed identically from
-    # the same input, so "someone else already wrote it" is a fine outcome
-    # to just read back.
-    insert_stmt = (
-        pg_insert(EffectivePermissionCache)
-        .values(
-            principal_id=principal_id,
-            resource_id=resource_id,
-            roles=sorted(role.name for role in roles),
-            permissions=permissions,
-            computed_at=datetime.now(UTC),
-        )
-        .on_conflict_do_nothing(index_elements=["principal_id", "resource_id"])
+    # established for object-type-service's counter rows (P5e-S1).
+    #
+    # Since P84-S1 (ADR 0239) it is an upsert that only ever moves an entry
+    # FORWARD in generation: an existing row from an older generation (left
+    # behind by a race, see `invalidate_cache`) is replaced, while a row a
+    # concurrent request already wrote for the same or a newer generation is
+    # kept. The function returns what it computed itself rather than
+    # re-reading - a re-read could return a row another request wrote under
+    # a different generation.
+    roles_out = sorted(role.name for role in roles)
+    computed_at = datetime.now(UTC)
+    insert_stmt = pg_insert(EffectivePermissionCache).values(
+        principal_id=principal_id,
+        resource_id=resource_id,
+        roles=roles_out,
+        permissions=permissions,
+        computed_at=computed_at,
+        generation=generation,
+    )
+    insert_stmt = insert_stmt.on_conflict_do_update(
+        index_elements=["principal_id", "resource_id"],
+        set_={
+            "roles": insert_stmt.excluded.roles,
+            "permissions": insert_stmt.excluded.permissions,
+            "computed_at": insert_stmt.excluded.computed_at,
+            "generation": insert_stmt.excluded.generation,
+        },
+        where=EffectivePermissionCache.generation < insert_stmt.excluded.generation,
     )
     await session.execute(insert_stmt)
     await session.flush()
-    entry = await session.get(EffectivePermissionCache, (principal_id, resource_id))
-    assert entry is not None
-    return entry
+    return EffectivePermissionCache(
+        principal_id=principal_id,
+        resource_id=resource_id,
+        roles=roles_out,
+        permissions=permissions,
+        computed_at=computed_at,
+        generation=generation,
+    )
 
 
 async def create_scope_lock(

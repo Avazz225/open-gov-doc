@@ -3448,17 +3448,30 @@ regression runs at each phase close.
 
 ## Phase 84 — Security & Correctness Hardening (cheap, high value)
 
-- **P84-S1 — Permission-cache race.**
-  - **Fix:** `invalidate_cache` takes `pg_advisory_xact_lock(<const>)` before its DELETE.
-    `get_effective_permissions` takes `pg_advisory_xact_lock_shared(<const>)` after a cache miss and before
-    `_collect_effective_roles`. Readers don't block each other. A writer waits for in-flight recomputes,
-    and its DELETE then removes their rows.
-  - **Tests:** one that forces the interleaving (recompute started before a grant commits) for both a
-    grant and a revoke.
-  - **Then:** remove the `workers: 1` work-arounds from the migration-console and process-designer
-    Playwright configs. Their comments name this race, and their suites must then pass in parallel.
-  - **Docs:** ADR 0239 (short). It records why this fix and not a generation counter (no schema change)
-    and not dropping the materialized write (concept 4.1).
+- **P84-S1 — Permission-cache race.** ✅ **Done, with a different mechanism than planned:** a
+  **generation counter** instead of advisory locks → [ADR 0239](docs/adr/0239-permission-cache-generation-counter.md).
+  - **Why not the lock:** permission-service's own write endpoints check the caller's capability through
+    `get_effective_permissions` (a cache miss after any invalidation, which would take the shared lock)
+    and then invalidate (the exclusive lock) in the same transaction. Two concurrent admin writes would
+    deadlock.
+  - **Built:** a single-row `permission_cache_generation`, bumped by `invalidate_cache`, and a
+    `generation` column per cache row (ad-hoc `ALTER … ADD COLUMN IF NOT EXISTS`). A lookup reads the
+    generation first and accepts only current rows; the write is a forward-only upsert that returns
+    what it computed.
+  - **Tests:** 4 new, for a grant and a revoke committed during a paused recompute, an uncommitted
+    insert overtaken by a commit, and the generation bump. permission-service is at 194. A
+    counter-check with the comparison disabled fails exactly the three race tests.
+  - **e2e:** `workers: 1` removed in migration-console and process-designer. Parallel runs then
+    exposed a second, test-only bug: grants are idempotent, so per-test grant/revoke fixtures shared
+    one assignment across workers, and the first teardown revoked it under the others. The grants
+    moved to a once-per-run `globalSetup`/`globalTeardown` (`e2e/role-grant.ts`), leaving a
+    pre-existing assignment untouched.
+  - **Checks:**
+    - both suites 3× in a row green with 4 workers (process-designer 9s instead of 19s);
+    - no assignments left over;
+    - the other four suites green (32/32 overall);
+    - ruff clean for permission-service (format also fixed its old `logger.warning` line);
+    - image rebuilt.
 - **P84-S2 — Federation installation lookup by id.**
   - **Hub:** new `GET /installations/{installation_id}`, open like the list, plus a paging client helper
     for the callers that really need the full list.

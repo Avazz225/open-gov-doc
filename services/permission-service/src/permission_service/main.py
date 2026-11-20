@@ -87,6 +87,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ADD COLUMN IF NOT EXISTS required_permission VARCHAR(128)"
             )
         )
+        # P84-S1 (ADR 0239) - cache generation, same ad-hoc pattern. Existing
+        # rows get generation 0; the first invalidation moves the counter to 1,
+        # so they stop counting as hits from then on.
+        await conn.execute(
+            text(
+                "ALTER TABLE permission.effective_permission_cache "
+                "ADD COLUMN IF NOT EXISTS generation BIGINT NOT NULL DEFAULT 0"
+            )
+        )
         # Post-Roadmap Phase 35 Session 1 (ADR 0143) - same ad-hoc pattern.
         await conn.execute(
             text(
@@ -299,7 +308,9 @@ async def _is_active_superuser(principal_id: str) -> bool:
     try:
         active, superuser_principal_id = await app.state.auth_client.get_active_superuser()
     except Exception:
-        logger.warning("superuser_status_check_failed - auth-service nicht erreichbar?", exc_info=True)
+        logger.warning(
+            "superuser_status_check_failed - auth-service nicht erreichbar?", exc_info=True
+        )
         return False
     return active and bool(principal_id) and superuser_principal_id == principal_id
 

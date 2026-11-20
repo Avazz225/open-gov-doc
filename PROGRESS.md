@@ -2,7 +2,42 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P83-S14, the last session of Phase 83. **Phase 83 is closed.** Full record:
+**Last completed:** P84-S1 (first session of Phase 84): the permission-cache race is fixed with a
+generation counter ([ADR 0239](docs/adr/0239-permission-cache-generation-counter.md)), not with the
+advisory lock the plan named. The lock would deadlock two concurrent admin writes, because they check
+permissions and then invalidate in one transaction.
+
+**What changed:**
+- **Cache.** Cache rows carry a `generation`, and every invalidation bumps a single-row counter. Lookups
+  accept only current-generation rows; the write is a forward-only upsert. A recompute that raced a
+  grant or revoke can no longer leave a stale row, which before could even keep a revoked permission
+  alive.
+- **e2e.** The `workers: 1` work-arounds are gone. Their role grants are now once-per-run
+  `globalSetup`/`globalTeardown`: idempotent grants made the per-test fixtures share one assignment
+  across workers, which was a second, hidden test bug.
+
+**Checks:**
+- permission-service 194 green (+4 race tests). The counter-check with the comparison disabled fails
+  exactly the three race tests.
+- ruff clean.
+- e2e: both suites 3× green with 4 workers, all six suites 32/32.
+- No leftover assignments. Image rebuilt.
+
+**Open (carried over):**
+- reviewer-ui principal names (→ P86-S2).
+- The federation `GET /installations` 100-row limit behind the flaky test (→ P84-S2).
+- The `<picture>` check (→ P86-S2).
+
+The stack was stopped afterwards.
+
+**Next session:** **P84-S2**, the federation installation lookup by id:
+- the hub gets `GET /installations/{id}` plus a paging helper;
+- workflow-service and auth-service use them;
+- regression tests with more than 100 installations.
+
+---
+
+Earlier P83-S14 summary, kept for context (the last session of Phase 83). **Phase 83 is closed.** Full record:
 `IMPLEMENTATION_PLAN.md`'s P83-S14 entry and "Phase 83 result".
 
 **What changed:**
@@ -32,7 +67,7 @@
 
 The stack was stopped afterwards.
 
-**Next session:** **P84-S1**, the permission-cache race (advisory lock), from the new plan "Phase 84+: Gap
+**Next session (at the time):** P84-S1. It was done next; see the entry above. Original note:, the permission-cache race (advisory lock), from the new plan "Phase 84+: Gap
 analysis after Phase 83" (Phases 84–91, ADR 0239+), built 2026-11-20 with the user's decisions:
 - identity bound to the token everywhere;
 - the account dropdown behind the user name in all apps, with user-ui's gear removed;

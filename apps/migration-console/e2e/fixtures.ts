@@ -21,35 +21,9 @@ async function login(username: string) {
 }
 
 // Pairing is gated behind `admin.migration_management` (role
-// `domain-admin-migration`, P59-S5), which no bootstrapped account holds.
-// The fixture grants that role to the test account for the duration of the
-// test and revokes it afterwards (P83-S8), so the shared dev stack keeps its
-// default role set. users-admin may grant roles itself (admin.user_management).
-async function grantMigrationRole(token: string): Promise<number> {
-  const auth = { Authorization: `Bearer ${token}` };
-  const me = (await (await fetch(`${GATEWAY_BASE_URL}/api/auth-service/me`, { headers: auth })).json()) as {
-    sub: string;
-  };
-  const roles = (await (
-    await fetch(`${GATEWAY_BASE_URL}/api/permission-service/roles`, { headers: auth })
-  ).json()) as { id: number; name: string }[];
-  const role = roles.find((r) => r.name === "domain-admin-migration");
-  if (!role) throw new Error("Role domain-admin-migration not seeded");
-  const response = await fetch(`${GATEWAY_BASE_URL}/api/permission-service/role-assignments`, {
-    method: "POST",
-    headers: { ...auth, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      principal_type: "user",
-      principal_id: me.sub,
-      role_id: role.id,
-      resource_id: "root",
-    }),
-  });
-  if (!response.ok) throw new Error(`Role grant failed: ${response.status}`);
-  const body = (await response.json()) as { role_assignment: { id: number } | null };
-  if (!body.role_assignment) throw new Error("Role grant went to approval instead of being applied");
-  return body.role_assignment.id;
-}
+// `domain-admin-migration`, P59-S5), which no bootstrapped account holds. It is
+// granted once per run in e2e/global-setup.ts and revoked in
+// e2e/global-teardown.ts (P84-S1; until then granted per test here).
 
 // A unique, throwaway paired-installation display name for the test to use,
 // plus a forced API cleanup after the test that removes any installation
@@ -63,18 +37,9 @@ export const testWithPairedInstallationCleanup = base.extend<{
 }>({
   pairedInstallationName: async ({}, use) => {
     const name = `e2e-console-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    await use(name);
+
     const { access_token: token } = await login(TEST_USERNAME);
-    const assignmentId = await grantMigrationRole(token);
-
-    try {
-      await use(name);
-    } finally {
-      await fetch(`${GATEWAY_BASE_URL}/api/permission-service/role-assignments/${assignmentId}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-    }
-
     const listRes = await fetch(
       `${GATEWAY_BASE_URL}/api/migration-service/paired-installations`,
       { headers: { Authorization: `Bearer ${token}` } }

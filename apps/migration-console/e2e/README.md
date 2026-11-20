@@ -40,10 +40,9 @@ installation requires the `admin.migration_management` capability (role
 `docs/services/migration-console.md` "Authorization"), which no
 bootstrapped account holds. The `testWithPairedInstallationCleanup` fixture
 (`e2e/fixtures.ts`) grants that role to the test account for the length of
-the test and revokes it afterwards. The suite runs with `workers: 1`: a
-parallel worker's login can recompute the account's effective permissions
-concurrently and leave a pre-grant entry in permission-service's
-materialized cache.
+the test and revokes it afterwards. (P83-S8 ran the suite with `workers: 1`
+because of a race in permission-service's materialized cache; P84-S1 fixed the
+race with a cache generation, ADR 0239, and the suite runs in parallel again.)
 
 ## Design notes
 

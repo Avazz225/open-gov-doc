@@ -1000,3 +1000,132 @@ async def test_everyone_assignment_combines_with_individual_assignment(session):
     entry = await repository.get_effective_permissions(session, "alice", ROOT_RESOURCE_ID)
 
     assert set(entry.permissions) == {"document.write", *repository.EVERYONE_ROLE_PERMISSIONS}
+
+
+# --- Cache-generation race (P84-S1, ADR 0239) ---------------------------------
+#
+# Each test forces the exact interleaving deterministically: a recompute in
+# session A is paused right after it collected the roles, a permission change
+# commits in session B, then A finishes and commits. Before P84-S1 the stale
+# row A wrote outlived the invalidating DELETE and answered every later
+# lookup; now it carries the old generation and a fresh lookup recomputes.
+
+
+async def _paused_recompute(monkeypatch, factory, principal_id, gate, started):
+    """Runs get_effective_permissions in its own session, pausing after the
+    role collection until ``gate`` is set; commits at the end."""
+    real_collect = repository._collect_effective_roles
+
+    async def collect_then_wait(session, pid, rid):
+        roles = await real_collect(session, pid, rid)
+        started.set()
+        await gate.wait()
+        return roles
+
+    monkeypatch.setattr(repository, "_collect_effective_roles", collect_then_wait)
+    async with factory() as s:
+        entry = await repository.get_effective_permissions(s, principal_id, ROOT_RESOURCE_ID)
+        await s.commit()
+    monkeypatch.setattr(repository, "_collect_effective_roles", real_collect)
+    return entry
+
+
+async def _fresh_permissions(factory, principal_id):
+    async with factory() as s:
+        entry = await repository.get_effective_permissions(s, principal_id, ROOT_RESOURCE_ID)
+        await s.commit()
+        return entry.permissions
+
+
+async def test_grant_committed_during_recompute_is_not_hidden_by_stale_row(
+    engine, session, monkeypatch
+):
+    factory = make_session_factory(engine)
+    role = await repository.create_role(session, "race-grant", "", ["race.read"])
+    await session.commit()
+    gate, started = asyncio.Event(), asyncio.Event()
+
+    reader = asyncio.create_task(
+        _paused_recompute(monkeypatch, factory, "race-user", gate, started)
+    )
+    await started.wait()
+    # The grant commits while the recompute holds the pre-grant role set.
+    async with factory() as writer:
+        await repository.create_role_assignment(
+            writer,
+            principal_type="user",
+            principal_id="race-user",
+            role_id=role.id,
+            resource_id=ROOT_RESOURCE_ID,
+        )
+        await writer.commit()
+    gate.set()
+    stale = await reader
+
+    assert "race.read" not in stale.permissions  # what the paused request saw
+    assert "race.read" in await _fresh_permissions(factory, "race-user")
+
+
+async def test_revoke_committed_during_recompute_is_not_undone_by_stale_row(
+    engine, session, monkeypatch
+):
+    factory = make_session_factory(engine)
+    role = await repository.create_role(session, "race-revoke", "", ["race.write"])
+    assignment = await repository.create_role_assignment(
+        session,
+        principal_type="user",
+        principal_id="race-user",
+        role_id=role.id,
+        resource_id=ROOT_RESOURCE_ID,
+    )
+    await session.commit()
+    gate, started = asyncio.Event(), asyncio.Event()
+
+    reader = asyncio.create_task(
+        _paused_recompute(monkeypatch, factory, "race-user", gate, started)
+    )
+    await started.wait()
+    async with factory() as writer:
+        await repository.delete_role_assignment(writer, assignment.id)
+        await writer.commit()
+    gate.set()
+    stale = await reader
+
+    assert "race.write" in stale.permissions
+    # The revoked permission must not survive in the cache.
+    assert "race.write" not in await _fresh_permissions(factory, "race-user")
+
+
+async def test_row_inserted_before_invalidation_but_committed_after_is_ignored(engine, session):
+    """The second interleaving: the recompute already INSERTed (uncommitted,
+    invisible to the writer's DELETE) when the change commits; it commits
+    afterwards."""
+    factory = make_session_factory(engine)
+    role = await repository.create_role(session, "race-late", "", ["race.late"])
+    await session.commit()
+
+    async with factory() as reader:
+        before = await repository.get_effective_permissions(reader, "race-user", ROOT_RESOURCE_ID)
+        async with factory() as writer:
+            await repository.create_role_assignment(
+                writer,
+                principal_type="user",
+                principal_id="race-user",
+                role_id=role.id,
+                resource_id=ROOT_RESOURCE_ID,
+            )
+            await writer.commit()
+        await reader.commit()
+
+    assert "race.late" not in before.permissions
+    assert "race.late" in await _fresh_permissions(factory, "race-user")
+
+
+async def test_cache_hit_within_one_generation_and_bump_on_invalidate(session):
+    first = await repository.get_effective_permissions(session, "gen-user", ROOT_RESOURCE_ID)
+    generation = await repository.current_cache_generation(session)
+    again = await repository.get_effective_permissions(session, "gen-user", ROOT_RESOURCE_ID)
+    assert again.generation == first.generation == generation
+
+    await repository.invalidate_cache(session)
+    assert await repository.current_cache_generation(session) == generation + 1

@@ -48,10 +48,10 @@ does not hold by default. The auto fixture `objectConfigRole`
 (`e2e/fixtures.ts`) grants the existing `domain-admin-config` role (looked up
 by permission, never by id) to the test account for the length of each test
 and revokes it afterwards - no manual one-time grant per stack any more,
-and a stack reset no longer breaks the suite silently. The suite therefore
-runs with `workers: 1`: a parallel worker's login can recompute the
-account's effective permissions concurrently and leave a pre-grant entry in
-permission-service's materialized cache.
+and a stack reset no longer breaks the suite silently. (P83-S8 ran the suite
+with `workers: 1` because of a race in permission-service's materialized cache;
+P84-S1 fixed the race with a cache generation, ADR 0239, and the suite runs in
+parallel again.)
 
 ## Design notes
 

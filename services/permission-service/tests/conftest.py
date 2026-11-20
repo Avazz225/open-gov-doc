@@ -38,9 +38,18 @@ async def _clean_tables():
     async with eng.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS permission"))
         await conn.run_sync(Base.metadata.create_all)
+        # Same ad-hoc column migration as main.py's lifespan (P84-S1): the test
+        # database may predate the column, and create_all never adds columns.
+        await conn.execute(
+            text(
+                "ALTER TABLE permission.effective_permission_cache "
+                "ADD COLUMN IF NOT EXISTS generation BIGINT NOT NULL DEFAULT 0"
+            )
+        )
         await conn.execute(
             text(
                 "TRUNCATE permission.role_assignment, permission.effective_permission_cache, "
+                "permission.permission_cache_generation, "
                 "permission.role, permission.scope_lock, permission.resource_node, "
                 "permission.approval_request, permission.approval_action_config, "
                 "permission.system_maintenance_mode, permission.delegation, "
