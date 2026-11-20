@@ -32,7 +32,11 @@
     "password": "Password",
     "submit": "Log in",
     "submitting": "Logging in...",
-    "error": "Login failed"
+    "error": "Login failed",
+    "illustration": {
+      "alt": "Illustration: a completed transfer to the state archive, 2 of 2 documents copied and verified, with its timeline up to released.",
+      "target": "State archive"
+    }
   },
   "nav": {
     "transfers": "Transfers",

@@ -29,7 +29,10 @@
     "password": "Password",
     "submit": "Log in",
     "submitting": "Logging in...",
-    "error": "Login failed"
+    "error": "Login failed",
+    "illustration": {
+      "alt": "Illustration: a four-eyes request filed by alice is approved; its status changes from pending to approved."
+    }
   },
   "nav": {
     "tasks": "Tasks",

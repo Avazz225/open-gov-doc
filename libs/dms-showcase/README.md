@@ -15,17 +15,30 @@ package, no workspace tooling.
 |---|---|
 | `kit/` | Stageshow kit, vendored (see below) |
 | `LICENSE`, `NOTICE.md` | Stageshow's MIT license and notices, kept beside the copy |
+| `look-ogdoc.css` | The OG Doc look shared by every illustration (since P83-S3; see below) |
+| `sync-playground.sh` | Mirrors every `*-login/` illustration into the stageshow playground for filming |
 | `user-ui-login/` | `user-ui` login illustration (P83-S2): `UserUiLogin.tsx`, `user-ui-login.css`, `REHEARSAL.md` |
+| `admin-ui-login/` | `admin-ui` login illustration (P83-S3): object-type editor, Kennzeichen format and its effect |
+| `reviewer-ui-login/` | `reviewer-ui` login illustration (P83-S3): a four-eyes request approved (plays once) |
+| `process-designer-login/` | `process-designer` login illustration (P83-S3): a signature task and its required level |
+| `migration-console-login/` | `migration-console` login illustration (P83-S3): a finished transfer and its timeline |
 
-Each illustration carries its own OG Doc look block at the top of its CSS (ADR 0237, Decision 3 as
-amended):
+Every Stage sets `className="og og-<name>"`. **`look-ogdoc.css`** (scope `.og`) holds what all
+illustrations share (ADR 0237, Decision 3 as amended):
 - `--ss-accent`, `--ss-accent-soft`, `--ss-font` and `--ss-radius-*` come from `--dms-*`.
-- A product pane takes the login card's material (`--dms-surface`, `--dms-border`).
+- A product pane and a satellite card (`.og-pane`, `.og-card`) take the login card's material
+  (`--dms-surface`, `--dms-border`).
 - Text on accent fills uses `--dms-accent-fg`.
-- Every `--dms-*` falls back to the kit's own theme token, never a light-only literal, so light and dark
-  both render correctly in the stageshow playground, where `--dms-*` does not exist.
-- The kit's own grays are left alone (`references/looks.md`). Once a second illustration exists, move the shared block into a
-`look-ogdoc.css` here rather than copying it a third time.
+- The fade-crop frame (`.og-mask`), the pane chrome (`.og-tabs`, `.og-tab[data-on]`, `.og-bar`,
+  `.og-crumbs`, `.og-heading`) and rows (`.og-row`, `.og-name`, `.og-meta`, `.og-code`, `.og-icon`,
+  `.og-icon[data-focus]`, `.og-actions`).
+- Every `--dms-*` falls back to the kit's own theme token (`var(--dms-surface, var(--ss-surface))`) so
+  dark renders correctly in the playground. The exception is the accent: `var(--ss-accent)` as its own
+  fallback would be a self-referencing cycle that invalidates the property, so it falls back to a
+  literal.
+- The kit's own grays are left alone (`references/looks.md`).
+
+Each illustration's own CSS holds only what is specific to its story.
 
 ## Vendored kit
 
@@ -44,7 +57,8 @@ amended):
 
 ## Using it from an app
 
-Each consuming app needs the four additions from ADR 0237, Decision 2. `user-ui` has them since P83-S2:
+Each consuming app needs the four additions from ADR 0237, Decision 2. `user-ui` has them since P83-S2,
+and `admin-ui`, `reviewer-ui`, `process-designer` and `migration-console` since P83-S3:
 
 1. `lucide-react` pinned to `0.468.0`.
 2. `resolve.modules` in `next.config.mjs`.
@@ -56,16 +70,21 @@ theme). See `apps/user-ui/src/components/LoginIllustration.tsx`.
 
 ## Developing and verifying an illustration
 
-Develop in the stageshow playground (`~/.claude/skills/stageshow`, `npm run dev`):
+Edit here, and film in the stageshow playground (`~/.claude/skills/stageshow`, `npm run dev`):
 
-1. Copy the illustration to `examples/<name>/index.tsx`, with the kit import as `'../../kit'`.
-2. Film it with `node scripts/film.mjs "<preview>/?capture=<name>" --select '#example' --gate`.
+1. Run `bash libs/dms-showcase/sync-playground.sh` (via `bash`: the repo does not track the executable
+   bit, `core.fileMode = false`). It copies every `*-login/` folder to
+   `examples/og-<app>/`, with the imports rewritten (`'../kit'` → `'../../kit'`, `'../look-ogdoc.css'` →
+   `'./look-ogdoc.css'`). This folder stays the only source; never edit the playground copy. If Vite was
+   already running before a *new* folder appeared, restart it, because its example glob only picks up
+   files that existed when it started.
+2. Film it with `node scripts/film.mjs "<preview>/?capture=og-<app>" --select '#example' --gate`.
    This needs Node from nvm and
    `CHROME_PATH=~/.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell`
    (Chrome 153). Not the older `chromium-1140` build: it lacks `text-box` and reports false button-label
    lines.
    Film with `--dark` and `--still --reduced` too, and look at the frames yourself. The gate does not
    check contrast.
-3. Copy it back here when it passes, with the import as `'../kit'`.
+3. When done, `bash libs/dms-showcase/sync-playground.sh --clean` removes the playground copies.
 
 The gate policy is in ADR 0237, Decision 5. Every illustration ships a `REHEARSAL.md` beside it.

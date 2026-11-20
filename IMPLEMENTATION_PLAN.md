@@ -2993,11 +2993,55 @@ work has to be read against that baseline (see DoD).
   - The root `pyproject.toml` `libs/*` workspace glob would have broken every `uv run`, exactly like
     `libs/dms-ui` did in Phase 50. `libs/dms-showcase` was added to `tool.uv.workspace.exclude` before it
     broke anything, and `uv lock --check`/`uv run` were verified.
-- **P83-S3 — Login illustrations for the remaining apps**: `admin-ui`, `reviewer-ui`, `process-designer`,
+- **P83-S3 — Login illustrations for the remaining apps**: ✅ ~~`admin-ui`, `reviewer-ui`, `process-designer`,
   `migration-console` (and `office-addin` only if S1 kept it) — one story per app that shows *that* app's
   job (e.g. reviewer: a task approved; process designer: a BPMN step connected), stills where an
   animation adds nothing; reuse S2's look mapping unchanged. May split into two sessions if S1's slot
-  list is long.
+  list is long.~~ **Done in one session.** Full record: each `libs/dms-showcase/<app>-login/REHEARSAL.md`,
+  ADR 0237's slot table (rows marked "built P83-S3") and the Decision 5 note.
+
+  **The four stories**, each told only with what the real product shows:
+  - **admin-ui** (still): the Kennzeichen format of the class "Eingangsrechnung", with a level leader to
+    its effect, `2026-114 Rechnung_Mai.pdf` as user-ui shows it. This replaces the ADR's retention idea,
+    because the product has no such per-folder link.
+  - **reviewer-ui** (plays once): a four-eyes request by alice is approved. Its own pill goes from
+    "Offen" to "Freigegeben", and the actions fold away. The native `confirm()` is left out.
+  - **process-designer** (still): an invoice process with the signature task selected, and its
+    properties panel: "Signatur erforderlich", "Mindestniveau" AES.
+  - **migration-console** (still): a finished transfer, "2/2 kopiert, 2 verifiziert", with its real phase
+    timeline hanging under the pill.
+
+  **Shared structure:**
+  - `libs/dms-showcase/look-ogdoc.css` now holds the look, the fade-crop frame, the pane chrome, the rows,
+    one satellite column and the satellite card. user-ui was refactored onto it; its picture is unchanged
+    and was re-gated.
+  - `sync-playground.sh` mirrors `libs/` into the playground, so `libs/` is the only source.
+  - Each app got the same four build additions plus a host component copied from user-ui (ADR 0006), and
+    its labels come from the app's own i18n keys.
+
+  **Review:** the fresh-eye subagent review was taken as a whole-set review. About 25 faults were found
+  and fixed. The largest were the three narrower panes with dead area, satellites anchored to nothing,
+  heavy filler, and reviewer's stranded end state. Three were deliberately kept, with reasons in each
+  `REHEARSAL.md`: the format syntax untranslated in EN, "Freigegeben" ending two scenes, and the
+  modeler's arrows crossing the selection.
+
+  **Three faults the gate could not see, found by eye:**
+  - admin's leader ran *through* "2026-114" once the filler went full width.
+  - reviewer's cursor never idled out twice: a faded button keeps `data-hover`, and a rest-point target
+    sat under the resting cursor.
+  - A `--ss-accent: var(--dms-accent, var(--ss-accent))` self-reference cycle was caught before it
+    shipped.
+
+  **Checks:**
+  - Gate: every still `no-issues-detected` in light and dark; reviewer motion `rehearsal passed` in light
+    and dark; user-ui motion re-gated after the refactor.
+  - `tsc`/`eslint` clean in all five apps.
+  - `vitest`: admin-ui 314, reviewer-ui 60, process-designer 60, migration-console 25 (+5 each), user-ui
+    298.
+  - All five Docker images rebuilt.
+  - Live, in all five apps: pane top = card top = 286; light, dark, reduced and EN render; high contrast
+    and 1199px show nothing; no page errors; a real login works. reviewer's cursor confirmed `data-idle`
+    at about 7s.
 - **P83-S4 — Empty-state and onboarding illustrations**: the empty-state/onboarding slots from S1's
   inventory (stills by default — `static-card`/`loading`/`many-of-one` golds), placed inside the real
   panes without changing their functional controls.

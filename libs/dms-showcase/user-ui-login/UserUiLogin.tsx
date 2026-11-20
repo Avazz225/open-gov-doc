@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, type ReactNode } from 'react'
 import { ChevronRight, File, Folder, Upload } from 'lucide-react'
 import { Bar, Button, Collapse, Meter, Stage, States, type Act, type Point, type Theme } from '../kit'
 import '../kit/stageshow.css'
+import '../look-ogdoc.css'
 import './user-ui-login.css'
 
 // user-ui login illustration (P83-S2, ADR 0237). Developed in the stageshow
@@ -95,14 +96,14 @@ export default function UserUiLoginIllustration({ theme = 'light', strings = DE 
       theme={theme}
       script={script}
       cursor={{ at: { at: 'drop', x: 0.3, y: 0.1 }, idle: 1400 }}
-      className="og-login"
+      className="og og-login"
     >
       {(s) => (
         <>
           <div className="og-mask">
             <div className="og-pane">
               <div className="og-tabs">
-                <span className="og-tab">{t.pane}</span>
+                <span className="og-tab" data-on>{t.pane}</span>
               </div>
               <div className="og-bar">
                 <span className="og-crumbs">
@@ -121,7 +122,7 @@ export default function UserUiLoginIllustration({ theme = 'light', strings = DE 
                 {t.neighbors.map(([kz, file]) => (
                   <div className="og-row" key={kz}>
                     <span className="og-name">
-                      <File size={16} strokeWidth={1.5} className="og-doc" />
+                      <File size={16} strokeWidth={1.5} className="og-icon" />
                       <span className="og-kz-static">{kz}</span>
                       <span className="og-name__text">{file}</span>
                     </span>
@@ -130,7 +131,7 @@ export default function UserUiLoginIllustration({ theme = 'light', strings = DE 
                 ))}
                 <div className="og-row">
                   <span className="og-name">
-                    <Folder size={16} strokeWidth={1.5} className="og-doc" />
+                    <Folder size={16} strokeWidth={1.5} className="og-icon" />
                     <Bar w={92} h={7} tone={3} />
                   </span>
                   <Actions />
@@ -138,7 +139,7 @@ export default function UserUiLoginIllustration({ theme = 'light', strings = DE 
                 {FILL.map((w, i) => (
                   <div className="og-row" key={i}>
                     <span className="og-name">
-                      <File size={16} strokeWidth={1.5} className="og-doc" />
+                      <File size={16} strokeWidth={1.5} className="og-icon" />
                       <Bar w={56} h={7} tone={2} />
                       <Bar w={w} h={7} tone={3} />
                     </span>
@@ -180,7 +181,7 @@ function UploadRow({ s, t }: { s: S; t: OgDocLoginStrings }) {
   return (
     <div className="og-row og-new" data-done={s.done || undefined}>
       <span className="og-name">
-        <File size={16} strokeWidth={1.5} className="og-doc og-doc--new" />
+        <File size={16} strokeWidth={1.5} className="og-icon" data-focus />
         {/* Opens its own width, so the filename moves aside instead of jumping */}
         <span className="og-kz" data-show={s.kz || undefined}>
           <span className="og-kz__inner">{t.kennzeichen}</span>

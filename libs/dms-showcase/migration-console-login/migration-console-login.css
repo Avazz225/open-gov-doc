@@ -1,0 +1,97 @@
+/* migration-console login illustration: a finished transfer and its phase
+   timeline (P83-S3). Shared look, frame, pane chrome, ruled list and the
+   satellite column come from ../look-ogdoc.css (className="og og-migration"). */
+
+/* Two-line rows: id over target */
+.og-migration .og-row {
+  height: 56px;
+}
+
+.og-migration .og-transfer__what {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+/* Placeholder rows keep the real row's air between its lines' ink */
+.og-migration .og-transfer__what--fill {
+  gap: 11px;
+}
+
+/* Title over meta: the id (13px) leads, the target follows smaller */
+.og-migration .og-transfer__what .og-meta {
+  font-size: 12.5px;
+}
+
+.og-migration .og-transfer__state {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.og-migration .og-transfer__state .og-meta {
+  font-size: 13px;
+}
+
+/* ---- The timeline (top is measured from the pill it details) ---- */
+
+.og-migration .og-timeline {
+  /* Under its pill, straddling the pane edge (536), ending a full gutter
+     before the stage edge (452 + 228 = 680) */
+  left: 452px;
+  width: 228px;
+  padding: 16px;
+}
+
+.og-migration .og-timeline__heading {
+  margin-bottom: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ss-text-strong);
+}
+
+.og-migration .og-timeline__phases {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* One line through the marks: a timeline, not a checklist */
+.og-migration .og-timeline__phases::before {
+  content: '';
+  position: absolute;
+  left: 6.5px;
+  top: 9px;
+  bottom: 9px;
+  width: 1px;
+  background: var(--og-border);
+}
+
+.og-migration .og-phase {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.3;
+  color: var(--ss-text);
+}
+
+.og-migration .og-phase__mark {
+  flex: none;
+  --ss-accent: var(--ss-success);
+  /* Punches the timeline's line out behind the open ring */
+  background: var(--og-card-bg);
+  border-radius: 50%;
+}
+
+/* Still ahead: faint */
+.og-migration .og-phase[data-ahead] {
+  color: var(--ss-text-faint);
+}

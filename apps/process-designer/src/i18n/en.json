@@ -34,7 +34,14 @@
     "password": "Password",
     "submit": "Log in",
     "submitting": "Logging in...",
-    "error": "Login failed"
+    "error": "Login failed",
+    "illustration": {
+      "alt": "Illustration: an invoice process in the designer; the step Sign approval is selected and requires a signature of at least level AES.",
+      "process": "Invoice approval",
+      "review": "Review invoice",
+      "sign": "Sign approval",
+      "group": "Signature"
+    }
   },
   "nav": {
     "processesTab": "Process definitions",

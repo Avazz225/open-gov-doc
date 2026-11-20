@@ -34,7 +34,14 @@
     "password": "Passwort",
     "submit": "Anmelden",
     "submitting": "Melde an...",
-    "error": "Anmeldung fehlgeschlagen"
+    "error": "Anmeldung fehlgeschlagen",
+    "illustration": {
+      "alt": "Illustration: Ein Rechnungsprozess im Designer; der Schritt Freigabe zeichnen ist ausgewählt und verlangt eine Signatur mit Mindestniveau AES.",
+      "process": "Rechnungsfreigabe",
+      "review": "Rechnung prüfen",
+      "sign": "Freigabe zeichnen",
+      "group": "Signatur"
+    }
   },
   "nav": {
     "processesTab": "Prozessdefinitionen",

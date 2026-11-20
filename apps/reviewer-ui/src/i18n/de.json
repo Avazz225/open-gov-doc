@@ -29,7 +29,10 @@
     "password": "Passwort",
     "submit": "Anmelden",
     "submitting": "Melde an...",
-    "error": "Anmeldung fehlgeschlagen"
+    "error": "Anmeldung fehlgeschlagen",
+    "illustration": {
+      "alt": "Illustration: Eine von alice beantragte Vier-Augen-Freigabe wird freigegeben; ihr Status wechselt von Offen zu Freigegeben."
+    }
   },
   "nav": {
     "tasks": "Aufgaben",

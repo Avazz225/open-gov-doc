@@ -31,7 +31,13 @@
     "password": "Passwort",
     "submit": "Anmelden",
     "submitting": "Melde an...",
-    "error": "Anmeldung fehlgeschlagen"
+    "error": "Anmeldung fehlgeschlagen",
+    "illustration": {
+      "alt": "Illustration: Das Kennzeichen-Format des Objekttyps Eingangsrechnung und das Kennzeichen 2026-114, das daraus für ein abgelegtes Dokument entsteht.",
+      "name": "Eingangsrechnung",
+      "folder": "Eingangsrechnungen",
+      "file": "Rechnung_Mai.pdf"
+    }
   },
   "nav": {
     "ariaLabel": "Admin-Bereiche",

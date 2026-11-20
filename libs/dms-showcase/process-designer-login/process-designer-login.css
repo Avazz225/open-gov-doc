@@ -1,0 +1,129 @@
+/* process-designer login illustration: a BPMN flow with a selected signature
+   task and its properties (P83-S3). Shared look, frame, pane chrome and the
+   satellite column come from ../look-ogdoc.css (className="og og-designer"). */
+
+/* ---- The canvas: bpmn-js shapes, drawn as the modeler draws them ---- */
+
+.og-designer .og-canvas {
+  position: relative;
+  display: flex;
+  align-items: center;
+  /* 28px flows keep the end event a full gutter clear of the properties
+     panel that straddles the pane's edge (no near-tangent) */
+  gap: 28px;
+  padding: 44px 16px 0;
+}
+
+/* Shapes in the text ink at 1.5px: the model is context, the story is the
+   selection and its panel - never the heaviest marks on the stage */
+.og-designer .og-event {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border: 1.5px solid var(--ss-text);
+  border-radius: 50%;
+  background: var(--og-surface);
+}
+
+.og-designer .og-event--end {
+  border-width: 3px;
+}
+
+.og-designer .og-task {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 104px;
+  height: 72px;
+  padding: 14px 10px 6px;
+  border: 1.5px solid var(--ss-text);
+  border-radius: 10px;
+  background: var(--og-surface);
+  text-align: center;
+}
+
+/* bpmn-js's own selection: one thin line set off from the shape */
+.og-designer .og-task[data-selected] {
+  outline: 1.5px solid var(--ss-accent);
+  outline-offset: 6px;
+}
+
+.og-designer .og-task__marker {
+  position: absolute;
+  top: 7px;
+  left: 8px;
+  color: var(--ss-icon);
+}
+
+.og-designer .og-task__name {
+  font-size: 12.5px;
+  line-height: 1.3;
+  color: var(--ss-text-strong);
+}
+
+/* The faint branch: filler, positioned under the review step and running
+   on beside it into the fade */
+.og-designer .og-task--faint {
+  position: absolute;
+  top: 176px;
+  border-color: var(--og-border);
+  background: transparent;
+}
+
+.og-designer .og-task--faint[data-target="branch"] {
+  left: 74px;
+}
+
+.og-designer .og-task--faint[data-target="next"] {
+  left: 206px;
+}
+
+/* Sequence flows: the modeler's thin lines in the text ink, no end dots */
+.og-designer .og-flow {
+  --ss-accent: var(--ss-text);
+}
+
+.og-designer .og-flow--faint {
+  --ss-accent: var(--og-border);
+}
+
+/* ---- The properties panel ---- */
+
+.og-designer .og-props {
+  /* Straddles the pane edge (536) and ends a full gutter before the
+     stage edge (444 + 252 = 696) */
+  left: 444px;
+  width: 252px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+}
+
+.og-designer .og-props__group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ss-text-strong);
+}
+
+/* An open group's chevron, at the icon ink: open, not disabled */
+.og-designer .og-props__chevron {
+  flex: none;
+  color: var(--ss-icon);
+}
+
+.og-designer .og-props__toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--ss-text-strong);
+}
+
+.og-designer .og-props__level {
+  width: 100%;
+}

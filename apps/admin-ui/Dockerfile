@@ -12,6 +12,9 @@ COPY apps/admin-ui/package.json apps/admin-ui/package-lock.json* apps/admin-ui/
 RUN npm install --prefix apps/admin-ui
 COPY apps/admin-ui/ apps/admin-ui/
 COPY libs/dms-ui/ libs/dms-ui/
+# Login illustration (P83-S3, ADR 0237): same mirrored-layout principle, the
+# relative import in src/components/LoginIllustration.tsx resolves unchanged.
+COPY libs/dms-showcase/ libs/dms-showcase/
 ARG NEXT_PUBLIC_GATEWAY_BASE_URL=http://localhost:8009
 ENV NEXT_PUBLIC_GATEWAY_BASE_URL=$NEXT_PUBLIC_GATEWAY_BASE_URL
 # Federation Hub (Phase 40 Session 3) - reached directly, not through the

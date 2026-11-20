@@ -12,6 +12,26 @@
 
 Unlike `apps/admin-ui` (`InstallationProvider`, multi-installation, ADR 0008), Process Designer follows the simpler `apps/user-ui` pattern: a single gateway address baked in at build time (`NEXT_PUBLIC_GATEWAY_BASE_URL`), global `dms.tokens` storage key. **Explicit user decision at plan approval time**: Process Designer remains non-multi-installation even after cross-installation functionality was requested (external swimlanes/handover, see below) — anyone who wants to use the UI runs the container in their own installation; switching between multiple installations (as in the Admin UI) is not supported.
 
+## Login illustration (Phase 83 Session 3, [ADR 0237](../adr/0237-stageshow-adoption-illustrations-and-craft-lens.md))
+
+At viewport widths of 1200px and above, `/login/` shows a 720×400 faux-UI illustration to the left of
+the login card, with its pane's top edge level with the card's. It shows a still of an invoice process: start, *Rechnung prüfen*, *Freigabe zeichnen* (selected), end. The properties panel straddles the pane's edge with *Signatur erforderlich* on and *Mindestniveau* *AES*, as `SignatureTaskPropertiesProvider` sets it.
+
+Built with the vendored Stageshow kit in
+[`libs/dms-showcase/process-designer-login`](../../libs/dms-showcase/README.md); rehearsal notes are in its `REHEARSAL.md`.
+
+The host, `src/components/LoginIllustration.tsx`, is a copy of user-ui's (ADR 0006), with the same rules:
+- Below 1200px and in the high-contrast theme it renders nothing, and the module is never loaded.
+- It follows `<html data-theme>` at runtime.
+- Under reduced motion it shows the final frame.
+- It has one DE/EN text alternative (`login.illustration.alt`), with its content `aria-hidden`.
+
+Labels the real UI already has come from the app's own i18n keys (`nav.processesTab`, `designer.exportButton`, `signatureTask.requiredLabel`/`levelLabel`. The group label *Signatur* has its own key until `signatureTask.groupLabel` loses its "(3.10)" (P83-S1 punch list item 1)). Only the sample data and the
+text alternative live under `login.illustration.*`.
+
+The build wiring is the same four additions as user-ui: `lucide-react` `0.468.0`, `resolve.modules`,
+tsconfig `paths` and the Dockerfile `COPY`. `tests/login-illustration.test.tsx` covers the gating.
+
 ## Pages
 
 | Route | Purpose |

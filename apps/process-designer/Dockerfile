@@ -12,6 +12,9 @@ COPY apps/process-designer/package.json apps/process-designer/package-lock.json*
 RUN npm install --prefix apps/process-designer
 COPY apps/process-designer/ apps/process-designer/
 COPY libs/dms-ui/ libs/dms-ui/
+# Login illustration (P83-S3, ADR 0237): same mirrored-layout principle, the
+# relative import in src/components/LoginIllustration.tsx resolves unchanged.
+COPY libs/dms-showcase/ libs/dms-showcase/
 # Gateway-Adresse zur Build-Zeit fest einbrennen (kein Server, der es später
 # nachladen könnte) - überschreibbar über einen Build-Arg.
 ARG NEXT_PUBLIC_GATEWAY_BASE_URL=http://localhost:8009

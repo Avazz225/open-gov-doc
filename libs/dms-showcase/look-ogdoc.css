@@ -1,0 +1,227 @@
+/* OG Doc look for every illustration in libs/dms-showcase (ADR 0237,
+   Decision 3 as amended). Each Stage sets className="og og-<name>"; this file
+   holds what all of them share:
+
+   - the token mapping onto OG Doc's --dms-* tokens. Every --dms-* falls back
+     to the kit's own theme token, never a light-only literal, so light and
+     dark both render correctly in the stageshow playground (no --dms-* there);
+   - the fade-crop frame: no plate (the page is the ground), a pane whole at
+     the top and sides, dissolving at its foot through a mask on a wrapper
+     that leaves 24px of room for the pane's shadow;
+   - OG Doc's own pane chrome (a tab strip and a bar), in the login card's
+     material (--dms-surface, --dms-border, 8px radius), and its rows;
+   - a satellite card in the same material, for a second object straddling
+     the pane's edge. */
+
+.og .ss-stage {
+  /* Literal fallbacks here: var(--ss-accent) as its own fallback would be a
+     self-reference cycle and invalidate the property. Only the playground
+     ever sees these (the apps always define --dms-*). */
+  --ss-accent: var(--dms-accent, #2563eb);
+  --ss-accent-soft: var(--dms-accent-bg, rgba(37, 99, 235, 0.15));
+  --ss-font: var(--dms-font-family, system-ui, -apple-system, 'Segoe UI', sans-serif);
+  --ss-radius-sm: 4px;
+  --ss-radius-md: 6px;
+  --ss-radius-lg: 8px;
+  --og-surface: var(--dms-surface, var(--ss-surface));
+  --og-border: var(--dms-border, var(--ss-line));
+  --og-on-accent: var(--dms-accent-fg, #fff);
+  overflow: hidden;
+  background: transparent;
+}
+
+/* ---- Frame: fade crop ---- */
+
+.og .og-mask {
+  position: absolute;
+  inset: 0;
+  padding: 24px 24px 0;
+  mask-image: linear-gradient(to bottom, #000 60%, transparent 97%);
+}
+
+.og .og-pane {
+  height: 460px;
+  overflow: hidden;
+  border: 1px solid var(--og-border);
+  border-radius: 8px;
+  background: var(--og-surface);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+/* A scene with a satellite: every one leaves the same right column, so the
+   five login pages share one pane width per kind (full, or with satellite) */
+.og .og-mask[data-satellite] {
+  padding-right: 184px;
+}
+
+/* A second object in the same material, straddling the pane's edge and
+   anchored to what it belongs to (a row, a field, a selected shape) */
+.og .og-card {
+  /* The card's own surface, for marks inside it that must punch out a line */
+  --og-card-bg: var(--og-surface);
+  position: absolute;
+  border: 1px solid var(--og-border);
+  border-radius: 8px;
+  background: var(--og-card-bg);
+  box-shadow: var(--ss-shadow-satellite);
+}
+
+/* On dark, depth comes from a lighter surface, not shadow (craft.md) */
+.og .ss-stage[data-theme="dark"] .og-card {
+  --og-card-bg: color-mix(in srgb, var(--og-surface) 90%, #fff);
+}
+
+/* Leaders are annotation: neutral ink, and their end dots are rimmed in
+   the surface they sit on (the kit's fixed white rim rings on dark) */
+.og .og-leader {
+  --ss-accent: var(--ss-text);
+}
+
+.og .ss-connector__dot {
+  stroke: var(--og-surface);
+}
+
+/* ---- Pane chrome: tab strip, bar, breadcrumb ---- */
+
+.og .og-tabs {
+  display: flex;
+  gap: 20px;
+  height: 34px;
+  /* The first tab's text shares the bar's 16px left edge */
+  padding: 0 16px;
+  border-bottom: 1px solid var(--og-border);
+}
+
+.og .og-tab {
+  display: flex;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--ss-text);
+}
+
+.og .og-tab[data-on] {
+  color: var(--ss-text-strong);
+  box-shadow: inset 0 -2px 0 var(--ss-accent);
+}
+
+.og .og-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px 8px;
+}
+
+/* A bar that is the pane's head (no tab strip above it) carries the rule
+   that separates chrome from content, as the tab strip does elsewhere */
+.og .og-bar--head {
+  padding: 16px 16px 14px;
+  border-bottom: 1px solid var(--og-border);
+}
+
+.og .og-crumbs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.og .og-crumb {
+  color: var(--ss-text);
+}
+
+.og .og-crumb-sep {
+  flex: none;
+  color: var(--ss-icon-faint);
+}
+
+.og .og-heading {
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--ss-text-strong);
+}
+
+/* Text on a solid accent fill takes OG Doc's own --dms-accent-fg (ADR 0219:
+   white on dark theme's #60a5fa fails contrast), not the kit's fixed white */
+.og .ss-button[data-variant="primary"] {
+  color: var(--og-on-accent);
+}
+
+/* ---- Rows ---- */
+
+.og .og-list {
+  position: relative;
+  margin: 0 8px;
+}
+
+.og .og-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: 40px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+.og .og-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.og .og-name__text {
+  white-space: nowrap;
+  color: var(--ss-text-strong);
+}
+
+.og .og-meta {
+  white-space: nowrap;
+  color: var(--ss-text);
+}
+
+.og .og-icon {
+  flex: none;
+  color: var(--ss-icon-faint);
+}
+
+/* The one object the story is about gets its icon at full strength */
+.og .og-icon[data-focus] {
+  color: var(--ss-icon);
+}
+
+.og .og-code {
+  font-family: var(--ss-mono);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--ss-text-strong);
+}
+
+/* A table-like list: rows divided by full-width rules, like the tab strip's
+   rule above them, with the content on the pane's 16px inset */
+.og .og-list--ruled {
+  margin: 0;
+}
+
+.og .og-list--ruled > .og-row {
+  padding: 0 16px;
+  border-radius: 0;
+}
+
+.og .og-list--ruled > .og-row + .og-row {
+  border-top: 1px solid var(--og-border);
+}
+
+/* A row's quiet action slots */
+.og .og-actions {
+  display: flex;
+  flex: none;
+  gap: 8px;
+}

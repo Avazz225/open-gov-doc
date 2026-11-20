@@ -1,0 +1,74 @@
+/* admin-ui login illustration: the object-type editor and the effect of its
+   Kennzeichen format (P83-S3). Shared look, frame and pane chrome come from
+   ../look-ogdoc.css (className="og og-admin"). */
+
+.og-admin .og-form {
+  display: flex;
+  flex-direction: column;
+  /* 22px between fields: no filler field's foot lands within a gutter of
+     the stage's bottom edge - the last whole one ends ~45px inside, the
+     next runs ~30px past (film flags both a near-miss and a sliver) */
+  gap: 22px;
+  padding: 16px 16px 0;
+}
+
+/* The one real field keeps a field's width; the filler runs on under the
+   satellite (which may cover filler, never content) */
+.og-admin .og-form .ss-field {
+  width: 300px;
+}
+
+/* The measured target is the field itself, not the full-width row it sits
+   in: the leader starts at the field's right edge */
+.og-admin .og-form > [data-target="format"] {
+  width: 300px;
+}
+
+.og-admin .og-filler {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.og-admin .og-blank {
+  display: block;
+  height: 34px;
+  border: 1px solid var(--og-border);
+  border-radius: 6px;
+}
+
+/* The format is configuration syntax: monospaced, the one value in focus */
+.og-admin .og-format .ss-field__value {
+  font-family: var(--ss-mono);
+  font-size: 13px;
+  /* Monospace reads lighter than the UI face: a half step up, so the value
+     never passes for a placeholder, yet stays lighter than its result */
+  font-weight: 500;
+  color: var(--ss-text-strong);
+}
+
+/* ---- The effect: a document row as user-ui shows it ---- */
+
+.og-admin .og-effect {
+  /* Straddles the pane edge (720 - 184 = 536), about 40% inside, and ends
+     a full 24px gutter before the stage edge (424 + 268 = 692) */
+  left: 424px;
+  width: 268px;
+  /* Even inset: 16px of ink on top, 8px + the row's own 8px at the sides */
+  padding: 16px 8px 4px;
+}
+
+.og-admin .og-effect__folder {
+  padding: 0 8px 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  font-weight: 500;
+  color: var(--ss-text);
+}
+
+.og-admin .og-kz {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--ss-accent);
+}

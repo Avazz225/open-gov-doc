@@ -8,6 +8,26 @@
 
 `apps/admin-ui/` — identical pattern to `apps/user-ui` (not under `services/`, see ADR 0006): Next.js/TypeScript, `output: "export"`, served via `nginx`, no Node process at runtime.
 
+## Login illustration (Phase 83 Session 3, [ADR 0237](../adr/0237-stageshow-adoption-illustrations-and-craft-lens.md))
+
+At viewport widths of 1200px and above, `/login/` shows a 720×400 faux-UI illustration to the left of
+the login card, with its pane's top edge level with the card's. It shows a still of the object-type editor for the document class *Eingangsrechnung*: its Kennzeichen format `{YYYY}-{Laufende_Nummer}`, with one leader to its effect, the document row `2026-114 Rechnung_Mai.pdf` as user-ui shows it.
+
+Built with the vendored Stageshow kit in
+[`libs/dms-showcase/admin-ui-login`](../../libs/dms-showcase/README.md); rehearsal notes are in its `REHEARSAL.md`.
+
+The host, `src/components/LoginIllustration.tsx`, is a copy of user-ui's (ADR 0006), with the same rules:
+- Below 1200px and in the high-contrast theme it renders nothing, and the module is never loaded.
+- It follows `<html data-theme>` at runtime.
+- Under reduced motion it shows the final frame.
+- It has one DE/EN text alternative (`login.illustration.alt`), with its content `aria-hidden`.
+
+Labels the real UI already has come from the app's own i18n keys (`objectTypes.pageTitle`, `objectTypes.kennzeichenFormatLabel`). Only the sample data and the
+text alternative live under `login.illustration.*`.
+
+The build wiring is the same four additions as user-ui: `lucide-react` `0.468.0`, `resolve.modules`,
+tsconfig `paths` and the Dockerfile `COPY`. `tests/login-illustration.test.tsx` covers the gating.
+
 ## Pages
 
 | Route | Purpose |

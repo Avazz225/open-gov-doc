@@ -2,8 +2,57 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P83-S2 (second session of Phase 83). It set up `libs/dms-showcase` and built the
-first illustration, on the `user-ui` login page. Full record: `IMPLEMENTATION_PLAN.md`'s P83-S2 entry,
+**Last completed:** P83-S3 (third session of Phase 83). All five apps that get one now have a login
+illustration: `admin-ui`, `reviewer-ui`, `process-designer` and `migration-console` joined `user-ui`.
+`office-addin` gets none (ADR 0237). Full record: `IMPLEMENTATION_PLAN.md`'s P83-S3 entry, each
+`libs/dms-showcase/<app>-login/REHEARSAL.md`, and ADR 0237 (slot table rows "built P83-S3", Decision 5
+note).
+
+**What users see** at ≥ 1200px, left of each login card, in the card's material and level with its top
+edge:
+- **admin-ui:** the Kennzeichen format, with a leader to the "2026-114" it produces.
+- **reviewer-ui:** a four-eyes request approved, played once.
+- **process-designer:** a signature task requiring AES.
+- **migration-console:** a finished transfer and its phase timeline.
+
+Every story uses only what the real product shows. Where the ADR's plan would have invented something
+(admin's retention → folder link), the story changed.
+
+**Structure:**
+- `libs/dms-showcase/look-ogdoc.css` holds the shared look and frame. user-ui was refactored onto it and
+  re-gated.
+- `libs/dms-showcase/sync-playground.sh` mirrors `libs/` into the playground (`--clean` removes the
+  copies), so `libs/` stays the only source.
+- Each app has a host copied from user-ui (ADR 0006) and uses its own i18n keys for every label the real
+  UI already has.
+
+**Review:** one fresh-eye subagent review of the whole set found about 25 faults. They were fixed:
+- the largest: three narrower panes with dead area, unanchored satellites, heavy filler, and
+  reviewer's stranded end state;
+- three were deliberately kept, with reasons in each `REHEARSAL.md`.
+
+**By eye, not by the gate:**
+- a leader running through "2026-114";
+- the reviewer cursor never idling out, twice (a faded button keeps `data-hover`; a rest-point target sat
+  under the resting cursor);
+- a CSS custom-property self-reference cycle.
+
+**Checks:**
+- All stills `no-issues-detected` in light and dark; the motions `rehearsal passed`.
+- `tsc`/`eslint` clean in five apps; vitest admin-ui 314, reviewer-ui 60, process-designer 60,
+  migration-console 25 (+5 each), user-ui 298.
+- Five images rebuilt; the live matrix passes in all five apps (alignment y=286, themes, EN, reduced
+  motion, gating, real login).
+
+The stack, the playground and its copies were stopped/removed afterwards.
+
+**Next session:** **P83-S4** — the two `user-ui` empty-state stills from ADR 0237's slot table: the
+empty preview pane ("Kein Dokument ausgewählt") and empty "Vorlagen". Onboarding was dropped in S1.
+These render *inside* real panes, which differs from the login slots. They need a `compact` design if
+the pane can be narrower than 600px, and must not change the pane's functional controls.
+
+Earlier P83-S2 summary, kept for context: it set up `libs/dms-showcase` and built the first
+illustration, on the `user-ui` login page. Full record: `IMPLEMENTATION_PLAN.md`'s P83-S2 entry,
 `libs/dms-showcase/user-ui-login/REHEARSAL.md`, and ADR 0237's P83-S2 amendments.
 
 **What users see:**
@@ -41,11 +90,7 @@ dark/high-contrast/reduced/EN, and a real login afterwards still works.
 
 The stack and the playground were stopped afterwards.
 
-**Next session:** **P83-S3** — login illustrations for `admin-ui`, `reviewer-ui`, `process-designer` and
-`migration-console`, per ADR 0237's slot table. Each app needs the same four build additions as
-`user-ui`. Once the second illustration exists, move the shared look block into
-`libs/dms-showcase/look-ogdoc.css`. Reuse each app's own i18n keys for labels the real UI already has.
-The session may split in two if it runs long.
+**Next session (at the time):** P83-S3. It was done next; see the entry above.
 
 ---
 

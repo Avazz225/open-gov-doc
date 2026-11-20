@@ -1,0 +1,67 @@
+/* reviewer-ui login illustration: the four-eyes inbox, one request approved
+   (P83-S3). Shared look, frame and pane chrome come from ../look-ogdoc.css
+   (className="og og-reviewer"). */
+
+/* Two-line request rows: the action code over its requester */
+.og-reviewer .og-row {
+  height: 56px;
+}
+
+.og-reviewer .og-request__what {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.og-reviewer .og-request__what .og-meta {
+  font-size: 12.5px;
+}
+
+/* Placeholder rows keep the real row's air between its two lines' ink
+   (about 11px), not its line pitch */
+.og-reviewer .og-request__what--fill {
+  gap: 11px;
+}
+
+.og-reviewer .og-request__state {
+  display: flex;
+  align-items: center;
+}
+
+/* The actions' own width, folded away on approval so the pill comes to rest
+   at the row's end. The gap to the pill lives inside, so it folds too. */
+.og-reviewer .og-request__fold {
+  display: grid;
+  grid-template-columns: 1fr;
+  transition: grid-template-columns 0.45s cubic-bezier(0.3, 0.6, 0.3, 1) 0.15s;
+}
+
+.og-reviewer .og-request__actions {
+  display: flex;
+  gap: 12px;
+  min-width: 0;
+  overflow: hidden;
+  transition: opacity 0.25s ease;
+}
+
+/* The gap to the pill as the first action's margin: clipped with the
+   content as the track folds, where padding would hold 16px open */
+.og-reviewer .og-request__actions > :first-child {
+  margin-left: 16px;
+}
+
+.og-reviewer .og-request[data-approved] .og-request__fold {
+  grid-template-columns: 0fr;
+}
+
+.og-reviewer .og-request[data-approved] .og-request__actions {
+  opacity: 0;
+}
+
+/* The settled twin: folded, invisible, never takes a pointer */
+.og-reviewer .og-request__fold[data-settled] {
+  visibility: hidden;
+  transition: none;
+}

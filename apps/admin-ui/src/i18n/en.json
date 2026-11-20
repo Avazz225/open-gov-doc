@@ -31,7 +31,13 @@
     "password": "Password",
     "submit": "Log in",
     "submitting": "Logging in...",
-    "error": "Login failed"
+    "error": "Login failed",
+    "illustration": {
+      "alt": "Illustration: the reference number format of the object type Incoming invoice, and the reference number 2026-114 it produces for a filed document.",
+      "name": "Incoming invoice",
+      "folder": "Incoming invoices",
+      "file": "Invoice_May.pdf"
+    }
   },
   "nav": {
     "ariaLabel": "Admin areas",

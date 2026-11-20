@@ -1,5 +1,11 @@
 # Rehearsal: user-ui login illustration (P83-S2)
 
+**P83-S3 refactor:** the shared parts (token mapping, fade-crop frame, pane chrome, rows) moved into
+`../look-ogdoc.css`. The Stage is now `className="og og-login"`, the tab carries `data-on`, and the icons
+use `.og-icon`/`[data-focus]`. The picture is unchanged. After the refactor it was re-filmed (Chrome 153):
+`--gate` on the motion gave `rehearsal passed`, and `--still --reduced` light/dark gave
+`no-issues-detected`. Live it was re-measured in the rebuilt image: pane top = card top = 286.
+
 **Gold:**
 - Started from `upload`: the drag-in, the drop-zone highlight, the upload row in a `Collapse` with a
   `Meter` that settles via `States`, and the `DragImage` hit-testing.

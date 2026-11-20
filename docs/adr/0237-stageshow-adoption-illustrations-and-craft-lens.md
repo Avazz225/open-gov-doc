@@ -74,8 +74,10 @@ contain none, and five copies of a ~700 KB kit would drift.
   The `Stage` theme follows the app's resolved `data-theme` (`light`/`dark`).
 
   **Amended in P83-S2 (as built):**
-  - There is no separate `look-ogdoc.css` yet. With one illustration, its look block sits at the top of
-    its own CSS; it moves to a shared file once a second illustration needs it.
+  - ~~There is no separate `look-ogdoc.css` yet.~~ **Since P83-S3** `libs/dms-showcase/look-ogdoc.css`
+    (scope `.og`) holds the shared look, the fade-crop frame, the pane chrome and rows, and the satellite
+    card. Each illustration's CSS holds only its own story. The accent alone falls back to a literal:
+    `var(--ss-accent)` as its own fallback is a self-referencing cycle that invalidates the property.
   - The mapping is narrower than listed above: `--ss-accent`, `--ss-accent-soft`, `--ss-font` and the
     radii only. The kit's text inks and grays are left alone, as `looks.md` advises.
   - Two additions came from live review. A pane drawn as product UI takes the login card's own material
@@ -97,10 +99,14 @@ contain none, and five copies of a ~700 KB kit would drift.
 | Slot | Medium | Layout / closest gold | Story (real strings only on this) |
 |---|---|---|---|
 | `user-ui` login (**built P83-S2**, see its `REHEARSAL.md`) | Plays once, then holds the poster | ~~Corner bleed~~ **Fade crop**, OG Doc's own Explorer pane instead of an OS window / `upload` motion | ~~… class chip … "Freigegeben"~~ A PDF is dropped into "Eingangsrechnungen" → the upload row settles → the server-assigned Kennzeichen "2026-114" grows in before the filename, after real rows 2026-113/112. Changed during the build: a status pill or virus-scan step would have shown things the product's explorer does not display. The Kennzeichen is real and shown exactly this way (`lib/kennzeichen.ts`). |
-| `admin-ui` login | Still | Panel over product / `panel-annotation` | A retention setting ("Aufbewahrung 10 Jahre") with one leader to the folder it governs |
-| `reviewer-ui` login | Short loop | Pinned bottom bleed / `form-error` + `dark-hero` (status changes on its own pill) | A four-eyes request: "Freigeben" pressed → pill "Offen" → "Freigegeben" |
-| `process-designer` login | Still | Pinned bottom bleed / `annotations` | Three BPMN shapes, one signature task in focus with its "AES" level |
-| `migration-console` login | Still | Satellite focus / `loading` | One transfer row "2/2 kopiert, 2 verifiziert" over a quiet list |
+| `admin-ui` login (**built P83-S3**) | Still | **Fade crop** + a satellite straddling the pane's edge, one leader / `panel-annotation` | ~~A retention setting with a leader to the folder it governs~~: the product shows no such per-folder link. **Instead:** the Kennzeichen format `{YYYY}-{Laufende_Nummer}` of the class "Eingangsrechnung", with a level leader to its effect, the row `2026-114 Rechnung_Mai.pdf` as user-ui shows it. Both ends are real, and it ties to the user-ui story. |
+| `reviewer-ui` login (**built P83-S3**) | ~~Short loop~~ **Plays once**, then holds | **Fade crop** / `form-error` + `dark-hero` | As planned: "Freigeben" pressed → own pill "Offen" → "Freigegeben", then the actions fold their width away so the pill rests at the row's end, in line with the waiting requests' pills. The real native `confirm()` step is left out. |
+| `process-designer` login (**built P83-S3**) | Still | **Fade crop** + the properties panel straddling the pane's edge (the real designer docks it right) | Start → "Rechnung prüfen" → "Freigabe zeichnen" (selected, bpmn-js's own outline) → end; panel: "Signatur erforderlich" on, "Mindestniveau" AES. |
+| `migration-console` login (**built P83-S3**) | Still | **Fade crop** + the "Zeitverlauf" card straddling the pane's edge below the row | A finished transfer "2/2 kopiert, 2 verifiziert", "Freigegeben", and its real phase timeline (Angelegt … Freigegeben, "Löschung geplant" still ahead). |
+
+**Applies to all five login illustrations (P83-S2/S3):** fade crop on the page itself, OG Doc's own pane
+chrome (never an OS window), the login card's material, the pane's top edge level with the card's, and
+labels from each app's own i18n keys wherever the real UI already has them.
 | `user-ui` empty preview pane ("Kein Dokument ausgewählt") | Still, gray art per `craft.md` (empty states are the one place for it) | Fade crop / `static-card` | A selected list row and the preview it opens; no cursor |
 | `user-ui` empty "Vorlagen" | Still | Stacked cards / `stacked-cards` | A folder subtree over the template made from it |
 | `README.md`/docs hero | Still (`film.mjs --still`) | Wide hero / `linear` | OG Doc explorer + preview, realistic fidelity |
@@ -151,6 +157,12 @@ The rules follow from that table:
   illustration's `REHEARSAL.md`.
 - **`framing`, `cut by the crop`, `tight inset`, `touching`, `mixed icons`, `invented mark` and every other
   class are never excused.** They are composition faults we would own.
+- **A line that seems wrong is still answered by the composition, not excused** (P83-S3). Example: a
+  tab strip directly over a bar with a lone heading drew `tight stack … 2.7px of ink`, unchanged when
+  the bar's padding went from 12 to 18px, so the number did not track the visible gap. In both cases the
+  real fix was a better picture. In `reviewer-ui` the heading only repeated the active tab ("Say it
+  once"), so it was dropped. In `admin-ui` the real app has no tab strip at all, so the tabs became a
+  breadcrumb.
 - Filming runs against the stageshow playground during development: copy the illustration to
   `examples/<name>/` and use `?capture=<name>`, the skill's "quickest loop". It also runs against the built
   app page once integrated.
