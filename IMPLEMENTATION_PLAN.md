@@ -3122,13 +3122,34 @@ work has to be read against that baseline (see DoD).
     updated and pass.
   - **Also noted for P83-S7:** dates are formatted with a fixed `"de-DE"` locale even in the English UI
     (reviewer-ui, migration-console), which belongs with item 6.
-- **P83-S6 — `user-ui` items 2–5 + 9**: one icon set instead of emoji, the header title following the
-  active pane, left-aligned explorer names, no columns of primary buttons, and the remaining
-  native-looking controls ("Papierkorb anzeigen", "Liste/Baum", "Standardanordnung", …). Build them so
-  they already hold at narrow widths (the S5 toolbar pattern).
-- **P83-S7 — items 5–7 + 10 in `admin-ui`/`reviewer-ui`/`process-designer`/`migration-console`**:
+- **P83-S6 — `user-ui` items 2–5 + 9**: ✅ **Done.**
+  - **Item 2:** all 46 emoji were replaced by **Lucide**, chosen deliberately: already a dependency, used
+    by the illustrations, one stroke style, every meaning covered. It is routed through
+    `src/lib/ui-icons.tsx` (one size and stroke), which replaces `lib/icons.ts`; the server-side
+    folder-class `icon` values are unchanged.
+    - The favorite marker carries meaning, so it got `role="img"` and a translated name instead of being
+      a decorative glyph.
+    - Kept as text on purpose: log-line arrows, and `⚠` inside a `<select>` option.
+  - **Item 3:** the header title follows the active view (`iconRail.<view>`), with a new test.
+  - **Item 4:** explorer names were centered by `.entry-row`'s `space-between`. The name now takes the
+    free space.
+  - **Item 5:**
+    - Row icon actions are hidden at rest, shown on hover/keyboard focus, and always shown on touch
+      (`hover: none`). Verified live: rest 0, hover 1, focus 1, touch 1.
+    - The per-row "Genehmigen" and the Poststelle per-message action are secondary.
+  - **Item 9:** `.view-mode-toggle` is a real segmented control (Liste/Baum, the trash scope), and
+    `.toggle-btn` styles "Papierkorb anzeigen" (pressed state) and "Standardanordnung".
+  - **Tests:** 5 tests asserted emoji characters; they now assert the accessible favorite marker, the
+    `data-folder-icon` and the name text.
+  - **Checks:** `tsc`/`eslint` clean, vitest 305/305 (+1). Image rebuilt. Live (light, tree, approvals,
+    trash, cases, dark, 700px): no emoji visible anywhere, the heading follows the view, no page errors.
+  - **Noted for S7:** item 6 also applies to `user-ui` (approvals show raw UUIDs as row titles), and
+    admin-ui's archival table shows typographic ✓/— for a yes/no value.
+- **P83-S7 — items 5–7 + 10 in `admin-ui`/`reviewer-ui`/`process-designer`/`migration-console`**
+  (plus item 6's `user-ui` part):
   - primary-button columns;
-  - raw identifiers/enums as content (plus the fixed `"de-DE"` date locale);
+  - raw identifiers/enums as content: also `user-ui`'s approvals rows, and admin-ui's ✓/— yes/no cells
+    (plus the fixed `"de-DE"` date locale);
   - `admin-ui`'s home duplicating the sidebar;
   - `process-designer`'s missing shared header.
 - **P83-S8 — Repair the stale Playwright e2e specs**: replace class locators removed in P75-S4 with

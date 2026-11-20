@@ -461,7 +461,7 @@ describe("DocumentWorkspace", () => {
     await waitFor(() => expect(moveFolderMock).toHaveBeenCalledWith("token-123", "f1a", "root"));
   });
 
-  it("shows the ⭐ favorite marker for a folder and a document in the tree view (P23-S5)", async () => {
+  it("shows the favorite marker for a folder and a document in the tree view (P23-S5)", async () => {
     listChildFoldersMock.mockResolvedValue([
       { id: "f1", name: "Verträge", parent_id: "root", object_type_id: null, attributes: {} },
     ]);
@@ -491,10 +491,10 @@ describe("DocumentWorkspace", () => {
     const treeContainer = await screen.findByLabelText("Ordner-Baumansicht");
     await waitFor(() => {
       const folderButton = within(treeContainer).getByText(/Verträge/).closest("button");
-      expect(folderButton?.textContent).toContain("⭐");
+      expect(within(folderButton as HTMLElement).getByRole("img", { name: "Favorit" })).toBeInTheDocument();
     });
     const documentButton = within(treeContainer).getByText(/Rechnung\.pdf/).closest("button");
-    expect(documentButton?.textContent).toContain("⭐");
+    expect(within(documentButton as HTMLElement).getByRole("img", { name: "Favorit" })).toBeInTheDocument();
   });
 
   it("reloads PreviewPane's version list after a successful signature, without reopening the document (P23-S7)", async () => {
@@ -606,7 +606,7 @@ describe("DocumentWorkspace", () => {
     );
     await waitFor(() => {
       const button = within(treeContainer).getByText(/Rechnung\.pdf/).closest("button");
-      expect(button?.textContent).toContain("⭐");
+      expect(within(button as HTMLElement).getByRole("img", { name: "Favorit" })).toBeInTheDocument();
     });
   });
 
@@ -1332,7 +1332,7 @@ describe("DocumentWorkspace", () => {
     );
   });
 
-  it("adds a document to favorites via the context menu, showing the ⭐ marker (seit P7-S1d)", async () => {
+  it("adds a document to favorites via the context menu, showing the favorite marker (seit P7-S1d)", async () => {
     listChildFoldersMock.mockResolvedValue([]);
     listDocumentsInFolderMock.mockResolvedValue([document1]);
     listFavoritesMock
@@ -1364,7 +1364,7 @@ describe("DocumentWorkspace", () => {
     );
     await waitFor(() => {
       const button = screen.getByText(/Rechnung\.pdf/).closest("button");
-      expect(button?.textContent).toContain("⭐");
+      expect(within(button as HTMLElement).getByRole("img", { name: "Favorit" })).toBeInTheDocument();
     });
   });
 
@@ -2005,12 +2005,24 @@ describe("DocumentWorkspace", () => {
     const user = userEvent.setup();
     renderWorkspace();
 
-    expect(await screen.findByText(/⭐ Projekte/)).toBeInTheDocument();
+    expect((await screen.findByText("Projekte")).closest("button")?.querySelector('[data-folder-icon="folder-star"]')).not.toBeNull();
 
     await user.click(screen.getByText("Baum"));
     expect(screen.getByLabelText("Ordner-Baumansicht")).toBeInTheDocument();
     expect(screen.queryByLabelText("Ordnerpfad")).not.toBeInTheDocument();
-    expect(await screen.findByText(/⭐ Projekte/)).toBeInTheDocument();
+    expect((await screen.findByText("Projekte")).closest("button")?.querySelector('[data-folder-icon="folder-star"]')).not.toBeNull();
+  });
+
+  it("names the active view in the page heading (P83-S6)", async () => {
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([]);
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Dokumente" })).toBeInTheDocument();
+    await user.click(screen.getByTitle("Papierkorb"));
+    expect(await screen.findByRole("heading", { level: 1, name: "Papierkorb" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 1, name: "Dokumente" })).not.toBeInTheDocument();
   });
 
   it("navigates via the tree view to a nested folder and rebuilds the breadcrumb in list view", async () => {
@@ -2030,7 +2042,7 @@ describe("DocumentWorkspace", () => {
 
     await user.click(screen.getByText("Baum"));
     await user.click(await screen.findByLabelText("A aufklappen"));
-    await user.click(await screen.findByText(/📁 B/));
+    await user.click(await screen.findByText("B"));
 
     await user.click(screen.getByText("Liste"));
 

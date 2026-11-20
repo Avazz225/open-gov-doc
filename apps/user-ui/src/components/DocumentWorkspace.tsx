@@ -341,7 +341,9 @@ export function DocumentWorkspace() {
   return (
     <div className="flex h-screen flex-col">
       <div className="flex items-center justify-between border-b border-border px-6 py-3">
-        <h1>{t("folderBrowser.title")}</h1>
+        {/* P83-S6 (punch list item 3): the title names the active view, in the
+            icon rail's own words - it said "Dokumente" on every view before */}
+        <h1>{t(`iconRail.${view}`)}</h1>
         <div>
           {user && <span>{user.username} </span>}
           <button

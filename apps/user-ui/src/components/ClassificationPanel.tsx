@@ -5,6 +5,8 @@ import { useI18n } from "@/i18n";
 import { ApiError, setDocumentClassificationLevel, type DocumentSummary } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { raisableClassificationLevels, type ClassificationLevel } from "@/lib/classification";
+import { Lock } from "lucide-react";
+import { UiIcon } from "@/lib/ui-icons";
 
 // Classification level (14.2, post-roadmap phase 31 session 3, ADR 0114) -
 // attached below the metadata form using the same standalone-panel pattern
@@ -73,11 +75,11 @@ export function ClassificationPanel({
           landing on it out of context (e.g. via heading/region navigation
           rather than reading top to bottom) got just "GEHEIM" with nothing
           tying it to "Einstufung". `aria-label` on the value line restates
-          that association explicitly; the 🔒 glyph mirrors the badge used
+          that association explicitly; the Lock icon mirrors the badge used
           elsewhere for the same field (PreviewPane.tsx) - shown only once
           an actual level is set, not for "Nicht eingestuft". */}
       <p aria-label={`${t("classification.heading")}: ${activeDocument.classification_level ?? t("classification.unclassified")}`}>
-        {activeDocument.classification_level && <span aria-hidden="true">🔒 </span>}
+        {activeDocument.classification_level && <UiIcon icon={Lock} />}{" "}
         {activeDocument.classification_level ?? t("classification.unclassified")}
       </p>
 

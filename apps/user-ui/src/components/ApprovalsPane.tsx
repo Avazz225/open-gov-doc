@@ -84,8 +84,6 @@ export function ApprovalsPane({
     }
   }
 
-  const primaryBtn =
-    "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap";
   const secondaryBtn =
     "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap";
 
@@ -116,10 +114,12 @@ export function ApprovalsPane({
                     : t("approvals.typeFolder")}{" "}
                   {objectId(request)} — {t("approvals.requestedBy", { name: request.initiated_by })}
                 </span>
+                {/* P83-S6 (item 5): row actions are secondary - a filled primary on
+                    every row left the eye nowhere to land */}
                 <span className="flex gap-3">
                   <button
                     type="button"
-                    className={primaryBtn}
+                    className={secondaryBtn}
                     onClick={() => handleApprove(request)}
                     disabled={busyId === request.id || isOwnRequest}
                     title={isOwnRequest ? t("approvals.cannotApproveOwn") : undefined}

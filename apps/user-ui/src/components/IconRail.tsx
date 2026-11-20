@@ -1,10 +1,29 @@
 "use client";
 
 import { useState } from "react";
+import {
+  Archive,
+  Briefcase,
+  Contact,
+  FileLock,
+  FileText,
+  FolderTree,
+  Folders,
+  Inbox,
+  ListChecks,
+  Search,
+  Settings,
+  ShieldAlert,
+  Star,
+  Trash2,
+  UserCheck,
+  Users,
+} from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useI18n } from "@/i18n";
 import { LocaleSwitcher } from "./LocaleSwitcher";
 import { ThemeSwitcher } from "./ThemeSwitcher";
+import { UiIcon } from "@/lib/ui-icons";
 
 export type WorkspaceView =
   | "documents"
@@ -71,128 +90,128 @@ export function IconRail({
     >
       <button
         type="button"
-        className={`w-9 h-9 rounded-md border-0 p-0 text-lg text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "documents" ? "bg-accent-bg" : "bg-transparent"}`}
+        className={`grid w-9 h-9 place-items-center rounded-md border-0 p-0 text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "documents" ? "bg-accent-bg" : "bg-transparent"}`}
         title={t("iconRail.documents")}
         aria-current={activeView === "documents" ? "page" : undefined}
         onClick={() => onSelectView("documents")}
       >
-        <span aria-hidden="true">📄</span>
+        <UiIcon icon={FileText} />
       </button>
       <button
         type="button"
-        className={`w-9 h-9 rounded-md border-0 p-0 text-lg text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "search" ? "bg-accent-bg" : "bg-transparent"}`}
+        className={`grid w-9 h-9 place-items-center rounded-md border-0 p-0 text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "search" ? "bg-accent-bg" : "bg-transparent"}`}
         title={t("iconRail.search")}
         aria-current={activeView === "search" ? "page" : undefined}
         onClick={() => onSelectView("search")}
       >
-        <span aria-hidden="true">🔍</span>
+        <UiIcon icon={Search} />
       </button>
       <button
         type="button"
-        className={`w-9 h-9 rounded-md border-0 p-0 text-lg text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "approvals" ? "bg-accent-bg" : "bg-transparent"}`}
+        className={`grid w-9 h-9 place-items-center rounded-md border-0 p-0 text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "approvals" ? "bg-accent-bg" : "bg-transparent"}`}
         title={t("iconRail.approvals")}
         aria-current={activeView === "approvals" ? "page" : undefined}
         onClick={() => onSelectView("approvals")}
       >
-        <span aria-hidden="true">✅</span>
+        <UiIcon icon={ListChecks} />
       </button>
       <button
         type="button"
-        className={`w-9 h-9 rounded-md border-0 p-0 text-lg text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "favorites" ? "bg-accent-bg" : "bg-transparent"}`}
+        className={`grid w-9 h-9 place-items-center rounded-md border-0 p-0 text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "favorites" ? "bg-accent-bg" : "bg-transparent"}`}
         title={t("iconRail.favorites")}
         aria-current={activeView === "favorites" ? "page" : undefined}
         onClick={() => onSelectView("favorites")}
       >
-        <span aria-hidden="true">⭐</span>
+        <UiIcon icon={Star} />
       </button>
       <button
         type="button"
-        className={`w-9 h-9 rounded-md border-0 p-0 text-lg text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "teamspaces" ? "bg-accent-bg" : "bg-transparent"}`}
+        className={`grid w-9 h-9 place-items-center rounded-md border-0 p-0 text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "teamspaces" ? "bg-accent-bg" : "bg-transparent"}`}
         title={t("iconRail.teamspaces")}
         aria-current={activeView === "teamspaces" ? "page" : undefined}
         onClick={() => onSelectView("teamspaces")}
       >
-        <span aria-hidden="true">👥</span>
+        <UiIcon icon={Users} />
       </button>
       <button
         type="button"
-        className={`w-9 h-9 rounded-md border-0 p-0 text-lg text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "delegations" ? "bg-accent-bg" : "bg-transparent"}`}
+        className={`grid w-9 h-9 place-items-center rounded-md border-0 p-0 text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "delegations" ? "bg-accent-bg" : "bg-transparent"}`}
         title={t("iconRail.delegations")}
         aria-current={activeView === "delegations" ? "page" : undefined}
         onClick={() => onSelectView("delegations")}
       >
-        <span aria-hidden="true">🧑‍🤝‍🧑</span>
+        <UiIcon icon={UserCheck} />
       </button>
       <button
         type="button"
-        className={`w-9 h-9 rounded-md border-0 p-0 text-lg text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "trash" ? "bg-accent-bg" : "bg-transparent"}`}
+        className={`grid w-9 h-9 place-items-center rounded-md border-0 p-0 text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "trash" ? "bg-accent-bg" : "bg-transparent"}`}
         title={t("iconRail.trash")}
         aria-current={activeView === "trash" ? "page" : undefined}
         onClick={() => onSelectView("trash")}
       >
-        <span aria-hidden="true">🗑️</span>
+        <UiIcon icon={Trash2} />
       </button>
       {isQuarantineAdmin && (
         <button
           type="button"
-          className={`w-9 h-9 rounded-md border-0 p-0 text-lg text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "quarantine" ? "bg-accent-bg" : "bg-transparent"}`}
+          className={`grid w-9 h-9 place-items-center rounded-md border-0 p-0 text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "quarantine" ? "bg-accent-bg" : "bg-transparent"}`}
           title={t("iconRail.quarantine")}
           aria-current={activeView === "quarantine" ? "page" : undefined}
           onClick={() => onSelectView("quarantine")}
         >
-          <span aria-hidden="true">☣️</span>
+          <UiIcon icon={ShieldAlert} />
         </button>
       )}
       {isRecordsQuarantineAdmin && (
         <button
           type="button"
-          className={`w-9 h-9 rounded-md border-0 p-0 text-lg text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "recordsQuarantine" ? "bg-accent-bg" : "bg-transparent"}`}
+          className={`grid w-9 h-9 place-items-center rounded-md border-0 p-0 text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "recordsQuarantine" ? "bg-accent-bg" : "bg-transparent"}`}
           title={t("iconRail.recordsQuarantine")}
           aria-current={activeView === "recordsQuarantine" ? "page" : undefined}
           onClick={() => onSelectView("recordsQuarantine")}
         >
-          <span aria-hidden="true">🔏</span>
+          <UiIcon icon={FileLock} />
         </button>
       )}
       {isPoststelle && (
         <button
           type="button"
-          className={`w-9 h-9 rounded-md border-0 p-0 text-lg text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "poststelle" ? "bg-accent-bg" : "bg-transparent"}`}
+          className={`grid w-9 h-9 place-items-center rounded-md border-0 p-0 text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "poststelle" ? "bg-accent-bg" : "bg-transparent"}`}
           title={t("iconRail.poststelle")}
           aria-current={activeView === "poststelle" ? "page" : undefined}
           onClick={() => onSelectView("poststelle")}
         >
-          <span aria-hidden="true">📬</span>
+          <UiIcon icon={Inbox} />
         </button>
       )}
       <button
         type="button"
-        className={`w-9 h-9 rounded-md border-0 p-0 text-lg text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "kontakte" ? "bg-accent-bg" : "bg-transparent"}`}
+        className={`grid w-9 h-9 place-items-center rounded-md border-0 p-0 text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "kontakte" ? "bg-accent-bg" : "bg-transparent"}`}
         title={t("iconRail.kontakte")}
         aria-current={activeView === "kontakte" ? "page" : undefined}
         onClick={() => onSelectView("kontakte")}
       >
-        <span aria-hidden="true">📇</span>
+        <UiIcon icon={Contact} />
       </button>
       {isArchivalAccess && (
         <button
           type="button"
-          className={`w-9 h-9 rounded-md border-0 p-0 text-lg text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "aussonderung" ? "bg-accent-bg" : "bg-transparent"}`}
+          className={`grid w-9 h-9 place-items-center rounded-md border-0 p-0 text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "aussonderung" ? "bg-accent-bg" : "bg-transparent"}`}
           title={t("iconRail.aussonderung")}
           aria-current={activeView === "aussonderung" ? "page" : undefined}
           onClick={() => onSelectView("aussonderung")}
         >
-          <span aria-hidden="true">🗄️</span>
+          <UiIcon icon={Archive} />
         </button>
       )}
       <button
         type="button"
-        className={`w-9 h-9 rounded-md border-0 p-0 text-lg text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "vorlagen" ? "bg-accent-bg" : "bg-transparent"}`}
+        className={`grid w-9 h-9 place-items-center rounded-md border-0 p-0 text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "vorlagen" ? "bg-accent-bg" : "bg-transparent"}`}
         title={t("iconRail.vorlagen")}
         aria-current={activeView === "vorlagen" ? "page" : undefined}
         onClick={() => onSelectView("vorlagen")}
       >
-        <span aria-hidden="true">📐</span>
+        <UiIcon icon={FolderTree} />
       </button>
       {/* Minimal case-browsing UI (14.2, post-roadmap phase 34 session 3,
           ADR 0141) - ungated (`case.read` is granted to "everyone" by
@@ -200,12 +219,12 @@ export function IconRail({
           individually gated on `archival.write`, not the pane itself). */}
       <button
         type="button"
-        className={`w-9 h-9 rounded-md border-0 p-0 text-lg text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "cases" ? "bg-accent-bg" : "bg-transparent"}`}
+        className={`grid w-9 h-9 place-items-center rounded-md border-0 p-0 text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "cases" ? "bg-accent-bg" : "bg-transparent"}`}
         title={t("iconRail.cases")}
         aria-current={activeView === "cases" ? "page" : undefined}
         onClick={() => onSelectView("cases")}
       >
-        <span aria-hidden="true">🗃️</span>
+        <UiIcon icon={Briefcase} />
       </button>
       {/* Hand-folder/work-tray cross-installation overview (14.2, Post-
           Roadmap Phase 35 Session 4, ADR 0146) - ungated, same posture as
@@ -215,23 +234,23 @@ export function IconRail({
           pane itself. */}
       <button
         type="button"
-        className={`w-9 h-9 rounded-md border-0 p-0 text-lg text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "handFolders" ? "bg-accent-bg" : "bg-transparent"}`}
+        className={`grid w-9 h-9 place-items-center rounded-md border-0 p-0 text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "handFolders" ? "bg-accent-bg" : "bg-transparent"}`}
         title={t("iconRail.handFolders")}
         aria-current={activeView === "handFolders" ? "page" : undefined}
         onClick={() => onSelectView("handFolders")}
       >
-        <span aria-hidden="true">🗂️</span>
+        <UiIcon icon={Folders} />
       </button>
       <div className="relative">
         <button
           type="button"
-          className={`w-9 h-9 rounded-md border-0 p-0 text-lg text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${isSettingsOpen ? "bg-accent-bg" : "bg-transparent"}`}
+          className={`grid w-9 h-9 place-items-center rounded-md border-0 p-0 text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${isSettingsOpen ? "bg-accent-bg" : "bg-transparent"}`}
           title={t("iconRail.settings")}
           aria-haspopup="true"
           aria-expanded={isSettingsOpen}
           onClick={() => setIsSettingsOpen((prev) => !prev)}
         >
-          <span aria-hidden="true">⚙️</span>
+          <UiIcon icon={Settings} />
         </button>
         {isSettingsOpen && (
           <div

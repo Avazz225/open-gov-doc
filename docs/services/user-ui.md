@@ -145,6 +145,35 @@ Tests: `tests/login-illustration.test.tsx` covers the gating rules (narrow, no `
 dark, a runtime switch to high contrast), with `next/dynamic` stubbed. The illustration's own motion
 and framing are verified with Stageshow's `film.mjs --gate`, not Vitest.
 
+## Icons, header title, list rows (Phase 83 Session 6, craft-lens punch list items 2–5 + 9)
+
+- **One icon set: Lucide** (`lucide-react`, chosen deliberately). It has been a dependency since P83-S2,
+  the illustrations use it, and it covers every meaning in one stroke style. It replaces 46 emoji that
+  rendered differently per platform.
+  - `src/lib/ui-icons.tsx` holds `UiIcon` (16px, stroke 1.75, `aria-hidden`), `FolderClassIcon` (the
+    folder-class icon set, still keyed by the unchanged server-side `icon` values; this replaces
+    `lib/icons.ts`), `DocumentIcon` and `FavoriteMarker`.
+  - The favorite marker carries meaning on its own, so it is a filled star with `role="img"` and the
+    name `favorites.markerLabel` ("Favorit"). Tests assert it by that accessible name, not by a
+    character.
+  - The icon rail, explorer and tree rows, the tree's expand chevrons, the case favorite toggles and
+    the lock/warning/redaction marks all use the same set.
+  - Kept as text on purpose: the `→` arrows in log lines, and the `⚠` in the version `<select>` (an
+    `<option>` cannot hold an SVG).
+- **The header title follows the active view** in the icon rail's own words (`iconRail.<view>`). Before,
+  it said "Dokumente" on every view.
+- **Explorer names read from the left edge.** `.entry-row` spread checkbox, name and actions with
+  `space-between`, which centered the name. The name now takes the free space (`flex: 1`), with its icon
+  on the same line.
+- **Row actions** (rename, retention, hand folder) sit in `.row-actions`. They are hidden at rest, shown on
+  hover and on keyboard focus within the row, and always shown on touch screens (`hover: none`).
+  Verified live: rest 0, hover 1, focus 1, touch 1.
+- **No columns of primary buttons:** the per-row "Genehmigen" (approvals) and the per-message Poststelle
+  action are secondary now. Primary stays for form submits.
+- **Native-looking controls in the established formula:** `.view-mode-toggle` is a real segmented
+  control (Liste/Baum, and the trash pane's scope). `.toggle-btn` styles "Papierkorb anzeigen" (with a
+  pressed state) and "Standardanordnung".
+
 ## Empty-state illustrations (Phase 83 Session 4, [ADR 0237](../adr/0237-stageshow-adoption-illustrations-and-craft-lens.md))
 
 Two empty states show a small still above their unchanged sentence:

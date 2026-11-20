@@ -2,7 +2,40 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P83-S5 (fifth session of Phase 83), the first craft-lens fix session. It covered
+**Last completed:** P83-S6 (sixth session of Phase 83): `user-ui` punch-list items 2–5 + 9. Full
+record: `IMPLEMENTATION_PLAN.md`'s P83-S6 entry and `docs/services/user-ui.md` ("Icons, header title,
+list rows").
+
+**What changed:**
+- **One icon set (Lucide)** instead of 46 platform-dependent emoji, through `src/lib/ui-icons.tsx`. The
+  favorite marker is an accessible `role="img"` with the name "Favorit".
+- **The header names the active view**, instead of "Dokumente" everywhere.
+- **Explorer names read from the left**; they had been centered by `space-between`.
+- **Row actions** are hidden at rest and appear on hover/keyboard focus, always on touch (`hover:
+  none`).
+- **No more columns of primary buttons** (approvals, Poststelle).
+- **Liste/Baum and the trash scope** are a real segmented control, and "Papierkorb anzeigen" and
+  "Standardanordnung" follow the established button formula.
+
+**Checks:** `tsc`/`eslint` clean, vitest 305/305 (+1 test for the heading). 5 tests that asserted emoji
+characters now assert the accessible marker and icon attributes. Image rebuilt. Live in light, dark, at
+700px, and across five views: no emoji visible, heading right, row actions verified at rest, on hover,
+with keyboard focus and on touch.
+
+**Noted for S7:** item 6 (raw identifiers) also applies to `user-ui`'s approvals rows, which show UUIDs.
+admin-ui shows ✓/— for a yes/no value. The stack was stopped afterwards.
+
+**Next session:** **P83-S7**, items 5–7 + 10 in `admin-ui`/`reviewer-ui`/`process-designer`/
+`migration-console`, plus item 6's `user-ui` part:
+- primary-button columns;
+- raw identifiers/enums as content, including user-ui approvals UUIDs, admin ✓/—, and the fixed
+  `"de-DE"` date locale;
+- admin-ui's home duplicating the sidebar;
+- process-designer's missing shared header.
+
+---
+
+Earlier P83-S5 summary, kept for context (fifth session of Phase 83), the first craft-lens fix session. It covered
 P83-S1 punch-list items 1, 8, 11 and 13 across all six apps. Full record: `IMPLEMENTATION_PLAN.md`'s
 P83-S5 entry, `docs/services/office-addin.md`, and ADR 0237 Decision 6.
 
@@ -47,14 +80,7 @@ have been stale since then. The e2e assertions S5 itself touched were updated an
 e2e passes. How to run e2e here: Node from nvm, `npx playwright test` in the app (Playwright 1.48 uses
 the cached `chromium-1140`).
 
-**Next session:** **P83-S6**, `user-ui` items 2–5 + 9:
-- one icon set instead of emoji (46 in 8 files);
-- the header title follows the active pane;
-- left-aligned explorer names;
-- no columns of primary buttons;
-- the remaining native-looking controls.
-
-Build everything so it already holds at narrow widths.
+**Next session (at the time):** P83-S6. It was done next; see the entry above.
 
 ---
 

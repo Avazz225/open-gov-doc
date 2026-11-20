@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { useI18n } from "@/i18n";
 import { listDerivedDocuments, type DocumentSummary } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { Scissors } from "lucide-react";
+import { UiIcon } from "@/lib/ui-icons";
 
 // First actual read-side consumer of the P6-S3 provenance fields
 // (`derived_from_document_id`, previously write-only - post-roadmap phase
@@ -37,7 +39,7 @@ export function DerivedDocumentsPanel({ document: activeDocument }: { document: 
             <a href={`/?document=${encodeURIComponent(doc.id)}`}>{doc.title}</a>
             {doc.derivation_type === "redaction" && (
               <span className="badge redacted" aria-label={t("derivedDocuments.redactionBadge")}>
-                <span aria-hidden="true">✂️ </span>
+                <UiIcon icon={Scissors} /> 
                 {t("derivedDocuments.redactionBadge")}
               </span>
             )}

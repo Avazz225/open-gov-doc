@@ -486,7 +486,7 @@ export const DockableDocumentArea = forwardRef<DockableDocumentAreaHandle, Docka
     return (
       <div className="dockable-document-area" style={{ display: hidden ? "none" : "flex" }}>
         <div className="dockable-document-area-toolbar">
-          <button type="button" onClick={resetLayout} title={t("workspace.resetLayoutHint")}>
+          <button type="button" className="toggle-btn" onClick={resetLayout} title={t("workspace.resetLayoutHint")}>
             {t("workspace.resetLayout")}
           </button>
         </div>

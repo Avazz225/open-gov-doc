@@ -26,6 +26,8 @@ import {
 import { useAuth } from "@/lib/auth-context";
 import { RedactionModal } from "./RedactionModal";
 import { EmptyState } from "./EmptyStateIllustration";
+import { Lock, TriangleAlert } from "lucide-react";
+import { UiIcon } from "@/lib/ui-icons";
 
 function triggerBrowserDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
@@ -687,7 +689,7 @@ export function PreviewPane({
               title={t("preview.versionConflictTooltip")}
               aria-label={`${t("preview.versionConflictBadge")}: ${t("preview.versionConflictTooltip")}`}
             >
-              <span aria-hidden="true">⚠️ </span>
+              <UiIcon icon={TriangleAlert} /> 
               {t("preview.versionConflictBadge")}
             </span>
           )}
@@ -702,7 +704,7 @@ export function PreviewPane({
               title={t("preview.versionClassificationTooltip")}
               aria-label={`${t("classification.paneLabel")}: ${currentVersionMeta.classification_level}. ${t("preview.versionClassificationTooltip")}`}
             >
-              <span aria-hidden="true">🔒 </span>
+              <UiIcon icon={Lock} /> 
               {currentVersionMeta.classification_level}
             </span>
           )}
@@ -798,7 +800,9 @@ export function PreviewPane({
       {previewKind === "none" && <p className="italic opacity-70">{t("preview.noRendition")}</p>}
 
       {ocrResult?.status === "needs_review" && (
-        <p className="ocr-review-hint">⚠ {t("preview.ocrNeedsReview")}</p>
+        <p className="ocr-review-hint">
+          <UiIcon icon={TriangleAlert} /> {t("preview.ocrNeedsReview")}
+        </p>
       )}
 
       {downloadError && (
@@ -827,7 +831,7 @@ export function PreviewPane({
           cleanly if unauthorized. */}
       {accessibilityCheck && !accessibilityCheck.is_tagged && (
         <p className="text-sm opacity-80" role="status">
-          ⚠️{" "}
+          <UiIcon icon={TriangleAlert} />{" "}
           {accessibilityCheck.is_pdf
             ? t("preview.exportNotTaggedPdfWarning")
             : t("preview.exportNotPdfWarning")}

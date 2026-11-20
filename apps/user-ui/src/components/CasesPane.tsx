@@ -22,6 +22,8 @@ import {
   type ProcessDefinition,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { Star } from "lucide-react";
+import { UiIcon } from "@/lib/ui-icons";
 
 // Minimal case-browsing UI (14.2, post-roadmap phase 34 session 3, ADR
 // 0141) - the first place in `user-ui` a `case-service` Case can be browsed
@@ -215,7 +217,7 @@ export function CasesPane({
                 }
                 onClick={() => toggleFavoriteCase(c.id)}
               >
-                {favoriteCaseIds.has(c.id) ? "★" : "☆"}
+                <UiIcon icon={Star} fill={favoriteCaseIds.has(c.id) ? "currentColor" : "none"} />
               </button>
             </li>
           ))}
@@ -673,7 +675,7 @@ function CaseDetail({
           }
           onClick={onToggleFavorite}
         >
-          {isFavorite ? "★" : "☆"}
+          <UiIcon icon={Star} fill={isFavorite ? "currentColor" : "none"} />
         </button>
       </span>
       <p className="text-sm opacity-80">

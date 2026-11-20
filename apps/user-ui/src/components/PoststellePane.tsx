@@ -326,9 +326,10 @@ export function PoststellePane({ token }: { token: string }) {
                 </span>
                 {(message.status === "unassigned" || message.status === "proposed_match") && (
                   <span className="flex gap-3">
+                    {/* P83-S6 (item 5): a per-row action, so secondary */}
                     <button
                       type="button"
-                      className={primaryBtn}
+                      className={secondaryBtn}
                       onClick={() => startAction(message)}
                       disabled={busyId === message.id}
                     >

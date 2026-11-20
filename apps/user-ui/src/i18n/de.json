@@ -314,7 +314,8 @@
     "typeCase": "Umlaufmappe",
     "unresolvedName": "(nicht mehr verfügbar)",
     "open": "Öffnen",
-    "remove": "Entfernen"
+    "remove": "Entfernen",
+    "markerLabel": "Favorit"
   },
   "teamspaces": {
     "paneLabel": "Team-Arbeitsbereiche",

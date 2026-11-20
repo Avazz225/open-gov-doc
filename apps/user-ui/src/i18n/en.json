@@ -314,7 +314,8 @@
     "typeCase": "Case binder",
     "unresolvedName": "(no longer available)",
     "open": "Open",
-    "remove": "Remove"
+    "remove": "Remove",
+    "markerLabel": "Favorite"
   },
   "teamspaces": {
     "paneLabel": "Team workspaces",

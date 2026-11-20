@@ -29,7 +29,8 @@ import {
   type FolderExportJob,
   type ObjectType,
 } from "@/lib/api";
-import { folderIcon } from "@/lib/icons";
+import { Clock, Paperclip, Pencil } from "lucide-react";
+import { DocumentIcon, FavoriteMarker, FolderClassIcon, UiIcon } from "@/lib/ui-icons";
 import { formatDocumentTitle } from "@/lib/kennzeichen";
 import { BulkEditModal, type BulkEditItem } from "./BulkEditModal";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
@@ -255,7 +256,7 @@ export function ExplorerPane({
   // now the folder class wasn't selectable at all when creating, even though
   // the backend has supported it since P3-S3) - loaded once, not a blocker
   // for the rest of the display if this fails (falls back to the generic
-  // folder icon/no class selection, see the `folderIcon()` fallback).
+  // folder icon/no class selection, see `FolderClassIcon`'s fallback in lib/ui-icons.tsx).
   useEffect(() => {
     if (!token) return;
     listObjectTypes(token, "folder")
@@ -564,7 +565,7 @@ export function ExplorerPane({
         <button
           type="button"
           aria-pressed={showTrash}
-          className={showTrash ? "view-mode-active" : undefined}
+          className={`toggle-btn${showTrash ? " view-mode-active" : ""}`}
           onClick={() => setShowTrash((v) => !v)}
         >
           {t("explorer.toggleTrash")}
@@ -691,10 +692,10 @@ export function ExplorerPane({
               {trashFolders.map((folder) => (
                 <li className="entry-row" key={folder.id}>
                   <span className="entry-name">
-                    {folderIcon(
-                      folder.object_type_id !== null ? folderIconById[folder.object_type_id] : null
-                    )}{" "}
-                    {folder.name}
+                    <FolderClassIcon
+                      icon={folder.object_type_id !== null ? folderIconById[folder.object_type_id] : null}
+                    />
+                    <span>{folder.name}</span>
                   </span>
                   <span className="flex gap-2">
                     <button type="button" className={secondaryBtn} onClick={() => handleRestoreFolder(folder)}>
@@ -706,7 +707,8 @@ export function ExplorerPane({
               {trashDocuments.map((doc) => (
                 <li className="entry-row" key={doc.id}>
                   <span className="entry-name">
-                    📄 {formatDocumentTitle(doc, documentTypeById, kennzeichenShowByDefault)}
+                    <DocumentIcon />
+                    <span>{formatDocumentTitle(doc, documentTypeById, kennzeichenShowByDefault)}</span>
                   </span>
                   <span className="flex gap-2">
                     <button type="button" className={secondaryBtn} onClick={() => handleRestore(doc)}>
@@ -787,20 +789,23 @@ export function ExplorerPane({
                       className="entry-name"
                       onClick={() => onOpenFolder(folder)}
                     >
-                      {favoriteKeys.has(`folder:${folder.id}`) && "⭐ "}
-                      {folderIcon(
-                        folder.object_type_id !== null ? folderIconById[folder.object_type_id] : null
-                      )}{" "}
-                      {folder.name}
+                      {favoriteKeys.has(`folder:${folder.id}`) && <FavoriteMarker label={t("favorites.markerLabel")} />}
+                      <FolderClassIcon
+                        icon={folder.object_type_id !== null ? folderIconById[folder.object_type_id] : null}
+                      />
+                      <span>{folder.name}</span>
                     </button>
-                    <span className="flex gap-3">
+                    {/* P83-S6: the row's actions show on hover, keyboard focus or
+                        touch (globals.css .row-actions) - not three buttons on
+                        every row at rest */}
+                    <span className="row-actions flex gap-3">
                       <button
                         type="button"
                         className={iconBtn}
                         aria-label={t("explorer.renameFolder", { name: folder.name })}
                         onClick={() => startRename(folder)}
                       >
-                        ✏️
+                        <UiIcon icon={Pencil} />
                       </button>
                       <button
                         type="button"
@@ -808,7 +813,7 @@ export function ExplorerPane({
                         aria-label={t("explorer.folderRetention", { name: folder.name })}
                         onClick={() => setRetentionModalFolder(folder)}
                       >
-                        🕒
+                        <UiIcon icon={Clock} />
                       </button>
                       <button
                         type="button"
@@ -816,7 +821,7 @@ export function ExplorerPane({
                         aria-label={t("explorer.handFolderReferences", { name: folder.name })}
                         onClick={() => setHandFolderModalFolder(folder)}
                       >
-                        📎
+                        <UiIcon icon={Paperclip} />
                       </button>
                     </span>
                   </>
@@ -843,8 +848,9 @@ export function ExplorerPane({
                   className="entry-name"
                   onClick={() => onOpenDocument(doc)}
                 >
-                  {favoriteKeys.has(`document:${doc.id}`) && "⭐ "}
-                  📄 {formatDocumentTitle(doc, documentTypeById, kennzeichenShowByDefault)}
+                  {favoriteKeys.has(`document:${doc.id}`) && <FavoriteMarker label={t("favorites.markerLabel")} />}
+                  <DocumentIcon />
+                  <span>{formatDocumentTitle(doc, documentTypeById, kennzeichenShowByDefault)}</span>
                 </button>
               </li>
             ))}

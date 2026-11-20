@@ -601,15 +601,71 @@ body {
 
 /* Baumansicht (2.2a/8, P5b-S4): nutzerseitig umschaltbare Alternative zur
    Listenansicht, siehe FolderTree.tsx. */
+/* P83-S6 (punch list item 9): a real segmented control in the established
+   formula - one bordered track, segments that share it, the active one on
+   the accent's soft fill. Used by Liste/Baum and the trash pane's scope. */
 .view-mode-toggle {
-  display: flex;
-  gap: var(--dms-space-1);
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
   margin-left: auto;
+  padding: 2px;
+  border: 1px solid var(--dms-border);
+  border-radius: var(--dms-radius-md);
+  background: var(--dms-bg);
+}
+
+.view-mode-toggle button {
+  border: 0;
+  border-radius: calc(var(--dms-radius-md) - 2px);
+  background: transparent;
+  color: var(--dms-fg);
+  font: inherit;
+  font-size: var(--dms-font-size-sm);
+  padding: var(--dms-space-1) var(--dms-space-3);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+.view-mode-toggle button:hover {
+  background: var(--dms-hover-bg);
 }
 
 .view-mode-toggle button.view-mode-active {
   background: var(--dms-accent-bg);
   font-weight: 600;
+}
+
+.view-mode-toggle button:focus-visible,
+.toggle-btn:focus-visible {
+  outline: 2px solid var(--dms-accent);
+  outline-offset: 2px;
+}
+
+/* A secondary button in the established formula, for toolbar toggles and
+   plain toolbar actions that were still native-looking (P83-S6, item 9);
+   pressed state on the accent's soft fill */
+.toggle-btn {
+  border: 1px solid var(--dms-border);
+  border-radius: var(--dms-radius-md);
+  background: var(--dms-hover-bg);
+  color: var(--dms-fg);
+  font: inherit;
+  font-size: var(--dms-font-size-sm);
+  padding: 0.375rem var(--dms-space-3);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+.toggle-btn:hover {
+  background: var(--dms-accent-bg);
+}
+
+.toggle-btn.view-mode-active {
+  border-color: var(--dms-accent);
+  background: var(--dms-accent-bg);
 }
 
 .folder-tree {
@@ -1025,4 +1081,69 @@ body {
   border: 1px solid var(--dms-border);
   border-radius: var(--dms-radius-md);
   padding: var(--dms-space-2);
+}
+
+/* ---- P83-S6: icons, row layout and row actions (punch list items 2, 4, 5) ---- */
+
+/* Lucide icons (lib/ui-icons.tsx) sit on the text's line and never shrink */
+.ui-icon {
+  flex: none;
+  vertical-align: -0.2em;
+}
+
+/* Decorative folder/document icons: quiet, one step under the text */
+.ui-icon--folder,
+.ui-icon--document {
+  color: color-mix(in srgb, var(--dms-fg) 60%, transparent);
+}
+
+/* The favorite marker carries meaning: the accent, the one colored mark */
+.ui-icon--favorite {
+  color: var(--dms-accent);
+}
+
+/* Item 4: names were centered, because `.entry-row` spreads checkbox, name
+   and actions with space-between. The name now takes the free space and
+   reads from the left edge, icon and text on one line. */
+.entry-row {
+  gap: var(--dms-space-3);
+}
+
+.entry-row .entry-name {
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dms-space-2);
+  text-align: left;
+}
+
+.tree-row .entry-name {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dms-space-2);
+}
+
+.tree-toggle {
+  display: inline-grid;
+  place-items: center;
+}
+
+/* Item 5: a row's icon actions show on hover, on keyboard focus within the
+   row, and always on touch screens (no hover there - the mobile goal, ADR
+   0237 Decision 6). At rest they don't stack three buttons on every row. */
+.row-actions {
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.entry-row:hover .row-actions,
+.entry-row:focus-within .row-actions {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .row-actions {
+    opacity: 1;
+  }
 }

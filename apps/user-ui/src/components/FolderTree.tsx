@@ -15,7 +15,8 @@ import {
   type Folder,
   type ObjectType,
 } from "@/lib/api";
-import { folderIcon } from "@/lib/icons";
+import { ChevronDown, ChevronRight } from "lucide-react";
+import { DocumentIcon, FavoriteMarker, FolderClassIcon, UiIcon } from "@/lib/ui-icons";
 import { formatDocumentTitle } from "@/lib/kennzeichen";
 
 interface NodeChildren {
@@ -198,9 +199,7 @@ export function FolderTree({
         {node.folders.map((folder) => {
           const childPath = [...path, folder];
           const isExpanded = expanded.has(folder.id);
-          const icon = folderIcon(
-            folder.object_type_id !== null ? folderIcons[folder.object_type_id] : null
-          );
+          const classIcon = folder.object_type_id !== null ? folderIcons[folder.object_type_id] : null;
           return (
             <li key={folder.id}>
               <span
@@ -225,11 +224,12 @@ export function FolderTree({
                   }
                   onClick={() => toggleExpand(folder.id)}
                 >
-                  {isExpanded ? "▾" : "▸"}
+                  <UiIcon icon={isExpanded ? ChevronDown : ChevronRight} />
                 </button>
                 <button type="button" className="entry-name" onClick={() => selectFolder(childPath)}>
-                  {favoriteKeys.has(`folder:${folder.id}`) && "⭐ "}
-                  {icon} {folder.name}
+                  {favoriteKeys.has(`folder:${folder.id}`) && <FavoriteMarker label={t("favorites.markerLabel")} />}
+                  <FolderClassIcon icon={classIcon} />
+                  <span>{folder.name}</span>
                 </button>
               </span>
               {isExpanded && renderChildren(folder.id, childPath)}
@@ -241,8 +241,9 @@ export function FolderTree({
             <span className="tree-row" onContextMenu={(e) => onDocumentContextMenu(e, doc)}>
               <span className="tree-toggle-spacer" aria-hidden="true" />
               <button type="button" className="entry-name" onClick={() => onOpenDocument(doc)}>
-                {favoriteKeys.has(`document:${doc.id}`) && "⭐ "}
-                📄 {formatDocumentTitle(doc, documentTypeById, kennzeichenShowByDefault)}
+                {favoriteKeys.has(`document:${doc.id}`) && <FavoriteMarker label={t("favorites.markerLabel")} />}
+                <DocumentIcon />
+                <span>{formatDocumentTitle(doc, documentTypeById, kennzeichenShowByDefault)}</span>
               </button>
             </span>
           </li>
@@ -266,7 +267,8 @@ export function FolderTree({
       >
         <span className="tree-toggle-spacer" aria-hidden="true" />
         <button type="button" className="entry-name" onClick={() => selectFolder([])}>
-          📁 {rootLabel}
+          <FolderClassIcon icon={null} />
+          <span>{rootLabel}</span>
         </button>
       </span>
       {renderChildren("root", [])}
