@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import {
   Archive,
   Briefcase,
@@ -12,7 +11,6 @@ import {
   Inbox,
   ListChecks,
   Search,
-  Settings,
   ShieldAlert,
   Star,
   Trash2,
@@ -21,8 +19,6 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useI18n } from "@/i18n";
-import { LocaleSwitcher } from "./LocaleSwitcher";
-import { ThemeSwitcher } from "./ThemeSwitcher";
 import { UiIcon } from "@/lib/ui-icons";
 
 export type WorkspaceView =
@@ -81,7 +77,6 @@ export function IconRail({
   // `RecordsQuarantinePanel.tsx` already uses, not a realm role (unlike the
   // unrelated virus-scan "quarantine" view above).
   const isRecordsQuarantineAdmin = permissions.includes("admin.records_quarantine");
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   return (
     <nav
@@ -241,27 +236,6 @@ export function IconRail({
       >
         <UiIcon icon={Folders} />
       </button>
-      <div className="relative">
-        <button
-          type="button"
-          className={`grid w-9 h-9 place-items-center rounded-md border-0 p-0 text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${isSettingsOpen ? "bg-accent-bg" : "bg-transparent"}`}
-          title={t("iconRail.settings")}
-          aria-haspopup="true"
-          aria-expanded={isSettingsOpen}
-          onClick={() => setIsSettingsOpen((prev) => !prev)}
-        >
-          <UiIcon icon={Settings} />
-        </button>
-        {isSettingsOpen && (
-          <div
-            className="absolute bottom-0 left-full z-[10000] ml-2 whitespace-nowrap rounded-md border border-border bg-surface p-3 text-surface-fg shadow-sm"
-            aria-label={t("iconRail.settings")}
-          >
-            <LocaleSwitcher />
-            <ThemeSwitcher />
-          </div>
-        )}
-      </div>
     </nav>
   );
 }

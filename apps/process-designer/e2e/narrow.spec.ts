@@ -1,7 +1,7 @@
 import { expect, loginViaUi, test } from "./fixtures";
 
 // Narrow widths (P83-S10, ADR 0238): no page overflow at phone width, the
-// header cluster lives in the account menu, and the designer's properties
+// settings live in the account menu, and the designer's properties
 // panel is a toggled sheet instead of a fixed 300px column.
 test.use({ viewport: { width: 390, height: 844 } });
 

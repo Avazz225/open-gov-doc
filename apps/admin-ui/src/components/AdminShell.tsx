@@ -49,7 +49,7 @@ export function AdminShell({ title, children }: { title: string; children: React
           <Menu size={20} strokeWidth={1.75} aria-hidden="true" />
         </button>
         <h1 className="min-w-0 flex-1 truncate max-md:text-xl">{title}</h1>
-        <AccountMenu inlineFrom="lg" leading={(touch) => <InstallationSwitcher touch={touch} />} />
+        <AccountMenu leading={(touch) => <InstallationSwitcher touch={touch} />} />
       </div>
       <div className="flex min-h-0 flex-1">
         <div className="hidden md:flex">

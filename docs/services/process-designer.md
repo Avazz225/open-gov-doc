@@ -42,9 +42,9 @@ now sit inline like in the other apps.
 ## Narrow widths (Phase 83 Session 10, [ADR 0238](../adr/0238-narrow-width-patterns-for-all-apps.md))
 
 Below 768px:
-- **Account menu.** The header cluster collapses into one account button (`components/AccountMenu.tsx`,
-  the same component as migration-console's), which opens a popover with language, theme, user and log
-  out stacked, each at least 40px tall.
+- **Account menu.** One account button (`components/AccountMenu.tsx`, the same component as
+  migration-console's) opens a popover with user, language, theme and log out stacked, each at least
+  40px tall. Since P86-S1 at every width; there is no inline cluster any more.
 - **Tabs** (Prozessdefinitionen / DMN) sit in a strip that scrolls instead of wrapping.
 - **Both definition tables** sit in a `dms-scroll-x` container (`libs/dms-ui/layout.css`). Before, the
   page was 948px wide at both 390 and 768px.

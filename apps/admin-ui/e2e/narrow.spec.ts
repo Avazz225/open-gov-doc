@@ -3,7 +3,7 @@ import { loginViaUi } from "./fixtures";
 
 // Narrow widths (P83-S12, ADR 0238): at phone width no page scrolls
 // sideways, the sidebar is a modal drawer behind the menu button, and the
-// header cluster lives in the account menu.
+// settings live in the account menu.
 test.use({ viewport: { width: 390, height: 844 } });
 
 async function expectNoPageOverflow(page: import("@playwright/test").Page) {

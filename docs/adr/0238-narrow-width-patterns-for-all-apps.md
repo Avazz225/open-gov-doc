@@ -49,6 +49,16 @@ cluster.
 moves to 1024px (`AccountMenu inlineFrom="lg"`). reviewer-ui is the one case: four tabs plus the
 cluster overflowed at 768px.
 
+*Amendment (P86-S1, user decision 2026-11-20):* the account menu is the only form, at every width, in
+all five apps with a header (admin-ui, reviewer-ui, migration-console, process-designer, user-ui). The
+header shows the user's name with a chevron (below 640px the icon stands in for the name, which stays
+the accessible label "Konto: <name>"); the dropdown holds app-specific controls first (admin-ui's
+installation switcher), then language, theme and log out. The inline cluster and `inlineFrom` are
+removed. Settings behind the name is where people look for them, and one form means one behavior to
+test. user-ui's icon-rail settings gear, which held only language and theme, is removed; user-ui gets the
+same `AccountMenu`. office-addin keeps its task-pane header (name and log out inline): it has no
+language or theme settings, so a dropdown would hold a single item.
+
 Navigation tabs (reviewer-ui, migration-console, process-designer) get the row to themselves; if they
 still don't fit they scroll horizontally inside their own strip with an edge fade, never wrapping into a
 second row and never scrolling the page.

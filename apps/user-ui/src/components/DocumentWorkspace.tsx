@@ -18,6 +18,7 @@ import {
   trashFolder as apiTrashFolder,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { AccountMenu } from "./AccountMenu";
 import { ApprovalsPane } from "./ApprovalsPane";
 import { DockableDocumentArea, type DockableDocumentAreaHandle } from "./DockableDocumentArea";
 import { FavoritesPane } from "./FavoritesPane";
@@ -47,7 +48,7 @@ import { VorlagenPane } from "./VorlagenPane";
 // state survives a switch to a special area and back. Furthest to the left,
 // outside the main content, the icon-based navigation rail.
 export function DocumentWorkspace() {
-  const { user, accessToken, logout } = useAuth();
+  const { user, accessToken } = useAuth();
   const { t } = useI18n();
 
   const [trail, setTrail] = useState<Array<Pick<Folder, "id" | "name">>>(() => [
@@ -340,24 +341,14 @@ export function DocumentWorkspace() {
   return (
     <div className="flex h-screen flex-col">
       {/* Narrow (P83-S13, ADR 0238): smaller padding and title, the title
-          truncates in one line, and the user name gives way below 768px -
-          language and theme already live in the icon rail's settings, so the
-          header keeps only log out and needs no account menu. */}
+          truncates in one line. Language, theme and log out sit behind the
+          user name in the account menu at every width (P86-S1; the icon
+          rail's settings gear is gone). */}
       <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-2 md:px-6 md:py-3">
         {/* P83-S6 (punch list item 3): the title names the active view, in the
             icon rail's own words - it said "Dokumente" on every view before */}
         <h1 className="min-w-0 truncate max-md:text-xl">{t(`iconRail.${view}`)}</h1>
-        <div className="flex flex-none items-center gap-2">
-          {user && <span className="whitespace-nowrap max-md:hidden">{user.username}</span>}
-          <button
-            type="button"
-            onClick={logout}
-            title={user?.username}
-            className="whitespace-nowrap rounded-md border border-border bg-hover-bg px-3 py-1 text-fg transition-colors hover:bg-accent-bg max-md:min-h-10"
-          >
-            {t("common.logout")}
-          </button>
-        </div>
+        <AccountMenu />
       </div>
 
       <div className="flex min-h-0 flex-1">

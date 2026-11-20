@@ -58,7 +58,7 @@ wide. Wide tables overflowed at 768px too. Now no page of all 32 routes overflow
 
   From 768px the sidebar column is unchanged. The home launcher (P83-S7) stays the landing page's way
   in.
-- **Account menu below 1024px** (`AccountMenu inlineFrom="lg"`, the same file as in the other apps). The
+- **Account menu** (the same file as in the other apps; at every width since P86-S1, see below). The
   installation switcher comes first through its `leading` slot. All three switchers got the `touch`
   form. The title truncates in one line (`text-xl` narrow) instead of the header wrapping.
 - **All 38 `.data-table`s** sit in a `dms-scroll-x` wrapper. Inside a `bg-surface` card the scroll covers
@@ -510,6 +510,15 @@ Two-stage Docker image (`apps/admin-ui/Dockerfile`), identical to the User UI. `
 The client no longer sends who is acting (`created_by`, `deleted_by`, `approved_by`, `locked_by`, …):
 the services take it from the verified token. The API helpers lost those parameters, and the
 components no longer pass the user name into them. Super-user activation, approve/reject, emergency shutdown and lift, and the user-tracking toggle no longer pass `user.sub`/`user.username`.
+
+## Account Menu (P86-S1, [ADR 0238](../adr/0238-narrow-width-patterns-for-all-apps.md) Decision 2)
+
+The header's right side is one button: the signed-in user's name (from 640px; an icon below) with a
+chevron. It opens the account dropdown: the installation switcher (only when more than one
+installation is configured, via `AccountMenu`'s `leading` slot), language, theme and log out, each at
+least 40px tall. Before, wide layouts showed all of these inline next to the name. The same
+`AccountMenu.tsx` is copied into reviewer-ui, migration-console, process-designer and user-ui (ADR 0006).
+`e2e/login.spec.ts` logs out through the menu at desktop width.
 
 ## Tests
 

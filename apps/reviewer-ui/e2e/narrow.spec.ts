@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { loginViaUi } from "./fixtures";
 
 // Narrow widths (P83-S11, ADR 0238): at phone width no page scrolls
-// sideways, the header cluster lives in the account menu, and the task list
+// sideways, settings and log out live in the account menu, and the task list
 // stacks its rows into cards (the column header is visually hidden).
 test.use({ viewport: { width: 390, height: 844 } });
 

@@ -22,7 +22,7 @@ Since **P6-S6**, `RequireAuth` (the auth guard behind every protected route) add
 
 Originally (P4-S4) replaced the earlier flat `FolderBrowser` view (P4-S2) with a fixed, resizable three-column layout. **Since P16-S1**, `DockableDocumentArea` (`dockview-react`, see [ADR 0057](../adr/0057-dockbarer-arbeitsbereich-dockview-context-not-params.md)) takes over the entire explorer/document tabs/preview/metadata area as real, VS-Code-like docking (Concept 8) — the earlier fixed `Splitter` layout was dropped for this.
 
-- **`IconRail`** (far left, outside the main content): icon-based cross-cutting navigation. "Documents", since P5-S4 "Search", since **P7-S1c** additionally "Approvals" (`✅`) and since **P7-S1d** additionally "Favorites" (`⭐`) (`WorkspaceView`) switch between the views of `DocumentWorkspace` (`activeView`/`onSelectView`) — previously "Search" was a deliberately visible, disabled placeholder. "Settings" has opened a popover with the `ThemeSwitcher` since P4-S6 instead of remaining disabled.
+- **`IconRail`** (far left, outside the main content): icon-based cross-cutting navigation. "Documents", since P5-S4 "Search", since **P7-S1c** additionally "Approvals" (`✅`) and since **P7-S1d** additionally "Favorites" (`⭐`) (`WorkspaceView`) switch between the views of `DocumentWorkspace` (`activeView`/`onSelectView`) — previously "Search" was a deliberately visible, disabled placeholder. "Settings" opened a popover with the `ThemeSwitcher` from P4-S6 until P86-S1; language and theme now live in the header's account menu.
 - **`DockableDocumentArea`** (new since P16-S1, active in the "Documents" view, but stays ALWAYS mounted - see below): hosts three dockview panel types -
   - **`explorer`** panel: renders `ExplorerPane` (see below) - Windows-Explorer-like folder navigation, but now WITHOUT its own tab bar (that carried the open documents until P16-S1, see next point).
   - **`documentPreview`** panel (one per open document): renders `PreviewPane` for exactly ONE document (`params.documentId`, fixed at panel-creation time). All open documents initially sit as tabs of the same dockview group ("document tabs now above the preview instead of above the explorer", the new default arrangement) - a tab can be dragged out into its own group to actually view two documents side by side/stacked simultaneously (Concept 8, provided by dockview itself, no custom code needed).
@@ -59,9 +59,9 @@ documents view shows **one pane at a time** (`SinglePaneWorkspace` in `DockableD
   opened meanwhile get one. Panels removed by the restore itself do not close their document
   (`suppressCloseRef`).
 - **"Standardanordnung"** is hidden in this mode, because there is nothing to arrange.
-- **Header.** Smaller padding, and the title truncates in one line. The user name gives way below 768px;
-  it stays as the log-out button's tooltip. Language and theme already live in the icon rail's settings,
-  so no account menu is needed here.
+- **Header.** Smaller padding, and the title truncates in one line. Since P86-S1 the right side is the account menu
+  (`components/AccountMenu.tsx`, the same file as in the other apps): the user name (from 640px, an
+  icon below) with a chevron opens language, theme and log out. The icon rail's settings gear is gone.
 - **Approval rows** wrap: the title takes the full width, and approve/reject sit below it, full-width and
   40px tall.
 
@@ -522,7 +522,7 @@ New `IconRail` entry "Hand-Ordner/Arbeitsvorrat" (🗂️, `WorkspaceView` exten
 
 ## Theming (Concept 8, since P4-S6)
 
-`src/lib/theme-context.tsx` (`ThemeProvider`/`useTheme()`): light/dark/high-contrast/automatic, toggled via the `ThemeSwitcher` in the `IconRail`'s settings popover. Stored cross-device on the user account (`GET/PUT /api/auth-service/me/preferences`), see [ADR 0009](../adr/0009-cross-ui-theming-profile-persistence.md) for the reasoning (Keycloak attribute instead of a new persistence building block) and the pitfall found in the process (declarative user profile silently discards undeclared attributes). `localStorage` (`dms.theme`) serves as an immediately available cache, among other things so that the login page also has a theme without a session. `data-theme` on `<html>` controls the entire stylesheet via CSS variables (`--dms-bg`, `--dms-fg`, `--dms-border`, `--dms-accent`, ...) (`globals.css`).
+`src/lib/theme-context.tsx` (`ThemeProvider`/`useTheme()`): light/dark/high-contrast/automatic, toggled via the `ThemeSwitcher` in the header's account menu (the `IconRail`'s settings popover until P86-S1). Stored cross-device on the user account (`GET/PUT /api/auth-service/me/preferences`), see [ADR 0009](../adr/0009-cross-ui-theming-profile-persistence.md) for the reasoning (Keycloak attribute instead of a new persistence building block) and the pitfall found in the process (declarative user profile silently discards undeclared attributes). `localStorage` (`dms.theme`) serves as an immediately available cache, among other things so that the login page also has a theme without a session. `data-theme` on `<html>` controls the entire stylesheet via CSS variables (`--dms-bg`, `--dms-fg`, `--dms-border`, `--dms-accent`, ...) (`globals.css`).
 
 **Since Phase 49 Session 2** ([ADR 0168](../adr/0168-shared-design-tokens-and-scales.md)): `globals.css`'s own `--dms-*` color-token declarations (the `:root`/`@media`/`[data-theme]` blocks) removed and replaced by `@import "../../../../libs/dms-ui/tokens.css";` — the shared, de-drifted token source built in Phase 48 Session 1. This app was one of the three (with `admin-ui`/`process-designer`) still carrying the unfixed high-contrast `--dms-accent-bg: #ffff00` bug; adopting the shared file fixes it. App-specific pieces stayed in `globals.css`: the `dockview` library variable mappings (`--dv-*`, this is the only app using `dockview`), the `.badge`/`.icon-rail-active` high-contrast border/color overrides.
 

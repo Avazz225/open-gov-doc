@@ -43,11 +43,11 @@ both showed raw enum values before. An unknown future value falls back to the ra
 ## Narrow widths (Phase 83 Session 10, [ADR 0238](../adr/0238-narrow-width-patterns-for-all-apps.md))
 
 Below 768px:
-- **Account menu.** The header cluster (language, theme, user, log out) collapses into one account button
-  (`components/AccountMenu.tsx`, accessible name "Konto: <user>"). It opens a popover with the same
+- **Account menu.** Language, theme and log out sit behind one account button
+  (`components/AccountMenu.tsx`, accessible name "Konto: <user>"). It opens a popover with the
   controls stacked, each at least 40px tall. Escape and an outside click close it, and Escape returns
-  focus to the button. From 768px the inline cluster shows as before. Both forms are rendered and
-  switched by CSS.
+  focus to the button. Since P86-S1 this holds at every width: the button shows the user name (from
+  640px) and a chevron, and the inline cluster is gone.
 - **Tabs** sit in their own strip (`dms-scroll-x dms-tab-strip` from `libs/dms-ui/layout.css`), which
   scrolls instead of wrapping.
 - **Tables** (transfers, paired installations) sit in a `dms-scroll-x` container with edge shadows. The

@@ -2,6 +2,43 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P86-S1, settings behind the user name in every app, at every width
+(ADR 0238 Decision 2 amendment).
+
+**What changed:**
+- **`AccountMenu.tsx`** (same file in admin-ui, reviewer-ui, migration-console, process-designer and now
+  user-ui): the header shows the user name (from 640px; an icon below) with a chevron. The dropdown
+  holds the `leading` slot (admin-ui's installation switcher, shown only with more than one
+  installation), language, theme and log out. The inline cluster, `inlineFrom` and
+  `BREAKPOINT_CLASSES` are removed.
+- **user-ui:** the header's name + log-out button became the `AccountMenu`. The icon rail's settings
+  gear is removed, along with `iconRail.settings`. The Locale/ThemeSwitcher got the `touch` form, and
+  `account.menuLabel` was added.
+- **office-addin** is unchanged: it has no settings, so a dropdown would hold one item.
+- **Docs:** ADR 0238 amendment; admin-ui doc section "Account Menu"; the header passages in the
+  reviewer-ui, migration-console, process-designer and user-ui docs.
+
+**Checks:**
+- `tsc`/`eslint` clean; vitest 319/64/25/61/308.
+- e2e 37/37: 32 existing plus 5 new "logs out through the account menu" tests at desktop width.
+- Screenshots at 390/768/1400, closed and open, in all five apps; no page overflow anywhere.
+
+**Seen for P86-S2:** user-ui `ApprovalsPane` compares `initiated_by` (now a principal `sub`) with the
+user name for "cannot approve own". Since P85 this check no longer matches, so the server's four-eyes
+check is the only guard; fix it together with the name resolution. reviewer-ui's task list still shows
+the related object as a long id at 768px.
+
+The stack was stopped afterwards.
+
+**Next session:** **P86-S2**, UX bundle:
+- principal → name resolution everywhere (reviewer "Beantragt von", locks, creators, trash, approvals,
+  audit views);
+- user-ui `ApprovalsPane` reject reason (plus the own-request check above);
+- admin-ui form-grid gap polish;
+- the README `<picture>` check.
+
+---
+
 **Last completed:** P85-S5, clients and cleanup. **Phase 85 is closed** (ADR 0240: the acting identity
 comes from the verified principal everywhere).
 
@@ -30,7 +67,7 @@ comes from the verified principal everywhere).
 
 The stack was stopped afterwards.
 
-**Next session:** **P86-S1**, settings behind the user name in every app, at every width:
+**Next session (at the time):** P86-S1. It was done next; see the entry above. Original note:, settings behind the user name in every app, at every width:
 - an account dropdown (installation switcher in admin-ui, language, theme, log out);
 - user-ui's gear removed;
 - the ADR 0238 amendment;

@@ -48,10 +48,10 @@ has no principal-name lookup, and adding one needs user-directory access; see th
 
 **Narrow widths.** The page no longer scrolls sideways at any width. Before, it was 874–1112px wide at
 both 390 and 768px.
-- **Header.** The four tabs scroll inside their own strip. The header cluster collapses into the
+- **Header.** The four tabs scroll inside their own strip. Language, theme and log out sit in the
   account menu (`components/AccountMenu.tsx`, the same file as migration-console's and
-  process-designer's) **below 1024px** (`inlineFrom="lg"`), not 768px, because four tabs and the inline
-  cluster don't fit one row at 768px.
+  process-designer's). Up to P86-S1 it replaced an inline cluster only below 1024px; since then it is
+  the only form at every width, which also leaves the tab row free.
 - **Stacked rows.** Below 768px, the task list and the four-eyes inbox turn each row into a card, using
   `dms-stack-table` from `libs/dms-ui/layout.css`. It is the same markup: cells carry `data-label`, and
   `data-stack` marks the title, the actions (full-width, ≥ 40px) and expanded detail rows (attached to

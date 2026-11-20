@@ -81,8 +81,7 @@
     "vorlagen": "Templates",
     "cases": "Case binders",
     "handFolders": "Hand folders/work tray",
-    "recordsQuarantine": "Records quarantine",
-    "settings": "Settings"
+    "recordsQuarantine": "Records quarantine"
   },
   "theme": {
     "label": "Theme",
@@ -677,5 +676,8 @@
     "loading": "Searching...",
     "noResults": "No matches.",
     "loadError": "Search failed."
+  },
+  "account": {
+    "menuLabel": "Account: {name}"
   }
 }

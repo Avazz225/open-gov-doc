@@ -3731,6 +3731,12 @@ real capability, and signatures are never made on behalf.
   - **Docs:** ADR 0238 Decision 2 amendment.
   - **Checks:** e2e specs that click "Abmelden" go through the menu. Screenshots at 390/768/1400 in all
     five apps.
+  - ✅ **Result:** one `AccountMenu.tsx` (user name from 640px, icon below, chevron; dropdown with
+    `leading`, language, theme, log out) in all five apps; `inlineFrom` and the inline cluster are gone;
+    user-ui's gear and its `iconRail.settings` key removed, its switchers got the `touch` form.
+    office-addin does show a name but has no settings, so it keeps name + log out inline (recorded in
+    the ADR 0238 amendment). No spec clicked the inline "Abmelden"; each app's `login.spec.ts` gained
+    "logs out through the account menu". No page overflow at 390/768/1400 in any app.
 - **P86-S2 — UX bundle.**
   - reviewer-ui "Beantragt von" shows names: copy user-ui's `usePrincipalNames` and `lookupUserById`,
     resolve UUID-shaped ids only, keep the raw id on hover. Apply it to team-task/instance ids too.

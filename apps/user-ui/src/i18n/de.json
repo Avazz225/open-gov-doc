@@ -81,8 +81,7 @@
     "vorlagen": "Vorlagen",
     "cases": "Umlaufmappen",
     "handFolders": "Hand-Ordner/Arbeitsvorrat",
-    "recordsQuarantine": "Schriftgutquarantäne",
-    "settings": "Einstellungen"
+    "recordsQuarantine": "Schriftgutquarantäne"
   },
   "theme": {
     "label": "Design",
@@ -677,5 +676,8 @@
     "loading": "Suche läuft...",
     "noResults": "Keine Treffer.",
     "loadError": "Suche fehlgeschlagen."
+  },
+  "account": {
+    "menuLabel": "Konto: {name}"
   }
 }

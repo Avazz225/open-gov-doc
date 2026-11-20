@@ -11,8 +11,8 @@ import { MaintenanceBanner } from "./MaintenanceBanner";
 // so a simple tab bar instead of full page navigation like AdminShell
 // (admin-ui). Same header pattern (title/theme/logout) as the other apps.
 // Narrow widths (P83-S10, ADR 0238 Decision 2): the tabs scroll inside their
-// own strip instead of pushing the page, and the header cluster collapses
-// into AccountMenu's button below 768px.
+// own strip instead of pushing the page. Language, theme and log out sit
+// behind the user name in AccountMenu at every width (P86-S1).
 export function Shell({ children }: { children: ReactNode }) {
   const { t } = useI18n();
   const pathname = usePathname();

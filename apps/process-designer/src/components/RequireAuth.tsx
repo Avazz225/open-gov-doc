@@ -41,8 +41,8 @@ export function RequireAuth({ children }: { children: ReactNode }) {
       <MaintenanceBanner />
       {/* P83-S7 (punch list item 10): the same header cluster as reviewer-ui/
           migration-console - language, theme, the signed-in user and log out,
-          right-aligned over a rule. Below 768px it collapses into AccountMenu's
-          button (P83-S10, ADR 0238 Decision 2). */}
+          right-aligned over a rule - since P86-S1 all behind the user name in
+          AccountMenu at every width (ADR 0238 Decision 2). */}
       <div className="flex items-center justify-end border-b border-border px-4 py-2 md:px-6 md:py-3">
         <AccountMenu />
       </div>
