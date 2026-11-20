@@ -34,11 +34,16 @@ bootstrapped `users-admin` technical account. No dev server is started by
 `playwright.config.ts` - `migration-console` is served as a static export
 via its own nginx container, same as production.
 
-**No permission grant needed**: per `docs/services/migration-console.md`
-"Authorization", `migration-service` gates its write endpoints only via its
-own license check (`license_gate`), not a domain-separated admin role -
-`RequireAuth` only checks whether a valid session exists. `users-admin`
-works out of the box.
+**Permission grant (automatic since P83-S8):** creating/deleting a paired
+installation requires the `admin.migration_management` capability (role
+`domain-admin-migration`, added in P59-S5 - see
+`docs/services/migration-console.md` "Authorization"), which no
+bootstrapped account holds. The `testWithPairedInstallationCleanup` fixture
+(`e2e/fixtures.ts`) grants that role to the test account for the length of
+the test and revokes it afterwards. The suite runs with `workers: 1`: a
+parallel worker's login can recompute the account's effective permissions
+concurrently and leave a pre-grant entry in permission-service's
+materialized cache.
 
 ## Design notes
 

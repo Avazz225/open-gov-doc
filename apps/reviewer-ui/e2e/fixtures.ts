@@ -18,11 +18,12 @@ export { expect };
 // and gets inserted into the DOM after the first client-side navigation -
 // `page.getByRole("alert")` alone therefore also matches it (with empty
 // text), which breaks any assertion that a page has *no* error banner.
-// Scoping to the app's own `.error-text` class (used consistently for every
-// real error/validation message, see login/page.tsx, TaskList.tsx,
-// ApprovalList.tsx) avoids that false positive.
+// Filtering to alerts that carry text avoids that false positive (P83-S8):
+// every real error/validation message has text, the announcer has none. It
+// replaces a `.error-text` class scope that the Tailwind migration (P75-S4)
+// removed from the app - the spec had been stale since then.
 export function errorAlert(page: import("@playwright/test").Page) {
-  return page.locator('[role="alert"].error-text');
+  return page.getByRole("alert").filter({ hasText: /\S/ });
 }
 
 export async function loginViaUi(page: import("@playwright/test").Page) {

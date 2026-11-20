@@ -12,13 +12,15 @@ test("browses the case list, opens a case, and downloads a document", async ({ p
   await expect(page.getByRole("heading", { name: "Vorgänge" })).toBeVisible();
   await expect(errorAlert(page)).toHaveCount(0);
 
-  const list = page.locator("ul.entry-list");
+  // Role-based, not the `.entry-list`/`.entry-row`/`.entry-name` classes the
+  // Tailwind migration (P75-S4) removed
+  const list = page.getByRole("list");
   const emptyState = page.getByText("Keine Vorgänge vorhanden.");
   await expect(list.or(emptyState)).toBeVisible();
   if (await emptyState.isVisible()) return;
 
-  const firstRow = list.locator("li.entry-row").first();
-  await firstRow.locator("button.entry-name").click();
+  const firstRow = list.getByRole("listitem").first();
+  await firstRow.getByRole("button").first().click();
 
   // Detail view rendered - "Zurück zur Übersicht" and either a document
   // list or the empty-documents hint confirm the case actually loaded.

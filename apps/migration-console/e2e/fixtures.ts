@@ -20,6 +20,37 @@ async function login(username: string) {
   return (await response.json()) as { access_token: string };
 }
 
+// Pairing is gated behind `admin.migration_management` (role
+// `domain-admin-migration`, P59-S5), which no bootstrapped account holds.
+// The fixture grants that role to the test account for the duration of the
+// test and revokes it afterwards (P83-S8), so the shared dev stack keeps its
+// default role set. users-admin may grant roles itself (admin.user_management).
+async function grantMigrationRole(token: string): Promise<number> {
+  const auth = { Authorization: `Bearer ${token}` };
+  const me = (await (await fetch(`${GATEWAY_BASE_URL}/api/auth-service/me`, { headers: auth })).json()) as {
+    sub: string;
+  };
+  const roles = (await (
+    await fetch(`${GATEWAY_BASE_URL}/api/permission-service/roles`, { headers: auth })
+  ).json()) as { id: number; name: string }[];
+  const role = roles.find((r) => r.name === "domain-admin-migration");
+  if (!role) throw new Error("Role domain-admin-migration not seeded");
+  const response = await fetch(`${GATEWAY_BASE_URL}/api/permission-service/role-assignments`, {
+    method: "POST",
+    headers: { ...auth, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      principal_type: "user",
+      principal_id: me.sub,
+      role_id: role.id,
+      resource_id: "root",
+    }),
+  });
+  if (!response.ok) throw new Error(`Role grant failed: ${response.status}`);
+  const body = (await response.json()) as { role_assignment: { id: number } | null };
+  if (!body.role_assignment) throw new Error("Role grant went to approval instead of being applied");
+  return body.role_assignment.id;
+}
+
 // A unique, throwaway paired-installation display name for the test to use,
 // plus a forced API cleanup after the test that removes any installation
 // with that name regardless of whether the UI's own delete flow ran or
@@ -32,10 +63,18 @@ export const testWithPairedInstallationCleanup = base.extend<{
 }>({
   pairedInstallationName: async ({}, use) => {
     const name = `e2e-console-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-
-    await use(name);
-
     const { access_token: token } = await login(TEST_USERNAME);
+    const assignmentId = await grantMigrationRole(token);
+
+    try {
+      await use(name);
+    } finally {
+      await fetch(`${GATEWAY_BASE_URL}/api/permission-service/role-assignments/${assignmentId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    }
+
     const listRes = await fetch(
       `${GATEWAY_BASE_URL}/api/migration-service/paired-installations`,
       { headers: { Authorization: `Bearer ${token}` } }
@@ -59,11 +98,12 @@ export { expect };
 // and gets inserted into the DOM after the first client-side navigation -
 // `page.getByRole("alert")` alone therefore also matches it (with empty
 // text), which breaks any assertion that a page has *no* error banner.
-// Scoping to the app's own `.error-text` class (used consistently for every
-// real error/validation message, see login/page.tsx, TransferConsole.tsx,
-// PairedInstallationList.tsx) avoids that false positive.
+// Filtering to alerts that carry text avoids that false positive (P83-S8):
+// every real error/validation message has text, the announcer has none. It
+// replaces a `.error-text` class scope that the Tailwind migration (P75-S4)
+// removed from the app - the spec had been stale since then.
 export function errorAlert(page: import("@playwright/test").Page) {
-  return page.locator('[role="alert"].error-text');
+  return page.getByRole("alert").filter({ hasText: /\S/ });
 }
 
 export async function loginViaUi(page: import("@playwright/test").Page) {

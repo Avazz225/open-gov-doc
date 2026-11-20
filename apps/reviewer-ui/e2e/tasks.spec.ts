@@ -17,7 +17,8 @@ test("loads the task inbox and the edit form validates JSON without submitting",
   await expect(page.getByRole("heading", { name: "Freigabeaufgaben" })).toBeVisible();
   await expect(errorAlert(page)).toHaveCount(0);
 
-  const table = page.locator("table.data-table");
+  // Role-based, not the `.data-table` class the Tailwind migration (P75-S4) removed
+  const table = page.getByRole("table");
   const hasTasks = (await table.count()) > 0;
 
   if (!hasTasks) {
@@ -25,7 +26,7 @@ test("loads the task inbox and the edit form validates JSON without submitting",
     return;
   }
 
-  const firstRow = table.locator("tbody tr").first();
+  const firstRow = table.locator("tbody").getByRole("row").first();
   await firstRow.getByRole("button", { name: "Bearbeiten" }).click();
 
   const dataField = page.locator("textarea[id^='data-']");

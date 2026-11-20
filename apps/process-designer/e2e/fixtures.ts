@@ -8,12 +8,6 @@ export const TEST_PASSWORD = process.env.E2E_PASSWORD || "users-admin";
 
 export const GATEWAY_BASE_URL = process.env.E2E_GATEWAY_BASE_URL || "http://localhost:8009";
 
-// `users-admin` needs the `admin.object_config` capability
-// (domain-admin-config role, see docs/services/process-designer.md
-// "Authorization") to save/delete process definitions - granted once per
-// dev stack the same way apps/user-ui/e2e/README.md documents its own
-// one-time grant. Reused here instead of created per test run (see this
-// directory's README).
 export async function apiLogin(username: string = TEST_USERNAME): Promise<{ access_token: string }> {
   const response = await fetch(`${GATEWAY_BASE_URL}/api/auth-service/login`, {
     method: "POST",
@@ -40,7 +34,57 @@ export async function deleteProcessDefinitionViaApi(token: string, id: number): 
   });
 }
 
-export const test = base;
+// `users-admin` needs the `admin.object_config` capability
+// (domain-admin-config role, see docs/services/process-designer.md
+// "Authorization") to save/delete process and DMN definitions. Until P83-S8
+// this was a manual one-time grant per dev stack (this directory's README),
+// which a stack reset silently undid - the suite then failed with nothing
+// pointing at the missing role. The auto fixture below grants the role for
+// the length of each test and revokes it afterwards, so the stack keeps its
+// default role set. users-admin may grant roles itself (admin.user_management).
+async function grantRole(token: string, permission: string): Promise<number> {
+  const auth = { Authorization: `Bearer ${token}` };
+  const me = (await (await fetch(`${GATEWAY_BASE_URL}/api/auth-service/me`, { headers: auth })).json()) as {
+    sub: string;
+  };
+  const roles = (await (
+    await fetch(`${GATEWAY_BASE_URL}/api/permission-service/roles`, { headers: auth })
+  ).json()) as { id: number; name: string; permissions: string[] }[];
+  const role = roles.find((r) => r.permissions.includes(permission));
+  if (!role) throw new Error(`No role carries ${permission}`);
+  const response = await fetch(`${GATEWAY_BASE_URL}/api/permission-service/role-assignments`, {
+    method: "POST",
+    headers: { ...auth, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      principal_type: "user",
+      principal_id: me.sub,
+      role_id: role.id,
+      resource_id: "root",
+    }),
+  });
+  if (!response.ok) throw new Error(`Role grant failed: ${response.status}`);
+  const body = (await response.json()) as { role_assignment: { id: number } | null };
+  if (!body.role_assignment) throw new Error("Role grant went to approval instead of being applied");
+  return body.role_assignment.id;
+}
+
+export const test = base.extend<{ objectConfigRole: void }>({
+  objectConfigRole: [
+    async ({}, use) => {
+      const { access_token: token } = await apiLogin();
+      const assignmentId = await grantRole(token, "admin.object_config");
+      try {
+        await use();
+      } finally {
+        await fetch(`${GATEWAY_BASE_URL}/api/permission-service/role-assignments/${assignmentId}`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      }
+    },
+    { auto: true },
+  ],
+});
 export { expect };
 
 export async function loginViaUi(page: import("@playwright/test").Page) {

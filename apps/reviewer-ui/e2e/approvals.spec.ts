@@ -22,6 +22,7 @@ test("loads the approval inbox and the status filter reloads without error", asy
   }
 
   const empty = page.getByText("Keine Freigabeanfragen.");
-  const table = page.locator("table.data-table");
+  // Role-based, not the `.data-table` class the Tailwind migration (P75-S4) removed
+  const table = page.getByRole("table");
   await expect(empty.or(table)).toBeVisible();
 });

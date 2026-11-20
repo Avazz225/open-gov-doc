@@ -41,41 +41,17 @@ bootstrapped `users-admin` technical account (present by default).
 container, same as production - no dev server is started by
 `playwright.config.ts`.
 
-**One-time permission grant** (not part of the app or its tests - a
-Postgres row in the local dev stack, nothing to commit): saving/deleting a
-process definition requires the `admin.object_config` capability (see
-`docs/services/process-designer.md` "Authorization") - `users-admin` does
-not have it by default (only `domain-admin-users`/`-license`/`-teamspaces`).
-Reading/opening the canvas remains open to any authenticated principal, so
-only the "creates a new BPMN diagram ... and saves it" flow needs this.
-There is already a reusable role for exactly this
-(`domain-admin-config` / "Objekttyp-/Workflow-Konfiguration", permission
-`admin.object_config`) - grant it once per stack instead of creating a new
-one-off role (this dev stack already has hundreds of leftover
-`search-test-role-*`/similar rows from other suites that never clean up):
-
-```bash
-TOKEN=$(curl -s http://localhost:8009/api/auth-service/login -X POST \
-  -H "Content-Type: application/json" \
-  -d '{"username":"users-admin","password":"users-admin"}' | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
-ROLE_ID=$(curl -s "http://localhost:8009/api/permission-service/roles" \
-  -H "Authorization: Bearer $TOKEN" | python3 -c "
-import sys,json
-for r in json.load(sys.stdin):
-    if 'admin.object_config' in r.get('permissions', []):
-        print(r['id']); break
-")
-curl -s -X POST http://localhost:8009/api/permission-service/role-assignments \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d "{\"principal_type\":\"user\",\"principal_id\":\"2\",\"role_id\":$ROLE_ID,\"resource_id\":\"root\"}"
-```
-
-(`principal_id: "2"` is `users-admin`'s `sub` claim in this stack - confirm
-via `GET /api/auth-service/me` if it ever differs. `GET
-/permission-service/roles` already listed an existing `domain-admin-config`
-role, id `1774` at the time this suite was built - re-check by permission
-name rather than hardcoding the id, roles can be re-created with different
-ids across stack resets.)
+**Permission grant (automatic since P83-S8):** saving/deleting a process
+or DMN definition requires the `admin.object_config` capability (see
+`docs/services/process-designer.md` "Authorization"), which `users-admin`
+does not hold by default. The auto fixture `objectConfigRole`
+(`e2e/fixtures.ts`) grants the existing `domain-admin-config` role (looked up
+by permission, never by id) to the test account for the length of each test
+and revokes it afterwards - no manual one-time grant per stack any more,
+and a stack reset no longer breaks the suite silently. The suite therefore
+runs with `workers: 1`: a parallel worker's login can recompute the
+account's effective permissions concurrently and leave a pre-grant entry in
+permission-service's materialized cache.
 
 ## Design notes
 
@@ -110,10 +86,13 @@ ids across stack resets.)
   drag targets) and was verified to actually place a second `.djs-shape`
   (an auto-generated `Activity_*` id) alongside the starter diagram's
   `StartEvent_1`. The canvas SVG itself needs a specific selector
-  (`.designer-canvas svg[data-element-id]`) - `.designer-canvas svg` alone
+  (`.djs-container svg[data-element-id]`) - a bare `svg` under the canvas
   matches 3 elements (the diagram SVG, the palette's built-in search-icon
-  SVG, and the "Powered by bpmn.io" badge SVG), all nested under the same
-  `.designer-canvas` container.
+  SVG, and the "Powered by bpmn.io" badge SVG). The selector is scoped to
+  bpmn-js's own `.djs-container`, not an app class: the Tailwind migration
+  (P75-S4) removed `.designer-canvas`/`.designer-toolbar`, which left this
+  suite stale until P83-S8; the name field is addressed by its id
+  (`#process-name`) for the same reason.
 - **Version pinning / `overrides` / `--legacy-peer-deps` trap / `e2e/tsconfig.json`
   / `eslint.config.mjs`'s `react-hooks/rules-of-hooks` override /
   `nginx.conf`'s `absolute_redirect off;`**: identical rationale to

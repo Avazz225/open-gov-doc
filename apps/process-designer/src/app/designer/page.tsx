@@ -189,6 +189,7 @@ function DesignerPageInner() {
         <label className="flex items-center gap-2 text-sm">
           {t("designer.nameLabel")}
           <input
+            id="process-name"
             type="text"
             value={name}
             onChange={(event) => setName(event.target.value)}

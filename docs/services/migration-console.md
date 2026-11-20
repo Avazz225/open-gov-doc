@@ -67,7 +67,7 @@ The transfer list shows a status badge (green for `released`/`deleted`/`dry_run_
 
 ## Authorization
 
-**No capability-gated actions in this app** — `migration-service` gates its write endpoints exclusively via its own license check (`license_gate`, Concept 9.3: demo mode blocks `POST /transfers`/`POST /paired-installations`, not reading), no domain-separated admin role. `RequireAuth` only checks whether a valid session exists at all. An unlicensed installation or one in demo mode shows the corresponding `403` error message directly in the respective form (no dedicated license status banner as in the Admin UI, not added for scope reasons in this session).
+**Pairing is capability-gated** (since P59-S5): `POST`/`DELETE /paired-installations` require `admin.migration_management` (role `domain-admin-migration`, "Migrations-Installationspaarung verwalten") — pairing with another installation is an admin-level trust decision (Concept 7.2). `POST /transfers` additionally checks the caller's read permission on the source folder. The console does not hide these actions; a caller without the role sees the backend's `403` message ("Fehlende Domain-Admin-Rolle 'Migrations-Installationspaarung'") directly in the form. On top of that, `migration-service`'s license check (`license_gate`, Concept 9.3) blocks `POST /transfers`/`POST /paired-installations` in demo mode, not reading — also shown as a `403` in the respective form (no dedicated license status banner as in the Admin UI). `RequireAuth` only checks whether a valid session exists at all. (This section claimed "no capability-gated actions" until P83-S8 — stale since P59-S5.)
 
 ## Connection to the backend
 

@@ -2,7 +2,33 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P83-S7 (seventh session of Phase 83): punch-list items 5–7 + 10 in admin-ui,
+**Last completed:** P83-S8 (eighth session of Phase 83): the stale Playwright e2e specs are repaired.
+All six suites pass against the stack, 27/27 (user-ui 3, admin-ui 7, process-designer 6,
+migration-console 4, reviewer-ui 5, office-addin 2). Full record: `IMPLEMENTATION_PLAN.md`'s P83-S8
+entry.
+
+**What changed:**
+- Class locators removed by the Tailwind migration (P75-S4) are now role/id locators. process-designer's
+  name input got `id="process-name"`.
+- `errorAlert(page)` matches only alerts with text, because Next.js's route announcer is an empty
+  `role="alert"`.
+- migration-console and process-designer grant the role their flows need (`domain-admin-migration`,
+  `domain-admin-config`) per test and revoke it afterwards. No manual one-time grant per stack any more.
+  Both run with `workers: 1` (see below).
+- `docs/services/migration-console.md` "Authorization" was stale since P59-S5 and is corrected.
+
+**Open:** suspected race in permission-service's effective-permission cache. With parallel workers, a
+fresh role grant intermittently did not apply, probably because a concurrent login wrote a pre-grant
+cache row after the invalidation. Backend issue, recorded for the next gap replan. reviewer-ui's
+principal-name lookup is still open from S7. The stack was stopped afterwards.
+
+**Next session:** **P83-S9**, narrow-width/mobile assessment + ADR (ADR 0237 Decision 6): screenshot every
+app at 390/768px and decide the shared patterns (sidebar → drawer, dockview panes → stacked/tabbed,
+tables → scroll vs stacked rows).
+
+---
+
+Earlier P83-S7 summary, kept for context (seventh session of Phase 83): punch-list items 5–7 + 10 in admin-ui,
 reviewer-ui, process-designer and migration-console, plus item 6's user-ui part. This closes the
 P83-S1 craft-lens punch list except item 12 (narrow widths → S9/S10+). Full record:
 `IMPLEMENTATION_PLAN.md`'s P83-S7 entry and the "Phase 83 Session 7" sections in
@@ -33,7 +59,7 @@ P83-S1 craft-lens punch list except item 12 (narrow widths → S9/S10+). Full re
 **Open:** reviewer-ui shows principal ids under "Beantragt von" (no name lookup available there). The
 stack was stopped afterwards.
 
-**Next session:** **P83-S8**, repair the stale Playwright e2e specs. Replace the CSS-class locators
+**Next session (at the time):** P83-S8. It was done next; see the entry above. Original note:, repair the stale Playwright e2e specs. Replace the CSS-class locators
 removed in P75-S4 (`.error-text`, `table.data-table`, `ul.entry-list`, …) with role/label locators in
 every app's `e2e/`, and run them all against the stack. Run them with Node from nvm and
 `npx playwright test` per app; Playwright 1.48 uses the cached chromium-1140.

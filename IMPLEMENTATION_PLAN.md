@@ -3180,9 +3180,31 @@ work has to be read against that baseline (see DoD).
       session.
     - process-designer's header is right-aligned with nothing on its left; the page's own tabs sit
       below. That is acceptable, and S9's narrow-width pass revisits header layouts anyway.
-- **P83-S8 — Repair the stale Playwright e2e specs**: replace class locators removed in P75-S4 with
-  role/label-based ones in every app's `e2e/`, and run them all against the stack (green, or each failure
-  explained).
+- **P83-S8 — Repair the stale Playwright e2e specs**: ✅ **Done.** All six suites green against the
+  stack: user-ui 3, admin-ui 7, process-designer 6, migration-console 4, reviewer-ui 5, office-addin 2
+  (27/27, twice in a row).
+  - **Class locators → roles:** `table.data-table` → `getByRole("table")`, `ul.entry-list` →
+    `getByRole("list")` (the case card is now clicked via its button), process-designer's
+    `.designer-toolbar`/`.designer-canvas` → `#process-name` (new id on the name input) and bpmn-js's
+    own `.djs-container`. admin-ui's registry status asserts the translated labels (S7 item 6).
+  - **`.error-text` → `errorAlert(page)`** (reviewer-ui, migration-console fixtures): alerts *with
+    text*. Next.js's route announcer also carries `role="alert"` (empty), so a bare `getByRole("alert")`
+    made every "no error" assertion fail.
+  - **Missing roles were the other half of the failures.** Pairing needs `admin.migration_management`
+    (role `domain-admin-migration`, P59-S5), saving process/DMN definitions needs `admin.object_config`;
+    the test account holds neither. process-designer's README documented a manual one-time grant that a
+    stack reset had undone. Both suites now **grant the role per test and revoke it in teardown**
+    (fixtures look roles up by name/permission, never by id); no assignment is left behind (checked).
+  - **Both suites run with `workers: 1`.** With parallel workers the grant intermittently did not apply.
+    Suspected cause: a concurrent login recomputes the account's effective permissions and writes a
+    pre-grant row into permission-service's materialized cache after the grant's invalidation.
+  - **Docs:** `docs/services/migration-console.md` "Authorization" claimed no capability-gated actions
+    (stale since P59-S5), corrected; both e2e READMEs describe the automatic grant.
+  - **Checks:** e2e `tsc` clean in both changed suites; process-designer vitest 60/60 and eslint clean
+    after the `id` change; image rebuilt.
+  - **Found and recorded, not fixed here:** the suspected effective-permission cache race in
+    permission-service (an invalidation can be overwritten by a concurrent recompute). It is a backend
+    correctness issue outside a UI phase; candidate for the next gap replan.
 - **P83-S9 — Narrow-width/mobile assessment + ADR (user decision 2026-11-20)**: screenshot every app at
   390/768px and decide the patterns once, for all apps:
   - sidebar → drawer/top navigation;

@@ -25,7 +25,7 @@ test.describe("P71-S3: process-definition restore", () => {
     await page.getByRole("button", { name: "Neu erstellen" }).click();
     await page.waitForURL(/\/designer\//);
     await expect(page.locator('.djs-shape[data-element-id="StartEvent_1"]')).toBeVisible();
-    await page.locator(".designer-toolbar input[type='text']").fill(PROCESS_NAME);
+    await page.locator("#process-name").fill(PROCESS_NAME);
     await page.getByRole("button", { name: "Speichern" }).click();
     await expect(page.getByText(/Gespeichert als Version 1\./)).toBeVisible({ timeout: 10_000 });
     const v1Id = Number(new URL(page.url()).searchParams.get("id"));

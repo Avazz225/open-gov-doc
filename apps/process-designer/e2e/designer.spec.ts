@@ -42,7 +42,7 @@ test.describe("BPMN designer", () => {
     // canvas to place" interaction (not HTML5 drag-and-drop), which is far
     // more reliable to drive through Playwright than a real drag gesture.
     await paletteTaskEntry.click();
-    const diagramSvg = page.locator(".designer-canvas svg[data-element-id]");
+    const diagramSvg = page.locator(".djs-container svg[data-element-id]");
     const box = await diagramSvg.boundingBox();
     if (!box) throw new Error("BPMN canvas SVG has no bounding box");
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2 + 100);
@@ -55,7 +55,7 @@ test.describe("BPMN designer", () => {
     // docs/services/process-designer.md "Authorization") - granted to
     // `users-admin` once per dev stack, same pattern as the `document.read`/
     // `folder.read` grant documented in apps/user-ui/e2e/README.md.
-    await page.locator(".designer-toolbar input[type='text']").fill(PROCESS_NAME);
+    await page.locator("#process-name").fill(PROCESS_NAME);
     await page.getByRole("button", { name: "Speichern" }).click();
 
     await expect(page.getByText(/Gespeichert als Version 1\./)).toBeVisible({ timeout: 10_000 });

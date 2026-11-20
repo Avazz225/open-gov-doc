@@ -21,6 +21,7 @@ test("loads the transfer console and the status filter reloads without error", a
 
   // Either the empty state or a populated table is a valid outcome here.
   const empty = page.getByText("Noch keine Transfers.");
-  const table = page.locator("table.data-table");
+  // Role-based, not the `.data-table` class the Tailwind migration (P75-S4) removed
+  const table = page.getByRole("table");
   await expect(empty.or(table)).toBeVisible();
 });

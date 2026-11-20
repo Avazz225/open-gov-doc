@@ -28,7 +28,8 @@ test("creates a paired installation, shows the one-time API key, and deletes it 
   await expect(page.getByText("API-Key (nur jetzt sichtbar")).toBeVisible();
   await expect(page.locator("code")).toBeVisible();
 
-  const row = page.locator("table.data-table tbody tr", { hasText: pairedInstallationName });
+  // Role-based, not the `.data-table` class the Tailwind migration (P75-S4) removed
+  const row = page.getByRole("table").getByRole("row").filter({ hasText: pairedInstallationName });
   await expect(row).toBeVisible();
 
   page.once("dialog", (dialog) => dialog.accept());

@@ -18,8 +18,9 @@ test("shows registered service instances and can refresh them", async ({ page })
 
   // Every row's status badge resolves to one of the two known German
   // status labels - a loose but real assertion that the API response was
-  // actually rendered, not just an empty/error state.
-  await expect(rows.first().locator(".badge")).toHaveText(/healthy|down/);
+  // actually rendered, not just an empty/error state. (P83-S7 translated the
+  // labels, which had been the English "healthy"/"down" in both languages.)
+  await expect(rows.first().locator(".badge")).toHaveText(/^(Erreichbar|Nicht erreichbar)$/);
 
   await page.getByRole("button", { name: "Aktualisieren" }).click();
   await expect(rows.first()).toBeVisible({ timeout: 15_000 });
