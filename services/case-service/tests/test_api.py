@@ -919,3 +919,169 @@ def test_collection_level_case_endpoints_still_check_root(
     response = client.get("/cases", headers=case_headers)
 
     assert response.status_code == 403
+
+
+# --- Case destruction (P89-S1, ADR 0235) --------------------------------------
+
+DISPOSAL_HEADERS = {"X-DMS-Principal": "archival-service"}  # seeded disposal-callback role
+
+
+async def _archived_case(session, *, retention_days_ago=1, full_deletion=False, documents=()):
+    """A closed, archived case whose retention ran out `retention_days_ago`
+    days ago (negative = still running), with active document references
+    and a registered permission resource (for `GET /cases/{id}`)."""
+    from datetime import UTC, datetime, timedelta
+
+    case = await repository.create_case(
+        session,
+        case_id=f"case-{uuid.uuid4()}",
+        name="Bauantrag Mustermann",
+        object_type_id=None,
+        attributes={"Antragsteller": "Max Mustermann"},
+        process_definition_id=1,
+        process_instance_id=None,
+        created_by="alice",
+    )
+    for document in documents:
+        await repository.add_document_reference(
+            session, case.id, document_id=document, added_by="alice"
+        )
+    await repository.close_case(session, case, snapshots={})
+    case.archived_at = datetime.now(UTC) - timedelta(days=30)
+    case.retention_until = datetime.now(UTC) - timedelta(days=retention_days_ago)
+    case.full_deletion = full_deletion
+    await session.commit()
+    async with httpx.AsyncClient() as pc:
+        (
+            await pc.post(
+                f"{PERMISSION_SERVICE_URL}/resources",
+                json={"resource_id": case.id, "parent_id": "root", "resource_type": "case"},
+            )
+        ).raise_for_status()
+    return case
+
+
+async def test_destroy_requires_the_disposal_callback_permission(client, session, case_headers):
+    case = await _archived_case(session)
+    assert client.post(f"/cases/{case.id}/destroy").status_code == 401
+    assert client.post(f"/cases/{case.id}/destroy", headers=case_headers).status_code == 403
+
+
+async def test_destroy_refuses_a_case_that_is_not_due(client, session):
+    running = await _archived_case(session, retention_days_ago=-10)
+    response = client.post(f"/cases/{running.id}/destroy", headers=DISPOSAL_HEADERS)
+    assert response.status_code == 409
+    assert "läuft noch" in response.json()["detail"]
+    assert client.post("/cases/does-not-exist/destroy", headers=DISPOSAL_HEADERS).status_code == 404
+
+
+async def test_destroy_leaves_a_tombstone_by_default(client, session, case_headers, document_id):
+    case = await _archived_case(session, documents=[document_id])
+    assert case.id in [c["id"] for c in client.get("/cases/due-for-destruction").json()]
+
+    response = client.post(f"/cases/{case.id}/destroy", headers=DISPOSAL_HEADERS)
+    assert response.status_code == 200
+    body = response.json()
+    assert (body["mode"], body["document_reference_count"]) == ("tombstone", 1)
+
+    tombstone = client.get(f"/cases/{case.id}", headers=case_headers).json()
+    assert tombstone["destroyed_at"] is not None
+    assert (tombstone["name"], tombstone["attributes"]) == ("", {})
+    assert tombstone["vorgangsnummer"] == case.vorgangsnummer
+    assert client.get(f"/cases/{case.id}/documents", headers=case_headers).json() == []
+    # Gone from listings and from the due list; a second destroy is refused.
+    assert case.id not in [c["id"] for c in client.get("/cases", headers=case_headers).json()]
+    assert case.id not in [c["id"] for c in client.get("/cases/due-for-destruction").json()]
+    assert client.post(f"/cases/{case.id}/destroy", headers=DISPOSAL_HEADERS).status_code == 409
+    # The referenced document itself is untouched.
+    async with httpx.AsyncClient() as dc:
+        document = await dc.get(
+            f"{DOCUMENT_SERVICE_URL}/documents/{document_id}", headers=case_headers
+        )
+    assert document.status_code == 200
+
+
+async def test_full_deletion_removes_the_case(client, session, case_headers):
+    case = await _archived_case(session, full_deletion=True)
+    body = client.post(f"/cases/{case.id}/destroy", headers=DISPOSAL_HEADERS).json()
+    assert body["mode"] == "deleted"
+    assert client.get(f"/cases/{case.id}", headers=case_headers).status_code == 404
+
+
+async def test_an_actively_quarantined_document_blocks_destruction(
+    client, session, document_id, records_quarantine_admin_headers
+):
+    """Block, don't cascade (ADR 0235 Decision 4) - against the live
+    document-service's records quarantine."""
+    case = await _archived_case(session, documents=[document_id])
+    async with httpx.AsyncClient() as dc:
+        quarantine = await dc.post(
+            f"{DOCUMENT_SERVICE_URL}/records-quarantine",
+            json={"document_id": document_id, "set_by": "alice", "reason": "Prüfung"},
+            headers=records_quarantine_admin_headers,
+        )
+    quarantine.raise_for_status()
+    try:
+        blocked = client.post(f"/cases/{case.id}/destroy", headers=DISPOSAL_HEADERS)
+        assert blocked.status_code == 409
+        assert document_id in blocked.json()["detail"]
+    finally:
+        async with httpx.AsyncClient() as dc:
+            released = await dc.post(
+                f"{DOCUMENT_SERVICE_URL}/records-quarantine/{quarantine.json()['id']}/release",
+                json={"released_by": "bob"},
+                headers=records_quarantine_admin_headers,
+            )
+        released.raise_for_status()
+    assert client.post(f"/cases/{case.id}/destroy", headers=DISPOSAL_HEADERS).status_code == 200
+
+
+async def test_archival_resolves_the_destruction_schedule_from_the_config(
+    client, session, case_headers
+):
+    from datetime import timedelta
+
+    # An older client sends only the two archival fields: the destruction
+    # settings must survive that.
+    client.put(
+        "/case-archival-config",
+        json={
+            "default_archive_after_days_closed": None,
+            "archive_encryption_enabled": False,
+            "default_retention_days_after_archived": 3650,
+            "default_full_deletion": True,
+        },
+        headers=case_headers,
+    ).raise_for_status()
+    old_client = client.put(
+        "/case-archival-config",
+        json={"default_archive_after_days_closed": 30, "archive_encryption_enabled": False},
+        headers=case_headers,
+    ).json()
+    assert (
+        old_client["default_retention_days_after_archived"],
+        old_client["default_full_deletion"],
+    ) == (
+        3650,
+        True,
+    )
+
+    case = await repository.create_case(
+        session,
+        case_id=f"case-{uuid.uuid4()}",
+        name="Akte",
+        object_type_id=None,
+        attributes={},
+        process_definition_id=1,
+        process_instance_id=None,
+        created_by="alice",
+    )
+    await repository.close_case(session, case, snapshots={})
+    await session.commit()
+    archived = client.put(f"/cases/{case.id}/archived").json()
+    assert archived["full_deletion"] is True
+    from datetime import datetime
+
+    retention = datetime.fromisoformat(archived["retention_until"])
+    archived_at = datetime.fromisoformat(archived["archived_at"])
+    assert retention - archived_at == timedelta(days=3650)

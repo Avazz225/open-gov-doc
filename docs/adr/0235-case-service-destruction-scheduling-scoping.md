@@ -78,3 +78,30 @@ quarantine primitive.**
 - `docs/services/case-service.md`'s Open Points should gain (and, once built, lose) this item — left for
   the build session, per this project's convention of updating docs alongside the change that closes a
   gap.
+
+## Build — P89-S1 (case-service part)
+
+Built as decided. The judgment calls this ADR left to the build session:
+
+- **Config:** two fields on `CaseArchivalConfig`, `default_retention_days_after_archived` and
+  `default_full_deletion`, resolved in `mark_archived`.
+  - `PUT /case-archival-config` writes them only when sent, which protects them from admin-ui's existing
+    two-field form.
+- **Destroy semantics:**
+  - The case's contents (document references, pseudonymized attribute values) always go.
+  - `full_deletion=false` keeps a **tombstone**: id, Vorgangsnummer, dates, `destroyed_at`; name and
+    attributes cleared, since both can carry personal data. It drops out of listings and the due list.
+  - `full_deletion=true` deletes the row.
+  - Referenced documents are untouched.
+- **Blocking strictness:** only an **active records quarantine** on a referenced document blocks (`409`).
+  An unanswerable check blocks too (`503`, fail closed).
+  - The stricter alternative ("every referenced document must itself be past its destruction point")
+    was not taken. A case doesn't destroy its documents, so their own retention isn't the case's
+    concern, and the stricter rule would make most cases indestructible.
+- **Gate:**
+  - Unlike the ungated archival callbacks (ADR 0070), the destroy is gated by archival-service's
+    existing disposal-callback capability (`document.disposal_callback`, role
+    `archival-service-callback`), because it is irreversible.
+  - A new `case.disposal_callback` was avoided: seeded roles aren't updated on existing installations.
+- **Remaining for P89-S2:** archival-service's destruction pipeline, deletion-register entries, and the
+  admin visibility.

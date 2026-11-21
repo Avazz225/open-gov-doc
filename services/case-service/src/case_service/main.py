@@ -5,6 +5,7 @@ import time
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 
 from dms_common import (
     ActingIdentity,
@@ -35,6 +36,7 @@ from case_service.schemas import (
     CaseArchivalConfigOut,
     CaseArchiveStatusOut,
     CaseCreate,
+    CaseDestroyedOut,
     CaseDocumentAdd,
     CaseDocumentReferenceOut,
     CaseDocumentRemove,
@@ -75,6 +77,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await conn.execute(
             text('ALTER TABLE "case".cases ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ')
         )
+        # Destruction (P89-S1, ADR 0235) - same ad-hoc migration pattern.
+        for column, ddl in (
+            ("cases", "retention_until TIMESTAMPTZ"),
+            ("cases", "full_deletion BOOLEAN NOT NULL DEFAULT FALSE"),
+            ("cases", "destroyed_at TIMESTAMPTZ"),
+            ("case_archival_config", "default_retention_days_after_archived INTEGER"),
+            ("case_archival_config", "default_full_deletion BOOLEAN NOT NULL DEFAULT FALSE"),
+        ):
+            await conn.execute(text(f'ALTER TABLE "case".{column} ADD COLUMN IF NOT EXISTS {ddl}'))
         # Case number (2.3/2.5, P15-S3) - same ad-hoc migration pattern.
         await conn.execute(
             text('ALTER TABLE "case".cases ADD COLUMN IF NOT EXISTS vorgangsnummer VARCHAR(64)')
@@ -570,6 +581,17 @@ async def list_cases_due_for_archival(
     return await repository.list_due_for_archival(session)
 
 
+@app.get("/cases/due-for-destruction", response_model=list[CaseOut])
+async def list_cases_due_for_destruction(
+    session: AsyncSession = Depends(get_session),
+) -> list[CaseOut]:
+    """Archived cases whose retention has run out (P89-S1, ADR 0235) - the
+    poll target of archival-service's destruction pipeline (P89-S2).
+    Ungated like `GET /cases/due-for-archival` (ADR 0070): a list of ids
+    and dates, the destructive step itself is gated."""
+    return await repository.list_due_for_destruction(session)
+
+
 @app.get("/cases/{case_id}", response_model=CaseOut)
 async def get_case(
     case_id: str,
@@ -715,6 +737,76 @@ async def mark_case_archived(case_id: str, session: AsyncSession = Depends(get_s
     return case
 
 
+async def _require_disposal_permission(x_dms_principal: str) -> None:
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    if not await app.state.permission_client.has_permission(
+        x_dms_principal, settings.disposal_callback_permission
+    ):
+        raise HTTPException(
+            status_code=403, detail="Fehlende Berechtigung 'Aussonderungs-Callback'"
+        )
+
+
+@app.post("/cases/{case_id}/destroy", response_model=CaseDestroyedOut)
+async def destroy_case(
+    case_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> CaseDestroyedOut:
+    """Destroys a case whose retention has run out (P89-S1, ADR 0235).
+    Unlike the archival callbacks this is gated (the disposal-callback
+    capability): it is irreversible.
+
+    Block, don't cascade (ADR 0235 Decision 4): refused with `409` while a
+    referenced document is under active records quarantine, and with `503`
+    when that can't be checked - the destruction pipeline retries later.
+    The documents themselves are not touched."""
+    await _require_disposal_permission(x_dms_principal)
+    case = await _get_case_or_404(session, case_id)
+    now = datetime.now(UTC)
+    try:
+        repository.check_due_for_destruction(case, now)
+    except repository.CaseNotDueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    references = await repository.get_active_references(session, case_id)
+    quarantined = []
+    for reference in references:
+        try:
+            if await app.state.document_client.has_active_quarantine(reference.document_id):
+                quarantined.append(reference.document_id)
+        except Exception as exc:  # noqa: BLE001 - fail closed, retry later
+            raise HTTPException(
+                status_code=503,
+                detail=f"Quarantäne-Status von Dokument {reference.document_id!r} nicht prüfbar",
+            ) from exc
+    if quarantined:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Dokumente in aktiver Quarantäne: {', '.join(sorted(quarantined))}",
+        )
+    vorgangsnummer = case.vorgangsnummer
+    mode, reference_count = await repository.destroy_case(session, case, now=now)
+    await session.commit()
+    await publish_event(
+        "case.destroyed",
+        subject=case_id,
+        payload={
+            "mode": mode,
+            "vorgangsnummer": vorgangsnummer,
+            "document_reference_count": reference_count,
+        },
+        actor=x_dms_principal,
+    )
+    return CaseDestroyedOut(
+        case_id=case_id,
+        vorgangsnummer=vorgangsnummer,
+        mode=mode,
+        destroyed_at=now,
+        document_reference_count=reference_count,
+    )
+
+
 @app.get("/case-archival-config", response_model=CaseArchivalConfigOut)
 async def get_case_archival_config(
     x_dms_principal: str = Header(default=""),
@@ -731,10 +823,16 @@ async def update_case_archival_config(
     session: AsyncSession = Depends(get_session),
 ) -> CaseArchivalConfigOut:
     await _require_case_permission(x_dms_principal, access_type="write")
+    destruction_fields = {
+        key: getattr(payload, key)
+        for key in ("default_retention_days_after_archived", "default_full_deletion")
+        if key in payload.model_fields_set
+    }
     config = await repository.update_archival_config(
         session,
         default_archive_after_days_closed=payload.default_archive_after_days_closed,
         archive_encryption_enabled=payload.archive_encryption_enabled,
+        **destruction_fields,
     )
     await session.commit()
     return config

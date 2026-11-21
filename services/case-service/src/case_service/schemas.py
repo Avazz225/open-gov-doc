@@ -1,7 +1,7 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class CaseCreate(BaseModel):
@@ -32,6 +32,10 @@ class CaseOut(BaseModel):
     archived_at: datetime | None
     vorgangsnummer: str | None
     registered_at: datetime | None
+    # P89-S1 (ADR 0235)
+    retention_until: datetime | None = None
+    full_deletion: bool = False
+    destroyed_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -93,13 +97,21 @@ class CaseArchiveStatusOut(BaseModel):
 
 
 class CaseArchivalConfigIn(BaseModel):
+    """The two P89-S1 fields are optional: a client that doesn't send them
+    (admin-ui before P89-S2) keeps their stored values instead of resetting
+    them - only fields present in the request are written."""
+
     default_archive_after_days_closed: int | None
     archive_encryption_enabled: bool
+    default_retention_days_after_archived: int | None = Field(default=None, ge=0)
+    default_full_deletion: bool = False
 
 
 class CaseArchivalConfigOut(BaseModel):
     default_archive_after_days_closed: int | None
     archive_encryption_enabled: bool
+    default_retention_days_after_archived: int | None = None
+    default_full_deletion: bool = False
     updated_at: datetime
 
     model_config = {"from_attributes": True}
@@ -140,3 +152,15 @@ class RevealedAttributeOut(BaseModel):
     reason: str | None
     pseudonymized_by: str
     pseudonymized_at: datetime
+
+
+class CaseDestroyedOut(BaseModel):
+    """Result of `POST /cases/{id}/destroy` (P89-S1, ADR 0235) - what the
+    deletion register (P89-S2) records about a case that no longer has a
+    name or contents."""
+
+    case_id: str
+    vorgangsnummer: str | None
+    mode: Literal["tombstone", "deleted"]
+    destroyed_at: datetime
+    document_reference_count: int

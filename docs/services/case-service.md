@@ -22,7 +22,9 @@
 | `GET` | `/cases/{id}/documents` | All references (active + removed) including resolved version: open → live `current_version_number`/`deleted_at` from the Document Service, closed → fixed `snapshot_version_number`, no more Document Service calls needed. **Since Post-Roadmap Phase 36 Session 2**: additionally `has_active_quarantine` (ADR 0116), always live-resolved regardless of case/reference status, see "Two-Stage Reference Model" below |
 | `POST` | `/cases/{id}/archive-request` | Manual records-disposal trigger (5.6, since P7-S3b) — `409` if the case is not yet closed |
 | `GET` | `/cases/{id}/archive-status` | Read disposal status (`archive_after`/`archived_at`, since P7-S3b) |
-| `PUT` | `/cases/{id}/archived` | Internal callback from `archival-service`, once the XDOMEA package is verified (since P7-S3b) — publishes `case.archived` |
+| `PUT` | `/cases/{id}/archived` | Internal callback from `archival-service`, once the XDOMEA package is verified (since P7-S3b) — publishes `case.archived`. Since P89-S1 it also resolves `retention_until`/`full_deletion` from the config |
+| `GET` | `/cases/due-for-destruction` | P89-S1 ([ADR 0235](../adr/0235-case-service-destruction-scheduling-scoping.md)): archived cases whose `retention_until` has passed and that aren't destroyed. Ungated like `due-for-archival`; registered before `/cases/{id}` |
+| `POST` | `/cases/{id}/destroy` | P89-S1: destroys a due case. **Gated** by the disposal-callback capability (`document.disposal_callback`, role `archival-service-callback`) because it is irreversible. `409` when not due/already destroyed or while a referenced document is actively quarantined; `503` when that can't be checked. Returns `{case_id, vorgangsnummer, mode, destroyed_at, document_reference_count}`, publishes `case.destroyed` |
 | `GET`/`PUT` | `/case-archival-config` | Installation-wide disposal configuration (`default_archive_after_days_closed`, `archive_encryption_enabled`, since P7-S3b) |
 | `GET`/`PUT` | `/case-number-config` | Case reference number format string (2.5, since P15-S3, default `{YYYY}-{Laufende_Nummer}`) — `400` on an unknown placeholder or missing `{Laufende_Nummer}` |
 | `POST` | `/cases/{id}/attributes/{name}/pseudonymize` | Pseudonymize one `personal_data: true` attribute (5.2, Phase 58 Session 1) — gated by `admin.attribute_pseudonymization`, see "Attribute-Level Pseudonymization" below |
@@ -69,6 +71,33 @@ Only **closed** cases are eligible for records disposal — the actual transfer 
 - **Encryption**: also installation-wide (`CaseArchivalConfig.archive_encryption_enabled`), for the same reason there is no counterpart to `ObjectType.archive_encryption_enabled`.
 - **No dehydration for cases themselves** — a case has no own live content (only references); only the referenced documents go through their own, independent P7-S3 archiving/dehydration cycle.
 - **`GET /cases/due-for-archival`** filters on `status="closed" AND archive_after <= now AND archived_at IS NULL` — registered before `/cases/{id}` (route ordering, see above).
+
+## Destruction (P89-S1, [ADR 0235](../adr/0235-case-service-destruction-scheduling-scoping.md))
+
+The archival lifecycle had no end: an archived case stayed forever. Destruction mirrors archival.
+- **Schedule:** `retention_until`/`full_deletion` on `Case` are resolved when archival-service reports
+  the case archived (`mark_archived`), from two new `CaseArchivalConfig` fields:
+  `default_retention_days_after_archived` (null = never due) and `default_full_deletion`.
+  - `PUT /case-archival-config` writes them only when sent, so admin-ui's older two-field form can't
+    reset them.
+  - A `retention_until` set earlier stays.
+- **Due:** `GET /cases/due-for-destruction` lists archived, not yet destroyed cases with `retention_until
+  <= now`. archival-service polls it (P89-S2), as it does `due-for-archival`.
+- **Destroy:** `POST /cases/{id}/destroy`.
+  - **Always removed:** the case's document references and pseudonymized attribute values, its
+    contents.
+  - **`full_deletion=false` (default) → tombstone:** the row stays with id, Vorgangsnummer, the
+    lifecycle dates and `destroyed_at`; name and attributes are cleared (both can hold personal data).
+    It stays readable by id, but drops out of `GET /cases` and the due list. A second destroy is `409`.
+  - **`full_deletion=true` → deleted:** the row goes; a later `GET` is `404`.
+  - **Referenced documents are not touched:** they have their own retention (5.2).
+- **Block, don't cascade (ADR 0235 Decision 4):**
+  - while any referenced document is under active records quarantine, the destroy is refused (`409`
+    naming the documents);
+  - if document-service can't answer, `503`, fail closed. The pipeline retries.
+- **Gate:** archival-service's existing disposal-callback capability rather than a new `case.*` one.
+  Seeded roles aren't updated on existing installations, so a new capability would need a manual
+  migration everywhere.
 
 ## Attribute-Level Pseudonymization (5.2, Phase 58 Session 1, [ADR 0177](../adr/0177-pseudonymization-retention-trigger-and-folder-case-mirroring.md))
 
@@ -170,6 +199,13 @@ case as `mail-connector` on behalf of the mailbox's user (before: the non-servic
 `system:mail-connector`, plus `added_by` in the body).
 
 ## Open Points
+
+- ~~**No destruction for cases**~~ (ADR 0235, never listed here before) — **case-service part built in
+  P89-S1**: schedule on archival, the due list and a gated destroy with quarantine block (see
+  "Destruction"). archival-service's pipeline, the deletion-register entries and the admin visibility
+  follow in P89-S2.
+- **A fully deleted case leaves its permission `ResourceNode`** (`full_deletion=true`): permission-service
+  has no delete for resource nodes yet. It is harmless (no case answers to it), but it is clutter.
 
 - ~~No role check/RBAC~~ — **fixed in Post-Roadmap Phase 19 Session 5** ([ADR 0070](../adr/0070-case-service-rbac.md)): all human-usable endpoints now check `case.read`/`case.write` against `permission-service` (`X-DMS-Principal` required). The two purely internal machine-to-machine callbacks (`GET /cases/due-for-archival`, `PUT /cases/{id}/archived`) remain deliberately ungated, see ADR 0070 "Decision".
 - ~~No resource tree entry in permission-service~~ — **fixed in Post-Roadmap Phase 35 Session 2** ([ADR 0144](../adr/0144-case-per-case-resource-type.md)): `case-service` now registers a real `ResourceNode` per case (`resource_type="case"`, `parent_id="root"`) via a new, synchronous `POST /resources` on `permission-service` (not just an async `case.resource.created` event, unlike `folder-service`'s own registration — a purely event-driven path would leave a race window where a freshly created case is briefly unreadable by anyone, since an unregistered resource_id denies every check outright). Every per-case endpoint now checks `resource_id=<case_id>`; an admin can scope a `RoleAssignment` to one specific case through the already-generic `POST /role-assignments` (`resource_id` free-text), no new admin-ui needed. A startup backfill loop registers every case created before this session (self-healing, idempotent, re-run on every restart). ~~Documents still have no per-document resource tree entry~~ — **closed in Post-Roadmap Phase 39 Session 4** ([ADR 0154](../adr/0154-document-per-document-resource-case-list-filtering-org-hierarchy-case-scope.md)): `document-service` now registers an identical per-document `ResourceNode`, mirroring this exact pattern — see `docs/services/document-service.md`.

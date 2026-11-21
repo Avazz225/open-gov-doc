@@ -42,6 +42,15 @@ class Case(Base):
     # eligible for disposal.
     archive_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Destruction (P89-S1, ADR 0235): resolved when the case is archived
+    # (`mark_archived`), from `CaseArchivalConfig`. Same meaning as on
+    # `Document`: from `retention_until` on, the case may be destroyed;
+    # `full_deletion=False` leaves a tombstone (id, Vorgangsnummer, dates,
+    # `destroyed_at`), `True` removes the row. A case has no content of its
+    # own - its referenced documents keep their own lifecycle.
+    retention_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    full_deletion: Mapped[bool] = mapped_column(Boolean, default=False)
+    destroyed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Case number (2.3/2.5, P15-S3): server-generated, installation-wide
     # unique reference (unlike `Document.attributes["Kennzeichen"]`, which
     # is only unique per object type + year) - basis for the new
@@ -99,6 +108,12 @@ class CaseArchivalConfig(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     default_archive_after_days_closed: Mapped[int | None] = mapped_column(Integer, nullable=True)
     archive_encryption_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    # P89-S1 (ADR 0235): retention after archival, and whether the case is
+    # then removed entirely instead of leaving a tombstone.
+    default_retention_days_after_archived: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+    default_full_deletion: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 

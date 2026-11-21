@@ -4009,6 +4009,17 @@ installation's replica health.
       chips → filter); windows with schedule summaries; `.badge.warn`.
     - **Live:** three rules showed error/warning/ok on the page.
 
+- **P88-S7 — Default alert package and Grafana (user request 2026-11-21, after the phase close; ADR 0252).**
+  - **Config-package category `alert_rules`** in config-service (export/import, upsert by rule name,
+    downtime windows included), so alert rules travel in the existing JSON package mechanism
+    (`packages/*/config.json`, four-eyes import).
+  - **Package `packages/monitoring-defaults/config.json`:** standard rules for the shipped sensors.
+    Imported deliberately, not auto-seeded.
+  - **Grafana:** monitoring-service exposes each rule's evaluated level as a sensor
+    (`monitoring.alert.level{rule,sensor}`, 0 ok, 1 warning, 2 error), and the dashboard gets an
+    "Alarme" row (state timeline). OG Doc stays the single evaluation engine; the Prometheus
+    rule-file export stays an opt-in for installations that want Prometheus to alert instead.
+
 **Phase 88 result:** admin-ui gained the surfaces whose backends existed without a UI, plus what the
 sessions found along the way:
 - **Fleet:** groups, update plans, rollouts and operators, with a rollout lifecycle (cancel, delete,
@@ -4021,7 +4032,7 @@ sessions found along the way:
 - **Object types:** guided rule editors. Two silent losses of status transitions were fixed.
 - **Mail:** mailboxes in a table with encrypted credentials and an admin page (ADR 0244).
 - **Users:** realm-role assignment.
-- PHASE88_REGRESSION
+- **Phase-close regression:** 32/32 services green on the first run; ruff shows only the known findings (23).
 
 ## Phase 89 — Compliance Completions
 
@@ -4030,6 +4041,12 @@ sessions found along the way:
   pair. The destroy guard refuses while any referenced document is actively quarantined, using the
   existing per-reference `has_active_quarantine`. Docs: add the open point `case-service.md` never got,
   then close it.
+  - ✅ **Result:**
+    - `retention_until`/`full_deletion`/`destroyed_at` plus two config fields, resolved on archival;
+    - `GET /cases/due-for-destruction` and a gated `POST /cases/{id}/destroy`: tombstone by default,
+      deleted with `full_deletion`, blocked by active quarantine (`409`) or an unanswerable check
+      (`503`);
+    - the ADR 0235 build addendum and the case-service docs.
 - **P89-S2 — Case destruction, archival-service pipeline and admin visibility.** A new pipeline in
   `case_pipeline.py`, deletion-register entries, and the admin archival view.
 - **P89-S3 — Small compliance bundle.**

@@ -30,3 +30,12 @@ class Settings(BaseServiceSettings):
     # service's/folder-service's own (no shared trust relationship between
     # services' key material, same rationale ADR 0156 itself used).
     attribute_pseudonymization_key: str | None = None
+
+    # P89-S1 (ADR 0235): who may destroy a due case. archival-service's
+    # existing disposal-callback capability (role `archival-service-
+    # callback`, also gating document-service's disposal callbacks) -
+    # reused rather than a new `case.*` capability, because seeded roles are
+    # not updated on existing installations (`ensure_domain_admin_roles`
+    # only creates missing ones), so a new capability would need a manual
+    # migration everywhere.
+    disposal_callback_permission: str = "document.disposal_callback"

@@ -2,7 +2,7 @@ import re
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -207,7 +207,9 @@ async def get_case_or_none(session: AsyncSession, case_id: str) -> Case | None:
 async def list_cases(
     session: AsyncSession, *, status: str | None = None, object_type_id: int | None = None
 ) -> list[Case]:
-    stmt = select(Case)
+    # A destroyed case (P89-S1) is a tombstone, not a case to work with:
+    # it stays readable by id, but no longer appears in listings.
+    stmt = select(Case).where(Case.destroyed_at.is_(None))
     if status is not None:
         stmt = stmt.where(Case.status == status)
     if object_type_id is not None:
@@ -325,10 +327,16 @@ async def update_archival_config(
     *,
     default_archive_after_days_closed: int | None,
     archive_encryption_enabled: bool,
+    **destruction_fields,
 ) -> CaseArchivalConfig:
+    """`destruction_fields` (P89-S1): only the destruction settings the
+    caller actually sent - `default_retention_days_after_archived`,
+    `default_full_deletion` - so an older client can't reset them."""
     config = await get_archival_config(session)
     config.default_archive_after_days_closed = default_archive_after_days_closed
     config.archive_encryption_enabled = archive_encryption_enabled
+    for key, value in destruction_fields.items():
+        setattr(config, key, value)
     config.updated_at = datetime.now(UTC)
     await session.flush()
     return config
@@ -370,8 +378,79 @@ async def mark_archived(session: AsyncSession, case_id: str) -> Case:
     intact (verbatim concept requirement, see models.py)."""
     case = await get_case(session, case_id)
     case.archived_at = datetime.now(UTC)
+    # Destruction schedule (P89-S1, ADR 0235): resolved here, like
+    # `archive_after` is at closure. A value set earlier (by hand) stays.
+    config = await get_archival_config(session)
+    if case.retention_until is None and config.default_retention_days_after_archived is not None:
+        case.retention_until = case.archived_at + timedelta(
+            days=config.default_retention_days_after_archived
+        )
+        case.full_deletion = config.default_full_deletion
     await session.flush()
     return case
+
+
+async def list_due_for_destruction(session: AsyncSession) -> list[Case]:
+    """Archived cases whose retention has run out and that still exist
+    (P89-S1, ADR 0235) - polled by archival-service (P89-S2), mirroring
+    `list_due_for_archival`."""
+    now = datetime.now(UTC)
+    result = await session.execute(
+        select(Case).where(
+            Case.archived_at.isnot(None),
+            Case.retention_until.isnot(None),
+            Case.retention_until <= now,
+            Case.destroyed_at.is_(None),
+        )
+    )
+    return list(result.scalars().all())
+
+
+class CaseNotDueError(Exception):
+    """Destroy refused: not archived, no retention reached, or destroyed."""
+
+
+def check_due_for_destruction(case: Case, now: datetime) -> None:
+    if case.destroyed_at is not None:
+        raise CaseNotDueError(f"Umlaufmappe {case.id!r} ist bereits vernichtet")
+    if case.archived_at is None:
+        raise CaseNotDueError(f"Umlaufmappe {case.id!r} ist nicht ausgesondert")
+    if case.retention_until is None or case.retention_until > now:
+        raise CaseNotDueError(
+            f"Aufbewahrung der Umlaufmappe {case.id!r} läuft noch "
+            f"(bis {case.retention_until.isoformat() if case.retention_until else 'unbestimmt'})"
+        )
+
+
+async def destroy_case(session: AsyncSession, case: Case, *, now: datetime) -> tuple[str, int]:
+    """Destroys a due case (P89-S1, ADR 0235): its document references and
+    pseudonymized attribute values always go - they are the case's contents.
+    `full_deletion=False` keeps the row as a tombstone (id, Vorgangsnummer,
+    dates, `destroyed_at`; name and attributes cleared, since both can hold
+    personal data), `True` deletes it. Referenced documents themselves are
+    untouched: they have their own retention. Returns (mode, number of
+    references removed)."""
+    references = await session.execute(
+        select(CaseDocumentReference).where(CaseDocumentReference.case_id == case.id)
+    )
+    reference_rows = list(references.scalars().all())
+    reference_count = len([r for r in reference_rows if r.removed_at is None])
+    await session.execute(
+        delete(CaseDocumentReference).where(CaseDocumentReference.case_id == case.id)
+    )
+    await session.execute(
+        delete(PseudonymizedAttribute).where(PseudonymizedAttribute.case_id == case.id)
+    )
+    if case.full_deletion:
+        await session.delete(case)
+        mode = "deleted"
+    else:
+        case.name = ""
+        case.attributes = {}
+        case.destroyed_at = now
+        mode = "tombstone"
+    await session.flush()
+    return mode, reference_count
 
 
 # --- Attribute-level pseudonymization vault (5.2, Phase 58 Session 1) ------

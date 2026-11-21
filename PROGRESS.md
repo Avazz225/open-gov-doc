@@ -2,6 +2,54 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P89-S1, case destruction, case-service part (build of
+[ADR 0235](docs/adr/0235-case-service-destruction-scheduling-scoping.md)).
+
+The user also asked for a default alert package as JSON and how the alerts reach Grafana. Planned as
+**P88-S7** (ADR 0252), with the answer given:
+- a config-package category `alert_rules` plus `packages/monitoring-defaults/config.json`;
+- alert states exported as a sensor for a Grafana "Alarme" row, so OG Doc stays the single engine;
+- the Prometheus rule export stays opt-in.
+
+**What changed:**
+- **`Case`:** `retention_until`, `full_deletion`, `destroyed_at`.
+- **`CaseArchivalConfig`:** `default_retention_days_after_archived`, `default_full_deletion`. Ad-hoc
+  `ALTER TABLE`s; verified live on the dev DB with 66 existing cases untouched.
+- **Schedule:** `mark_archived` resolves the schedule from the config (an earlier value stays).
+  `PUT /case-archival-config` writes the new fields only when sent.
+- **`GET /cases/due-for-destruction`:** archived, past `retention_until`, not destroyed. Ungated like
+  `due-for-archival`.
+- **`POST /cases/{id}/destroy`:**
+  - **Gate:** the disposal-callback capability (`document.disposal_callback`, which
+    `archival-service` holds).
+  - **Refusals:** `409` when not due/destroyed or while a referenced document is actively
+    quarantined; `503` when the quarantine check fails.
+  - **What goes:** references and pseudonymized values always. Then a tombstone (name/attributes
+    cleared, `destroyed_at`, out of listings), or the row deleted with `full_deletion`.
+  - Publishes `case.destroyed` and returns the summary the deletion register (P89-S2) will need.
+- **`GET /cases`** no longer lists destroyed cases.
+- **Docs:** case-service ("Destruction", API rows, the open point added then closed, the resource-node
+  leftover noted), the ADR 0235 build addendum, the plan (result, and P88-S7 added).
+
+**Checks:**
+- case-service 93 (+6, against the live permission-/document-service):
+  - the gate (401/403);
+  - not due → 409;
+  - tombstone (name/attributes cleared, references gone, readable, out of listings/due list, second
+    destroy 409, the document untouched);
+  - full deletion → 404;
+  - a real records quarantine blocks, and the release unblocks;
+  - the config survives an old two-field client, and archival resolves 3650 days and
+    `full_deletion`.
+- ruff clean.
+- **Live (rebuilt container):** the five columns exist, the due list is empty (no archived cases on
+  the dev stack), and destroy without a principal answers 401.
+
+**Next session:** **P88-S7** (default alert package and Grafana, ADR 0252) before P89-S2, as agreed.
+Then P89-S2: archival-service destruction pipeline, deletion register, admin visibility.
+
+---
+
 **Last completed:** P88-S6, the alerting UI on the sensors page
 ([ADR 0245](docs/adr/0245-sensor-alerting-thresholds-downtime-and-notification.md)). **Phase 88 is
 closed.**
@@ -34,9 +82,11 @@ closed.**
   examples** for the user to look at (mail goes to mailpit); delete them on the sensors page with
   `admin.monitoring`, or with `DELETE /alert-rules/{id}`.
 - No page overflow at 390px.
-- **Phase-close regression:** PHASE88_REGRESSION
+- **Phase-close regression:** 32/32 services green on the first run (auth-service 167 in 18 min, document-service 428, workflow-service 244, permission-service 202, …). ruff shows only 23 known findings in untouched files (the LibreOffice add-in, the loadtest notebook, one line each in plugin-orchestration and reporting), two fewer than the 25 known, through formatting (→ P91-S3).
+- **Permissions for the user (at their request, after this session's checks):** their Keycloak account got all 31 `domain-admin-*` roles plus `breakglass-approver` on `root` (32 assignments, none pending four-eyes) and the realm roles `dms-admin`/`dms-poststelle`. Machine roles (`archival-service-callback`, `service-*-lookup`) and test debris were left out.
+- The stack was left running for the user.
 
-**Next session:** **P89-S1**, case destruction in case-service (build ADR 0235).
+**Next session:** P89-S1 (done, see above).
 
 ---
 
