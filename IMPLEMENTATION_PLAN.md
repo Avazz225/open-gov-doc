@@ -4171,6 +4171,17 @@ sessions found along the way:
   existing deletion-reminder/SLA timer infrastructure (Konzept names exactly this as a future add-on).
   The session decides the owning service (favorite-service vs. notification-service vs. a small new
   table elsewhere).
+  - ✅ **Result:**
+    - **Owner:** favorite-service (personal, user-name-keyed, owner check, document/folder/case).
+    - **Table `reminder`:** several per object, `open`/`done`, time-zone-aware `due_at`.
+    - **API:** create, list (`due`/`status`/object filters, `is_due`), `due-count`, edit, snooze, done,
+      reopen, delete.
+    - **Due poll:** every 60 s under an advisory lock, commit before publish.
+    - **notification-service:** `favorite.reminder.due` → in-app plus a mail when the account has an
+      address (service-directory lookup), template use case, `?case=` links.
+    - **Live:** in-app for an account without an address; mail with note and link for one with.
+    - **For P90-S2:** no user-ui lists a person's own in-app notifications, so the reminder list itself
+      is the channel (`due=true`, `due-count` badge). The user-ui also has to read `?case=` deep links.
 - **P90-S2 — Follow-up reminders, UI.**
   - user-ui: set from the document/folder/case context menu and detail panes, and a "Wiedervorlagen" view
     in the icon rail.

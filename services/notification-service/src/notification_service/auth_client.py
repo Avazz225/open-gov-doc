@@ -36,5 +36,17 @@ class AuthServiceClient:
             return any(u.get("email") == recipient for u in users)
         return any(u["username"] == recipient for u in users)
 
+    async def email_for(self, username: str) -> str | None:
+        """The account's e-mail address, or None when it has none or doesn't
+        exist (P90-S1: follow-up reminders mail their owner by user name)."""
+        response = await self._client.get(
+            "/users/service-directory", headers=_SYSTEM_PRINCIPAL_HEADERS
+        )
+        response.raise_for_status()
+        for user in response.json():
+            if user["username"] == username:
+                return user.get("email") or None
+        return None
+
     async def close(self) -> None:
         await self._client.aclose()

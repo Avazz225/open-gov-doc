@@ -71,6 +71,11 @@ EMAIL_TEMPLATE_USE_CASES: list[dict[str, object]] = [
         "placeholders": ["title", "document_id", "locked_by", "link"],
     },
     {
+        "use_case": "favorite.reminder.due",
+        "description": "Wiedervorlage fällig (P90-S1): an die Person, die sie angelegt hat",
+        "placeholders": ["note", "object_type", "object_id", "due_at", "user", "link"],
+    },
+    {
         "use_case": "auth.superuser.activated",
         "description": "Superuser Break-Glass aktiviert (4.6)",
         "placeholders": ["expires_at"],

@@ -100,6 +100,9 @@ class Settings(BaseServiceSettings):
         # Sensor alerts (P88-S5, ADR 0245) on the "monitoring" stream.
         "monitoring.alert.raised",
         "monitoring.alert.resolved",
+        # Follow-up reminders (P90-S1, ADR 0246) - the first subject of this
+        # service on the "favorite" stream, so no durable override.
+        "favorite.reminder.due",
     ]
 
     # Recipient of the optional security notification on break-glass

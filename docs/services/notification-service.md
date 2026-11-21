@@ -135,6 +135,18 @@ with `registry.instance.*`.
 - **Placeholders:** `name`, `sensor`, `filter`, `value`, `level`, `since`, `thresholds`,
   `previous_level`.
 
+## Follow-up reminder consumer (P90-S1, [ADR 0246](../adr/0246-follow-up-reminders-in-favorite-service.md))
+
+`favorite.reminder.due` (the first subject of this service on the `"favorite"` stream, default durable)
+comes from favorite-service's due poll.
+- **In-app:** a notification to the owner's user name.
+- **E-mail:** sent when the account has an address. `AuthServiceClient.email_for` reads auth-service's
+  `GET /users/service-directory`; a failed lookup keeps the in-app message and skips the mail.
+- **Template:** use case `favorite.reminder.due`, placeholders `note`, `object_type` (German label),
+  `object_id`, `due_at`, `user`, `link`.
+- **Fallback text:** subject "Wiedervorlage: <note>" (or the object type), the note, and the direct link.
+  `case` links (`?case=`) are new and read by the user-ui from P90-S2 on.
+
 ## Configurable email templates (Post-Roadmap Phase 30, [ADR 0111](../adr/0111-configurable-email-templates.md))
 
 `src/notification_service/templates.py` adds `EmailTemplate`-backed subject/body overrides for **most** `consumer.py` use cases (17 since P71-S1 added six more, see above — `virus_scan.completed` remains the one dispatch branch with no registered use case, a pre-existing gap this session didn't chase). `resolve_template(session, use_case, recipient)` tries an exact `(use_case, domain-of-recipient)` row, then the `(use_case, NULL)` catch-all row, then returns `None`. `consumer.py`'s new `_render_or_fallback()` helper wraps every handler's notification-send call: `None` → the handler's original hardcoded subject/body, unchanged from before this feature (guaranteeing zero behavior change for any installation that has never configured a template); a resolved template's `render_template()` (`str.format()`-based) either substitutes cleanly or raises `UnknownPlaceholderError` on a typo'd placeholder, in which case the fallback is used and a warning logged — a misconfigured template can never cause a broken/half-rendered email to actually be sent. Resolution runs **per notification, not per event**: an event producing both an in-app and an email notification (e.g. `workflow.task.escalated`) resolves separately per channel's own recipient, so a domain-specific override can legitimately change only the email wording, not the in-app one (which almost never carries an `"@"` recipient and therefore only ever matches a catch-all row). `GET /email-template-use-cases` exposes the fixed catalog (with each use case's known placeholders) for the admin-ui form (`apps/admin-ui/src/app/email-templates/`, `EmailTemplates.tsx`) - deliberately a closed catalog rather than free text, since it mirrors `consumer.py`'s actual fixed set of dispatch branches (see ADR 0111 for the full rationale against `ApprovalActionConfig`'s open free-text `action_type`).

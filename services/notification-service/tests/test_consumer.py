@@ -1619,3 +1619,74 @@ async def test_sensor_alert_resolved_closes_the_loop(engine, settings, rate_limi
     )
     assert mail.subject == "Wieder in Ordnung: Speicher voll"
     assert "steht wieder auf 60 (vorher: Fehler)" in mail.body
+
+
+async def test_reminder_due_notifies_the_owner_in_app_and_by_mail(
+    engine, settings, rate_limiter, monkeypatch
+):
+    """P90-S1 (ADR 0246): a due follow-up reminder reaches its owner in-app,
+    and by e-mail when the account has an address (resolved by user name)."""
+    from notification_service.auth_client import AuthServiceClient
+
+    async def email_for(self, username):
+        return {"alice": "alice@dms.local"}.get(username)
+
+    monkeypatch.setattr(AuthServiceClient, "email_for", email_for)
+    configured = settings.model_copy(update={"user_ui_public_base_url": "http://localhost:3000"})
+    handler = consumer.make_handler(
+        _session_factory(engine), configured, _noop_publish, rate_limiter
+    )
+    for user, object_type, object_id in (("alice", "case", "case-7"), ("bob", "document", "doc-9")):
+        await handler(
+            Event(
+                event_type="favorite.reminder.due",
+                service_name="favorite-service",
+                subject=f"reminder-{user}",
+                payload={
+                    "user_id": user,
+                    "object_type": object_type,
+                    "object_id": object_id,
+                    "due_at": "2026-12-01T09:00:00+00:00",
+                    "note": "Antwort des Bauamts prüfen",
+                },
+            ).to_bytes()
+        )
+
+    async with _session_factory(engine)() as session:
+        notifications = await repository.list_notifications(session)
+    by_target = {(n.channel, n.recipient): n for n in notifications}
+    assert set(by_target) == {("in_app", "alice"), ("email", "alice@dms.local"), ("in_app", "bob")}
+    alice_mail = by_target[("email", "alice@dms.local")]
+    assert alice_mail.subject == "Wiedervorlage: Antwort des Bauamts prüfen"
+    assert "Umlaufmappe" in alice_mail.body
+    assert "http://localhost:3000/?case=case-7" in alice_mail.body
+    assert "http://localhost:3000/?document=doc-9" in by_target[("in_app", "bob")].body
+
+
+async def test_reminder_due_keeps_the_in_app_message_when_the_lookup_fails(
+    engine, settings, rate_limiter, monkeypatch
+):
+    from notification_service.auth_client import AuthServiceClient
+
+    async def broken(self, username):
+        raise RuntimeError("auth-service nicht erreichbar")
+
+    monkeypatch.setattr(AuthServiceClient, "email_for", broken)
+    handler = consumer.make_handler(_session_factory(engine), settings, _noop_publish, rate_limiter)
+    await handler(
+        Event(
+            event_type="favorite.reminder.due",
+            service_name="favorite-service",
+            subject="reminder-x",
+            payload={"user_id": "alice", "object_type": "folder", "object_id": "f-1", "note": ""},
+        ).to_bytes()
+    )
+    async with _session_factory(engine)() as session:
+        notifications = await repository.list_notifications(session)
+    assert [(n.channel, n.recipient, n.subject) for n in notifications] == [
+        ("in_app", "alice", "Wiedervorlage: Ordner")
+    ]
+
+
+async def _noop_publish(event_type, subject, payload, actor=None):
+    pass

@@ -5,6 +5,7 @@ from dms_eventbus_client import Event, NatsEventBusClient, SubjectNotFoundError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from notification_service import repository
+from notification_service.auth_client import AuthServiceClient
 from notification_service.links import build_resource_link
 from notification_service.rate_limiter import RecipientRateLimiter
 from notification_service.settings import Settings
@@ -87,6 +88,11 @@ def make_handler(
             return
         if event.event_type == "folder.deletion.reminder":
             await _handle_folder_deletion_reminder(
+                session_factory, settings, publish_event, rate_limiter, event
+            )
+            return
+        if event.event_type == "favorite.reminder.due":
+            await _handle_reminder_due(
                 session_factory, settings, publish_event, rate_limiter, event
             )
             return
@@ -495,6 +501,102 @@ async def _handle_folder_deletion_reminder(
             )
             await session.commit()
             await publish_notification_result(publish_event, email_notification)
+
+
+_OBJECT_LABELS = {"document": "Dokument", "folder": "Ordner", "case": "Umlaufmappe"}
+
+
+async def _handle_reminder_due(
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    publish_event: Callable[[str, str, dict], Awaitable[None]],
+    rate_limiter: RecipientRateLimiter,
+    event: Event,
+) -> None:
+    """Follow-up reminder due (P90-S1, ADR 0246): in-app to its owner, and an
+    e-mail when the owner's account has an address. The reminder stays
+    listed as due in the user-ui until it is done or snoozed, so a failed
+    mail loses a message, not the reminder. The object's title isn't
+    resolved here (it would need a call per object type, as the owner); the
+    note and the link carry what the person wrote down."""
+    data = event.payload
+    user = data.get("user_id", "?")
+    object_type = data.get("object_type", "document")
+    object_id = data.get("object_id", "?")
+    note = data.get("note") or ""
+    due_at = data.get("due_at", "")
+    label = _OBJECT_LABELS.get(object_type, object_type)
+    fallback_subject = f"Wiedervorlage: {note[:80]}" if note else f"Wiedervorlage: {label}"
+    fallback_body = f"Ihre Wiedervorlage ist fällig ({label}, id={object_id})."
+    if note:
+        fallback_body += f"\n\nNotiz: {note}"
+    link = (
+        build_resource_link(settings.user_ui_public_base_url, object_type, object_id)
+        if object_type in _OBJECT_LABELS
+        else None
+    )
+    if link:
+        fallback_body += f"\n\n{label} öffnen: {link}"
+    placeholders = {
+        "note": note,
+        "object_type": label,
+        "object_id": object_id,
+        "due_at": due_at,
+        "user": user,
+        "link": link or "",
+    }
+
+    async with session_factory() as session:
+        subject, body = await _render_or_fallback(
+            session,
+            use_case="favorite.reminder.due",
+            recipient=user,
+            fallback_subject=fallback_subject,
+            fallback_body=fallback_body,
+            **placeholders,
+        )
+        in_app = await repository.create_and_send(
+            session,
+            settings,
+            channel="in_app",
+            recipient=user,
+            subject=subject,
+            body=body,
+            rate_limiter=rate_limiter,
+        )
+        await session.commit()
+        await publish_notification_result(publish_event, in_app)
+
+    auth_client = AuthServiceClient(settings.auth_service_base_url)
+    try:
+        email = await auth_client.email_for(user)
+    except Exception:  # noqa: BLE001 - the in-app message went out; log and move on
+        logger.warning("reminder_email_lookup_failed", extra={"user": user}, exc_info=True)
+        email = None
+    finally:
+        await auth_client.close()
+    if not email:
+        return
+    async with session_factory() as session:
+        subject, body = await _render_or_fallback(
+            session,
+            use_case="favorite.reminder.due",
+            recipient=email,
+            fallback_subject=fallback_subject,
+            fallback_body=fallback_body,
+            **placeholders,
+        )
+        email_notification = await repository.create_and_send(
+            session,
+            settings,
+            channel="email",
+            recipient=email,
+            subject=subject,
+            body=body,
+            rate_limiter=rate_limiter,
+        )
+        await session.commit()
+        await publish_notification_result(publish_event, email_notification)
 
 
 async def _handle_lock_reminder(

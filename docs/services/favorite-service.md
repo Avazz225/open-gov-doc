@@ -1,9 +1,10 @@
 # favorite-service
 
-**Purpose:** Favorites/watchlist (quick retrieval, since P7-S1d) — personal bookmarks by individual users on documents, folders, and cases (case-binder favorites added Phase 45 Session 2). Purely user-scoped (`user_id`/`object_type`/`object_id`), no relation to retention/deletion/approvals. *(User idea raised during the P7-S1b plan approval, deferred as its own session, see `PROGRESS.md`.)*
+**Purpose:** Favorites/watchlist (quick retrieval, since P7-S1d) and, since P90-S1, follow-up reminders
+(Wiedervorlagen, see below) — personal bookmarks by individual users on documents, folders, and cases (case-binder favorites added Phase 45 Session 2). Purely user-scoped (`user_id`/`object_type`/`object_id`), no relation to retention/deletion/approvals. *(User idea raised during the P7-S1b plan approval, deferred as its own session, see `PROGRESS.md`.)*
 
 **Concept reference:** none (user request outside the original concept).
-**Own Postgres schema:** `favorite` (table `favorite`).
+**Own Postgres schema:** `favorite` (tables `favorite`, `reminder` since P90-S1).
 
 ## Architecture decision: deliberately no referential check
 
@@ -57,6 +58,16 @@ Registers itself with the registry on startup (`libs/dms-registry-client`), iden
 ## Tests
 
 - `uv run pytest services/favorite-service/tests`: Repository (create, duplicate rejection, remove including `NotFoundError`, list filtering by user/object type, newest-first sorting, case favorite creation), API (`POST`/`GET`/`DELETE` including `409`/`404`, filtering by `object_type`, user isolation, full case favorite create/list/delete round trip). **18 tests since P54-S3** (+4: `test_create_favorite_for_another_user_is_rejected`, `test_create_favorite_without_principal_header_returns_401`, `test_list_favorites_for_another_user_is_rejected`, `test_delete_favorite_for_another_user_is_rejected` — the latter also confirms the target favorite genuinely survives a rejected cross-user delete attempt, not just that the response code is correct; every existing test's `client` call sites updated to send a matching `X-DMS-Username` header via a new `_headers()` test helper). Before P54-S3, 14 tests since Phase 45 Session 2.
+- **Since P90-S1:** 25 tests (+7). `test_reminders.py` covers:
+  - owner-only access (403/401/404);
+  - the time-zone requirement;
+  - the due listing, count and one notification per due time;
+  - snooze and edit re-arming;
+  - done, reopen and delete;
+  - the object/status filters.
+
+  `test_repository.py` covers one replica claiming a tick while another holds the lock. Run through
+  `scripts/run-tests.sh favorite-service`.
 - **Live smoke test** (P7-S1d): see `PROGRESS.md` — document/folder favorited via context menu, `FavoritesPane` resolved the names correctly, "Open" navigated correctly for both object types, audit trail showed `favorite.added`/`favorite.removed`.
 - **Live smoke test** (Phase 45 Session 2): case favorited via the star toggle in `user-ui`'s `CasesPane` (both list and detail view), correctly listed in `FavoritesPane` with a resolved case name, "Open" navigated back into the case detail view.
 
@@ -66,7 +77,51 @@ Already compliant, unchanged: `user_id` must equal the gateway-verified `X-DMS-U
 (`_require_own_user_id`), so nobody can create favorites for someone else. Favorites stay keyed by user
 name; rebinding them to the `sub` would orphan existing rows for no security gain.
 
+## Follow-up reminders (Wiedervorlagen, P90-S1, [ADR 0246](../adr/0246-follow-up-reminders-in-favorite-service.md))
+
+A person puts a document, folder or case back in front of themselves at a set time, with a note
+(Konzept 2.5's named add-on). Personal like favorites: the same `X-DMS-Username` owner rule, no
+referential check, several reminders per object.
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/reminders` | `{user_id, object_type, object_id, due_at, note}`. `due_at` must carry a time zone (`422` otherwise); a past time is due at once. `201` |
+| `GET` | `/reminders?user_id=` | The caller's reminders, earliest due first. Filters: `status` (`open`/`done`), `due=true` (open and due), `object_type`+`object_id` (one object). Each row has a computed `is_due` |
+| `GET` | `/reminders/due-count?user_id=` | `{due: n}` for a badge |
+| `PATCH` | `/reminders/{id}` | `{due_at?, note?}` on an open reminder (`409` when done). A new date re-arms the notification |
+| `POST` | `/reminders/{id}/snooze` | `{until}`, which must be in the future (`422` otherwise); re-arms |
+| `POST` | `/reminders/{id}/done` | Completes (`409` when already done) |
+| `POST` | `/reminders/{id}/reopen` | Undoes "done" |
+| `DELETE` | `/reminders/{id}` | `204` |
+
+- **Owner check:** someone else's reminder answers `404`, whatever the action; a missing user name
+  answers `401`.
+- **Table:** `reminder` (`id`, `user_id`, `object_type`, `object_id`, `due_at`, `note` ≤ 2000, `status`,
+  `notified_at`, `completed_at`, `created_at`, `updated_at`). Indexed for the per-user listing and the
+  due poll.
+
+**The due poll:**
+- **Cadence:** every `reminder_poll_interval_seconds` (60), first after
+  `reminder_poll_initial_delay_seconds` (2).
+- **One replica per tick:** under `pg_try_advisory_xact_lock`, so with several replicas only one
+  claims.
+- **What a tick does:** claims up to 500 open, unnotified, due reminders, sets `notified_at`, commits,
+  then publishes `favorite.reminder.due` per reminder with actor `system:favorite-reminders`.
+  notification-service turns that into an in-app message and, when the account has an address, a mail.
+- **Commit before publish:** a lost event costs a message, not the reminder; it stays listed as due.
+
+**Events:** `favorite.reminder.created/updated/snoozed/completed/deleted/due`, with payload `user_id`,
+`object_type`, `object_id`, `due_at` (and `note` on `due`).
+
+**Live (P90-S1):**
+- A due reminder for `users-admin` (no e-mail address) produced the in-app notification only.
+- One for a temporary user with an address also produced the mail "Wiedervorlage: Mail-Pfad prüfen"
+  with the note and the direct link.
+- Both reminders and the user were deleted afterwards.
+
 ## Open Points
 
 - No referential check against document-/folder-/case-service (deliberate, see above) — a favorite on an object deleted in the meantime remains until the user manually removes it.
+- Reminders, like favorites, stay on deleted objects until the person removes them. Reminders for
+  someone else, recurring and team reminders are out of scope (ADR 0246).
 - No admin UI/configuration needed — a pure end-user feature with no four-eyes principle relevance.

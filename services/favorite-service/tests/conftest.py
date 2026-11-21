@@ -13,6 +13,9 @@ DSN = os.environ.get(
 # Test-Fixtures oben - sonst testet TestClient(app) unbemerkt gegen die Live-DB,
 # siehe PROGRESS.md "Tooling & Testing" (P5-S2-Datenverlust, P5b-S6-Leck).
 os.environ["DMS_POSTGRES_DSN"] = DSN
+# P90-S1: the reminder poll must not race the tests that drive
+# `run_reminder_tick` themselves.
+os.environ["DMS_REMINDER_POLL_INITIAL_DELAY_SECONDS"] = "3600"
 
 
 @pytest.fixture(autouse=True)
@@ -22,6 +25,7 @@ async def _clean_tables():
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS favorite"))
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text("TRUNCATE favorite.favorite CASCADE"))
+        await conn.execute(text("TRUNCATE favorite.reminder"))
     await eng.dispose()
     yield
 
