@@ -595,3 +595,65 @@ export async function lookupUserByUsername(token: string, username: string): Pro
   );
   return response.json();
 }
+
+// Follow-up reminders on cases (Wiedervorlagen, P90-S2, ADR 0246) - the
+// subset of user-ui's reminder API this app needs, duplicated rather than
+// shared (ADR 0006). Personal and owner-checked by user name in
+// favorite-service.
+export interface Reminder {
+  id: string;
+  user_id: string;
+  object_type: "document" | "folder" | "case";
+  object_id: string;
+  due_at: string;
+  note: string;
+  status: "open" | "done";
+  is_due: boolean;
+}
+
+export async function listCaseReminders(
+  token: string,
+  userId: string,
+  caseId: string
+): Promise<Reminder[]> {
+  const query = new URLSearchParams({
+    user_id: userId,
+    status: "open",
+    object_type: "case",
+    object_id: caseId,
+  });
+  const response = await request("favorite-service", `reminders?${query.toString()}`, {}, token);
+  return response.json();
+}
+
+export async function createCaseReminder(
+  token: string,
+  params: { user_id: string; case_id: string; due_at: string; note: string }
+): Promise<Reminder> {
+  const response = await request(
+    "favorite-service",
+    "reminders",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        user_id: params.user_id,
+        object_type: "case",
+        object_id: params.case_id,
+        due_at: params.due_at,
+        note: params.note,
+      }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export async function completeReminder(token: string, reminderId: string): Promise<void> {
+  await request(
+    "favorite-service",
+    `reminders/${encodeURIComponent(reminderId)}/done`,
+    { method: "POST" },
+    token
+  );
+}

@@ -200,6 +200,21 @@ Consumes `permission-service`'s `GET /approval-requests` **unfiltered by action 
 
 **No capability-gated actions in this app** — neither task completion nor approval decisions are bound server-side to a domain-separated admin role (see ADR 0041 "Rationale"). `RequireAuth` only checks whether a valid session exists at all, no `RequireCapability` redirect like in the Admin UI. `getEffectivePermissions` is still fetched (identical pattern to the other apps), but is currently not evaluated anywhere — preparation for a possible later, more targeted restriction.
 
+## Follow-up reminders on cases (P90-S2, [ADR 0246](../adr/0246-follow-up-reminders-in-favorite-service.md))
+
+The case detail has a "Meine Wiedervorlagen" section:
+- the reviewer's own open reminders on this case, with "Erledigt";
+- an inline form (date, a week ahead by default; time 09:00; note) to set one.
+
+It is an inline section rather than a dialog, since this app has no modal styles. Its API functions are a
+copy of user-ui's subset (ADR 0006). The full list, snooze and history live in user-ui's
+"Wiedervorlagen" view.
+
+**Tests:**
+- **Vitest:** `cases-pane.test.tsx` (set with date, time and note; complete).
+- **e2e:** `cases.spec.ts` "sets and completes a follow-up reminder on a case" (screenshots at
+  1400/390; deletes its reminder in `finally`).
+
 ## No Actor Fields in Requests (P85-S5, [ADR 0240](../adr/0240-acting-identity-from-verified-principal.md))
 
 The client no longer sends who is acting (`created_by`, `deleted_by`, `approved_by`, `locked_by`, …):

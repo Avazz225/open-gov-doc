@@ -546,6 +546,44 @@ New `IconRail` entry "Hand-Ordner/Arbeitsvorrat" (🗂️, `WorkspaceView` exten
 - **`components/HandFolderOverviewPane.tsx`** (new): two independent lists, one pane. **Hand-folder references** — `search-service`'s new `GET /folder-references` (already permission-filtered per row server-side against each reference's own folder), rendered as a table (folder, document title, added by, added at); clicking the folder/document cell resolves it (`getFolder`/`getDocument`) and navigates via the same callbacks `TeamspacesPane.tsx`/favorites already use (`onOpenFolder`/`onOpenDocument`, `DocumentWorkspace.tsx`'s new `handleOpenHandFolder` mirrors its existing `handleOpenTeamspaceFolder` exactly). **Work tray** — reuses the existing document search (`searchDocuments(token, {registered: false})`, new parameter, ADR 0146) rather than a new index, since ADR 0118 deliberately never made work trays a new entity; lists every still-unregistered document across every folder in the installation.
 - **`lib/api.ts`**: new `FolderReference`/`FolderReferencesResponse` types and `listFolderReferences()` against `search-service`; `SearchParams` gained `registered?: boolean` (`searchDocuments`) — `DocumentSummary`/`SearchResult` already carried `registered_at`, previously unused by this app.
 
+## Follow-up reminders (Wiedervorlagen, P90-S2, [ADR 0246](../adr/0246-follow-up-reminders-in-favorite-service.md))
+
+The UI for favorite-service's reminders (P90-S1).
+
+**`ReminderModal`:** opened from four places:
+- the document and folder context menus ("Wiedervorlage für „…“ …");
+- the document preview ("Wiedervorlage …");
+- the alarm-clock button next to a case's favorite star.
+
+It offers:
+- **Presets** "Morgen", "In einer Woche" (the default) and "In einem Monat", each at 09:00 local.
+- **Date, time and note.** Local inputs are sent as an ISO instant with a zone.
+- **The open reminders already on the object,** with done and delete, so a second one is a deliberate
+  choice.
+
+**`RemindersPane`** ("Wiedervorlagen", alarm clock on the icon rail):
+- **Groups:** "Fällig", "Anstehend" and "Zuletzt erledigt" (the latest 20, collapsed).
+- **Names** are resolved live like `FavoritesPane`. An unreadable or deleted object stays listed with a
+  placeholder, so the reminder can still be completed.
+- **Rows** stack when and what, the note, and the actions (open, done, "Morgen", "Nächste Woche",
+  delete; reopen for done ones), so they wrap without collisions at 390 px.
+- **Dates** are formatted in the app's language, not the browser's.
+
+**Badge:**
+- The rail button shows the due count (`GET /reminders/due-count`).
+- It refreshes every minute (the server poll's cadence), on every view change, and on the
+  `dms:reminders-changed` window event that every reminder action dispatches.
+- It is the reminders' main signal, since no view lists a person's own in-app notifications.
+
+**`?case=` direct links:** reminder mails carry them since P90-S1. They open the case view (see
+"Authenticated direct links").
+
+**Verification:**
+- **Vitest:** `tests/reminders.test.tsx` (the date helpers, the pane's groups and actions, the dialog,
+  the badge) and the `?case=` test in `document-workspace.test.tsx`.
+- **e2e:** `e2e/reminders.spec.ts` sets a due reminder from a folder's context menu, sees the badge and
+  the due row, then snoozes, completes and deletes it, with screenshots at 1400/768/390.
+
 ## Theming (Concept 8, since P4-S6)
 
 `src/lib/theme-context.tsx` (`ThemeProvider`/`useTheme()`): light/dark/high-contrast/automatic, toggled via the `ThemeSwitcher` in the header's account menu (the `IconRail`'s settings popover until P86-S1). Stored cross-device on the user account (`GET/PUT /api/auth-service/me/preferences`), see [ADR 0009](../adr/0009-cross-ui-theming-profile-persistence.md) for the reasoning (Keycloak attribute instead of a new persistence building block) and the pitfall found in the process (declarative user profile silently discards undeclared attributes). `localStorage` (`dms.theme`) serves as an immediately available cache, among other things so that the login page also has a theme without a session. `data-theme` on `<html>` controls the entire stylesheet via CSS variables (`--dms-bg`, `--dms-fg`, `--dms-border`, `--dms-accent`, ...) (`globals.css`).
@@ -570,7 +608,7 @@ Own `src/i18n/en.json` — a full English translation of all 574 keys in `de.jso
 
 ## Authenticated direct links (Post-Roadmap Phase 29, [ADR 0109](../adr/0109-direct-link-url-scheme.md))
 
-`DocumentWorkspace.tsx` reads `?document=<id>`/`?folder=<id>` from `window.location.search` once on mount (not `useSearchParams()`, same Suspense-avoidance reasoning as the share link's `/share/` page above) and resolves them via the already-existing `GET /documents/{id}`/`GET /folders/{id}` plus the already-existing `openDocumentTab`/`openFolderPath` navigation functions — no new backend endpoint. A `403`/`404` surfaces via the normal `error` state instead of a silent fallback to the root folder. Structurally opposite to the public share link (anonymous, single-document, token-bearing) — a direct link carries no secret, just a stable resource ID resolved through the normal session/permission-check path, see ADR 0109 for the full comparison.
+`DocumentWorkspace.tsx` reads `?document=<id>`/`?folder=<id>` (and since P90-S2 `?case=<id>`, which opens the case view as "Open" from the favorites does) from `window.location.search` once on mount (not `useSearchParams()`, same Suspense-avoidance reasoning as the share link's `/share/` page above) and resolves them via the already-existing `GET /documents/{id}`/`GET /folders/{id}` plus the already-existing `openDocumentTab`/`openFolderPath` navigation functions — no new backend endpoint. A `403`/`404` surfaces via the normal `error` state instead of a silent fallback to the root folder. Structurally opposite to the public share link (anonymous, single-document, token-bearing) — a direct link carries no secret, just a stable resource ID resolved through the normal session/permission-check path, see ADR 0109 for the full comparison.
 
 **"Copy link"**: new context menu entries in `ExplorerPane.tsx` (folder/document) and a button in `PreviewPane.tsx`, all calling `navigator.clipboard.writeText()` — the first use of the Clipboard API in this project (see the note on `ShareLinkModal.tsx` above for why it wasn't used there).
 

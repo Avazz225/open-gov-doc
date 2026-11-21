@@ -89,4 +89,9 @@ the audit trail and a future inbox.
 - Clean-up of reminders on deleted objects (like favorites, they stay until the person removes them;
   the UI marks unresolvable objects).
 
-**UI:** P90-S2.
+**UI (P90-S2, built):**
+- **user-ui:** a reminder dialog (document/folder context menus, document preview, case detail), a
+  "Wiedervorlagen" view with due/upcoming/done groups, a due badge on the icon rail, and `?case=` direct
+  links.
+- **reviewer-ui:** a "Meine Wiedervorlagen" section in the case detail.
+- See `docs/services/user-ui.md` and `docs/services/reviewer-ui.md`.

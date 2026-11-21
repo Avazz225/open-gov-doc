@@ -22,7 +22,8 @@ import {
   type ProcessDefinition,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import { Star } from "lucide-react";
+import { AlarmClock, Star } from "lucide-react";
+import { ReminderModal } from "./ReminderModal";
 import { UiIcon } from "@/lib/ui-icons";
 
 // Minimal case-browsing UI (14.2, post-roadmap phase 34 session 3, ADR
@@ -487,6 +488,9 @@ function CaseDetail({
   const [documentTitles, setDocumentTitles] = useState<Record<string, string | null>>({});
   const [error, setError] = useState<string | null>(null);
 
+  // Follow-up reminder dialog (P90-S2, ADR 0246).
+  const [reminderOpen, setReminderOpen] = useState(false);
+
   const [xdomeaExportOpen, setXdomeaExportOpen] = useState(false);
   const [xdomeaLeserName, setXdomeaLeserName] = useState("");
   const [xdomeaExporting, setXdomeaExporting] = useState(false);
@@ -677,7 +681,24 @@ function CaseDetail({
         >
           <UiIcon icon={Star} fill={isFavorite ? "currentColor" : "none"} />
         </button>
+        <button
+          type="button"
+          className="favorite-toggle"
+          aria-label={t("cases.setReminder", { name: activeCase.name })}
+          title={t("cases.setReminder", { name: activeCase.name })}
+          onClick={() => setReminderOpen(true)}
+        >
+          <UiIcon icon={AlarmClock} />
+        </button>
       </span>
+      {reminderOpen && (
+        <ReminderModal
+          objectType="case"
+          objectId={activeCase.id}
+          objectName={activeCase.name}
+          onClose={() => setReminderOpen(false)}
+        />
+      )}
       <p className="text-sm opacity-80">
         {activeCase.vorgangsnummer ? `${activeCase.vorgangsnummer} · ` : ""}
         {activeCase.status === "open" ? t("cases.statusOpen") : t("cases.statusClosed")}

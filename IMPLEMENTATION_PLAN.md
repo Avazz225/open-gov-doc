@@ -4186,6 +4186,15 @@ sessions found along the way:
   - user-ui: set from the document/folder/case context menu and detail panes, and a "Wiedervorlagen" view
     in the icon rail.
   - reviewer-ui: for cases.
+  - ✅ **Result:**
+    - **user-ui:** `ReminderModal` (presets at 09:00 local, date/time/note, the open ones on the object)
+      from the context menus, the preview and the case detail. `RemindersPane` (due/upcoming/done,
+      snooze presets, reopen). A due badge on the icon rail (every minute, on view change, on a
+      change event). `?case=` direct links.
+    - **reviewer-ui:** "Meine Wiedervorlagen" inline in the case detail.
+    - **Found in the first screenshots and fixed:** dates in the browser's locale, and rows colliding at
+      768/390.
+    - **Tests:** user-ui 321 vitest (+7), reviewer-ui 68 (+1), two e2e flows green.
 - **P90-S3 — Approver notification and role-based recipients.**
   - notification-service consumes `permission.approval.requested` (published, never consumed).
   - Resolve "who may decide" to concrete recipients (role → principals via permission-service), in-app

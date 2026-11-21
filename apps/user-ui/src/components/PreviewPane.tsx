@@ -25,6 +25,7 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { RedactionModal } from "./RedactionModal";
+import { ReminderModal } from "./ReminderModal";
 import { EmptyState } from "./EmptyStateIllustration";
 import { Lock, TriangleAlert } from "lucide-react";
 import { UiIcon } from "@/lib/ui-icons";
@@ -128,6 +129,8 @@ export function PreviewPane({
   const { accessToken } = useAuth();
   const { t } = useI18n();
   const [previewKind, setPreviewKind] = useState<PreviewKind>("none");
+  // Follow-up reminder dialog (P90-S2, ADR 0246).
+  const [reminderOpen, setReminderOpen] = useState(false);
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
   const [textContent, setTextContent] = useState<string | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
@@ -817,6 +820,17 @@ export function PreviewPane({
       <button type="button" className={primaryBtn} onClick={handleExport} disabled={exporting}>
         {exporting ? t("preview.exporting") : t("preview.export")}
       </button>
+      <button type="button" className={primaryBtn} onClick={() => setReminderOpen(true)}>
+        {t("preview.setReminder")}
+      </button>
+      {reminderOpen && (
+        <ReminderModal
+          objectType="document"
+          objectId={activeDocument.id}
+          objectName={activeDocument.title}
+          onClose={() => setReminderOpen(false)}
+        />
+      )}
       {exportError && (
         <p className="text-danger" role="alert">
           {exportError}

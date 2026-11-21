@@ -2061,6 +2061,109 @@ export async function removeFavorite(
   await request("favorite-service", `favorites?${query.toString()}`, { method: "DELETE" }, token);
 }
 
+// Follow-up reminders (Wiedervorlagen, P90-S1/S2, ADR 0246) - personal, in
+// favorite-service, owner-checked by user name like favorites. `due_at` is
+// always sent with a time zone (ISO with "Z").
+export type ReminderStatus = "open" | "done";
+
+export interface Reminder {
+  id: string;
+  user_id: string;
+  object_type: FavoriteObjectType;
+  object_id: string;
+  due_at: string;
+  note: string;
+  status: ReminderStatus;
+  notified_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+  is_due: boolean;
+}
+
+export async function listReminders(
+  token: string,
+  userId: string,
+  filters: {
+    status?: ReminderStatus;
+    due?: boolean;
+    objectType?: FavoriteObjectType;
+    objectId?: string;
+  } = {}
+): Promise<Reminder[]> {
+  const query = new URLSearchParams({ user_id: userId });
+  if (filters.status) query.set("status", filters.status);
+  if (filters.due) query.set("due", "true");
+  if (filters.objectType) query.set("object_type", filters.objectType);
+  if (filters.objectId) query.set("object_id", filters.objectId);
+  const response = await request("favorite-service", `reminders?${query.toString()}`, {}, token);
+  return response.json();
+}
+
+export async function countDueReminders(token: string, userId: string): Promise<number> {
+  const query = new URLSearchParams({ user_id: userId });
+  const response = await request("favorite-service", `reminders/due-count?${query.toString()}`, {}, token);
+  return (await response.json()).due;
+}
+
+export async function createReminder(
+  token: string,
+  params: {
+    user_id: string;
+    object_type: FavoriteObjectType;
+    object_id: string;
+    due_at: string;
+    note: string;
+  }
+): Promise<Reminder> {
+  const response = await request(
+    "favorite-service",
+    "reminders",
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(params) },
+    token
+  );
+  return response.json();
+}
+
+export async function snoozeReminder(token: string, reminderId: string, until: string): Promise<Reminder> {
+  const response = await request(
+    "favorite-service",
+    `reminders/${encodeURIComponent(reminderId)}/snooze`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ until }) },
+    token
+  );
+  return response.json();
+}
+
+export async function completeReminder(token: string, reminderId: string): Promise<Reminder> {
+  const response = await request(
+    "favorite-service",
+    `reminders/${encodeURIComponent(reminderId)}/done`,
+    { method: "POST" },
+    token
+  );
+  return response.json();
+}
+
+export async function reopenReminder(token: string, reminderId: string): Promise<Reminder> {
+  const response = await request(
+    "favorite-service",
+    `reminders/${encodeURIComponent(reminderId)}/reopen`,
+    { method: "POST" },
+    token
+  );
+  return response.json();
+}
+
+export async function deleteReminder(token: string, reminderId: string): Promise<void> {
+  await request(
+    "favorite-service",
+    `reminders/${encodeURIComponent(reminderId)}`,
+    { method: "DELETE" },
+    token
+  );
+}
+
 // User resolution by exact username (2.5, P14-S6) - deliberately NOT gated
 // behind `admin.user_management` (unlike a full user list): every
 // authenticated user may resolve a single account, e.g. to invite them to a

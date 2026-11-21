@@ -95,6 +95,15 @@ const listDeletedFoldersGlobalMock = vi.fn();
 const purgeDocumentMock = vi.fn();
 const purgeFolderMock = vi.fn();
 
+type ApiFn = (...args: unknown[]) => Promise<unknown>;
+const caseApi = vi.hoisted(() => ({
+  listCases: vi.fn<ApiFn>(() => Promise.resolve([])),
+  // Never settles: the test only checks that the case is requested.
+  getCase: vi.fn<ApiFn>(() => new Promise(() => undefined)),
+  listCaseDocuments: vi.fn<ApiFn>(() => Promise.resolve([])),
+  listProcessDefinitions: vi.fn<ApiFn>(() => Promise.resolve([])),
+}));
+
 vi.mock("@/lib/api", () => ({
   listChildFolders: (...args: unknown[]) => listChildFoldersMock(...args),
   listDocumentsInFolder: (...args: unknown[]) => listDocumentsInFolderMock(...args),
@@ -120,6 +129,13 @@ vi.mock("@/lib/api", () => ({
   approveApprovalRequest: (...args: unknown[]) => approveApprovalRequestMock(...args),
   rejectApprovalRequest: (...args: unknown[]) => rejectApprovalRequestMock(...args),
   listFavorites: (...args: unknown[]) => listFavoritesMock(...args),
+  // Follow-up reminders (P90-S2): the icon rail's due badge.
+  countDueReminders: () => Promise.resolve(0),
+  // The case view, for the `?case=` deep link test (P90-S2).
+  listCases: (...args: unknown[]) => caseApi.listCases(...args),
+  getCase: (...args: unknown[]) => caseApi.getCase(...args),
+  listCaseDocuments: (...args: unknown[]) => caseApi.listCaseDocuments(...args),
+  listProcessDefinitions: (...args: unknown[]) => caseApi.listProcessDefinitions(...args),
   addFavorite: (...args: unknown[]) => addFavoriteMock(...args),
   removeFavorite: (...args: unknown[]) => removeFavoriteMock(...args),
   getDocument: (...args: unknown[]) => getDocumentMock(...args),
@@ -1307,6 +1323,18 @@ describe("DocumentWorkspace", () => {
 
     await waitFor(() => expect(getDocumentMock).toHaveBeenCalledWith("token-123", "d-linked"));
     expect(await screen.findByLabelText("Vorschau: Linked.pdf")).toBeInTheDocument();
+  });
+
+  it("opens a case directly via a ?case= deep link (P90-S2, reminder mails)", async () => {
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([]);
+    window.history.pushState({}, "", "/?case=c-linked");
+
+    renderWorkspace();
+
+    // The case view is active (its title) and the case detail is requested.
+    expect(await screen.findByRole("heading", { level: 1, name: "Umlaufmappen" })).toBeInTheDocument();
+    await waitFor(() => expect(caseApi.getCase).toHaveBeenCalledWith("token-123", "c-linked"));
   });
 
   it("opens a folder directly via a ?folder= deep link and rebuilds the breadcrumb (Phase 29, ADR 0109)", async () => {

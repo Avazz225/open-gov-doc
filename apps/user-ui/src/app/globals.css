@@ -1253,3 +1253,58 @@ body {
     opacity: 1;
   }
 }
+
+/* Follow-up reminders (P90-S2, ADR 0246): a due reminder's date pill, and
+   the icon rail's due-count badge. Same warning tone as admin-ui's alert
+   level "warning" (P88-S6): a dark yellow that reads on light backgrounds
+   (~4.9:1), a light one on dark. The high-contrast border comes from the
+   generic `.badge` rule above. */
+:root {
+  --dms-warn: #a16207;
+  --dms-warn-bg: #a1620722;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --dms-warn: #facc15;
+    --dms-warn-bg: #facc1526;
+  }
+}
+
+:root[data-theme="light"] {
+  --dms-warn: #a16207;
+  --dms-warn-bg: #a1620722;
+}
+
+:root[data-theme="dark"],
+:root[data-theme="high-contrast"] {
+  --dms-warn: #facc15;
+  --dms-warn-bg: #facc1526;
+}
+
+.badge.warn {
+  background: var(--dms-warn-bg);
+  color: var(--dms-warn);
+}
+
+/* An upcoming reminder's date: present, but without a signal colour. */
+.badge.neutral {
+  background: var(--dms-hover-bg);
+  color: var(--dms-fg);
+}
+
+/* Due count on the icon rail button: a small pill on the icon's top right. */
+.rail-badge {
+  position: absolute;
+  top: -5px;
+  right: -7px;
+  min-width: 1.1rem;
+  padding: 0 0.25rem;
+  border-radius: var(--dms-radius-full);
+  background: var(--dms-warn);
+  color: var(--dms-bg);
+  font-size: 0.65rem;
+  font-weight: 700;
+  line-height: 1.1rem;
+  text-align: center;
+}

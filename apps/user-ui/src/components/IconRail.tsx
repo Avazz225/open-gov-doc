@@ -1,6 +1,8 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import {
+  AlarmClock,
   Archive,
   Briefcase,
   Contact,
@@ -20,12 +22,15 @@ import {
 import { useAuth } from "@/lib/auth-context";
 import { useI18n } from "@/i18n";
 import { UiIcon } from "@/lib/ui-icons";
+import { countDueReminders } from "@/lib/api";
+import { REMINDERS_CHANGED_EVENT } from "@/lib/reminders";
 
 export type WorkspaceView =
   | "documents"
   | "search"
   | "approvals"
   | "favorites"
+  | "reminders"
   | "teamspaces"
   | "delegations"
   | "trash"
@@ -77,6 +82,7 @@ export function IconRail({
   // `RecordsQuarantinePanel.tsx` already uses, not a realm role (unlike the
   // unrelated virus-scan "quarantine" view above).
   const isRecordsQuarantineAdmin = permissions.includes("admin.records_quarantine");
+  const dueReminders = useDueReminderCount(activeView);
 
   return (
     <nav
@@ -118,6 +124,32 @@ export function IconRail({
         onClick={() => onSelectView("favorites")}
       >
         <UiIcon icon={Star} />
+      </button>
+      {/* Follow-up reminders (P90-S2, ADR 0246) - the badge counts the due
+          ones; it is the reminders' main signal, since no view lists a
+          person's own in-app notifications. */}
+      <button
+        type="button"
+        className={`relative grid w-9 h-9 place-items-center rounded-md border-0 p-0 text-fg cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${activeView === "reminders" ? "bg-accent-bg" : "bg-transparent"}`}
+        title={
+          dueReminders > 0
+            ? t("iconRail.remindersDue", { count: dueReminders })
+            : t("iconRail.reminders")
+        }
+        aria-label={
+          dueReminders > 0
+            ? t("iconRail.remindersDue", { count: dueReminders })
+            : t("iconRail.reminders")
+        }
+        aria-current={activeView === "reminders" ? "page" : undefined}
+        onClick={() => onSelectView("reminders")}
+      >
+        <UiIcon icon={AlarmClock} />
+        {dueReminders > 0 && (
+          <span className="rail-badge" aria-hidden="true">
+            {dueReminders > 99 ? "99+" : dueReminders}
+          </span>
+        )}
       </button>
       <button
         type="button"
@@ -238,4 +270,38 @@ export function IconRail({
       </button>
     </nav>
   );
+}
+
+// Due follow-up reminders for the badge (P90-S2): loaded on mount, every
+// minute (the server's due poll runs on the same cadence), whenever the view
+// changes, and when a reminder is changed anywhere in the app. A failed load
+// keeps the last count - the badge is a hint, not a source of truth.
+const DUE_REFRESH_MS = 60_000;
+
+function useDueReminderCount(activeView: WorkspaceView): number {
+  const { accessToken, user } = useAuth();
+  const username = user?.username ?? "";
+  const [count, setCount] = useState(0);
+
+  useEffect(() => {
+    if (!accessToken || !username) return;
+    let cancelled = false;
+    const refresh = () => {
+      countDueReminders(accessToken, username)
+        .then((due) => {
+          if (!cancelled) setCount(due);
+        })
+        .catch(() => undefined);
+    };
+    refresh();
+    const timer = window.setInterval(refresh, DUE_REFRESH_MS);
+    window.addEventListener(REMINDERS_CHANGED_EVENT, refresh);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      window.removeEventListener(REMINDERS_CHANGED_EVENT, refresh);
+    };
+  }, [accessToken, username, activeView]);
+
+  return count;
 }

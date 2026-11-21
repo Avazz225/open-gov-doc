@@ -4,13 +4,17 @@ import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "@/i18n";
 import {
   ApiError,
+  completeReminder,
+  createCaseReminder,
   downloadDocumentVersion,
   getCase,
   getCaseDocument,
   listCaseDocuments,
+  listCaseReminders,
   listCases,
   type Case,
   type CaseDocumentReference,
+  type Reminder,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
@@ -261,6 +265,156 @@ function CaseDetail({
       {downloadError && (
         <p className="text-danger" role="alert">
           {downloadError}
+        </p>
+      )}
+
+      <CaseReminders token={token} caseId={caseId} />
+    </section>
+  );
+}
+
+function pad(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+// A week from now at 09:00 local - the same default as user-ui's dialog.
+function defaultReminderDate(): { date: string; time: string } {
+  const date = new Date();
+  date.setDate(date.getDate() + 7);
+  return {
+    date: `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`,
+    time: "09:00",
+  };
+}
+
+// Follow-up reminders on the case (Wiedervorlagen, P90-S2, ADR 0246): a
+// reviewer puts the case back in front of themselves, e.g. after asking for
+// a missing document. Only the reviewer's own open reminders on this case
+// are listed; the full list lives in user-ui's "Wiedervorlagen" view.
+function CaseReminders({ token, caseId }: { token: string; caseId: string }) {
+  const { t, locale } = useI18n();
+  const { user } = useAuth();
+  const username = user?.username ?? "";
+  const initial = defaultReminderDate();
+  const [reminders, setReminders] = useState<Reminder[]>([]);
+  const [dateInput, setDateInput] = useState(initial.date);
+  const [timeInput, setTimeInput] = useState(initial.time);
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const reload = useCallback(async () => {
+    if (!token || !username) return;
+    try {
+      setReminders(await listCaseReminders(token, username, caseId));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t("cases.remindersLoadError"));
+    }
+  }, [token, username, caseId, t]);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  async function run(action: () => Promise<unknown>) {
+    setBusy(true);
+    setError(null);
+    try {
+      await action();
+      await reload();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t("cases.remindersActionError"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function handleCreate() {
+    if (!dateInput) return;
+    const dueAt = new Date(`${dateInput}T${timeInput || "09:00"}`).toISOString();
+    run(async () => {
+      await createCaseReminder(token, {
+        user_id: username,
+        case_id: caseId,
+        due_at: dueAt,
+        note: note.trim(),
+      });
+      setNote("");
+    });
+  }
+
+  const secondaryBtn =
+    "rounded-md border border-border bg-hover-bg px-3 py-1 text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap";
+  const primaryBtn =
+    "rounded-md border-0 bg-accent px-3 py-1 text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap";
+  const fieldInput =
+    "box-border w-full rounded-md border border-border bg-bg px-2 py-1.5 text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
+
+  return (
+    <section aria-labelledby="case-reminders-heading" className="mt-4">
+      <h3 id="case-reminders-heading">{t("cases.remindersHeading")}</h3>
+      {reminders.length === 0 ? (
+        <p className="italic opacity-70">{t("cases.remindersEmpty")}</p>
+      ) : (
+        <ul className="mt-2 mb-0 list-none p-0">
+          {reminders.map((reminder) => (
+            <li
+              key={reminder.id}
+              className="flex flex-wrap items-center justify-between gap-2 border-b border-border py-2"
+            >
+              <span className="min-w-0">
+                {formatDate(reminder.due_at, locale)}
+                {reminder.is_due && <strong> · {t("cases.reminderDue")}</strong>}
+                {reminder.note && <span className="block text-sm opacity-80">{reminder.note}</span>}
+              </span>
+              <button
+                type="button"
+                className={secondaryBtn}
+                disabled={busy}
+                onClick={() => run(() => completeReminder(token, reminder.id))}
+              >
+                {t("cases.reminderDone")}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="mt-3 flex flex-wrap items-end gap-3">
+        <label className="flex flex-col gap-1 text-sm">
+          {t("cases.reminderDate")}
+          <input
+            type="date"
+            className={fieldInput}
+            value={dateInput}
+            onChange={(e) => setDateInput(e.target.value)}
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          {t("cases.reminderTime")}
+          <input
+            type="time"
+            className={fieldInput}
+            value={timeInput}
+            onChange={(e) => setTimeInput(e.target.value)}
+          />
+        </label>
+        <label className="flex min-w-[12rem] flex-1 flex-col gap-1 text-sm">
+          {t("cases.reminderNote")}
+          <input
+            type="text"
+            className={fieldInput}
+            maxLength={2000}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+        </label>
+        <button type="button" className={primaryBtn} disabled={busy || !dateInput} onClick={handleCreate}>
+          {t("cases.reminderSet")}
+        </button>
+      </div>
+      {error && (
+        <p className="text-danger" role="alert">
+          {error}
         </p>
       )}
     </section>

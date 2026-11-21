@@ -81,7 +81,9 @@
     "vorlagen": "Vorlagen",
     "cases": "Umlaufmappen",
     "handFolders": "Hand-Ordner/Arbeitsvorrat",
-    "recordsQuarantine": "Schriftgutquarantäne"
+    "recordsQuarantine": "Schriftgutquarantäne",
+    "reminders": "Wiedervorlagen",
+    "remindersDue": "Wiedervorlagen ({count} fällig)"
   },
   "theme": {
     "label": "Design",
@@ -142,7 +144,8 @@
     "exportFolderFailed": "Export von \"{name}\" fehlgeschlagen: {error}",
     "copyLink": "Link zu \"{name}\" kopieren",
     "linkCopied": "Link in die Zwischenablage kopiert.",
-    "linkCopyError": "Link konnte nicht kopiert werden."
+    "linkCopyError": "Link konnte nicht kopiert werden.",
+    "setReminder": "Wiedervorlage für „{name}“ …"
   },
   "metadata": {
     "paneLabel": "Metadaten",
@@ -549,7 +552,8 @@
     "newCaseImportHeading": "Neue Umlaufmappe per Import anlegen",
     "newCaseImportHint": "Ein zuvor exportiertes Paket wird eingelesen und eine neue Umlaufmappe nach dem im Paket enthaltenen Vorgang/Akte benannt.",
     "newCaseProcessDefinitionLabel": "Prozessdefinition für die neue Umlaufmappe",
-    "newCaseProcessDefinitionPlaceholder": "Bitte auswählen"
+    "newCaseProcessDefinitionPlaceholder": "Bitte auswählen",
+    "setReminder": "Wiedervorlage für „{name}“"
   },
   "handFolderOverview": {
     "paneLabel": "Hand-Ordner/Arbeitsvorrat",
@@ -670,7 +674,8 @@
       "not_marked": "nicht als getaggt markiert (/MarkInfo /Marked fehlt)",
       "no_lang": "keine Dokumentsprache angegeben",
       "figure_without_alt": "Abbildungen ohne Alternativtext"
-    }
+    },
+    "setReminder": "Wiedervorlage …"
   },
   "search": {
     "paneLabel": "Suche",
@@ -688,5 +693,41 @@
   },
   "account": {
     "menuLabel": "Konto: {name}"
+  },
+  "reminders": {
+    "paneLabel": "Wiedervorlagen",
+    "heading": "Wiedervorlagen",
+    "hint": "Dokumente, Ordner und Umlaufmappen, die Sie sich zu einem Zeitpunkt wieder vorlegen lassen. Fällige Wiedervorlagen stehen oben und kommen zusätzlich per Benachrichtigung, bei hinterlegter Adresse auch per Mail.",
+    "dueHeading": "Fällig ({count})",
+    "dueEmpty": "Nichts fällig.",
+    "upcomingHeading": "Anstehend ({count})",
+    "upcomingEmpty": "Keine anstehenden Wiedervorlagen.",
+    "doneHeading": "Zuletzt erledigt ({count})",
+    "done": "Erledigt",
+    "reopen": "Wieder öffnen",
+    "delete": "Löschen",
+    "snooze": {
+      "tomorrow": "Morgen",
+      "nextWeek": "Nächste Woche",
+      "tomorrowLabel": "„{name}“ auf morgen verschieben",
+      "nextWeekLabel": "„{name}“ auf nächste Woche verschieben"
+    },
+    "dialogHeading": "Wiedervorlage: {name}",
+    "presets": "Schnellauswahl",
+    "preset": {
+      "tomorrow": "Morgen",
+      "nextWeek": "In einer Woche",
+      "nextMonth": "In einem Monat"
+    },
+    "date": "Datum",
+    "time": "Uhrzeit",
+    "note": "Notiz",
+    "notePlaceholder": "Worum geht es beim nächsten Mal?",
+    "save": "Wiedervorlage setzen",
+    "saved": "Gesetzt für {date}.",
+    "existingHeading": "Bereits gesetzt",
+    "loadError": "Wiedervorlagen konnten nicht geladen werden.",
+    "saveError": "Wiedervorlage konnte nicht gesetzt werden.",
+    "actionError": "Aktion fehlgeschlagen."
   }
 }

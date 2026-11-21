@@ -22,6 +22,7 @@ import { AccountMenu } from "./AccountMenu";
 import { ApprovalsPane } from "./ApprovalsPane";
 import { DockableDocumentArea, type DockableDocumentAreaHandle } from "./DockableDocumentArea";
 import { FavoritesPane } from "./FavoritesPane";
+import { RemindersPane } from "./RemindersPane";
 import { IconRail, type WorkspaceView } from "./IconRail";
 import { SearchPane } from "./SearchPane";
 import { DelegationsPane } from "./DelegationsPane";
@@ -279,7 +280,7 @@ export function DocumentWorkspace() {
   }
 
   // Authenticated direct links (post-roadmap phase 29, ADR 0109) - reads
-  // `?document=<id>`/`?folder=<id>` directly from `window.location.search`
+  // `?document=<id>`/`?folder=<id>` (and since P90-S2 `?case=<id>`) directly from `window.location.search`
   // once on mount (not `useSearchParams()`, same reasoning as
   // RequireAuth.tsx: avoids a `<Suspense>` boundary requirement under
   // `output: "export"`), resolves via the already-existing `GET
@@ -292,6 +293,14 @@ export function DocumentWorkspace() {
     const params = new URLSearchParams(window.location.search);
     const documentId = params.get("document");
     const folderId = params.get("folder");
+    // `?case=` (P90-S2): follow-up reminder mails link cases this way since
+    // P90-S1; the case view opens it like "Open" from the favorites.
+    const caseId = params.get("case");
+    if (caseId) {
+      setOpenCaseId(caseId);
+      setView("cases");
+      return;
+    }
     if (!documentId && !folderId) return;
     (async () => {
       try {
@@ -388,6 +397,14 @@ export function DocumentWorkspace() {
               <ApprovalsPane token={accessToken ?? ""} currentPrincipalId={user?.sub ?? ""} />
             ) : view === "favorites" ? (
               <FavoritesPane
+                token={accessToken ?? ""}
+                currentUsername={user?.username ?? ""}
+                onOpenDocument={handleOpenFavoriteDocument}
+                onOpenFolder={handleOpenFavoriteFolder}
+                onOpenCase={handleOpenFavoriteCase}
+              />
+            ) : view === "reminders" ? (
+              <RemindersPane
                 token={accessToken ?? ""}
                 currentUsername={user?.username ?? ""}
                 onOpenDocument={handleOpenFavoriteDocument}

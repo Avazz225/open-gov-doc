@@ -37,6 +37,7 @@ import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { FolderRetentionModal } from "./FolderRetentionModal";
 import { FolderTree } from "./FolderTree";
 import { HandFolderReferencesModal } from "./HandFolderReferencesModal";
+import { ReminderModal } from "./ReminderModal";
 import { ShareLinkModal } from "./ShareLinkModal";
 import { UploadForm } from "./UploadForm";
 
@@ -148,6 +149,12 @@ export function ExplorerPane({
   const [shareLinkModalDocument, setShareLinkModalDocument] = useState<DocumentSummary | null>(
     null
   );
+  // Follow-up reminder dialog (P90-S2, ADR 0246), from both context menus.
+  const [reminderTarget, setReminderTarget] = useState<{
+    objectType: "document" | "folder";
+    objectId: string;
+    name: string;
+  } | null>(null);
   // Bulk metadata editing (8, P14-S12) - a "kind:id" set, same key format as
   // `favoriteKeys` above. Only meaningful in the list view outside the trash
   // (see checkbox rendering below) - cleared on folder change/trash toggle,
@@ -485,6 +492,10 @@ export function ExplorerPane({
           onSelect: () => toggleFavorite("folder", folder.id),
         },
         {
+          label: t("explorer.setReminder", { name: folder.name }),
+          onSelect: () => setReminderTarget({ objectType: "folder", objectId: folder.id, name: folder.name }),
+        },
+        {
           label: t("explorer.exportFolder", { name: folder.name }),
           onSelect: () => handleExportFolder(folder),
         },
@@ -513,6 +524,10 @@ export function ExplorerPane({
         {
           label: isFavorite ? t("explorer.removeFavorite", { name }) : t("explorer.addFavorite", { name }),
           onSelect: () => toggleFavorite("document", doc.id),
+        },
+        {
+          label: t("explorer.setReminder", { name }),
+          onSelect: () => setReminderTarget({ objectType: "document", objectId: doc.id, name }),
         },
         {
           label: t("explorer.copyLink", { name }),
@@ -868,6 +883,15 @@ export function ExplorerPane({
         <FolderRetentionModal
           folder={retentionModalFolder}
           onClose={() => setRetentionModalFolder(null)}
+        />
+      )}
+
+      {reminderTarget && (
+        <ReminderModal
+          objectType={reminderTarget.objectType}
+          objectId={reminderTarget.objectId}
+          objectName={reminderTarget.name}
+          onClose={() => setReminderTarget(null)}
         />
       )}
 

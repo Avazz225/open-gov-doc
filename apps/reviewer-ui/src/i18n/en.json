@@ -157,7 +157,17 @@
     "documentDeleted": "Document deleted",
     "documentTitleUnavailable": "Document title not available",
     "documentAddedAt": "added on {date}",
-    "documentDownloadError": "Document could not be downloaded"
+    "documentDownloadError": "Document could not be downloaded",
+    "remindersHeading": "My follow-ups",
+    "remindersEmpty": "No open follow-up for this case.",
+    "reminderDue": "due",
+    "reminderDone": "Done",
+    "reminderDate": "Date",
+    "reminderTime": "Time",
+    "reminderNote": "Note",
+    "reminderSet": "Set follow-up",
+    "remindersLoadError": "Follow-ups could not be loaded.",
+    "remindersActionError": "Action failed."
   },
   "account": {
     "menuLabel": "Account: {name}"

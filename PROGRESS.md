@@ -2,6 +2,45 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P90-S2, follow-up reminders UI
+([ADR 0246](docs/adr/0246-follow-up-reminders-in-favorite-service.md)).
+
+**What changed:**
+- **user-ui:**
+  - **`ReminderModal`:** opened from the document/folder context menus, the preview ("Wiedervorlage
+    …") and an alarm-clock button next to a case's star. Presets "Morgen", "In einer Woche" (default),
+    "In einem Monat" at 09:00 local; date, time and note; the open reminders on the object with done and
+    delete.
+  - **`RemindersPane`** ("Wiedervorlagen" on the icon rail): due, upcoming and recently done
+    (collapsed); live name resolution with a placeholder for unreadable objects; open, done, snooze
+    "Morgen"/"Nächste Woche", delete, reopen.
+  - **Icon rail badge:** the due count, refreshed every minute, on view change, and on the
+    `dms:reminders-changed` event every reminder action dispatches.
+  - **Direct links:** `?case=` opens the case view.
+  - **Other:** `lib/reminders.ts` (date helpers, locale-aware formatting); `.badge.warn`/
+    `.badge.neutral`/`.rail-badge` with the warning tokens from admin-ui.
+- **reviewer-ui:** "Meine Wiedervorlagen" inline in the case detail (own open reminders with
+  "Erledigt", plus a date/time/note form), with API functions copied per ADR 0006.
+- **Docs:** user-ui and reviewer-ui sections, the ADR 0246 UI note, the plan.
+
+**Checks:**
+- **user-ui:**
+  - vitest 321 (+7: helpers, pane groups and actions, dialog, badge refresh; `?case=`). The
+    workspace test's API mock gained the new functions.
+  - tsc clean, eslint only the 2 known `<img>` warnings, `next build` OK.
+- **reviewer-ui:** vitest 68 (+1), tsc/eslint/build clean.
+- **e2e:**
+  - user-ui `reminders.spec.ts`: context menu → due → badge → snooze → done → delete.
+  - reviewer-ui `cases.spec.ts`: set and complete on a case.
+  - Both green; both clean up through the API.
+- **Screenshots** at 1400/768/390 (user-ui) and 1400/390 (reviewer-ui). The first set showed dates in
+  the browser's locale and colliding rows at 768/390; both were fixed and re-shot.
+- No reminders are left on the dev stack.
+
+**Next session:** P90-S3, approver notification and role-based recipients.
+
+---
+
 **Last completed:** P90-S1, follow-up reminders (Wiedervorlagen), backend
 ([ADR 0246](docs/adr/0246-follow-up-reminders-in-favorite-service.md)).
 

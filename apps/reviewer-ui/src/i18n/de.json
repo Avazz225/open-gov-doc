@@ -157,7 +157,17 @@
     "documentDeleted": "Dokument gelöscht",
     "documentTitleUnavailable": "Dokumenttitel nicht verfügbar",
     "documentAddedAt": "hinzugefügt am {date}",
-    "documentDownloadError": "Dokument konnte nicht heruntergeladen werden"
+    "documentDownloadError": "Dokument konnte nicht heruntergeladen werden",
+    "remindersHeading": "Meine Wiedervorlagen",
+    "remindersEmpty": "Keine offene Wiedervorlage für diesen Vorgang.",
+    "reminderDue": "fällig",
+    "reminderDone": "Erledigt",
+    "reminderDate": "Datum",
+    "reminderTime": "Uhrzeit",
+    "reminderNote": "Notiz",
+    "reminderSet": "Wiedervorlage setzen",
+    "remindersLoadError": "Wiedervorlagen konnten nicht geladen werden.",
+    "remindersActionError": "Aktion fehlgeschlagen."
   },
   "account": {
     "menuLabel": "Konto: {name}"

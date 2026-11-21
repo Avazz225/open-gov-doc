@@ -81,7 +81,9 @@
     "vorlagen": "Templates",
     "cases": "Case binders",
     "handFolders": "Hand folders/work tray",
-    "recordsQuarantine": "Records quarantine"
+    "recordsQuarantine": "Records quarantine",
+    "reminders": "Follow-ups",
+    "remindersDue": "Follow-ups ({count} due)"
   },
   "theme": {
     "label": "Theme",
@@ -142,7 +144,8 @@
     "exportFolderFailed": "Export of \"{name}\" failed: {error}",
     "copyLink": "Copy link to \"{name}\"",
     "linkCopied": "Link copied to clipboard.",
-    "linkCopyError": "Link could not be copied."
+    "linkCopyError": "Link could not be copied.",
+    "setReminder": "Follow-up for “{name}” …"
   },
   "metadata": {
     "paneLabel": "Metadata",
@@ -549,7 +552,8 @@
     "newCaseImportHeading": "Create new case binder via import",
     "newCaseImportHint": "A previously exported package is read in and a new case binder is named after the case/file it contains.",
     "newCaseProcessDefinitionLabel": "Process definition for the new case binder",
-    "newCaseProcessDefinitionPlaceholder": "Please select"
+    "newCaseProcessDefinitionPlaceholder": "Please select",
+    "setReminder": "Follow-up for “{name}”"
   },
   "handFolderOverview": {
     "paneLabel": "Hand folders/work tray",
@@ -670,7 +674,8 @@
       "not_marked": "not marked as tagged (/MarkInfo /Marked missing)",
       "no_lang": "no document language set",
       "figure_without_alt": "figures without alternative text"
-    }
+    },
+    "setReminder": "Follow-up …"
   },
   "search": {
     "paneLabel": "Search",
@@ -688,5 +693,41 @@
   },
   "account": {
     "menuLabel": "Account: {name}"
+  },
+  "reminders": {
+    "paneLabel": "Follow-ups",
+    "heading": "Follow-ups",
+    "hint": "Documents, folders and case binders you want put in front of you again at a set time. Due follow-ups are listed first and also arrive as a notification, and by e-mail if your account has an address.",
+    "dueHeading": "Due ({count})",
+    "dueEmpty": "Nothing due.",
+    "upcomingHeading": "Upcoming ({count})",
+    "upcomingEmpty": "No upcoming follow-ups.",
+    "doneHeading": "Recently done ({count})",
+    "done": "Done",
+    "reopen": "Reopen",
+    "delete": "Delete",
+    "snooze": {
+      "tomorrow": "Tomorrow",
+      "nextWeek": "Next week",
+      "tomorrowLabel": "Move “{name}” to tomorrow",
+      "nextWeekLabel": "Move “{name}” to next week"
+    },
+    "dialogHeading": "Follow-up: {name}",
+    "presets": "Quick choice",
+    "preset": {
+      "tomorrow": "Tomorrow",
+      "nextWeek": "In a week",
+      "nextMonth": "In a month"
+    },
+    "date": "Date",
+    "time": "Time",
+    "note": "Note",
+    "notePlaceholder": "What is it about next time?",
+    "save": "Set follow-up",
+    "saved": "Set for {date}.",
+    "existingHeading": "Already set",
+    "loadError": "Follow-ups could not be loaded.",
+    "saveError": "Follow-up could not be set.",
+    "actionError": "Action failed."
   }
 }
