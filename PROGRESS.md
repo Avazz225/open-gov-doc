@@ -2,6 +2,58 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P88-S4a, mail-connector mailboxes in a table with encrypted credentials
+([ADR 0244](docs/adr/0244-mail-connector-mailboxes-in-a-table-with-encrypted-credentials.md)). P88-S4
+was split as the plan allowed: S4a backend, S4b admin page plus realm roles.
+- ADR numbers moved again: alerting P88-S5 is now ADR 0245, and the reserved P90/P91 numbers are
+  0246–0251.
+
+**What changed:**
+- **mail-connector:**
+  - **Tables:** `Mailbox` (one connection block per mailbox, `password_encrypted`, `enabled`,
+    audit fields) and the `MailboxAdoption` marker.
+  - **`crypto.py`:** AES-256-GCM with `DMS_MAILBOX_CREDENTIALS_KEY`.
+  - **`mailboxes.py`:** row↔`MailboxConfig`, `adopt_from_settings` (one-time), `save` (write-only
+    password, validation through `MailboxConfig`), delete only without messages.
+  - **Readers:** the poll loop (`_poll_tick` split out), the department RBAC, `GET /mailboxes` and
+    the routing-target check all read the table.
+  - **Admin API:** `/mailbox-config` CRUD plus `/mailbox-config/test` (gated by
+    `admin.mail_config`), backed by `MailboxBackend.check()` for POP3/IMAP.
+  - **Also:** per-replica last poll result, the events `mail_connector.mailbox.*` with actor, and
+    `cryptography` as a dependency.
+- **permission-service:** `domain-admin-mail` ("Postfach-Konfiguration", `admin.mail_config`).
+- **Compose:** `DMS_MAILBOX_CREDENTIALS_KEY` (dev default); `DMS_MAILBOXES` is now adopt-once.
+- **Helm:** `DMS_MAILBOXES: "[]"` and the key. The stale `DMS_POP3_HOST` was removed: it had been
+  ignored since P31-S12a. `helm lint` is clean.
+- **Docs:** ADR 0244; mail-connector (API rows, "Mailboxes in a Table", events, open point).
+
+**Checks:**
+- mail-connector 88 (+8 in `test_mailbox_config.py`):
+  - adopt once, and no re-adoption after deleting everything;
+  - the gate;
+  - encrypted at rest and write-only;
+  - invalid/conflicting/immutable id;
+  - delete only without messages, disable instead;
+  - the connection test with draft and stored password;
+  - the poll tick reads the table and records its result.
+  - The existing fixtures now write table rows instead of monkeypatching `settings.mailboxes`.
+- permission 202; ruff clean.
+- **Live:**
+  - **First start:** `central` adopted (encrypted, 50-byte ciphertext). The restart logged the
+    "DMS_MAILBOXES ignoriert" warning.
+  - **Polling:** a real SMTP mail to mailpit was ingested.
+  - **Admin API (gateway):** with `users-admin` temporarily granted `domain-admin-mail` (assignment
+    4945, revoked), the list showed `has_password`, 744 messages and the last poll ok. The test
+    gave ok/`-ERR invalid password`, and create/delete appeared in the audit trail with actor `2`.
+- **Found live:** the rebuilt container crashed on `ModuleNotFoundError: cryptography` (the shared
+  test venv had hidden it). Added to `pyproject.toml`; `uv lock` updated.
+
+**Next session:** **P88-S4b**, the admin-ui page for mailboxes (list, create/edit with write-only
+password, enable/disable, connection test, last poll result) and realm-role assignment in user
+management (the auth-service endpoints exist since Phase 78).
+
+---
+
 **Last completed:** P88-S3, guided editors for object-type rules.
 
 **What changed:**
@@ -41,8 +93,7 @@
   new "Namensmuster" label contains "Name".
 - No page overflow at 390px after the layout-designer fix.
 
-**Next session:** **P88-S4**, mailboxes (env → config API/table, migration, admin page) and realm-role
-assignment.
+**Next session:** P88-S4 → split into S4a/S4b (S4a done, see above).
 
 ---
 

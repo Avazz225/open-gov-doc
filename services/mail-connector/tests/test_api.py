@@ -5,11 +5,11 @@ from datetime import UTC, datetime
 
 import httpx
 import pytest
+from dms_db_base import build_engine, make_session_factory
 from fastapi.testclient import TestClient
 from mail_connector import repository
 from mail_connector.backends.interface import RawIncomingMessage
 from mail_connector.main import _ingest_message, _ingest_message_or_skip_duplicate, app, settings
-from mail_connector.settings import MailboxConfig
 
 OBJECT_TYPE_SERVICE_URL = os.environ.get("TEST_OBJECT_TYPE_SERVICE_URL", "http://localhost:8007")
 DOCUMENT_SERVICE_URL = os.environ.get("TEST_DOCUMENT_SERVICE_URL", "http://localhost:8006")
@@ -584,9 +584,10 @@ def test_list_mailboxes_returns_configured_mailboxes_without_credentials(client)
         "name": "Zentrale Poststelle",
         "kind": "central",
         "owning_group_id": None,
+        "enabled": True,
     }
-    # Keine Zugangsdaten in der Antwort (ADR 0091-Praezedenzfall - Secrets
-    # bleiben env-var-only, niemals in einer GET-Antwort).
+    # Keine Zugangsdaten in der Antwort - since P88-S4a they live encrypted
+    # in the mailbox table and never appear in any GET response.
     assert "pop3_password" not in mailbox
     assert "pop3_username" not in mailbox
 
@@ -639,8 +640,35 @@ def _ensure_department_group(name: str, *, member_principal_id: str) -> str:
         return group["id"]
 
 
+async def add_mailbox(**fields) -> None:
+    """Writes a mailbox row directly (P88-S4a) - the tests' replacement for
+    monkeypatching `settings.mailboxes`, which the runtime no longer reads."""
+    from mail_connector import crypto, mailboxes
+
+    values = {
+        "kind": "departmental",
+        "owning_group_id": None,
+        "inbound_protocol": "pop3",
+        "host": "irrelevant",
+        "port": 995,
+        "username": "irrelevant",
+        "use_tls": True,
+        "imap_mailbox": "INBOX",
+        "enabled": True,
+        **fields,
+    }
+    key = crypto.load_key(os.environ["DMS_MAILBOX_CREDENTIALS_KEY"])
+    eng = build_engine(os.environ["DMS_POSTGRES_DSN"])
+    async with make_session_factory(eng)() as session:
+        await mailboxes.save(
+            session, values, password="irrelevant", key=key, actor="tests", create=True
+        )
+        await session.commit()
+    await eng.dispose()
+
+
 @pytest.fixture
-def with_finanzen_mailbox(monkeypatch):
+async def with_finanzen_mailbox(client):
     """Fuegt fuer die Dauer eines Tests ein zweites, konfiguriertes Postfach
     hinzu (Settings sind sonst nur mit dem Standard-Postfach "central"
     bestueckt) - echte Weiterleitung zwischen zwei Postfaechern ist ohne
@@ -652,23 +680,9 @@ def with_finanzen_mailbox(monkeypatch):
     group_id = _ensure_department_group(
         "mail-connector-test-finanzen", member_principal_id=ADMIN_HEADERS["X-DMS-Principal"]
     )
-    monkeypatch.setattr(
-        settings,
-        "mailboxes",
-        [
-            *settings.mailboxes,
-            MailboxConfig(
-                id="finanzen",
-                name="Poststelle Finanzen",
-                kind="departmental",
-                owning_group_id=group_id,
-                inbound_protocol="pop3",
-                pop3_host="irrelevant",
-                pop3_username="irrelevant",
-                pop3_password="irrelevant",
-            ),
-        ],
-    )
+    # Depends on `client`: the app's start adopts "central" into the empty
+    # table first.
+    await add_mailbox(id="finanzen", name="Poststelle Finanzen", owning_group_id=group_id)
 
 
 def test_route_message_requires_principal(client):
@@ -1139,23 +1153,7 @@ async def test_search_routing_log_without_filter_excludes_hops_between_inaccessi
     personal_group_id = _ensure_department_group(
         "mail-connector-test-personal", member_principal_id="mail-connector-test-personal-owner"
     )
-    monkeypatch.setattr(
-        settings,
-        "mailboxes",
-        [
-            *settings.mailboxes,
-            MailboxConfig(
-                id="personal",
-                name="Poststelle Personal",
-                kind="departmental",
-                owning_group_id=personal_group_id,
-                inbound_protocol="pop3",
-                pop3_host="irrelevant",
-                pop3_username="irrelevant",
-                pop3_password="irrelevant",
-            ),
-        ],
-    )
+    await add_mailbox(id="personal", name="Poststelle Personal", owning_group_id=personal_group_id)
     await _ingest(
         session, uid="uid-rbac-12", subject="RBAC Postbuch Ungefiltert", mailbox_id="finanzen"
     )

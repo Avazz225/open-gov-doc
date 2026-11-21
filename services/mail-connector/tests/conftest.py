@@ -26,6 +26,9 @@ os.environ["DMS_POSTGRES_DSN"] = DSN
 # Testlaufhost aus nicht auf - gleiche Überschreibung wie notification-
 # service/tests/conftest.py.
 os.environ["DMS_SMTP_HOST"] = os.environ.get("TEST_SMTP_HOST", "localhost")
+# P88-S4a: mailbox passwords are encrypted at rest; the same dev key as
+# infra/docker-compose.yml.
+os.environ.setdefault("DMS_MAILBOX_CREDENTIALS_KEY", "bWFpbC1jb25uZWN0b3ItY3JlZGVudGlhbHMta2V5ISE=")
 
 WORKFLOW_SERVICE_URL = os.environ.get("TEST_WORKFLOW_SERVICE_URL", "http://localhost:8014")
 CASE_SERVICE_URL = os.environ.get("TEST_CASE_SERVICE_URL", "http://localhost:8016")
@@ -105,6 +108,10 @@ async def _clean_tables():
         await conn.execute(text("TRUNCATE mail_connector.inbound_attachment CASCADE"))
         await conn.execute(text("TRUNCATE mail_connector.inbound_message CASCADE"))
         await conn.execute(text("TRUNCATE mail_connector.outbound_message CASCADE"))
+        # P88-S4a: every app start in a test adopts the settings' default
+        # mailbox ("central") into an empty table again.
+        await conn.execute(text("TRUNCATE mail_connector.mailbox"))
+        await conn.execute(text("TRUNCATE mail_connector.mailbox_adoption"))
     await eng.dispose()
     yield
 

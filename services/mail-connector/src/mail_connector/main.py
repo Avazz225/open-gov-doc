@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import email
 import logging
+import os
 import re
 import time
 import uuid
@@ -18,12 +19,11 @@ from dms_eventbus_client import Event, NatsEventBusClient
 from dms_metrics_client import (
     SensorConfigClient,
     bootstrap_http_sensors,
-    http_sensor_declarations,
     metrics_payload,
 )
 from dms_registry_client import maybe_start_registration
 from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
-from mail_connector import matching, repository
+from mail_connector import crypto, mailboxes, matching, repository
 from mail_connector.backends import RawIncomingMessage, build_backend
 from mail_connector.case_client import CaseClient
 from mail_connector.document_client import DocumentClient
@@ -35,7 +35,11 @@ from mail_connector.schemas import (
     ConfirmMatchRequest,
     InboundAttachmentOut,
     InboundMessageOut,
+    MailboxConfigIn,
+    MailboxConfigOut,
     MailboxOut,
+    MailboxTestIn,
+    MailboxTestResult,
     MailRoutingLogEntryOut,
     MailRoutingLogEntryWithMessageOut,
     OutboundMessageCreate,
@@ -43,7 +47,7 @@ from mail_connector.schemas import (
     RejectRequest,
     RouteMessageRequest,
 )
-from mail_connector.settings import MailboxConfig, Settings
+from mail_connector.settings import Settings
 from mail_connector.storage_client import ObjectNotFoundError, StorageClient
 from mail_connector.virus_scan_client import VirusScanClient
 from sqlalchemy import text
@@ -370,33 +374,59 @@ async def _poll_loop(session_factory) -> None:
     cross-event-loop `RuntimeError` in an unrelated test once the
     now-dead background task's stale client got garbage-collected)."""
     while True:
-        try:
-            skip_tick = await app.state.permission_client.is_maintenance_active()
-        except Exception:
-            logger.exception("Wartungsmodus-Check fehlgeschlagen - Tick wird trotzdem ausgefuehrt.")
-            skip_tick = False
-        if skip_tick:
-            await asyncio.sleep(settings.poll_interval_seconds)
-            continue
-
-        for mailbox_id, backend in app.state.backends.items():
-            try:
-                messages = await backend.fetch_new_messages()
-                for raw in messages:
-                    async with session_factory() as session:
-                        if (
-                            await repository.get_by_source_uid(session, mailbox_id, raw.uid)
-                            is not None
-                        ):
-                            continue
-                        await _ingest_message_or_skip_duplicate(session, mailbox_id, raw)
-            except Exception:
-                logger.exception(
-                    "Posteingang-Poll-Tick fuer Postfach %r fehlgeschlagen - wird beim "
-                    "naechsten Tick erneut versucht.",
-                    mailbox_id,
-                )
+        await _poll_tick(session_factory)
         await asyncio.sleep(settings.poll_interval_seconds)
+
+
+async def _poll_tick(session_factory) -> None:
+    """One pass over every enabled mailbox (split out of `_poll_loop` in
+    P88-S4a so a test can run exactly one tick on the app's own loop)."""
+    try:
+        skip_tick = await app.state.permission_client.is_maintenance_active()
+    except Exception:
+        logger.exception("Wartungsmodus-Check fehlgeschlagen - Tick wird trotzdem ausgefuehrt.")
+        skip_tick = False
+    if skip_tick:
+        return
+
+    # P88-S4a (ADR 0244): the mailbox list is read from the table on
+    # every tick, so an admin change takes effect without a restart.
+    try:
+        async with session_factory() as session:
+            rows = [row for row in await mailboxes.list_rows(session) if row.enabled]
+    except Exception:
+        logger.exception("Postfachliste nicht lesbar - Tick uebersprungen.")
+        rows = []
+    for row in rows:
+        mailbox_id = row.id
+        try:
+            config = mailboxes.to_config(row, app.state.credentials_key)
+            backend = app.state.backend_factory(config)
+            messages = await backend.fetch_new_messages()
+            for raw in messages:
+                async with session_factory() as session:
+                    if await repository.get_by_source_uid(session, mailbox_id, raw.uid) is not None:
+                        continue
+                    await _ingest_message_or_skip_duplicate(session, mailbox_id, raw)
+            _record_poll(mailbox_id, None)
+        except Exception as exc:
+            _record_poll(mailbox_id, exc)
+            logger.exception(
+                "Posteingang-Poll-Tick fuer Postfach %r fehlgeschlagen - wird beim "
+                "naechsten Tick erneut versucht.",
+                mailbox_id,
+            )
+
+
+def _record_poll(mailbox_id: str, error: Exception | None) -> None:
+    """Last poll result per mailbox, in this replica's memory only - shown
+    on the admin page next to the mailbox (P88-S4a). Never contains the
+    password: exceptions from poplib/imaplib carry the server's reply."""
+    app.state.poll_status[mailbox_id] = {
+        "at": datetime.now(UTC),
+        "ok": error is None,
+        "error": None if error is None else f"{type(error).__name__}: {error}"[:500],
+    }
 
 
 @asynccontextmanager
@@ -470,7 +500,37 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.documents = DocumentClient(settings.document_service_base_url)
     app.state.cases = CaseClient(settings.case_service_base_url)
     app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
-    app.state.backends = {mailbox.id: build_backend(mailbox) for mailbox in settings.mailboxes}
+    # P88-S4a (ADR 0244): mailboxes live in the table. The key encrypts
+    # their passwords; without it, existing mailboxes can't be polled and
+    # none with a password can be saved - the service still starts, so the
+    # rest of the mail room keeps working.
+    try:
+        app.state.credentials_key = crypto.load_key(settings.mailbox_credentials_key)
+    except crypto.CredentialKeyError as exc:
+        app.state.credentials_key = None
+        logger.error("Postfach-Zugangsdaten nicht nutzbar: %s", exc)
+    app.state.backend_factory = build_backend
+    app.state.poll_status = {}
+    async with app.state.session_factory() as session:
+        try:
+            adopted = await mailboxes.adopt_from_settings(
+                session, settings.mailboxes, app.state.credentials_key
+            )
+            await session.commit()
+        except crypto.CredentialKeyError as exc:
+            adopted = None
+            logger.error("DMS_MAILBOXES nicht übernommen: %s", exc)
+        except IntegrityError:
+            # Another replica adopted at the same moment.
+            await session.rollback()
+            adopted = None
+    if adopted is not None:
+        logger.info("mailboxes_adopted_from_env", extra={"mailbox_ids": adopted})
+    elif os.environ.get("DMS_MAILBOXES"):
+        logger.warning(
+            "DMS_MAILBOXES ist gesetzt, wird aber ignoriert: Postfächer werden seit P88-S4a "
+            "über die Admin-Oberfläche verwaltet (ADR 0244)."
+        )
 
     event_bus = NatsEventBusClient(settings.nats_url, stream="mail_connector")
     await event_bus.connect()
@@ -495,7 +555,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         self_address=settings.self_address,
         service_type=settings.service_name,
         version="0.1.0",
-        sensors=http_sensor_declarations(),
+        sensors=sensor_registry.declarations(),
     )
 
     startup_end = time.time()
@@ -536,7 +596,12 @@ async def get_session() -> AsyncIterator[AsyncSession]:
 
 
 async def publish_event(
-    event_type: str, subject: str, payload: dict, *, event_bus: NatsEventBusClient | None = None
+    event_type: str,
+    subject: str,
+    payload: dict,
+    *,
+    event_bus: NatsEventBusClient | None = None,
+    actor: str | None = None,
 ) -> None:
     """`event_bus` defaults to the long-lived `app.state.event_bus` (every
     caller except `_ingest_message` - all reached via a real HTTP request,
@@ -544,7 +609,11 @@ async def publish_event(
     passes its own short-lived, freshly connected instance instead - see its
     own docstring for why."""
     event = Event(
-        event_type=event_type, service_name=settings.service_name, subject=subject, payload=payload
+        event_type=event_type,
+        service_name=settings.service_name,
+        subject=subject,
+        payload=payload,
+        actor=actor,
     )
     bus = event_bus if event_bus is not None else app.state.event_bus
     await bus.publish(event_type, event.to_bytes())
@@ -572,8 +641,14 @@ def _require_poststelle(x_dms_principal: str, x_dms_roles: str) -> None:
         )
 
 
-def _mailbox_by_id(mailbox_id: str) -> MailboxConfig | None:
-    return next((mailbox for mailbox in settings.mailboxes if mailbox.id == mailbox_id), None)
+async def _mailbox_rows() -> list:
+    async with app.state.session_factory() as session:
+        return await mailboxes.list_rows(session)
+
+
+async def _mailbox_by_id(mailbox_id: str):
+    async with app.state.session_factory() as session:
+        return await mailboxes.get_row(session, mailbox_id)
 
 
 async def _accessible_mailbox_ids(principal_id: str) -> set[str]:
@@ -587,8 +662,9 @@ async def _accessible_mailbox_ids(principal_id: str) -> set[str]:
     docstring): the routing-target selector needs every mailbox NAME
     visible, central intake routes to departments its own staff aren't
     members of."""
-    accessible = {mailbox.id for mailbox in settings.mailboxes if mailbox.kind == "central"}
-    for mailbox in settings.mailboxes:
+    rows = await _mailbox_rows()
+    accessible = {mailbox.id for mailbox in rows if mailbox.kind == "central"}
+    for mailbox in rows:
         if mailbox.kind != "departmental":
             continue
         if await app.state.permission_client.is_group_member(mailbox.owning_group_id, principal_id):
@@ -602,7 +678,7 @@ async def _require_mailbox_access(mailbox_id: str, principal_id: str) -> None:
     `DMS_MAILBOXES` after messages were already stored under it) is
     deliberately let through unchecked, same lenient behavior this
     endpoint family already had before this session for an unknown ID."""
-    mailbox = _mailbox_by_id(mailbox_id)
+    mailbox = await _mailbox_by_id(mailbox_id)
     if mailbox is None or mailbox.kind == "central":
         return
     if await app.state.permission_client.is_group_member(mailbox.owning_group_id, principal_id):
@@ -641,7 +717,16 @@ async def list_mailboxes(
     members of (`POST /inbound/{id}/route` only requires access to the
     message's current mailbox, not the target - see there)."""
     _require_poststelle(x_dms_principal, x_dms_roles)
-    return [MailboxOut.model_validate(mailbox.model_dump()) for mailbox in settings.mailboxes]
+    return [
+        MailboxOut(
+            id=row.id,
+            name=row.name,
+            kind=row.kind,
+            owning_group_id=row.owning_group_id,
+            enabled=row.enabled,
+        )
+        for row in await _mailbox_rows()
+    ]
 
 
 @app.get("/inbound", response_model=list[InboundMessageOut])
@@ -718,7 +803,7 @@ async def route_message(
             detail=f"Nachricht ist bereits abschließend bearbeitet (status={message.status!r}) "
             "und kann nicht mehr weitergeleitet werden",
         )
-    if payload.target_mailbox_id not in {mailbox.id for mailbox in settings.mailboxes}:
+    if await _mailbox_by_id(payload.target_mailbox_id) is None:
         raise HTTPException(
             status_code=422, detail=f"Postfach {payload.target_mailbox_id!r} ist nicht konfiguriert"
         )
@@ -1074,3 +1159,193 @@ async def list_outbound(
 ) -> list[OutboundMessageOut]:
     _require_poststelle(x_dms_principal, x_dms_roles)
     return await repository.list_outbound_messages(session)
+
+
+# --- Mailbox administration (P88-S4a, ADR 0244) ----------------------------
+
+
+async def _require_mail_config(x_dms_principal: str) -> None:
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="X-DMS-Principal fehlt")
+    if not await app.state.permission_client.has_permission(
+        x_dms_principal, settings.mail_config_permission
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Fehlende Domain-Admin-Rolle 'Postfach-Konfiguration' (admin.mail_config)",
+        )
+
+
+async def _config_out(session: AsyncSession, row) -> MailboxConfigOut:
+    status_entry = app.state.poll_status.get(row.id, {})
+    return MailboxConfigOut(
+        **mailboxes.row_values(row),
+        has_password=row.password_encrypted is not None,
+        message_count=await mailboxes.message_count(session, row.id),
+        updated_at=row.updated_at,
+        updated_by=row.updated_by,
+        last_poll_at=status_entry.get("at"),
+        last_poll_ok=status_entry.get("ok"),
+        last_poll_error=status_entry.get("error"),
+    )
+
+
+def _values_from_payload(payload: MailboxConfigIn) -> dict:
+    return {
+        "id": payload.id,
+        "name": payload.name,
+        "kind": payload.kind,
+        "owning_group_id": payload.owning_group_id or None,
+        "inbound_protocol": payload.inbound_protocol,
+        "host": payload.host,
+        "port": payload.effective_port(),
+        "username": payload.username,
+        "use_tls": payload.use_tls,
+        "imap_mailbox": payload.imap_mailbox or "INBOX",
+        "enabled": payload.enabled,
+    }
+
+
+def _mailbox_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, mailboxes.MailboxNotFoundError):
+        return HTTPException(status_code=404, detail=str(exc))
+    if isinstance(exc, mailboxes.MailboxConflictError):
+        return HTTPException(status_code=409, detail=str(exc))
+    if isinstance(exc, mailboxes.MailboxInvalidError):
+        return HTTPException(status_code=422, detail=str(exc))
+    if isinstance(exc, crypto.CredentialKeyError):
+        return HTTPException(status_code=503, detail=str(exc))
+    if isinstance(exc, crypto.DecryptionError):
+        return HTTPException(
+            status_code=409,
+            detail=f"{exc} - Passwort neu eingeben (Schlüssel geändert?)",
+        )
+    raise exc
+
+
+_MAILBOX_ERRORS = (
+    mailboxes.MailboxNotFoundError,
+    mailboxes.MailboxConflictError,
+    mailboxes.MailboxInvalidError,
+    crypto.CredentialKeyError,
+    crypto.DecryptionError,
+)
+
+
+@app.get("/mailbox-config", response_model=list[MailboxConfigOut])
+async def list_mailbox_config(
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> list[MailboxConfigOut]:
+    """Every mailbox with its connection settings (never the password),
+    message count and this replica's last poll result."""
+    await _require_mail_config(x_dms_principal)
+    return [await _config_out(session, row) for row in await mailboxes.list_rows(session)]
+
+
+@app.post("/mailbox-config", response_model=MailboxConfigOut, status_code=201)
+async def create_mailbox_config(
+    payload: MailboxConfigIn,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> MailboxConfigOut:
+    await _require_mail_config(x_dms_principal)
+    try:
+        row = await mailboxes.save(
+            session,
+            _values_from_payload(payload),
+            password=payload.password,
+            key=app.state.credentials_key,
+            actor=x_dms_principal,
+            create=True,
+        )
+    except _MAILBOX_ERRORS as exc:
+        raise _mailbox_error(exc) from exc
+    await session.commit()
+    await publish_event(
+        "mail_connector.mailbox.created",
+        subject=row.id,
+        payload={"kind": row.kind, "inbound_protocol": row.inbound_protocol, "host": row.host},
+        actor=x_dms_principal,
+    )
+    return await _config_out(session, row)
+
+
+@app.put("/mailbox-config/{mailbox_id}", response_model=MailboxConfigOut)
+async def update_mailbox_config(
+    mailbox_id: str,
+    payload: MailboxConfigIn,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> MailboxConfigOut:
+    """Replaces every non-secret field; the password only when one is
+    given. Takes effect on the next poll tick."""
+    await _require_mail_config(x_dms_principal)
+    if payload.id != mailbox_id:
+        raise HTTPException(status_code=422, detail="Die id eines Postfachs ist unveränderlich")
+    try:
+        row = await mailboxes.save(
+            session,
+            _values_from_payload(payload),
+            password=payload.password,
+            key=app.state.credentials_key,
+            actor=x_dms_principal,
+            create=False,
+        )
+    except _MAILBOX_ERRORS as exc:
+        raise _mailbox_error(exc) from exc
+    await session.commit()
+    await publish_event(
+        "mail_connector.mailbox.updated",
+        subject=row.id,
+        payload={"enabled": row.enabled, "password_changed": bool(payload.password)},
+        actor=x_dms_principal,
+    )
+    return await _config_out(session, row)
+
+
+@app.delete("/mailbox-config/{mailbox_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_mailbox_config(
+    mailbox_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    """Only a mailbox without stored messages; otherwise `409` - disable it
+    instead, so its messages keep a name and a mailbox to route from."""
+    await _require_mail_config(x_dms_principal)
+    try:
+        await mailboxes.delete(session, mailbox_id)
+    except _MAILBOX_ERRORS as exc:
+        raise _mailbox_error(exc) from exc
+    await session.commit()
+    app.state.poll_status.pop(mailbox_id, None)
+    await publish_event(
+        "mail_connector.mailbox.deleted", subject=mailbox_id, payload={}, actor=x_dms_principal
+    )
+
+
+@app.post("/mailbox-config/test", response_model=MailboxTestResult)
+async def test_mailbox_config(
+    payload: MailboxTestIn,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> MailboxTestResult:
+    """Logs in with a draft configuration, reading no message. Without a
+    password in the draft, the stored one of the same id is used - so an
+    admin can test a change of host without retyping the secret."""
+    await _require_mail_config(x_dms_principal)
+    try:
+        row = await mailboxes.get_row(session, payload.id)
+        password = mailboxes.resolve_password(row, payload.password, app.state.credentials_key)
+        config = mailboxes.build_config(_values_from_payload(payload), password)
+    except _MAILBOX_ERRORS as exc:
+        raise _mailbox_error(exc) from exc
+    backend = app.state.backend_factory(config)
+    try:
+        async with asyncio.timeout(settings.mailbox_test_timeout_seconds):
+            await backend.check()
+    except TimeoutError:
+        return MailboxTestResult(ok=False, error="Zeitüberschreitung beim Verbindungsaufbau")
+    except Exception as exc:  # noqa: BLE001 - every failure is a test result
+        return MailboxTestResult(ok=False, error=f"{type(exc).__name__}: {exc}"[:500])
+    return MailboxTestResult(ok=True)

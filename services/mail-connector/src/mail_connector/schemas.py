@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class InboundAttachmentOut(BaseModel):
@@ -26,6 +26,69 @@ class MailboxOut(BaseModel):
     name: str
     kind: Literal["central", "departmental"]
     owning_group_id: str | None
+    # P88-S4a: a disabled mailbox isn't polled but stays a name and a
+    # routing target for its stored messages.
+    enabled: bool = True
+
+
+class MailboxConfigIn(BaseModel):
+    """A mailbox as the admin API writes it (P88-S4a, ADR 0244). `password`
+    is write-only: omitted or empty keeps the stored secret, so the admin
+    page never needs to know it. `port` defaults by protocol and TLS."""
+
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]{0,63}$")
+    name: str = Field(min_length=1, max_length=256)
+    kind: Literal["central", "departmental"] = "central"
+    owning_group_id: str | None = None
+    inbound_protocol: Literal["pop3", "imap"] = "pop3"
+    host: str = Field(min_length=1)
+    port: int | None = Field(default=None, ge=1, le=65535)
+    username: str = Field(min_length=1)
+    password: str | None = None
+    use_tls: bool = True
+    imap_mailbox: str = "INBOX"
+    enabled: bool = True
+
+    def effective_port(self) -> int:
+        if self.port is not None:
+            return self.port
+        if self.inbound_protocol == "pop3":
+            return 995 if self.use_tls else 110
+        return 993 if self.use_tls else 143
+
+
+class MailboxConfigOut(BaseModel):
+    """What the admin page sees: everything but the password, plus whether
+    one is stored and the last poll result of this replica."""
+
+    id: str
+    name: str
+    kind: Literal["central", "departmental"]
+    owning_group_id: str | None
+    inbound_protocol: Literal["pop3", "imap"]
+    host: str
+    port: int
+    username: str
+    has_password: bool
+    use_tls: bool
+    imap_mailbox: str
+    enabled: bool
+    message_count: int
+    updated_at: datetime
+    updated_by: str | None
+    last_poll_at: datetime | None = None
+    last_poll_ok: bool | None = None
+    last_poll_error: str | None = None
+
+
+class MailboxTestIn(MailboxConfigIn):
+    """A connection test of a draft; `password` omitted uses the stored one
+    of the mailbox with the same id."""
+
+
+class MailboxTestResult(BaseModel):
+    ok: bool
+    error: str | None = None
 
 
 class MailRoutingLogEntryOut(BaseModel):

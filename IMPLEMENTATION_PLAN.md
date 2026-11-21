@@ -3946,8 +3946,26 @@ installation's replica health.
   - mail-connector mailboxes move from env variables to a config API/table: the backend part with
     migration of the existing env config, then the admin page.
   - Realm-role assignment in user management.
-  - If the mailbox backend turns out to be large, this session splits in two.
-- **P88-S5 — Alerting on sensors (user-requested, ADR 0244).** Scope first, then build what fits one
+  - If the mailbox backend turns out to be large, this session splits in two. **It did (2026-11-21):**
+    - **P88-S4a — Mailbox backend (ADR 0244).**
+      - a `mail_connector.mailbox` table with credentials encrypted at rest (AES-256-GCM,
+        `DMS_MAILBOX_CREDENTIALS_KEY`, write-only in the API);
+      - a one-time adoption of `DMS_MAILBOXES` on an empty table;
+      - the poll loop and every lookup read from the table;
+      - an admin API gated by a new `admin.mail_config` (`domain-admin-mail`): CRUD, enable/disable,
+        a connection test, events;
+      - Helm and compose.
+      - ✅ **Result:** built as listed.
+        - **Live:** `central` was adopted; a real SMTP→POP3 mail was ingested by the table-driven
+          loop; the connection test passed with the stored password and failed with a wrong one;
+          create/delete appeared in the audit trail.
+        - **Two side findings fixed:** the Helm chart's stale `DMS_POP3_HOST` (ignored since
+          P31-S12a), and `cryptography` missing from mail-connector's dependencies (only the shared
+          test venv had it).
+    - **P88-S4b — Mailbox admin page and realm-role assignment.** The admin-ui page for the
+      mailbox API; realm-role assignment in user management (the auth-service endpoints exist since
+      Phase 78).
+- **P88-S5 — Alerting on sensors (user-requested, ADR 0245).** Scope first, then build what fits one
   session. Following the reference comparison:
   - warning and error thresholds per sensor (min and max), with a repeat count before a level counts
     (debounce);
@@ -3978,7 +3996,7 @@ installation's replica health.
 
 ## Phase 90 — Collaboration Features (user-selected from the external comparison)
 
-- **P90-S1 — Follow-up reminders (Wiedervorlagen), backend: ADR 0245.** Set a date and note on a
+- **P90-S1 — Follow-up reminders (Wiedervorlagen), backend: ADR 0246.** Set a date and note on a
   document, folder or case. List "my reminders", clear or snooze, and notify when due, reusing the
   existing deletion-reminder/SLA timer infrastructure (Konzept names exactly this as a future add-on).
   The session decides the owning service (favorite-service vs. notification-service vs. a small new
@@ -3993,15 +4011,15 @@ installation's replica health.
     and by email.
 - **P90-S4 — Watch subscriptions.** Subscribe to a document or folder (and optionally a workflow
   instance), and get notified on new version, metadata change, move, or delete. Backend events are
-  already published. favorite-service's "watchlist" wording finally means watching. ADR 0246.
+  already published. favorite-service's "watchlist" wording finally means watching. ADR 0247.
 - **P90-S5 — Embedded-metadata extraction on upload.** Copy PDF info/XMP and Office core properties into
   document attributes, configured per object type (source property → attribute, overwrite policy). An
   admin UI mapping in the object-type editor.
-- **P90-S6 — Scoping: validating externally signed incoming documents (ADR 0247).** Validate PAdES (and
+- **P90-S6 — Scoping: validating externally signed incoming documents (ADR 0248).** Validate PAdES (and
   detached CAdES?) on ingest (upload, mail-connector), with trust lists, a stored validation report per
   document, and a UI badge. Stay format-agnostic and keep QES creation, HSM and XAdES out (still
   declined). No code.
-- **P90-S7 — Scoping: changing running processes, and lane semantics (ADR 0248).**
+- **P90-S7 — Scoping: changing running processes, and lane semantics (ADR 0249).**
   - Insert, remove or redirect a step in a running instance (circulation-folder routing by hand), against
     SpiffWorkflow's serialized state.
   - Decide in the same pass whether BPMN lanes become an authorization boundary (lane = role) or stay
@@ -4017,7 +4035,7 @@ installation's replica health.
     instrumentation and trace propagation through NATS headers.
   - An OTLP collector plus Tempo (or Jaeger) in compose and the Helm chart, a Grafana datasource, and the
     sampling ratio as a monitoring-service sensor parameter.
-  - ADR 0249.
+  - ADR 0250.
 - **P91-S2 — Central log aggregation (§10.1).** Loki plus promtail (or Alloy) in compose and Helm, with
   the JSON logs that already exist and a Grafana datasource. Trace-id ↔ log correlation with S1.
 - **P91-S3 — Hygiene bundle.**
@@ -4028,7 +4046,7 @@ installation's replica health.
   - `PROGRESS.md`'s "Open Decisions" section rewritten: about 38 stale bullets removed and the section
     split from the MVP-era session log it runs into.
   - The `process-designer.md` "stale specs" sentence annotated as closed in P79-S3.
-- **P91-S4 — Scoping: database schema migrations (ADR 0250).** Today schemas evolve through
+- **P91-S4 — Scoping: database schema migrations (ADR 0251).** Today schemas evolve through
   `create_all` plus ad-hoc `ALTER TABLE … IF NOT EXISTS` at startup. Options: Alembic per service,
   formalizing the current pattern, or accepting it, judged against fleet rolling updates and the
   Helm upgrade path. No code. **This is the last session of the plan:** phase-close regression, then

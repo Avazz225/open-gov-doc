@@ -877,15 +877,20 @@ services:
       - case-service
       - object-type-service
     env:
-      # settings.py default for pop3_host is "localhost" (only works
-      # against a host-local mail server) - infra/docker-compose.yml
-      # overrides it to the Compose hostname "mailpit". smtp_host/
-      # pop3_port/-_username/-_password/poststelle_role defaults in
-      # settings.py already match infra/docker-compose.yml, no
-      # further lines needed. "mailpit" remains, until P26-S3 (builds the real
-      # Mailpit deployment), a pure Compose hostname without a k8s equivalent
-      # in this chart (an open point, see the session report).
-      DMS_POP3_HOST: "mailpit"
+      # P88-S4a (ADR 0244): mailboxes are created in the admin UI ("Postfächer")
+      # and stored in mail-connector's table. The former DMS_POP3_HOST line was
+      # stale: the single-mailbox settings it fed were replaced by DMS_MAILBOXES
+      # in P31-S12a, so it had been ignored since. An empty list here means
+      # nothing is adopted on first start (instead of the settings default, a
+      # localhost dev mailbox); set DMS_MAILBOXES only to migrate an existing
+      # env-based list once.
+      DMS_MAILBOXES: "[]"
+      # Encrypts the mailbox passwords at rest (base64, 32 bytes). Dev-only
+      # value, same pattern as archival-service's DMS_ARCHIVE_ENCRYPTION_KEY
+      # above - override it for any real deployment (e.g. --set or a values
+      # file from your secret store); changing it later makes the stored
+      # passwords unreadable until they are entered again.
+      DMS_MAILBOX_CREDENTIALS_KEY: "bWFpbC1jb25uZWN0b3ItY3JlZGVudGlhbHMta2V5ISE="
 
   migration-service:
     enabled: true

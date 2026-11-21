@@ -54,3 +54,17 @@ class Pop3Backend(MailboxBackend):
 
     async def fetch_new_messages(self) -> list[RawIncomingMessage]:
         return await asyncio.to_thread(self._fetch_sync)
+
+    def _check_sync(self) -> None:
+        client_cls = poplib.POP3_SSL if self._use_tls else poplib.POP3
+        client = client_cls(self._host, self._port, timeout=10)
+        try:
+            client.user(self._username)
+            client.pass_(self._password)
+            client.stat()
+        finally:
+            with contextlib.suppress(Exception):
+                client.quit()
+
+    async def check(self) -> None:
+        await asyncio.to_thread(self._check_sync)

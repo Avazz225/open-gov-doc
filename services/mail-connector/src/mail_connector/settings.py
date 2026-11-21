@@ -95,6 +95,17 @@ class Settings(BaseServiceSettings):
     # see ADR 0123 "Consequences".
     permission_service_base_url: str = "http://localhost:8004"
 
+    # Since P88-S4a (ADR 0244) the mailboxes live in the `mailbox` table and
+    # are managed through the admin API; `mailboxes` below (DMS_MAILBOXES)
+    # is only adopted ONCE into an empty table on first start after the
+    # upgrade, then ignored. The passwords are encrypted at rest with this
+    # key (base64, 32 bytes, AES-256-GCM).
+    mailbox_credentials_key: str | None = None
+    # Who may manage mailboxes (`domain-admin-mail`).
+    mail_config_permission: str = "admin.mail_config"
+    # A connection test gives up after this long.
+    mailbox_test_timeout_seconds: float = 10.0
+
     # Multi-inbox model (14.2, Post-Roadmap Phase 31 Session 12a) - replaces
     # the previous single, service-wide `inbound_protocol`/`pop3_*`/`imap_*`
     # settings block with a list of any number of named mailboxes. The

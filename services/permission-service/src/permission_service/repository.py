@@ -338,6 +338,12 @@ DOMAIN_ADMIN_ROLES: list[tuple[str, str, list[str]]] = [
     # notification, this one governs who may change the wording every
     # future notification is sent with).
     ("domain-admin-notification", "Notification-Konfiguration", ["admin.notification_config"]),
+    # P88-S4a (ADR 0244): mail-connector's mailboxes moved from DMS_MAILBOXES
+    # into a table managed through the admin UI. Their credentials grant
+    # access to every incoming letter, so managing them is its own domain,
+    # not part of the mail room role (`dms-poststelle`, which processes the
+    # intake) nor of notification templates.
+    ("domain-admin-mail", "Postfach-Konfiguration", ["admin.mail_config"]),
     # Phase 59 Session 1: `GET /notifications`/`GET /notifications/{id}` on
     # notification-service previously had NO permission check at all -
     # complete unauthenticated PII/content disclosure (any authenticated

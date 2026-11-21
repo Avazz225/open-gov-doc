@@ -22,3 +22,8 @@ class MailboxBackend(ABC):
 
     @abstractmethod
     async def fetch_new_messages(self) -> list[RawIncomingMessage]: ...
+
+    @abstractmethod
+    async def check(self) -> None:
+        """Connects and logs in without reading or changing any message
+        (P88-S4a: the admin page's connection test). Raises on failure."""

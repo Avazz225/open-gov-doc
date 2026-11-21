@@ -1358,6 +1358,13 @@ services:
       # falls back to the local dev default (`localhost:8007`), which points
       # nowhere there.
       DMS_OBJECT_TYPE_SERVICE_BASE_URL: http://object-type-service:8000
+      # P88-S4a (ADR 0244): mailboxes are managed in the admin UI and stored
+      # in mail-connector's own table; DMS_MAILBOXES below is only ADOPTED
+      # ONCE into an empty table on the first start after the upgrade, then
+      # ignored (a warning is logged while it is still set). The passwords
+      # are encrypted at rest with this key (base64, 32 bytes) - dev-only
+      # default, override in any real deployment.
+      DMS_MAILBOX_CREDENTIALS_KEY: ${MAIL_CONNECTOR_CREDENTIALS_KEY:-bWFpbC1jb25uZWN0b3ItY3JlZGVudGlhbHMta2V5ISE=}
       # Multi-inbox model (14.2, Post-Roadmap Phase 31 Session 12a) - any
       # number of named mailboxes instead of one fixed POP3/IMAP block, same
       # env-var-JSON-list pattern as storage-service's DMS_TARGETS (ADR

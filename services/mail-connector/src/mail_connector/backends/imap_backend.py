@@ -105,3 +105,18 @@ class ImapBackend(MailboxBackend):
 
     async def fetch_new_messages(self) -> list[RawIncomingMessage]:
         return await asyncio.to_thread(self._fetch_sync)
+
+    def _check_sync(self) -> None:
+        client_cls = imaplib.IMAP4_SSL if self._use_tls else imaplib.IMAP4
+        client = client_cls(self._host, self._port, timeout=10)
+        try:
+            client.login(self._username, self._password)
+            status, _ = client.select(self._mailbox, readonly=True)
+            if status != "OK":
+                raise RuntimeError(f"IMAP-Postfach {self._mailbox!r} nicht vorhanden")
+        finally:
+            with contextlib.suppress(Exception):
+                client.logout()
+
+    async def check(self) -> None:
+        await asyncio.to_thread(self._check_sync)

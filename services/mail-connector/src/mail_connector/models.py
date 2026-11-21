@@ -1,7 +1,16 @@
 from datetime import datetime
 
 from dms_db_base import make_declarative_base
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    LargeBinary,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 Base = make_declarative_base("mail_connector")
@@ -115,3 +124,46 @@ class OutboundMessage(Base):
     sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(16))  # "sent" | "failed"
     error_message: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+
+
+class Mailbox(Base):
+    """A configured inbound mailbox (P88-S4a, ADR 0244) - before, the list
+    came from `DMS_MAILBOXES` and changed only with a restart. One protocol
+    per mailbox, so the protocol-specific `pop3_*`/`imap_*` settings of
+    `settings.MailboxConfig` collapse into one host/port/username/password
+    block here. The password is stored encrypted (`crypto`), never
+    returned by the API (`has_password` only).
+
+    `enabled=False` stops polling but keeps the mailbox as a name and a
+    routing target for messages already stored under it - a mailbox with
+    messages can't be deleted, only disabled."""
+
+    __tablename__ = "mailbox"
+
+    id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    name: Mapped[str] = mapped_column(String(256))
+    kind: Mapped[str] = mapped_column(String(16), default="central")
+    owning_group_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    inbound_protocol: Mapped[str] = mapped_column(String(8), default="pop3")
+    host: Mapped[str] = mapped_column(String(255))
+    port: Mapped[int] = mapped_column(Integer)
+    username: Mapped[str] = mapped_column(String(255))
+    password_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    use_tls: Mapped[bool] = mapped_column(Boolean, default=True)
+    imap_mailbox: Mapped[str] = mapped_column(String(255), default="INBOX")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+
+class MailboxAdoption(Base):
+    """Single row recording that `DMS_MAILBOXES` was adopted into the
+    `mailbox` table (P88-S4a). Without it, an installation whose admin
+    deleted every mailbox would get the env list back on the next start."""
+
+    __tablename__ = "mailbox_adoption"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    adopted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    adopted_ids: Mapped[list] = mapped_column(JSON, default=list)

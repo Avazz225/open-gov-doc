@@ -8,6 +8,8 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     "httpx>=0.27",
     "aiosmtplib>=3.0",
+    # P88-S4a: mailbox passwords encrypted at rest (AES-256-GCM).
+    "cryptography>=42",
     "dms-common",
     "dms-db-base",
     "dms-eventbus-client",
