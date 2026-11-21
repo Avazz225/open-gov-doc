@@ -2486,6 +2486,152 @@ export async function pushInstallationLicense(
   return response.json();
 }
 
+// --- Fleet orchestration (P88-S1): groups, update plans, rollouts, and
+// operator management. Every call carries the operator token; the server
+// takes the acting identity (proposer, approver, starter) from it, never
+// from the body (P84-S4, ADR 0234).
+
+export interface FleetGroup {
+  id: string;
+  name: string;
+  created_at: string;
+  installation_ids: string[];
+}
+
+export type FleetStepType = "gate" | "verify";
+
+export interface FleetPlanStep {
+  name: string;
+  step_type: FleetStepType;
+  requires_approval: boolean;
+}
+
+export interface FleetPlan {
+  id: string;
+  name: string;
+  version: string;
+  steps: FleetPlanStep[];
+  created_at: string;
+}
+
+export type FleetRunStatus =
+  | "pending"
+  | "wait_external"
+  | "retry_later"
+  | "manual_required"
+  | "recoverable_failed"
+  | "fatal_contract"
+  | "completed";
+
+export interface FleetRun {
+  id: string;
+  installation_id: string;
+  installation_display_name: string;
+  current_step_index: number;
+  current_step_name: string | null;
+  status: FleetRunStatus;
+  last_outcome: string | null;
+  error_message: string | null;
+  proposed_by: string | null;
+  started_at: string | null;
+  updated_at: string;
+  completed_at: string | null;
+}
+
+export interface FleetRollout {
+  id: string;
+  plan_id: string;
+  name: string;
+  group_id: string | null;
+  status: "draft" | "running" | "completed" | "cancelled";
+  created_at: string;
+  started_at: string | null;
+  started_by: string | null;
+  runs: FleetRun[];
+}
+
+export type FleetGateOutcome = "success" | "retry_later" | "recoverable_failed" | "fatal_contract";
+
+async function fleetJson<T>(
+  path: string,
+  operatorKey: string,
+  method = "GET",
+  body?: unknown
+): Promise<T> {
+  const response = await fleetManagementRequest(path, {
+    method,
+    headers:
+      body === undefined
+        ? fleetOperatorHeaders(operatorKey)
+        : { ...fleetOperatorHeaders(operatorKey), "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  return (response.status === 204 ? undefined : await response.json()) as T;
+}
+
+export const listFleetGroups = (key: string) => fleetJson<FleetGroup[]>("groups", key);
+export const createFleetGroup = (name: string, key: string) =>
+  fleetJson<FleetGroup>("groups", key, "POST", { name });
+export const deleteFleetGroup = (id: string, key: string) =>
+  fleetJson<void>(`groups/${id}`, key, "DELETE");
+export const addFleetGroupMember = (groupId: string, installationId: string, key: string) =>
+  fleetJson<FleetGroup>(`groups/${groupId}/members`, key, "POST", {
+    installation_id: installationId,
+  });
+export const removeFleetGroupMember = (groupId: string, installationId: string, key: string) =>
+  fleetJson<FleetGroup>(`groups/${groupId}/members/${installationId}`, key, "DELETE");
+
+export const listFleetPlans = (key: string) => fleetJson<FleetPlan[]>("plans", key);
+export const createFleetPlan = (
+  payload: { name: string; version: string; steps: FleetPlanStep[] },
+  key: string
+) => fleetJson<FleetPlan>("plans", key, "POST", payload);
+export const deleteFleetPlan = (id: string, key: string) =>
+  fleetJson<void>(`plans/${id}`, key, "DELETE");
+
+export const listFleetRollouts = (key: string) => fleetJson<FleetRollout[]>("rollouts", key);
+export const createFleetRollout = (
+  payload: { plan_id: string; name: string; group_id: string | null; include: string[]; exclude: string[] },
+  key: string
+) => fleetJson<FleetRollout>("rollouts", key, "POST", payload);
+export const deleteFleetRollout = (id: string, key: string) =>
+  fleetJson<void>(`rollouts/${id}`, key, "DELETE");
+// A running rollout that can't finish is cancelled; its runs keep their
+// state, and it can then be deleted.
+export const cancelFleetRollout = (id: string, key: string) =>
+  fleetJson<FleetRollout>(`rollouts/${id}/cancel`, key, "POST");
+export const startFleetRollout = (id: string, key: string) =>
+  fleetJson<FleetRollout>(`rollouts/${id}/start`, key, "POST", {});
+
+// One installation's run inside a rollout. `advance` checks a verify step;
+// `mark-done` reports a gate step; `approve`/`reject` decide a proposal;
+// `retry` and `acknowledge-fatal` re-open a failed step.
+export type FleetRunAction = "advance" | "mark-done" | "approve" | "reject" | "retry" | "acknowledge-fatal";
+
+export const fleetRunAction = (
+  rolloutId: string,
+  installationId: string,
+  action: FleetRunAction,
+  key: string,
+  body: Record<string, unknown> = {}
+) =>
+  fleetJson<FleetRun>(
+    `rollouts/${rolloutId}/installations/${installationId}/${action}`,
+    key,
+    "POST",
+    body
+  );
+
+export interface FleetOperatorCreateOut extends FleetOperator {
+  token: string;
+}
+
+export const listFleetOperators = (key: string) => fleetJson<FleetOperator[]>("operators", key);
+export const createFleetOperator = (name: string, isAdmin: boolean, key: string) =>
+  fleetJson<FleetOperatorCreateOut>("operators", key, "POST", { name, is_admin: isAdmin });
+export const revokeFleetOperator = (id: string, key: string) =>
+  fleetJson<void>(`operators/${id}`, key, "DELETE");
+
 export interface OcrResult {
   id: string;
   document_id: string;

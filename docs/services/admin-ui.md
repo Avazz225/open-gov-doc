@@ -397,8 +397,7 @@ component state, never persisted, same convention as `ProcessingFailuresView`'s
 `HandoverFailuresSection`. Covers: registering a new managed installation (shows the plaintext
 `fleet_agent_api_key` exactly once, never re-fetchable afterward), listing, deletion, a live status check
 (`GET /installations/status`), and pushing a license token (`POST /installations/{id}/license`). Groups,
-update plans, and rollouts — the rest of `fleet-management-service`'s API — are not built here, a
-separate, larger UI surface left for a future session.
+update plans and rollouts followed in P88-S1 (see "Fleet Orchestration").
 
 
 **Operator identity (P84-S4, ADR 0234):** after "Laden" the view also calls `GET /operators/me` and shows
@@ -504,6 +503,32 @@ notification_read")` and shows a graceful missing-permission message instead of 
 Two-stage Docker image (`apps/admin-ui/Dockerfile`), identical to the User UI. `NEXT_PUBLIC_GATEWAY_BASE_URL` as a build arg (initial value of the "Local" installation), overridable via `ADMIN_UI_GATEWAY_BASE_URL` in `infra/.env`. Port `3001` (User UI: `3000`). Additional installations are added at runtime via `/installations/`, not via a rebuild.
 
 **Since Phase 49 Session 3**: the build stage's `WORKDIR`/`COPY` layout changed to mirror the actual repo shape (`/repo/apps/admin-ui/`, plus `/repo/libs/dms-ui/`) instead of flattening this app into `/app` — needed so `globals.css`'s new relative `@import` of `libs/dms-ui/tokens.css` resolves identically to a local `npm run build`, same fix as every other app in Phase 49. The two existing build args (`NEXT_PUBLIC_GATEWAY_BASE_URL`, `NEXT_PUBLIC_FEDERATION_HUB_BASE_URL`) carried over unchanged.
+
+## Fleet Orchestration (P88-S1, [ADR 0242](../adr/0242-admin-ui-fleet-orchestration-and-rollout-lifecycle.md))
+
+Once a fleet token has been accepted, `FleetOrchestration.tsx` adds four sections below the managed
+installations. All of them use the token from the last successful "Laden"; the server takes the acting
+operator from it.
+- **Gruppen (Wellen):** create and delete groups, add installations through a select (only those not
+  yet in the group), and remove them through the × on their chip.
+- **Update-Pläne:** a plan has a name, a version and ordered steps. Each step is a Bestätigung (`gate`,
+  optionally "mit Freigabe") or a Prüfung (`verify`), and steps can be moved up or down. A step without
+  a name is refused before the request. The list shows each plan's steps.
+- **Rollouts:**
+  - Creating one takes a name, a plan, an optional group, checkboxes to exclude group members or add
+    other installations, and a live "Zielkreis: n Installation(en)".
+  - Each rollout shows its state (Entwurf, Läuft, Abgeschlossen, Abgebrochen), the plan, who started it
+    and when, and one row per installation: step `i/n` with its type, and the run state with its error
+    or proposer.
+  - The actions follow status and step type (table in ADR 0242). "Ergebnis melden" and "Ablehnen" open
+    an inline form, and the row's buttons hide while it is open. "Freigeben" is disabled, with the
+    reason, for the operator who proposed the step.
+  - "Abbrechen" on a running rollout; "Entfernen" on any other.
+- **Operatoren:** the list for everyone. Admins can also mint an operator (the token is shown once) and
+  revoke one; `bootstrap` has no revoke button.
+
+Every section shows its own errors, including the server's `409` texts (for example "Gruppe wird von
+einem Rollout verwendet"). At 390px the tables scroll inside their containers.
 
 ## No Actor Fields in Requests (P85-S5, [ADR 0240](../adr/0240-acting-identity-from-verified-principal.md))
 
@@ -732,7 +757,7 @@ Older history: 282 tests since Phase 58 Session 2 — +2 in
 - ~~No group management, only individual users (Permission Service already supports `principal_type=group`, the UI only offers `user`).~~ — **reworded during Phase 65+'s gap-analysis round**: group ENTITY management (create/delete groups, add/remove members) has existed since Post-Roadmap Phase 22 Session 2 — the blanket "no group management" claim was stale. The narrower gap remains real: `UserManagement.tsx`'s `createRoleAssignment` hardcodes `principalType: "user"`, so a ROLE ASSIGNMENT can still only ever target a `user` principal, never a `group`, even though Groups are now real, manageable entities. — **closed in Phase 78 Session 3**: the role-assignment form now has a "Zuweisen an" (assign-to) select (`user`/`group`); picking `group` swaps the free-text username field for a `<select>` populated from the already-loaded `groups` list, sending the chosen `Group.id` as `principal_id` with `principalType: "group"` — `permission-service`'s `POST /role-assignments` already accepted `principal_type: "group"` server-side, this was purely a frontend gap. The assignments table also gained a "Typ" column and resolves a group principal's name via the same `groups` list instead of showing a raw id.
 - ~~Workflow designer, license overview, audit trail view, configuration import/export (Concept 8 names these for the Admin UI) are not part of this base scaffold — the underlying services do not yet exist.~~ — **closed in Phase 57 Session 1**: license overview (`app/license/page.tsx`), audit trail view (`app/audit-trace-settings/page.tsx`), and configuration import/export (`components/ConfigPackages.tsx`) all shipped in later sessions and are stale here. Workflow designer remains correctly out of scope for admin-ui specifically — it is a separate app, `process-designer` (Phase 24), not an embedded admin-ui page.
 - ~~i18n only structurally prepared (ADR 0007), no second language and no UI language switch.~~ — **closed in Phase 47 Session 4**: full English translation (`en.json`, 754 keys) plus `LocaleSwitcher` in `AdminShell.tsx`'s header, see "i18n: English Translation + Locale Switcher" above. Stale bullet, left un-struck when that session shipped — corrected during a later gap-analysis round.
-- ~~**Installation list is stored purely locally in the browser, no cross-device provisioning** (see ADR 0008 "Consequences"). The "optional, not-yet-built Fleet/License Management Service" this bullet blamed is stale — `fleet-management-service` has fully existed since Phase 54 Session 1 (full CRUD: `POST`/`GET /installations`, `/installations/{id}/license`, group/rollout management), it was simply never wired into `admin-ui`.~~ — **closed in P67-S1** ([ADR 0197](../adr/0197-admin-ui-fleet-management-view.md)): a new, separate `FleetManagementView` (`/fleet-management/`) now wires up registration/listing/deletion/status/license-push against the real service. Deliberately NOT a change to `InstallationManager.tsx`/`installations.ts` — those manage an unrelated concept (which gateway THIS browser's admin session logs into, Concept 8), not the operator's fleet inventory; conflating the two would have merged two data models that don't correspond field-for-field. Groups/plans/rollouts (the rest of `fleet-management-service`'s API) remain unbuilt in `admin-ui` — a separate, larger UI surface, scoped out of this session, not yet scheduled.
+- ~~**Installation list is stored purely locally in the browser, no cross-device provisioning** (see ADR 0008 "Consequences"). The "optional, not-yet-built Fleet/License Management Service" this bullet blamed is stale — `fleet-management-service` has fully existed since Phase 54 Session 1 (full CRUD: `POST`/`GET /installations`, `/installations/{id}/license`, group/rollout management), it was simply never wired into `admin-ui`.~~ — **closed in P67-S1** ([ADR 0197](../adr/0197-admin-ui-fleet-management-view.md)): a new, separate `FleetManagementView` (`/fleet-management/`) now wires up registration/listing/deletion/status/license-push against the real service. Deliberately NOT a change to `InstallationManager.tsx`/`installations.ts` — those manage an unrelated concept (which gateway THIS browser's admin session logs into, Concept 8), not the operator's fleet inventory; conflating the two would have merged two data models that don't correspond field-for-field. ~~Groups/plans/rollouts (the rest of `fleet-management-service`'s API) remain unbuilt in `admin-ui`~~ — built in P88-S1, see "Fleet Orchestration".
 - Theme preference has no conflict resolution mechanism between devices/installations (last fetch wins) and no retry on a failed `PUT /me/preferences` (see ADR 0009 "Consequences").
 - `ocrEnabled` is not editable on the new OCR settings page, only indirectly visible (reachable/unreachable) — actual on/off switching remains a deployment action (Compose profile), see ADR 0016.
 - The Storage Service's target set (which backends/credentials are configured) is likewise not editable on the storage guard page, only the admin override — target-set changes remain deployment configuration (`DMS_TARGETS`), see ADR 0017.

@@ -3861,6 +3861,15 @@ installation's replica health.
 
 - **P88-S1 — Fleet groups, update plans, rollouts.** The admin UI only lists installations today.
   Depends on P84-S4 (operator identity).
+  - ✅ **Result** ([ADR 0242](docs/adr/0242-admin-ui-fleet-orchestration-and-rollout-lifecycle.md)):
+    - **admin-ui:** sections for groups, plans (an ordered step editor), rollouts (target preview, start,
+      per-run actions by status and step type, four-eyes hint, cancel, delete) and operators (mint and
+      revoke for admins).
+    - **fleet-management-service:** reference-aware deletes (`409` instead of FK `500`s),
+      `DELETE /plans/{id}`, `DELETE /rollouts/{id}`, `POST /rollouts/{id}/cancel`, automatic rollout
+      completion, and run actions only on running rollouts.
+    - **Live:** a stuck rollout was cancelled and deleted; a two-step plan went bootstrap → proposal →
+      second operator's approval → completed. The e2e leaves the fleet tables empty.
 - **P88-S2 — Monitoring sensors page.** View and change the sensor configuration (`PUT /sensor-config/*`
   exists), including the cost flags, and the P91-S1 tracing sampling ratio once it exists.
 - **P88-S3 — Object-type status transitions.** An editor for `status_transitions`, plus guided forms for

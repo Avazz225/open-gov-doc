@@ -253,6 +253,8 @@ async def delete_installation(
         await repository.delete_managed_installation(session, installation_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except repository.InUseError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     await session.commit()
 
 
@@ -430,7 +432,10 @@ async def _group_out(session: AsyncSession, group) -> GroupOut:
 async def create_group(
     payload: GroupCreate, session: AsyncSession = Depends(get_session)
 ) -> GroupOut:
-    group = await repository.create_group(session, payload.name)
+    try:
+        group = await repository.create_group(session, payload.name)
+    except repository.InUseError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     await session.commit()
     return await _group_out(session, group)
 
@@ -485,6 +490,8 @@ async def delete_group(group_id: str, session: AsyncSession = Depends(get_sessio
         await repository.delete_group(session, group_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except repository.InUseError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     await session.commit()
 
 
@@ -523,6 +530,22 @@ async def get_plan(plan_id: str, session: AsyncSession = Depends(get_session)) -
         return await repository.get_update_plan(session, plan_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.delete(
+    "/plans/{plan_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(_require_fleet_operator)],
+)
+async def delete_plan(plan_id: str, session: AsyncSession = Depends(get_session)) -> None:
+    """P88-S1: `409` while a rollout uses the plan."""
+    try:
+        await repository.delete_update_plan(session, plan_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except repository.InUseError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await session.commit()
 
 
 async def _run_out(
@@ -598,6 +621,23 @@ async def get_rollout(rollout_id: str, session: AsyncSession = Depends(get_sessi
     return await _rollout_out(session, rollout)
 
 
+@app.delete(
+    "/rollouts/{rollout_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(_require_fleet_operator)],
+)
+async def delete_rollout(rollout_id: str, session: AsyncSession = Depends(get_session)) -> None:
+    """P88-S1: drafts, completed and cancelled rollouts only (`409` while
+    running)."""
+    try:
+        await repository.delete_rollout(session, rollout_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except repository.InUseError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await session.commit()
+
+
 @app.post(
     "/rollouts/{rollout_id}/start",
     response_model=RolloutOut,
@@ -630,6 +670,25 @@ async def start_rollout(
     return await _rollout_out(session, rollout)
 
 
+@app.post(
+    "/rollouts/{rollout_id}/cancel",
+    response_model=RolloutOut,
+    dependencies=[Depends(_require_fleet_operator)],
+)
+async def cancel_rollout(rollout_id: str, session: AsyncSession = Depends(get_session)):
+    """P88-S1: stops a running rollout for good (`409` otherwise); its runs
+    keep their state, and it can be deleted afterwards."""
+    try:
+        rollout = await repository.get_rollout(session, rollout_id)
+        await repository.cancel_rollout(session, rollout)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except repository.InUseError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await session.commit()
+    return await _rollout_out(session, rollout)
+
+
 async def _load_run_context(session: AsyncSession, rollout_id: str, installation_id: str):
     try:
         rollout = await repository.get_rollout(session, rollout_id)
@@ -637,6 +696,11 @@ async def _load_run_context(session: AsyncSession, rollout_id: str, installation
         plan = await repository.get_update_plan(session, rollout.plan_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    # P88-S1: a cancelled (or not yet started) rollout's runs are frozen.
+    if rollout.status != "running":
+        raise HTTPException(
+            status_code=409, detail=f"Rollout ist im Status {rollout.status!r}, nicht 'running'"
+        )
     return rollout, run, plan
 
 
@@ -688,6 +752,7 @@ async def advance_installation_run(
         )
     else:
         await repository.advance_run(session, run, plan)
+        await repository.complete_rollout_if_done(session, rollout)
     await session.commit()
     return await _run_out(session, run, plan)
 
@@ -735,6 +800,7 @@ async def mark_installation_run_done(
         await repository.propose_run(session, run, actor=operator.name)
     else:
         await repository.advance_run(session, run, plan)
+        await repository.complete_rollout_if_done(session, rollout)
     await session.commit()
     return await _run_out(session, run, plan)
 
@@ -768,6 +834,7 @@ async def approve_installation_run(
             detail="Freigabe durch dieselbe Person wie der Vorschlag ist nicht erlaubt (4.3)",
         )
     await repository.advance_run(session, run, plan)
+    await repository.complete_rollout_if_done(session, rollout)
     await session.commit()
     return await _run_out(session, run, plan)
 

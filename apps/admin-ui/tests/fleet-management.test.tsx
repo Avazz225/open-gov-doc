@@ -25,6 +25,12 @@ vi.mock("@/lib/api", () => ({
   getManagedInstallationsStatus: (...args: unknown[]) => getManagedInstallationsStatusMock(...args),
   pushInstallationLicense: (...args: unknown[]) => pushInstallationLicenseMock(...args),
   getCurrentFleetOperator: (...args: unknown[]) => getCurrentFleetOperatorMock(...args),
+  // P88-S1: the orchestration sections load once a token is accepted; they
+  // have their own test file, here they just come back empty.
+  listFleetGroups: async () => [],
+  listFleetPlans: async () => [],
+  listFleetRollouts: async () => [],
+  listFleetOperators: async () => [],
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {

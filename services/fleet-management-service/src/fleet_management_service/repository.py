@@ -4,7 +4,7 @@ import secrets
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,6 +26,12 @@ from fleet_management_service.schemas import (
 
 class NotFoundError(Exception):
     pass
+
+
+class InUseError(Exception):
+    """P88-S1: the row is still referenced (a group or plan by a rollout, an
+    installation by a rollout's run, a running rollout) - a 409, not a raw
+    foreign-key 500."""
 
 
 def generate_api_key() -> str:
@@ -67,7 +73,22 @@ async def get_managed_installation(
 
 
 async def delete_managed_installation(session: AsyncSession, installation_id: str) -> None:
+    """Group memberships go with the installation (P88-S1); a rollout run
+    is history the installation can't silently drop, so it blocks until the
+    rollout itself is deleted."""
     installation = await get_managed_installation(session, installation_id)
+    run_count = await session.scalar(
+        select(func.count())
+        .select_from(InstallationRun)
+        .where(InstallationRun.installation_id == installation_id)
+    )
+    if run_count:
+        raise InUseError("Installation ist Teil eines Rollouts - erst den Rollout löschen")
+    await session.execute(
+        delete(InstallationGroupMember).where(
+            InstallationGroupMember.installation_id == installation_id
+        )
+    )
     await session.delete(installation)
     await session.flush()
 
@@ -96,6 +117,9 @@ async def rotate_managed_installation_key(
 
 
 async def create_group(session: AsyncSession, name: str) -> InstallationGroup:
+    existing = await session.scalar(select(InstallationGroup).where(InstallationGroup.name == name))
+    if existing is not None:
+        raise InUseError(f"Eine Gruppe {name!r} gibt es schon")
     group = InstallationGroup(id=str(uuid.uuid4()), name=name, created_at=datetime.now(UTC))
     session.add(group)
     await session.flush()
@@ -115,7 +139,17 @@ async def list_groups(session: AsyncSession) -> list[InstallationGroup]:
 
 
 async def delete_group(session: AsyncSession, group_id: str) -> None:
+    """Members are just links and go with the group (P88-S1); a rollout
+    that was created from the group still names it, so that blocks."""
     group = await get_group(session, group_id)
+    used = await session.scalar(
+        select(func.count()).select_from(Rollout).where(Rollout.group_id == group_id)
+    )
+    if used:
+        raise InUseError("Gruppe wird von einem Rollout verwendet - erst den Rollout löschen")
+    await session.execute(
+        delete(InstallationGroupMember).where(InstallationGroupMember.group_id == group_id)
+    )
     await session.delete(group)
     await session.flush()
 
@@ -170,6 +204,19 @@ async def get_update_plan(session: AsyncSession, plan_id: str) -> UpdatePlan:
     if plan is None:
         raise NotFoundError(f"plan_id {plan_id!r} unbekannt")
     return plan
+
+
+async def delete_update_plan(session: AsyncSession, plan_id: str) -> None:
+    """P88-S1: a plan no rollout uses can go; one in use is the rollout's
+    definition and stays as long as the rollout does."""
+    plan = await get_update_plan(session, plan_id)
+    used = await session.scalar(
+        select(func.count()).select_from(Rollout).where(Rollout.plan_id == plan_id)
+    )
+    if used:
+        raise InUseError("Plan wird von einem Rollout verwendet - erst den Rollout löschen")
+    await session.delete(plan)
+    await session.flush()
 
 
 async def resolve_rollout_installation_ids(
@@ -262,6 +309,43 @@ async def get_run(session: AsyncSession, rollout_id: str, installation_id: str) 
             f"{rollout_id!r}"
         )
     return run
+
+
+async def delete_rollout(session: AsyncSession, rollout_id: str) -> None:
+    """P88-S1: a draft (created by mistake), a completed or a cancelled
+    rollout can be deleted with its runs; a running one can't - its runs are
+    open work (cancel it first)."""
+    rollout = await get_rollout(session, rollout_id)
+    if rollout.status == "running":
+        raise InUseError("Ein laufender Rollout kann nicht gelöscht werden")
+    await session.execute(delete(InstallationRun).where(InstallationRun.rollout_id == rollout_id))
+    await session.delete(rollout)
+    await session.flush()
+
+
+async def cancel_rollout(session: AsyncSession, rollout: Rollout) -> None:
+    """P88-S1: a running rollout that can't finish (an installation was
+    decommissioned, the plan was wrong) is stopped for good. Its runs keep
+    the state they were in, as the record of how far it got."""
+    if rollout.status != "running":
+        raise InUseError(f"Nur ein laufender Rollout kann abgebrochen werden ({rollout.status!r})")
+    rollout.status = "cancelled"
+    await session.flush()
+
+
+async def complete_rollout_if_done(session: AsyncSession, rollout: Rollout) -> None:
+    """P88-S1: a running rollout whose runs have all completed is
+    `completed` itself (before, it stayed `running` forever)."""
+    if rollout.status != "running":
+        return
+    open_runs = await session.scalar(
+        select(func.count())
+        .select_from(InstallationRun)
+        .where(InstallationRun.rollout_id == rollout.id, InstallationRun.status != "completed")
+    )
+    if not open_runs:
+        rollout.status = "completed"
+        await session.flush()
 
 
 async def start_rollout(session: AsyncSession, rollout: Rollout, *, started_by: str) -> None:

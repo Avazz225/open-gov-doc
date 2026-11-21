@@ -616,3 +616,130 @@ def test_rollout_records_the_verified_starter(client):
     token = _mint_operator(client, "starter")
     started, _ = _start_rollout_for_one_installation(client, headers=_bearer(token))
     assert started["started_by"] == "starter"
+
+
+# --- P88-S1: deleting and completing, for the admin-ui -----------------------
+
+
+def _one_gate_plan(client) -> dict:
+    return _create_plan(
+        client,
+        name="Ein Schritt",
+        steps=[{"name": "Update eingespielt", "step_type": "gate", "requires_approval": False}],
+    )
+
+
+def test_duplicate_group_name_is_a_conflict_not_a_500(client):
+    name = f"Welle-{uuid.uuid4().hex[:8]}"
+    assert client.post("/groups", json={"name": name}).status_code == 201
+    assert client.post("/groups", json={"name": name}).status_code == 409
+
+
+def test_deleting_a_group_takes_its_memberships_along(client):
+    group = client.post("/groups", json={"name": f"Welle-{uuid.uuid4().hex[:8]}"}).json()
+    installation = _register(client)
+    client.post(f"/groups/{group['id']}/members", json={"installation_id": installation["id"]})
+
+    assert client.delete(f"/groups/{group['id']}").status_code == 204
+    assert group["id"] not in {g["id"] for g in client.get("/groups").json()}
+
+
+def test_deleting_an_installation_takes_its_memberships_along(client):
+    group = client.post("/groups", json={"name": f"Welle-{uuid.uuid4().hex[:8]}"}).json()
+    installation = _register(client)
+    client.post(f"/groups/{group['id']}/members", json={"installation_id": installation["id"]})
+
+    assert client.delete(f"/installations/{installation['id']}").status_code == 204
+    groups = {g["id"]: g for g in client.get("/groups").json()}
+    assert groups[group["id"]]["installation_ids"] == []
+
+
+def test_group_plan_and_installation_in_use_by_a_rollout_cannot_be_deleted(client):
+    group = client.post("/groups", json={"name": f"Welle-{uuid.uuid4().hex[:8]}"}).json()
+    installation = _register(client)
+    client.post(f"/groups/{group['id']}/members", json={"installation_id": installation["id"]})
+    plan = _one_gate_plan(client)
+    rollout = client.post(
+        "/rollouts", json={"plan_id": plan["id"], "name": "Welle", "group_id": group["id"]}
+    ).json()
+
+    assert client.delete(f"/groups/{group['id']}").status_code == 409
+    assert client.delete(f"/plans/{plan['id']}").status_code == 409
+    assert client.delete(f"/installations/{installation['id']}").status_code == 409
+
+    # The draft goes, and with it everything it held on to.
+    assert client.delete(f"/rollouts/{rollout['id']}").status_code == 204
+    assert client.delete(f"/plans/{plan['id']}").status_code == 204
+    assert client.delete(f"/groups/{group['id']}").status_code == 204
+    assert client.delete(f"/installations/{installation['id']}").status_code == 204
+
+
+def test_a_rollout_completes_when_its_last_run_does_and_only_then_can_go(client):
+    installation = _register(client)
+    plan = _one_gate_plan(client)
+    rollout = client.post(
+        "/rollouts", json={"plan_id": plan["id"], "name": "Welle", "include": [installation["id"]]}
+    ).json()
+    client.post(f"/rollouts/{rollout['id']}/start", json={})
+
+    assert client.delete(f"/rollouts/{rollout['id']}").status_code == 409  # running
+
+    done = client.post(
+        f"/rollouts/{rollout['id']}/installations/{installation['id']}/mark-done", json={}
+    )
+    assert done.json()["status"] == "completed"
+    assert client.get(f"/rollouts/{rollout['id']}").json()["status"] == "completed"
+    assert client.delete(f"/rollouts/{rollout['id']}").status_code == 204
+    assert client.get(f"/rollouts/{rollout['id']}").status_code == 404
+
+
+def test_a_rollout_stays_running_while_one_run_is_open(client):
+    first, second = _register(client), _register(client, display_name="Kunde Süd")
+    plan = _one_gate_plan(client)
+    rollout = client.post(
+        "/rollouts",
+        json={"plan_id": plan["id"], "name": "Welle", "include": [first["id"], second["id"]]},
+    ).json()
+    client.post(f"/rollouts/{rollout['id']}/start", json={})
+    client.post(f"/rollouts/{rollout['id']}/installations/{first['id']}/mark-done", json={})
+
+    assert client.get(f"/rollouts/{rollout['id']}").json()["status"] == "running"
+
+
+def test_deleting_unknown_plan_or_rollout_returns_404(client):
+    assert client.delete("/plans/does-not-exist").status_code == 404
+    assert client.delete("/rollouts/does-not-exist").status_code == 404
+
+
+def test_a_stuck_rollout_can_be_cancelled_then_deleted_and_its_runs_freeze(client):
+    installation = _register(client)
+    plan = _one_gate_plan(client)
+    rollout = client.post(
+        "/rollouts", json={"plan_id": plan["id"], "name": "Welle", "include": [installation["id"]]}
+    ).json()
+    assert client.post(f"/rollouts/{rollout['id']}/cancel").status_code == 409  # still a draft
+    client.post(f"/rollouts/{rollout['id']}/start", json={})
+
+    cancelled = client.post(f"/rollouts/{rollout['id']}/cancel")
+    assert cancelled.status_code == 200
+    assert cancelled.json()["status"] == "cancelled"
+    assert cancelled.json()["runs"][0]["status"] == "wait_external"  # kept as the record
+
+    frozen = client.post(
+        f"/rollouts/{rollout['id']}/installations/{installation['id']}/mark-done", json={}
+    )
+    assert frozen.status_code == 409
+    assert client.delete(f"/rollouts/{rollout['id']}").status_code == 204
+    assert client.delete(f"/installations/{installation['id']}").status_code == 204
+
+
+def test_run_actions_on_a_draft_rollout_are_refused(client):
+    installation = _register(client)
+    plan = _one_gate_plan(client)
+    rollout = client.post(
+        "/rollouts", json={"plan_id": plan["id"], "name": "Welle", "include": [installation["id"]]}
+    ).json()
+    response = client.post(
+        f"/rollouts/{rollout['id']}/installations/{installation['id']}/mark-done", json={}
+    )
+    assert response.status_code == 409

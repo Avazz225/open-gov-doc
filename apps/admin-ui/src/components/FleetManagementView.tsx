@@ -14,6 +14,7 @@ import {
   getCurrentFleetOperator,
   type FleetOperator,
 } from "@/lib/api";
+import { FleetOrchestration } from "@/components/FleetOrchestration";
 
 // Fleet Management (P67-S1) - wires up fleet-management-service, which had
 // fully existed since Phase 54 Session 1 with no admin-ui view at all. Every
@@ -39,6 +40,10 @@ export function FleetManagementView() {
   const [busyId, setBusyId] = useState<string | null>(null);
   // P84-S4: who the entered token belongs to (its own operator identity).
   const [operator, setOperator] = useState<FleetOperator | null>(null);
+  // The token that was accepted by the last successful load - the
+  // orchestration sections use it, so editing the field doesn't refetch
+  // them with a half-typed token.
+  const [activeKey, setActiveKey] = useState("");
 
   async function load() {
     setIsLoading(true);
@@ -50,6 +55,7 @@ export function FleetManagementView() {
       ]);
       setInstallations(list);
       setOperator(me);
+      setActiveKey(operatorKey);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("fleetManagement.unreachable"));
       setInstallations(null);
@@ -132,6 +138,7 @@ export function FleetManagementView() {
     "box-border rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent-bg";
 
   return (
+    <>
     <div className="rounded-lg border border-border p-4 mb-6">
       <h2>{t("fleetManagement.heading")}</h2>
       <p className="text-sm opacity-80">{t("fleetManagement.hint")}</p>
@@ -310,5 +317,11 @@ export function FleetManagementView() {
         </>
       )}
     </div>
+    {/* P88-S1: groups, update plans, rollouts and operators, once a token
+        has been accepted. */}
+    {installations !== null && operator && (
+      <FleetOrchestration operatorKey={activeKey} operator={operator} installations={installations} />
+    )}
+    </>
   );
 }
