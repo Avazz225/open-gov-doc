@@ -950,7 +950,7 @@ async def set_resource_inherit(
 
 async def _collect_effective_roles(
     session: AsyncSession, principal_id: str, resource_id: str
-) -> list[Role]:
+) -> tuple[list[Role], bool]:
     """Walks the ancestor chain of ``resource_id`` upward and collects all
     roles assigned to the principal at every traversed node. A node with
     ``inherit=False`` stops the ascent AFTER evaluating its own assignments
@@ -965,15 +965,22 @@ async def _collect_effective_roles(
     assignments to any real, admin-created group (``Group``/
     ``GroupMembership``) that the principal belongs to via explicit
     membership - unlike "everyone", this requires an actual row.
+
+    Also returns whether ``resource_id`` itself is registered (P89-S4, ADR
+    0254): an unregistered resource denies everything, and that answer must
+    not be cached - see ``get_effective_permissions``.
     """
     collected: dict[int, Role] = {}
     current_id: str | None = resource_id
     member_group_ids = await _group_ids_for_principal(session, principal_id)
+    registered = False
 
     while current_id is not None:
         node = await session.get(ResourceNode, current_id)
         if node is None:
             break
+        if current_id == resource_id:
+            registered = True
 
         group_conditions = [
             and_(
@@ -1004,7 +1011,7 @@ async def _collect_effective_roles(
             break
         current_id = node.parent_id
 
-    return list(collected.values())
+    return list(collected.values()), registered
 
 
 async def get_effective_permissions(
@@ -1027,8 +1034,27 @@ async def get_effective_permissions(
     # Timed only while the (expensive) sensor is on - not even the clock
     # read otherwise (10.1).
     started = time.monotonic() if metrics.rebuild_timing_active() else None
-    roles = await _collect_effective_roles(session, principal_id, resource_id)
+    roles, registered = await _collect_effective_roles(session, principal_id, resource_id)
     permissions = sorted({p for role in roles for p in role.permissions})
+    roles_out = sorted(role.name for role in roles)
+    computed_at = datetime.now(UTC)
+    if not registered:
+        # P89-S4 (ADR 0254): the deny for a not-yet-registered resource is
+        # not cached. That is what lets registering a node skip cache
+        # invalidation: no cached row for it can exist, so there is nothing
+        # to go stale - and a recompute racing the registration either saw
+        # no node (and caches nothing) or saw it (and caches the right
+        # answer). Registration happens once per document/folder/case, so
+        # these misses are rare; invalidating instead cleared the whole
+        # cache twice per upload.
+        return EffectivePermissionCache(
+            principal_id=principal_id,
+            resource_id=resource_id,
+            roles=roles_out,
+            permissions=permissions,
+            computed_at=computed_at,
+            generation=generation,
+        )
     # Concurrency-safe cache population (found live during post-roadmap
     # phase 31 session 4's browser verification, ADR 0115 - two of the new
     # redaction-preview endpoints checking `document.read` on the same
@@ -1048,8 +1074,6 @@ async def get_effective_permissions(
     # kept. The function returns what it computed itself rather than
     # re-reading - a re-read could return a row another request wrote under
     # a different generation.
-    roles_out = sorted(role.name for role in roles)
-    computed_at = datetime.now(UTC)
     insert_stmt = pg_insert(EffectivePermissionCache).values(
         principal_id=principal_id,
         resource_id=resource_id,

@@ -183,3 +183,31 @@ def test_resource_deleted_event_cascades_to_a_still_existing_child_node(client):
     # parent's own deletion", the child row is actually gone from the table,
     # same as it would be if it had been explicitly deleted itself.
     assert client.get(f"/resources/{child}").status_code == 404
+
+
+def test_registration_via_rest_and_event_does_not_invalidate_the_cache(client):
+    """P89-S4 (ADR 0254): `POST /resources` and `*.resource.created` used to
+    clear the whole permission cache - twice per uploaded document. Same
+    `asyncio.run` style as the tests above; the generation is read through
+    a short-lived engine of its own (the app's is bound to another loop)."""
+    from dms_db_base import build_engine, make_session_factory
+    from permission_service import repository
+    from permission_service.main import settings
+
+    async def generation() -> int:
+        engine = build_engine(settings.postgres_dsn)
+        try:
+            async with make_session_factory(engine)() as session:
+                return await repository.current_cache_generation(session)
+        finally:
+            await engine.dispose()
+
+    before = asyncio.run(generation())
+    rest_id = f"perf-rest-{uuid.uuid4()}"
+    node = {"resource_id": rest_id, "parent_id": ROOT_RESOURCE_ID, "resource_type": "document"}
+    assert client.post("/resources", json=node).status_code == 201
+    event_id = f"perf-event-{uuid.uuid4()}"
+    created = {"resource_id": event_id, "parent_id": ROOT_RESOURCE_ID}
+    asyncio.run(_publish("folder.resource.created", created))
+    assert asyncio.run(_poll_until(lambda: client.get(f"/resources/{event_id}").status_code == 200))
+    assert asyncio.run(generation()) == before

@@ -69,6 +69,10 @@ spec:
         - name: postgresql
           image: {{ printf "%s%s:%s" .Values.global.image.registry .Values.postgresql.image.repository .Values.postgresql.image.tag | quote }}
           imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          {{- /* Connection budget (P89-S4, ADR 0254), see values.yaml. */}}
+          args:
+            - "-c"
+            - {{ printf "max_connections=%v" (.Values.postgresql.maxConnections | default 500) | quote }}
           ports:
             - name: postgresql
               containerPort: 5432

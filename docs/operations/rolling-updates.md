@@ -128,3 +128,29 @@ single rollout operation) — the same basic discipline already
 described for version compatibility between federated installations (7.4),
 here applied at the service level within a single
 installation.
+
+## Database connection budget (P89-S4, [ADR 0254](../adr/0254-permission-cache-on-registration-and-db-connection-budget.md))
+
+Every service process keeps a connection pool that never shrinks by itself. Each process can therefore
+hold `DMS_DB_POOL_SIZE + DMS_DB_MAX_OVERFLOW` connections:
+- **Default:** 2 + 3.
+- **permission-service:** 10 + 20.
+- **document-service and folder-service:** 8 + 12.
+- **storage-service:** 4 + 6.
+
+**The rule:** Postgres' `max_connections` must cover the sum over all services of maximum replicas
+(`maxReplicas` with autoscaling) × pool budget, plus Keycloak's own pool and a reserve for admin
+sessions.
+
+**Current values:**
+
+| Environment | Services at full scale | Plus | `max_connections` |
+|---|---|---|---|
+| docker-compose (one replica each) | about 200 | Keycloak and admin sessions | 300 |
+| Helm, chart's own Postgres (`postgresql.maxConnections`) | about 370 at full autoscaling | Keycloak, whose pool can reach 100 | 500 |
+
+**When you change replicas:**
+- Raising `replicas`/`maxReplicas` or a pool size raises the requirement.
+- Recompute and raise `postgresql.maxConnections`, or the setting of an external Postgres, with it.
+- If the budget is exceeded, Postgres refuses new connections (`too many clients`) under load. A full
+  pool only makes a request wait up to `DMS_DB_POOL_TIMEOUT_SECONDS`.

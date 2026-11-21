@@ -1129,3 +1129,47 @@ async def test_cache_hit_within_one_generation_and_bump_on_invalidate(session):
 
     await repository.invalidate_cache(session)
     assert await repository.current_cache_generation(session) == generation + 1
+
+
+# --- P89-S4 (ADR 0254): registering a node no longer clears the cache --------
+
+
+async def test_a_deny_for_an_unregistered_resource_is_not_cached(session):
+    """What makes it safe to skip invalidation on registration: no cached
+    answer for a resource can exist before its node does."""
+    from permission_service.models import EffectivePermissionCache
+
+    viewer = await repository.create_role(session, "Viewer", "", ["read"])
+    await repository.create_role_assignment(
+        session,
+        principal_type="user",
+        principal_id="bob",
+        role_id=viewer.id,
+        resource_id=ROOT_RESOURCE_ID,
+    )
+    before = await repository.get_effective_permissions(session, "bob", "doc-not-yet-there")
+    assert before.permissions == []
+    assert await session.get(EffectivePermissionCache, ("bob", "doc-not-yet-there")) is None
+
+    generation = await repository.current_cache_generation(session)
+    await repository.create_resource_node(
+        session, "doc-not-yet-there", ROOT_RESOURCE_ID, "document"
+    )
+    # Registered: inherits root's assignment at once, without any invalidation.
+    after = await repository.get_effective_permissions(session, "bob", "doc-not-yet-there")
+    assert after.permissions == ["read"]
+    assert await repository.current_cache_generation(session) == generation
+
+
+async def test_registering_a_node_keeps_existing_cache_entries(session):
+    """The load-test regression: every upload's registration used to clear
+    the whole cache. A new leaf changes nobody's existing permissions."""
+    await repository.get_effective_permissions(session, "carol", ROOT_RESOURCE_ID)
+    generation = await repository.current_cache_generation(session)
+
+    for i in range(3):
+        await repository.create_resource_node(session, f"upload-{i}", ROOT_RESOURCE_ID, "document")
+
+    assert await repository.current_cache_generation(session) == generation
+    cached = await repository.get_effective_permissions(session, "carol", ROOT_RESOURCE_ID)
+    assert cached.generation == generation  # still the same, still a hit

@@ -27,6 +27,9 @@ def make_handler(
         event = Event.from_bytes(payload)
         async with session_factory() as session:
             if event.event_type.endswith(".resource.created"):
+                # No cache invalidation for a new node (P89-S4, ADR 0254),
+                # see `main.create_resource`; moves and deletes still clear
+                # the cache - a move changes what a whole subtree inherits.
                 # Post-Roadmap Phase 35 Session 2 (ADR 0144): shares its
                 # create-if-missing logic with the new, synchronous
                 # `POST /resources` REST path via `repository.
@@ -39,6 +42,8 @@ def make_handler(
                     event.payload.get("parent_id"),
                     event.payload.get("resource_type", "folder"),
                 )
+                await session.commit()
+                return
             elif event.event_type.endswith(".resource.moved"):
                 node = await session.get(ResourceNode, event.payload["resource_id"])
                 if node is not None:

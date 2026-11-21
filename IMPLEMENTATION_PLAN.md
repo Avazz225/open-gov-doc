@@ -3443,8 +3443,8 @@ ADR 0239**.
 3. Then the three user-requested UI/fleet/admin initiatives.
 4. Then compliance completions, the new collaboration features, and operations/hygiene last.
 
-`graphify update .` runs once, at the end of this whole plan (end of Phase 91). The full backend
-regression runs at each phase close.
+`graphify update .` runs once, at the end of this whole plan (end of Phase 92, moved from Phase 91 when
+Phase 92 was added on 2026-11-21). The full backend regression runs at each phase close.
 
 ## Phase 84 — Security & Correctness Hardening (cheap, high value)
 
@@ -4099,6 +4099,55 @@ sessions found along the way:
       - README Part 5 with the ungated rationale.
     - **Live:** both changed categories imported and then restored directly.
 
+- **P89-S4 — Performance regression from the load test (user request 2026-11-21, after the phase close;
+  ADR 0254).**
+  - **Finding** (`PROGRESS.md`, "Between sessions (2026-11-21)"): against the August baseline the hold
+    phase at 200 VUs went from 8 to 137 ms median with 19 % errors.
+    - Every new resource node clears the whole permission cache, twice per upload (`POST /resources`
+      plus the `*.resource.created` event): 23,464 invalidations in 21 minutes, a 14 % hit rate,
+      permission-service saturated on one core.
+    - Slow checks hold DB connections longer. The hot services reach pool plus overflow, the others keep
+      idle pooled connections (84 of 100 used at rest), and Postgres refuses connections from about 140
+      VUs on.
+  - **Cache:**
+    - Creating a node (and the idempotent no-op on an existing one) no longer invalidates; a new leaf
+      without assignments changes no effective permission.
+    - Check every other `invalidate_cache` call site (moves, deletes, assignments, roles, groups,
+      approvals) for whether it really needs the whole cache cleared. Keep the generation counter
+      (ADR 0239) where it does.
+    - Measure, in the same session, why the August run did not suffer: the pre-P84 race versus more
+      registrations.
+  - **Connection budget:**
+    - Per-service pool size and overflow configurable through the environment, in `dms-db-base`.
+    - Small defaults for lightly used services, larger ones for permission/document/folder.
+    - The total budgeted against `max_connections`, which is set explicitly in compose and the Helm chart
+      (documented formula: replicas × (pool + overflow) per service, plus reserve).
+    - Optionally recycle idle connections.
+    - PgBouncer is weighed in the ADR, not built.
+  - **Verification:**
+    - Tests for the no-invalidation-on-create rule.
+    - A unit-level benchmark of the check path.
+    - The full load test again (same profile) with the notebook, compared against both earlier runs.
+    - The cache sensors (`permission.cache.lookups`/`.invalidations`) show the hit rate recovering.
+    - The phase-close regression again, since it changes a shared library.
+  - ✅ **Result:**
+    - **Cache:** registration no longer invalidates; a deny for an unregistered resource isn't cached
+      (closes the race without the global bump); one invalidation at startup for upgrades. All other
+      call sites reviewed and kept.
+    - **August question:** per-document nodes (P39-S4, late September) are why August didn't suffer.
+    - **Budget:**
+      - `dms-db-base.pool_settings()` (defaults 2 + 3, env overrides);
+      - hot services in compose/Helm (permission 10 + 20, document/folder 8 + 12, storage 4 + 6);
+      - `max_connections` 300 (compose) and 500 (Helm), with the formula in rolling-updates.md;
+      - PgBouncer weighed and not built.
+    - **Load test (hold phase):**
+      - errors 18.8 % → 0 %;
+      - goodput 80.2 % → 99.97 %;
+      - p50 137 → 23.5 ms; p99 1,017 → 447 ms (August 2,012);
+      - invalidations 23,464 → 0; hit rate 14 % → 75 %.
+    - **Remaining:** about 2× per-request latency at low load against August. Moved to P91-S1 (tracing).
+    - **Regression:** 32/32 green, in three parts because of the load-test backlog (see PROGRESS).
+
 **Phase 89 result:**
 - **Case destruction is complete end to end:**
   - the schedule set at archival;
@@ -4157,6 +4206,10 @@ sessions found along the way:
   - An OTLP collector plus Tempo (or Jaeger) in compose and the Helm chart, a Grafana datasource, and the
     sampling ratio as a monitoring-service sensor parameter.
   - ADR 0250.
+  - **Use it on the open question from P89-S4** (ADR 0254, "What remains"): at low load, listing, upload
+    and download are still about 2× the August times (5 → 11 ms, 25 → 42 ms, 10 → 17 ms). Break one
+    request of each down per hop (gateway, service, permission check, DB, storage) and name what grew
+    since August.
 - **P91-S2 — Central log aggregation (§10.1).** Loki plus promtail (or Alloy) in compose and Helm, with
   the JSON logs that already exist and a Grafana datasource. Trace-id ↔ log correlation with S1.
 - **P91-S3 — Hygiene bundle.**
@@ -4179,8 +4232,62 @@ sessions found along the way:
 - **P91-S4 — Scoping: database schema migrations (ADR 0251).** Today schemas evolve through
   `create_all` plus ad-hoc `ALTER TABLE … IF NOT EXISTS` at startup. Options: Alembic per service,
   formalizing the current pattern, or accepting it, judged against fleet rolling updates and the
-  Helm upgrade path. No code. **This is the last session of the plan:** phase-close regression, then
-  `graphify update .` once.
+  Helm upgrade path. No code. Phase-close regression for Phase 91. (`graphify update .` moved to the end
+  of Phase 92.)
+
+## Phase 92 — AI-Assisted Administration (user request 2026-11-21)
+
+The user's goal: an AI skill that helps a customer configure and administer OG Doc by hiding
+complexity. Configuration is spread over many services, many categories, four-eyes rules and domain
+roles. An admin should be able to say what they want ("Alarm, wenn ein Speicher zu 80 % voll ist",
+"richte das eGov-Paket ein", "warum sieht Frau X den Ordner Y nicht?") and get a safe, explained,
+reviewable change.
+
+Distinct from Phase 76's open "AI features" candidate, which is about end-user document features (still
+unchosen).
+
+- **P92-S1 — Scoping: the admin skill (ADR 0253). No code.**
+  - **Format:**
+    - An Agent Skill (`SKILL.md` plus reference files and scripts), so it works with Claude Code and the
+      Agent SDK.
+    - Plain Markdown plus the CLI, so other agents can follow it too.
+    - Decide where it ships (`skills/og-doc-admin/` in the repo, and as a downloadable bundle from the
+      admin-ui?).
+  - **Tool surface:** the existing `dms` CLI (`tools/cli`, same gateway and permissions as the UIs) versus
+    an MCP server. The likely answer is the CLI first: no new server, same audit trail. An MCP server
+    would be an option later.
+  - Inventory which admin tasks the CLI already covers and which it lacks (likely sensors/alerts,
+    mailboxes, case archival/destruction config, config compare as a preview, approval requests).
+  - **Safety model:**
+    - The skill acts as a named admin with domain-admin roles, never as superuser or a breakglass
+      account.
+    - **Read → plan → preview → apply → verify:**
+      - writes go through configuration packages where a category exists, with `POST /config/compare`
+        as the preview;
+      - four-eyes requests are surfaced, never worked around;
+      - nothing irreversible (force-delete, destruction, superuser) without an explicit human
+        instruction.
+    - Every change has a human-readable summary and stays auditable.
+  - **Task catalogue:** the 10–15 most common admin tasks from the admin-ui and the docs, each with
+    intent, required role, steps and verification. Plus a diagnosis mode: permission tracing, failed
+    jobs, alarms, licence.
+  - **Knowledge:** which docs the skill carries (condensed references, not the 90-phase history) and how
+    it stays current with the code.
+- **P92-S2 — Build: CLI gaps and the skill package.**
+  - The missing CLI commands from S1's inventory (with tests).
+  - `skills/og-doc-admin/`:
+    - `SKILL.md` (when to use it, the safety rules, the workflow);
+    - `references/` per admin domain (users/roles, object types, retention/archival, monitoring/alerts,
+      mail, packages, fleet);
+    - recipes for the task catalogue;
+    - helper scripts where a step is mechanical (for example building a package fragment and running
+      compare).
+- **P92-S3 — Evaluation and customer documentation.**
+  - A scenario set (the task catalogue plus diagnosis cases and a few "should refuse or ask"
+    cases), run with an agent against the dev stack, iterating the skill until the scenarios pass.
+  - A customer-facing guide: setup (CLI login, the roles the skill's account needs), what it can and
+    can't do, and how its changes show up in the audit trail.
+  - **This is the last session of the plan:** phase-close regression, then `graphify update .` once.
 
 ## Deliberately Not Included in This Plan
 
@@ -4210,7 +4317,7 @@ sessions found along the way:
 - **Environment-blocked:** real Office/LibreOffice hosts, real GUI WebDAV/CMIS clients, a real k8s
   cluster, a second installation for migration/federation, and ClamAV signature access.
 
-## Definition of Done for Phases 84–91 (unchanged, `CONTRIBUTING.md`)
+## Definition of Done for Phases 84–92 (unchanged, `CONTRIBUTING.md`)
 
 - Tests green.
 - `docs/services/*.md` current.
@@ -4220,7 +4327,7 @@ sessions found along the way:
 - Real browser verification with screenshots for every UI-visible change (390/768/1400 for layout
   changes, as in Phase 83).
 - Full backend regression (`scripts/run-tests.sh`, with `~/.local/bin` on PATH) once per phase close.
-- `graphify update .` only at the end of the whole plan (P91-S4).
+- `graphify update .` only at the end of the whole plan (P92-S3, moved from P91-S4).
 - Scoping sessions produce an ADR and no code diff; `PROGRESS.md` marks them "Scoping, kein Feature".
 
 ---

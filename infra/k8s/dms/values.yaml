@@ -230,12 +230,16 @@ services:
       - storage-service
       - folder-service
       - object-type-service
-    env: {}
 
   # --- Example 4: storage-service — populates storageService.targets (below)
   # via DMS_TARGETS/DMS_WRITE_STRATEGY/DMS_QUORUM_COUNT, see
   # the storageTargetsEnv flag and dms.storageServiceTargetsEnv in _helpers.tpl.
   # Second pure baseline-fallback case (no own resources block). ---
+    env:
+      # Pool budget per replica (P89-S4, ADR 0254), see postgresql.maxConnections.
+      DMS_DB_POOL_SIZE: "8"
+      DMS_DB_MAX_OVERFLOW: "12"
+
   storage-service:
     enabled: true
     image:
@@ -253,6 +257,9 @@ services:
       minAvailable: 1
     storageTargetsEnv: true
     env:
+      # Pool budget per replica (P89-S4, ADR 0254), see postgresql.maxConnections.
+      DMS_DB_POOL_SIZE: "4"
+      DMS_DB_MAX_OVERFLOW: "6"
       DMS_GOVERNANCE_BYPASS_ROLE: "dms-admin"
 
   # ---------------------------------------------------------------------
@@ -361,13 +368,17 @@ services:
       minAvailable: 1
     dependsOnServices:
       - auth-service
-    env: {}
 
   # Part of the upload hot-path pipeline (document-service calls it synchronously) -
   # therefore scales horizontally too (one of the P26-S2 autoscaling picks,
   # see the session report). scan_engine default in settings.py is already
   # "eicar" (matching infra/docker-compose.yml) - no explicit
   # env line needed.
+    env:
+      # Pool budget per replica (P89-S4, ADR 0254), see postgresql.maxConnections.
+      DMS_DB_POOL_SIZE: "10"
+      DMS_DB_MAX_OVERFLOW: "20"
+
   virus-scan-service:
     enabled: true
     image:
@@ -1020,7 +1031,6 @@ services:
     dependsOnServices:
       - object-type-service
       - permission-service
-    env: {}
 
   # ---------------------------------------------------------------------
   # From here on: the 6 Next.js frontend apps from infra/docker-compose.yml
@@ -1084,6 +1094,11 @@ services:
   # XML file living in the source code/image) — this chart can just as
   # little rewrite it at deploy time, see ADR 0102 "Consequences".
   # ---------------------------------------------------------------------
+    env:
+      # Pool budget per replica (P89-S4, ADR 0254), see postgresql.maxConnections.
+      DMS_DB_POOL_SIZE: "8"
+      DMS_DB_MAX_OVERFLOW: "12"
+
   user-ui:
     enabled: true
     image:
@@ -1313,6 +1328,16 @@ services:
 # `valueFrom.secretKeyRef`, never as a literal env value.
 # ---------------------------------------------------------------------------
 postgresql:
+  # Connection budget (P89-S4, ADR 0254). Every service process may hold up
+  # to DMS_DB_POOL_SIZE + DMS_DB_MAX_OVERFLOW connections (default 2 + 3;
+  # permission 10 + 20, document and folder 8 + 12, storage 4 + 6 per
+  # replica, see their `env`). Formula: sum over services of maxReplicas (or
+  # replicas without autoscaling) x pool budget, plus Keycloak's own pool and
+  # a reserve. With these values: about 370 for the services at full
+  # autoscaling, plus Keycloak (its pool can reach 100) and admin sessions.
+  # Raise it with replicas/maxReplicas; an external Postgres needs the same
+  # budget on its side.
+  maxConnections: 500
   enabled: true
   image:
     repository: postgres

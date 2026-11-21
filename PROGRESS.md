@@ -2,6 +2,122 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P89-S4, the performance regression from the load test
+([ADR 0254](docs/adr/0254-permission-cache-on-registration-and-db-connection-budget.md)).
+
+**What changed:**
+- **permission-service:**
+  - `POST /resources` and the `*.resource.created` handler no longer clear the cache.
+    `_collect_effective_roles` reports whether the resource itself is registered, and
+    `get_effective_permissions` doesn't cache a deny for an unregistered one.
+    - That way no cached row for a node can exist before the node does.
+    - It also closes the race without the global generation bump (ADR 0239).
+  - One `invalidate_cache` at startup drops such rows from before the upgrade.
+  - The other call sites (role update, groups, memberships, assignments, inherit, move/delete) were
+    reviewed: they are real permission changes and stay global.
+- **Why August was fine:** documents got their own resource node only in P39-S4 (ADR 0154, late
+  September); before that an upload registered nothing.
+- **`dms-db-base`:** `pool_settings()` with `DMS_DB_POOL_SIZE`/`DMS_DB_MAX_OVERFLOW`/
+  `DMS_DB_POOL_TIMEOUT_SECONDS`, defaults 2 + 3 / 30 s (SQLAlchemy's 5 + 10 before).
+- **compose:**
+  - `max_connections=300`;
+  - pool env for permission (10 + 20), document and folder (8 + 12) and storage (4 + 6).
+- **Helm:**
+  - the same env;
+  - `postgresql.maxConnections: 500`, rendered as a Postgres argument, with the formula in a comment;
+  - lint clean; duplicate `env` keys found and removed while editing.
+- **Docs:**
+  - permission-service (cache section);
+  - the `dms-db-base` README;
+  - `docs/operations/rolling-updates.md` "Database connection budget";
+  - ADR 0254;
+  - P91-S1 now carries the open per-request question.
+
+**Checks:**
+- permission-service 205 (+3: unregistered deny not cached, registration keeps entries, REST plus
+  event path without a generation bump); `dms-db-base` +4 pure pool tests.
+- **Load test** `run-20261121T183750Z` (same profile; notebook as HTML in the scratchpad), hold phase,
+  August / before / after:
+
+  | Metric | Aug 15 | Before | After |
+  |---|---|---|---|
+  | p50 | 8.2 ms | 137 ms | 23.5 ms |
+  | p95 | 89.7 ms | 726 ms | 187 ms |
+  | p99 | 2,012 ms | 1,017 ms | 447 ms |
+  | Error rate | 0 % | 18.8 % | 0 % |
+  | Goodput | 98.4 % | 80.2 % | 99.97 % |
+
+  - **Cache and resources:** invalidations 23,464 → 0; hit rate 14 % → 75 %; permission-service CPU
+    0.93 → 0.5 cores; at most 17 connections checked out; 43 connections at rest (84 before).
+  - **The one error:** a gateway 502 after 5 ms without an upstream log entry (keep-alive close).
+  - **Remaining:** low-load latency is still about 2× August (`list_folder` 5 → 11 ms, `upload`
+    25 → 42 ms, `download` 10 → 17 ms). Not the cache; recorded for P91-S1 (tracing).
+- **Phase-close regression: 32/32 green, in three parts.**
+  - **Part 1:** the first full run had 23 services green, then stalled in rendering-service. Its
+    in-process tests bind the shared durable NATS consumer, which had 159,468 unprocessed messages
+    from the two load tests.
+  - **Backlog skipped, with the user's OK:** the `rendering-service` consumer on stream `document` was
+    recreated with the same config and `deliver_policy=by_start_sequence` after the last stream
+    message (206,426). Renditions for documents uploaded during that backlog (the load-test documents,
+    and any dev uploads from that window) won't be generated unless re-triggered.
+  - **Part 2:** the remaining 8 services green (rendering-service 112 in 17 s).
+  - **Part 3:** workflow-service separately (244 in 54 s; an earlier attempt hung behind a leftover
+    pytest process from the aborted run).
+  - ruff: the known 23 findings and the same 4 unformatted files.
+
+**Next session:** P90-S1, follow-up reminders (Wiedervorlagen), backend (ADR 0246).
+
+---
+
+**Between sessions (2026-11-21): load test and Phase 92 planned.**
+
+**Load test** (`loadtest/run.sh`, the same 20-minute profile up to 200 VUs as the baseline run
+`run-20260815T153206Z`; new run `run-20261121T175601Z`; notebook executed headless). Against the
+August baseline, in the hold phase at 200 VUs:
+
+| Metric | Aug 15 | Nov 21 |
+|---|---|---|
+| p50, all actions | 8.2 ms | 136.9 ms |
+| Error rate | 0.0 % | 18.8 % |
+| Goodput (SLA 1000 ms) | 98.4 % | 80.2 % |
+| Error rate `upload` | 0 % | 35.6 % |
+| Error rate `list_folder` | 0 % | 20.7 % |
+| Error rate `download` | 0 % | 18.4 % |
+
+Search and login are unchanged. Even at a handful of VUs, before any error, `list_folder` and
+`download` are about 3× slower and `upload` about 2× slower.
+
+**Root cause (from the P88 sensors):**
+- **Every new resource node clears the whole permission cache.** permission-service invalidates the
+  entire cache on every resource creation: synchronous `POST /resources` from document-service, plus
+  the `*.resource.created` event. With 11,600 uploads that gave 23,464 invalidations in 21 minutes
+  (about 19/s).
+- **Cache hit rate fell to 14 %.** 91,424 recomputes at about 6.7 ms median add up to 1,829 CPU-seconds,
+  more than one core, so permission-service (single process, about 0.93 cores on average) saturated.
+  Every `list_folder`/`upload`/`download` waits on `/check`.
+- **Connections then run out.** Slow checks hold DB connections longer. document-, folder- and
+  permission-service each hit pool plus overflow (15). The other roughly 28 services each keep up to
+  5 idle pooled connections (84 of `max_connections=100` used at rest). Postgres then refuses
+  (`TooManyConnectionsError`) from about 140 VUs on.
+- **The invalidation is unnecessary.** A new leaf node without assignments changes no existing
+  effective permission.
+- **What changed since August is not proven.** Candidates: P84-S1's generation counter (ADR 0239)
+  makes every row of an older generation a miss. Previously the race let recomputes refill the cache.
+  Also more per-document registrations.
+- **Ruled out by measurement:** the P88 sensors (disabling them globally changed nothing), the
+  gateway, and machine load.
+
+**Agreed with the user:** a performance session before P90, planned as **P89-S4** (ADR 0254): do not
+invalidate on node creation, budget the DB pools against `max_connections`, rerun the load test.
+
+**Next session (at the time):** P89-S4, then P90-S1; P89-S4 is done, see above.
+
+**Phase 92 planned** (user request): AI-assisted administration. The three sessions are scoping
+(ADR 0253), build (CLI gaps plus the `skills/og-doc-admin/` skill) and evaluation/customer docs.
+`graphify update .` moves to its end.
+
+---
+
 **Last completed:** P89-S3, the small compliance bundle. **Phase 89 is closed.**
 
 **What changed:**

@@ -148,6 +148,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     async with app.state.session_factory() as session:
         await repository.ensure_root_resource(session)
+        # P89-S4 (ADR 0254): before this release a deny for a not-yet-
+        # registered resource was cached, and registering the node cleared
+        # it by invalidating. Registration no longer invalidates, so such a
+        # row left from before the upgrade would stick - one invalidation at
+        # startup drops them. Cheap and harmless when repeated per replica.
+        await repository.invalidate_cache(session)
         await repository.ensure_domain_admin_roles(session)
         await repository.ensure_everyone_role(session)
         # Break-glass activation (4.6) mandatorily requires the four-eyes
@@ -751,7 +757,10 @@ async def create_resource(
     resource = await repository.create_resource_node(
         session, payload.resource_id, payload.parent_id, payload.resource_type
     )
-    await repository.invalidate_cache(session)
+    # No cache invalidation (P89-S4, ADR 0254): a new node has no
+    # assignments of its own, so it changes no effective permission, and no
+    # cached answer for it can exist (unregistered resources aren't cached).
+    # Invalidating here cleared the whole cache once per uploaded document.
     await session.commit()
     return resource
 
