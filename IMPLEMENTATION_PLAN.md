@@ -4240,8 +4240,9 @@ The user's goals:
   kind of folder that can be created comes from its parent, for example
   root → Abteilung → Team → Vorgang → Akten (documents). Structures can be created from templates, and
   creation can be restricted to the templates.
-- **user-ui navigation** feels unintuitive in places. The document list should optionally be a
-  VS-Code-like expandable tree, and upload should work by right-click.
+- **user-ui navigation:** upload should work by right-click. The explorer's existing tree mode is fine
+  (the user had overlooked it, 2026-11-21). New: folders the user can't access should be hidden from the
+  listings, for a clearer overview.
 - **admin-ui:** long lists need a length limit (scrolling and/or collapsing).
 
 **What exists (checked 2026-11-21):**
@@ -4252,8 +4253,12 @@ The user's goals:
   early). There is no parent-side "allowed children" view and no "structure is mandatory" switch.
 - **Structure templates** (`VorlagenPane`, P15-S6, ADR 0056) save and apply a folder subtree. Folders
   are chosen by typed-in id (a documented simplification), and admins have no management for them.
-- **The explorer** has had a list/tree toggle (`FolderTree`, P5b-S4) for a long time. Why it doesn't feel
-  right is the first question for the navigation session.
+- **The explorer** has had a list/tree toggle (`FolderTree`, P5b-S4); the user confirmed it fits.
+- **Folder listings are not permission-filtered:** `GET /folders/{id}/children` checks `folder.read` on
+  the parent only and returns every child. That includes folders the caller can't open, for example a
+  teamspace root with `inherit=False`. This is untidy, and it also discloses the existence and names of
+  those folders. document-service already filters per document in some places (Kennzeichen lookup, the
+  WebDAV/CMIS version batch) through `POST /check/batch`.
 - **Upload** is a toolbar button plus a modal with drag and drop. There is no context-menu entry.
 
 - **P93-S1 — Scoping: enforced filing structure (ADR 0255). No code.**
@@ -4288,12 +4293,21 @@ The user's goals:
     - "Struktur aus Vorlage anlegen" from the folder context menu;
     - upload offers only the allowed document types;
     - clear messages when something isn't allowed.
-- **P93-S4 — user-ui navigation.**
-  - Start from what makes today's tree mode unintuitive (a short walkthrough with screenshots).
-  - Then a VS-Code-like explorer: an expandable tree with folders and documents, lazy loading, keyboard
-    navigation, selection opening the preview, and the same context menu as the list.
-  - Upload by right-click on a folder ("Hochladen …", into that folder) and by dropping onto a tree node.
-  - The tree/list choice is remembered. Narrow widths (390) keep working.
+- **P93-S4 — Hide what the caller can't read; upload by right-click.**
+  - **folder-service:** child listings (`/folders/{id}/children`, the root listing, the breadcrumb where
+    it applies) filter by `folder.read` per child with one `POST /check/batch`.
+  - **document-service:** folder document listings filter by `document.read` the same way, where they
+    don't already.
+  - **Every client gets it,** because the filter is server-side: list and tree view, WebDAV, CMIS,
+    teamspace and hand-folder views. Check each for counts or paging that would now be off.
+  - **To decide:**
+    - a readable folder below an unreadable one, reachable today only through favorites, teamspaces or
+      links: show the unreadable ancestor as a neutral placeholder on the path, or keep it hidden;
+    - the cost of the batch check on very large folders (the cache helps; measure it with the load test's
+      listing).
+  - **Upload by right-click:** "Hochladen …" in the folder context menu, into that folder, for list and
+    tree. Dropping files onto a folder in the tree is optional.
+  - Screenshots at 1400/768/390.
 - **P93-S5 — admin-ui long lists.**
   - An audit of every admin-ui page for unbounded lists. Examples seen this round: approval settings
     with dozens of action types, realm roles, sensors, deletion register, archival transfers, alert

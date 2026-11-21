@@ -48,7 +48,10 @@
 **Planned (user request during this session):** Phase 93, "Filing Structure & Navigation".
 - Enforced filing structure from parent folder classes, with templates and "creation only from
   templates".
-- A VS-Code-like explorer tree with upload by right-click.
+- Upload by right-click. The existing tree view is fine (the user had overlooked it).
+- Folders and documents the caller can't read are hidden from listings. Folder children are not
+  permission-filtered today, so this is also an information leak (names of, e.g., isolated teamspace
+  folders); P93-S4.
 - Length limits for admin-ui lists.
 
 It runs after Phase 90 and before 91/92 (order 90 → 93 → 91 → 92); see the plan.
