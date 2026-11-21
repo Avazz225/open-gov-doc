@@ -46,7 +46,8 @@ const SENSORS = [
   {
     name: "document.upload.duration",
     group: "performance",
-    cost: "expensive",
+    cost: 4,
+    default_enabled: true,
     description: "Dauer eines Uploads",
     service_types: ["document-service"],
     active: false,
@@ -55,7 +56,8 @@ const SENSORS = [
   {
     name: "document.count.active_total",
     group: "capacity",
-    cost: "cheap",
+    cost: 2,
+    default_enabled: true,
     description: "Aktive Dokumente",
     service_types: ["document-service"],
     active: true,
@@ -64,7 +66,8 @@ const SENSORS = [
   {
     name: "storage.replication.backlog",
     group: "reliability",
-    cost: "cheap",
+    cost: 2,
+    default_enabled: true,
     description: "Replikations-Rückstand",
     service_types: ["storage-service"],
     active: true,
@@ -86,7 +89,7 @@ describe("SensorSettings", () => {
     mocks.listSensors.mockReset().mockResolvedValue(SENSORS);
     mocks.getSensorConfig.mockReset().mockResolvedValue({
       global_default: true,
-      overrides: { "cost:expensive": false, "storage.replication.backlog": true, "old.sensor": false },
+      overrides: { "cost:4": false, "storage.replication.backlog": true, "old.sensor": false },
     });
     mocks.setSensorGlobalDefault.mockReset().mockResolvedValue({});
     mocks.setSensorOverride.mockReset().mockResolvedValue({});
@@ -99,7 +102,7 @@ describe("SensorSettings", () => {
     expect(screen.getByText("über die Kosten")).toBeInTheDocument();
     expect(screen.getByText("eigene Einstellung")).toBeInTheDocument();
     expect(screen.getByText("2 von 3 aktiv")).toBeInTheDocument();
-    expect(screen.getByLabelText("Teuer")).toHaveValue("off");
+    expect(screen.getByLabelText("Einstellung für Kostenstufe 4")).toHaveValue("off");
     expect(screen.getByLabelText("Einstellung für storage.replication.backlog")).toHaveValue("on");
   });
 
@@ -116,8 +119,8 @@ describe("SensorSettings", () => {
     });
     await waitFor(() => expect(mocks.setSensorOverride).toHaveBeenCalledWith("tok", "group:capacity", false));
 
-    fireEvent.change(screen.getByLabelText("Teuer"), { target: { value: "inherit" } });
-    await waitFor(() => expect(mocks.setSensorOverride).toHaveBeenCalledWith("tok", "cost:expensive", null));
+    fireEvent.change(screen.getByLabelText("Einstellung für Kostenstufe 4"), { target: { value: "inherit" } });
+    await waitFor(() => expect(mocks.setSensorOverride).toHaveBeenCalledWith("tok", "cost:4", null));
 
     fireEvent.change(screen.getByLabelText("Einstellung für document.upload.duration"), {
       target: { value: "on" },
@@ -135,6 +138,22 @@ describe("SensorSettings", () => {
     expect(await screen.findByText("4 Dienste")).toBeInTheDocument();
   });
 
+  it("shows the cost level as dots and words, and marks default-off sensors", async () => {
+    mocks.listSensors.mockResolvedValue([
+      { ...SENSORS[1], name: "document.count.by_type", cost: 5, default_enabled: false, active: false, source: "default" },
+    ]);
+    renderPage();
+    const dots = await screen.findAllByRole("img", { name: "Kostenstufe 5 von 5: Sehr teuer" });
+    // One in the cost section, one in the sensor's row.
+    expect(dots).toHaveLength(2);
+    expect(dots[1].querySelectorAll(".cost-dot.filled")).toHaveLength(5);
+    expect(screen.getAllByText("standardmäßig aus").length).toBeGreaterThanOrEqual(2);
+    // All five levels get a switch.
+    for (const level of [1, 2, 3, 4, 5]) {
+      expect(screen.getByRole("combobox", { name: `Einstellung für Kostenstufe ${level}` })).toBeInTheDocument();
+    }
+  });
+
   it("filters sensors by service", async () => {
     renderPage();
     await screen.findByText("document.upload.duration");
@@ -150,7 +169,7 @@ describe("SensorSettings", () => {
     const orphaned = await screen.findByRole("region", { name: "Einstellungen ohne laufenden Sensor" });
     expect(within(orphaned).getByText("old.sensor")).toBeInTheDocument();
     // Cost-class keys are never orphaned.
-    expect(within(orphaned).queryByText("cost:expensive")).not.toBeInTheDocument();
+    expect(within(orphaned).queryByText("cost:4")).not.toBeInTheDocument();
     fireEvent.click(within(orphaned).getByRole("button", { name: "Zurücksetzen" }));
     await waitFor(() => expect(mocks.setSensorOverride).toHaveBeenCalledWith("tok", "old.sensor", null));
   });
@@ -160,7 +179,7 @@ describe("SensorSettings", () => {
     renderPage();
     await screen.findByText("document.upload.duration");
     expect(screen.getByText(/Nur lesend/)).toBeInTheDocument();
-    expect(screen.getByLabelText("Teuer")).toBeDisabled();
+    expect(screen.getByLabelText("Einstellung für Kostenstufe 4")).toBeDisabled();
     expect(screen.getByLabelText("Nichts überwachen")).toBeDisabled();
     expect(screen.queryByRole("button", { name: "Zurücksetzen" })).not.toBeInTheDocument();
   });
@@ -169,7 +188,7 @@ describe("SensorSettings", () => {
     const { ApiError } = await import("@/lib/api");
     mocks.setSensorOverride.mockRejectedValue(new ApiError(403, "Fehlende Domain-Admin-Rolle"));
     renderPage();
-    fireEvent.change(await screen.findByLabelText("Teuer"), { target: { value: "on" } });
+    fireEvent.change(await screen.findByLabelText("Einstellung für Kostenstufe 4"), { target: { value: "on" } });
     expect(await screen.findByRole("alert")).toHaveTextContent("Fehlende Domain-Admin-Rolle");
   });
 });

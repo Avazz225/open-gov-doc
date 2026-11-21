@@ -160,3 +160,39 @@ def test_unknown_prefixed_keys_are_refused(client):
     assert _put(client, "cost:medium", False).status_code == 422
     assert _put(client, "grp:storage", False).status_code == 422
     assert _put(client, "group:", False).status_code == 422
+
+
+# --- P88-S2c: cost levels 1-5 and default-off sensors -------------------------
+
+
+def test_cost_levels_legacy_keys_and_default_off_sensors(client):
+    app.state.registry_client.list_active_instances.return_value = [
+        _instance_with(
+            {**_sensor("cheap.one", "capacity", 1)},
+            {**_sensor("legacy.expensive", "performance", "expensive")},
+            {**_sensor("breakdown", "capacity", 5), "default_enabled": False},
+        )
+    ]
+    try:
+        body = {s["name"]: s for s in client.get("/sensors").json()}
+        # An old registration's "expensive" is shown as level 4.
+        assert body["legacy.expensive"]["cost"] == 4
+        assert body["breakdown"]["default_enabled"] is False
+        assert (body["breakdown"]["active"], body["breakdown"]["source"]) == (False, "default")
+
+        # A legacy key is written as its levels.
+        written = _put(client, "cost:expensive", False).json()["overrides"]
+        assert written == {"cost:4": False, "cost:5": False}
+        assert _put(client, "cost:9", False).status_code == 422
+
+        # Level 5 on switches the default-off breakdown on.
+        _put(client, "cost:5", True)
+        body = {s["name"]: s for s in client.get("/sensors").json()}
+        assert (body["breakdown"]["active"], body["breakdown"]["source"]) == (True, "cost")
+        assert (body["legacy.expensive"]["active"], body["legacy.expensive"]["source"]) == (
+            False,
+            "cost",
+        )
+    finally:
+        for key in ("cost:4", "cost:5"):
+            _put(client, key, None)

@@ -79,3 +79,24 @@ async def test_list_sensors_aggregates_across_instances_and_resolves_active(sess
     assert by_name["registry.instances.active_total"].active is True
     assert by_name["registry.instances.active_total"].service_types == ["registry-service"]
     assert by_name["document.upload.duration"].active is False
+
+
+async def test_legacy_cost_keys_are_migrated_to_levels_on_startup(session):
+    """P88-S2c: `cost:cheap` becomes levels 1-3, `cost:expensive` 4-5; a
+    level that already has its own override keeps it."""
+    await repository.set_sensor_override(session, "cost:cheap", False)
+    await repository.set_sensor_override(session, "cost:expensive", False)
+    await repository.set_sensor_override(session, "cost:2", True)
+
+    migrated = await repository.migrate_legacy_cost_keys(session)
+
+    assert sorted(migrated) == ["cost:cheap", "cost:expensive"]
+    config = await repository.get_sensor_config(session)
+    assert config.overrides == {
+        "cost:1": False,
+        "cost:2": True,
+        "cost:3": False,
+        "cost:4": False,
+        "cost:5": False,
+    }
+    assert await repository.migrate_legacy_cost_keys(session) == []

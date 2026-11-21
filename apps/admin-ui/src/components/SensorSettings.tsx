@@ -6,7 +6,6 @@ import {
   ApiError,
   type Sensor,
   type SensorConfig,
-  type SensorCost,
   getSensorConfig,
   listSensors,
   setSensorGlobalDefault,
@@ -24,7 +23,23 @@ import { useAuth } from "@/lib/auth-context";
 
 type Choice = "inherit" | "on" | "off";
 
-const COSTS: SensorCost[] = ["cheap", "expensive"];
+// P88-S2c: cost is a level from 1 (very cheap) to 5 (very expensive).
+const COST_LEVELS = [1, 2, 3, 4, 5] as const;
+
+// Five dots, the first `level` filled, in the level's colour from a
+// sequential green-to-red scale (globals.css `--dms-cost-<n>`). The dot
+// count carries the level on its own, and the label says it in words, so
+// colour is never the only carrier (colour-vision deficiency, high
+// contrast).
+export function CostDots({ level, label }: { level: number; label: string }) {
+  return (
+    <span className="cost-dots" data-level={level} role="img" aria-label={label} title={label}>
+      {COST_LEVELS.map((i) => (
+        <span key={i} className={i <= level ? "cost-dot filled" : "cost-dot"} aria-hidden="true" />
+      ))}
+    </span>
+  );
+}
 
 function choiceOf(overrides: Record<string, boolean>, key: string): Choice {
   if (!(key in overrides)) return "inherit";
@@ -173,21 +188,23 @@ export function SensorSettings() {
         <h2 id="sensors-cost-heading">{t("sensors.cost.heading")}</h2>
         <p className="text-sm opacity-80">{t("sensors.cost.hint")}</p>
         <div className="flex flex-wrap gap-6">
-          {COSTS.map((cost) => {
-            const ofCost = sensors.filter((s) => s.cost === cost);
+          {COST_LEVELS.map((level) => {
+            const ofCost = sensors.filter((s) => s.cost === level);
+            const label = t("sensors.costLevel", { level, name: t(`sensors.costs.${level}`) });
             return (
-              <label key={cost} className="flex flex-col gap-1 text-sm">
-                <span>
-                  {t(`sensors.costs.${cost}`)}{" "}
-                  <span className="opacity-70">
-                    ({t("sensors.activeCount", {
-                      active: ofCost.filter((s) => s.active).length,
-                      total: ofCost.length,
-                    })})
-                  </span>
+              <div key={level} className="flex flex-col gap-1 text-sm">
+                <span className="flex items-center gap-2 whitespace-nowrap">
+                  <CostDots level={level} label={label} />
+                  {t(`sensors.costs.${level}`)}
                 </span>
-                {choiceSelect(`cost:${cost}`, t(`sensors.costs.${cost}`))}
-              </label>
+                <span className="text-xs opacity-70">
+                  {t("sensors.activeCount", {
+                    active: ofCost.filter((s) => s.active).length,
+                    total: ofCost.length,
+                  })}
+                </span>
+                {choiceSelect(`cost:${level}`, t("sensors.costSetting", { level }))}
+              </div>
             );
           })}
         </div>
@@ -244,11 +261,21 @@ export function SensorSettings() {
                         <tr key={sensor.name}>
                           <td>
                             <code className="font-mono text-xs">{sensor.name}</code>
+                            {!sensor.default_enabled && (
+                              <span className="badge neutral ml-2">{t("sensors.defaultOff")}</span>
+                            )}
                             <div className="text-sm opacity-80">{sensor.description}</div>
                           </td>
                           <td>
-                            <span className={sensor.cost === "expensive" ? "badge down" : "badge neutral"}>
-                              {t(`sensors.costs.${sensor.cost}`)}
+                            <span className="flex items-center gap-2 whitespace-nowrap text-sm">
+                              <CostDots
+                                level={sensor.cost}
+                                label={t("sensors.costLevel", {
+                                  level: sensor.cost,
+                                  name: t(`sensors.costs.${sensor.cost}`),
+                                })}
+                              />
+                              <span className="opacity-80">{t(`sensors.costs.${sensor.cost}`)}</span>
                             </span>
                           </td>
                           <td className="text-sm">

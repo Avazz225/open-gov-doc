@@ -14,19 +14,19 @@ from license_service.usage import UsageSnapshot
 EXPIRATION_DAYS = SensorSpec(
     name="license.expiration.days",
     group="capacity",
-    cost="cheap",
+    cost=1,
     description="Tage bis zum Ablauf der installierten Lizenz",
 )
 USERS_CURRENT = SensorSpec(
     name="license.usage.users.current",
     group="capacity",
-    cost="cheap",
+    cost=1,
     description="Aktuell gezaehlte Nutzer (named oder concurrent, je nach Lizenzmodell)",
 )
 DOCUMENTS_CURRENT = SensorSpec(
     name="license.usage.documents.current",
     group="capacity",
-    cost="cheap",
+    cost=1,
     description="Aktuell gezaehlte aktive Dokumente gegen das Lizenzlimit",
 )
 

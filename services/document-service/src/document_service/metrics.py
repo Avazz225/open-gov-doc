@@ -22,13 +22,13 @@ from document_service.models import Document, DocumentLock
 UPLOAD_DURATION = SensorSpec(
     name="document.upload.duration",
     group="performance",
-    cost="expensive",
+    cost=4,
     description="Dauer eines Dokument-Uploads (Virenscan + Storage-Schreibvorgang)",
 )
 ACTIVE_DOCUMENTS = SensorSpec(
     name="document.count.active_total",
     group="capacity",
-    cost="cheap",
+    cost=2,
     description="Anzahl installationsweit aktiver Dokumente",
 )
 
@@ -39,17 +39,28 @@ ACTIVE_DOCUMENTS = SensorSpec(
 OLDEST_LOCK_HOURS = SensorSpec(
     name="document.locks.oldest_age_hours",
     group="reliability",
-    cost="cheap",
+    cost=2,
     description="Alter der aeltesten aktiven Ausleih-Sperre in Stunden (0 ohne Sperren)",
 )
 TRASH_OVERDUE = SensorSpec(
     name="document.trash.overdue",
     group="reliability",
-    cost="cheap",
+    cost=2,
     description=(
         "Papierkorb-Eintraege ueber der Wiederherstellungsfrist, noch nicht endgueltig "
         "geloescht (Holds nicht abgezogen)"
     ),
+)
+
+
+# P88-S2c (package E): a breakdown with one series per object type - level 5
+# and off by default; switched on for a capacity question, not kept running.
+COUNT_BY_TYPE = SensorSpec(
+    name="document.count.by_type",
+    group="capacity",
+    cost=5,
+    description="Aktive Dokumente je Objekttyp (eine Zeitreihe je Typ)",
+    default_enabled=False,
 )
 
 
@@ -75,6 +86,20 @@ def build_scrape_sensors(registry: SensorRegistry, app) -> None:
             )
         return float(count or 0)
 
+    async def count_by_type() -> dict[tuple[str, ...], float]:
+        async with app.state.session_factory() as session:
+            rows = await session.execute(
+                select(Document.object_type_id, func.count())
+                .where(Document.deleted_at.is_(None))
+                .group_by(Document.object_type_id)
+            )
+        return {
+            ("none" if type_id is None else str(type_id),): float(n) for type_id, n in rows.all()
+        }
+
+    registry.on_scrape_async(
+        registry.gauge(COUNT_BY_TYPE, labelnames=("object_type_id",)), count_by_type
+    )
     registry.on_scrape_async(registry.gauge(OLDEST_LOCK_HOURS), oldest_lock_hours)
     registry.on_scrape_async(registry.gauge(TRASH_OVERDUE), trash_overdue)
 

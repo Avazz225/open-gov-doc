@@ -14,13 +14,13 @@ from archival_service.repository import _ACTIVE_CASE_STATUSES, _ACTIVE_STATUSES
 ACTIVE = SensorSpec(
     name="archival.transfers.active",
     group="capacity",
-    cost="cheap",
+    cost=3,
     description="Laufende Aussonderungs-Transfers je Art (document, case)",
 )
 FAILED = SensorSpec(
     name="archival.transfers.failed",
     group="reliability",
-    cost="cheap",
+    cost=2,
     description="Endgueltig fehlgeschlagene Aussonderungs-Transfers je Art (document, case)",
 )
 

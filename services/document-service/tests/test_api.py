@@ -3572,3 +3572,28 @@ def test_metrics_report_lock_age_and_overdue_trash(client):
     text = client.get("/metrics").text
     assert _extract_metric_value(text, "document_locks_oldest_age_hours") >= 0.0
     assert _extract_metric_value(text, "document_trash_overdue") >= 0.0
+
+
+def test_p88_s2c_breakdown_is_off_by_default_and_on_with_its_cost_level(client):
+    """P88-S2c: document.count.by_type is declared level 5 and off by default, so it stays
+    off under "monitor everything" until a `cost:5` override switches it on
+    (set directly on the running app's config client)."""
+    from document_service.main import app as running_app
+
+    declared = {d["name"]: d for d in running_app.state.sensor_registry.declarations()}
+    spec = declared["document.count.by_type"]
+    assert (spec["cost"], spec["default_enabled"]) == (5, False)
+
+    config = running_app.state.sensor_config_client
+
+    def active() -> bool:
+        return config.is_active(
+            spec["name"], group=spec["group"], cost=spec["cost"], default_enabled=False
+        )
+
+    assert active() is False
+    config._overrides = {"cost:5": True}
+    try:
+        assert active() is True
+    finally:
+        config._overrides = {}

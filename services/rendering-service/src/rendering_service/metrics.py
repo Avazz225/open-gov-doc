@@ -4,7 +4,10 @@ there is no queue; rows are written after processing."""
 
 from __future__ import annotations
 
-from dms_metrics_client import GuardedCounter, SensorRegistry, SensorSpec
+import time
+from io import BytesIO
+
+from dms_metrics_client import GuardedCounter, SensorRegistry, SensorSpec, throttled
 from sqlalchemy import func, select
 
 from rendering_service.models import Rendition
@@ -12,15 +15,28 @@ from rendering_service.models import Rendition
 FAILURES = SensorSpec(
     name="rendering.renditions.failed",
     group="reliability",
-    cost="cheap",
+    cost=3,
     description="Fehlgeschlagene Renditions je Art (thumbnail, pdf_archive, ...) und Zustand",
 )
 PRODUCED = SensorSpec(
     name="rendering.renditions.produced",
     group="performance",
-    cost="cheap",
+    cost=1,
     description="Erfolgreich erzeugte Renditions je Art seit Prozessstart",
 )
+
+# P88-S2c (package E): an active probe - renders a small generated image to
+# PDF/A with the real renderer and reports how long it took, labelled by
+# result. Level 5, off by default, and at most once per PROBE_INTERVAL even
+# when Prometheus scrapes far more often.
+PROBE = SensorSpec(
+    name="rendering.probe.duration_seconds",
+    group="reliability",
+    cost=5,
+    description="Test-Konvertierung (Bild zu PDF/A): Dauer in Sekunden, Label result ok/failed",
+    default_enabled=False,
+)
+PROBE_INTERVAL_SECONDS = 300.0
 
 _STATE = {"failed": "retrying", "failed_permanent": "permanent"}
 _produced: GuardedCounter | None = None
@@ -40,6 +56,33 @@ def build_sensors(registry: SensorRegistry, app) -> None:
         return {(kind, _STATE[status]): float(n) for kind, status, n in rows.all()}
 
     registry.on_scrape_async(registry.gauge(FAILURES, labelnames=("kind", "state")), failures)
+    registry.on_scrape_async(
+        registry.gauge(PROBE, labelnames=("result",)),
+        throttled(run_probe, min_interval_seconds=PROBE_INTERVAL_SECONDS),
+    )
+
+
+def _probe_image() -> bytes:
+    from PIL import Image
+
+    buffer = BytesIO()
+    Image.new("RGB", (64, 64), (200, 200, 200)).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+async def run_probe() -> dict[tuple[str, ...], float]:
+    """One test rendition; never raises - a failure is a reported result."""
+    from rendering_service.renderers.pdf_archive import PdfArchiveRenderer
+
+    started = time.monotonic()
+    try:
+        output = await PdfArchiveRenderer().render(
+            _probe_image(), filename="probe.png", content_type="image/png"
+        )
+        ok = bool(output.data)
+    except Exception:
+        ok = False
+    return {("ok" if ok else "failed",): time.monotonic() - started}
 
 
 def count_produced(kind: str) -> None:

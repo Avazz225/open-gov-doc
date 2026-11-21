@@ -2,6 +2,66 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P88-S2c: the cost scale 1–5 (user request) and default-off sensors with package E
+(amendment to [ADR 0243](docs/adr/0243-sensor-group-and-cost-overrides-and-admin-page.md)).
+
+**What changed:**
+- **`dms-metrics-client`:**
+  - new `cost.py` with `normalize_cost`, `COST_LEVELS` and `LEGACY_KEY_LEVELS`;
+  - `SensorSpec.cost` is normalized to 1–5 (legacy cheap/expensive become 2/4);
+  - `SensorSpec.default_enabled`;
+  - `resolve_active(..., default_enabled=)`: the source `default` for a default-off sensor left off,
+    and legacy cost keys as a safety net;
+  - the unbound proxy keeps default-off sensors off;
+  - `throttled()` for probes.
+- **All existing sensors re-rated by the rubric** (table in `docs/operations/monitoring.md`).
+- **registry-service:** `SensorDeclaration.cost` is an int with a legacy normalizer, plus
+  `default_enabled`. Without this, every registration with a level would have been a `422`.
+- **monitoring-service:** the catalog normalizes cost and reports `default_enabled`; `cost:<1-5>` keys;
+  legacy keys are expanded on write and migrated on startup (`migrate_legacy_cost_keys`).
+- **Package E**, level 5 and off by default:
+  - `document.count.by_type`, `workflow.instances.by_definition`;
+  - the probes `rendering.probe.duration_seconds{result}` (generated image → PDF/A) and
+    `search.probe.duration_seconds{result}`, throttled to every 300 s.
+- **admin-ui:**
+  - `CostDots`, five dots in the level's colour (`--dms-cost-1…5` for light/dark/high contrast, light
+    green instead of blue at 2), always with the level in words and an aria label;
+  - five cost switches ("Einstellung für Kostenstufe n");
+  - a "standardmäßig aus" badge and source label.
+- **Docs:** the ADR 0243 amendment; monitoring.md (rubric, compatibility, package E, levels in the
+  catalog table).
+
+**Checks:**
+- dms-metrics-client 29 (+4: levels and legacy values, default-off resolution, unbound proxy,
+  throttle).
+- monitoring 23 (+2: levels/legacy keys/default-off in the catalog, startup migration); registry 83
+  (+1, levels and range check).
+- document 428, workflow 244, rendering 105, search 78 (the E sensors are off by default and switch on
+  with `cost:5`).
+- Rerun because of the lib change: storage, license, ocr, virus-scan, archival, notification,
+  permission, federation-hub, plugin-orchestration, gateway and config, all green.
+- ruff clean for every touched package; repo-wide 23 findings, all in untouched files (the 25 known,
+  two fewer through formatting).
+- admin-ui vitest 347, `tsc`/`eslint` clean, e2e 11/11.
+  - `fleet-management.spec.ts` failed once in each of two full runs right after the stack restart.
+    It passed on its own and in 9 further full runs. Not touched this session; noted as a possible
+    warm-up flake.
+- **Live, after rebuilding all images:**
+  - a legacy `cost:expensive` row inserted by SQL became `cost:4`/`cost:5` on the monitoring restart
+    (logged `sensor_cost_keys_migrated`);
+  - the catalog has 49 sensors over levels 1–5 (23/11/8/3/4);
+  - in admin-ui, switching level 5 on turned the E sensors on ("über die Kosten"). The
+    rendering probe reported ok in 87 ms, the search probe ok in 9 ms;
+  - the breakdowns produced 685 series (workflow per definition) and 77 (documents per type) on the
+    dev stack, which is the point of default-off;
+  - the dot scale was checked in light, dark and at 390px, with no page overflow.
+- `users-admin` temporarily had `domain-admin-monitoring` (assignment 4926), now revoked. The
+  overrides were reset and the config is empty.
+
+**Next session:** **P88-S3**, object-type status transitions and the guided naming/conditions forms.
+
+---
+
 **Last completed:** P88-S2b, sensor catalog extension A–D. The user approved it after a comparison
 with an external reference system (amendment to
 [ADR 0243](docs/adr/0243-sensor-group-and-cost-overrides-and-admin-page.md)).
@@ -59,12 +119,7 @@ with an external reference system (amendment to
   reads as "expired". There is now `SensorRegistry.gauge(optional=True)`, absent until it has a value,
   and the poll loop clears the snapshot when the license is gone.
 
-**Next session:** **P88-S2c**:
-- the cost scale 1–5 (user request: five-dot colour scale, legacy cheap/expensive keys mapped to
-  1–3/4–5);
-- `SensorSpec.default_enabled` plus the expensive breakdowns (E).
-
-Then P88-S3.
+**Next session:** P88-S2c (done, see above).
 
 ---
 

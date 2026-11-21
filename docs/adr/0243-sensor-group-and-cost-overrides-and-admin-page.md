@@ -97,3 +97,31 @@ Where the reference's sensor had no counterpart in the DMS data model, the close
 - no storage purge backlog → overdue trash and permanently failed replicas.
 
 The full table is in `docs/operations/monitoring.md`.
+
+## Amendment — P88-S2c: cost levels 1–5 and default-off sensors
+
+**Cost levels.** At the user's request the cost is a level from 1 (very cheap) to 5 (very expensive), not
+cheap/expensive, so admins can weigh sensors before switching them on.
+- **Rubric:** the work per measurement plus the number of series it produces; table in
+  `docs/operations/monitoring.md`.
+- **Override keys:** `cost:1` … `cost:5`.
+- **Compatibility, so nothing breaks across a rolling update or an old config export:**
+  - a declared `cheap`/`expensive` is read as 2/4, in `SensorSpec` and in registry-service's
+    registration schema;
+  - a legacy `cost:cheap`/`cost:expensive` key stands for levels 1–3/4–5. monitoring-service rewrites
+    stored ones on startup and expands written ones, and the client still honours an unmigrated one.
+- **admin-ui scale:** five dots on a sequential green → light green → yellow → orange → red scale.
+  - Light green rather than the suggested blue at level 2, so the colours read as one ordered
+    progression and not as a separate category.
+  - The filled-dot count and the level in words always go with the colour, so colour is never the only
+    carrier: colour-vision deficiency, high contrast.
+
+**Default-off sensors.** `SensorSpec.default_enabled=False` keeps a sensor off under "monitor everything"
+until its own, its group's or its cost level's override switches it on. The resolution's last step is then
+"off", reported as source `default`.
+- An unbound `SensorConfigProxy` (before startup, in tests) also keeps such sensors off. "Fail-open" stays
+  true only for normal sensors.
+- **Package E** uses it for the breakdowns per object type and per process definition, and for two active
+  probes (a test rendition, a test search).
+  - The probes are throttled to once per 300 s, because Prometheus scrapes far more often than a probe
+    should run.

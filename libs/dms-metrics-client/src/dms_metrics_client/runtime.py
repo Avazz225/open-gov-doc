@@ -19,43 +19,43 @@ from dms_metrics_client.sensors import GuardedGauge, SensorRegistry, SensorSpec
 HTTP_IN_FLIGHT = SensorSpec(
     name="http.requests.in_flight",
     group="performance",
-    cost="cheap",
+    cost=1,
     description="Gerade laufende HTTP-Anfragen dieser Instanz",
 )
 DB_POOL_IN_USE = SensorSpec(
     name="db.pool.in_use",
     group="capacity",
-    cost="cheap",
+    cost=1,
     description="Ausgeliehene Verbindungen des Datenbank-Pools",
 )
 DB_POOL_SIZE = SensorSpec(
     name="db.pool.size",
     group="capacity",
-    cost="cheap",
+    cost=1,
     description="Groesse des Datenbank-Pools (ohne Overflow)",
 )
 PROCESS_MEMORY = SensorSpec(
     name="process.memory_bytes",
     group="runtime",
-    cost="cheap",
+    cost=1,
     description="Belegter Arbeitsspeicher des Prozesses (RSS) in Bytes",
 )
 PROCESS_CPU = SensorSpec(
     name="process.cpu_seconds",
     group="runtime",
-    cost="cheap",
+    cost=1,
     description="Verbrauchte CPU-Zeit des Prozesses (User + System) in Sekunden",
 )
 PROCESS_OPEN_FDS = SensorSpec(
     name="process.open_fds",
     group="runtime",
-    cost="cheap",
+    cost=1,
     description="Offene Dateideskriptoren des Prozesses",
 )
 STARTUP_DURATION = SensorSpec(
     name="service.startup.duration_seconds",
     group="runtime",
-    cost="cheap",
+    cost=1,
     description="Dauer des letzten Starts (Lifespan bis betriebsbereit) in Sekunden",
 )
 

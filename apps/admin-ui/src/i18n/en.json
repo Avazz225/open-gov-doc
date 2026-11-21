@@ -1120,11 +1120,14 @@
     "activeCount": "{active} of {total} active",
     "cost": {
       "heading": "By cost",
-      "hint": "Expensive sensors (high resolution, much CPU/IO or many label values) can be switched together, for example off in continuous operation. A group or sensor setting takes precedence."
+      "hint": "Every sensor has a cost level from 1 (very cheap) to 5 (very expensive): the work per measurement and the number of series it produces. Levels can be switched together, for example the expensive ones off in continuous operation. A group or sensor setting takes precedence. Sensors that are off by default need to be switched on explicitly, even under \"monitor everything\"."
     },
     "costs": {
-      "cheap": "Cheap",
-      "expensive": "Expensive"
+      "1": "Very cheap",
+      "2": "Cheap",
+      "3": "Medium",
+      "4": "Expensive",
+      "5": "Very expensive"
     },
     "list": {
       "heading": "Groups and sensors",
@@ -1159,13 +1162,17 @@
       "sensor": "own setting",
       "group": "through the group",
       "cost": "through the cost",
-      "global": "through the base setting"
+      "global": "through the base setting",
+      "default": "off by default"
     },
     "orphaned": {
       "heading": "Settings without a running sensor",
       "hint": "These settings belong to sensors or groups no service reports right now (stopped or renamed). They apply again once the sensor is back.",
       "reset": "Reset"
-    }
+    },
+    "costLevel": "Cost level {level} of 5: {name}",
+    "defaultOff": "off by default",
+    "costSetting": "Setting for cost level {level}"
   },
   "license": {
     "pageTitle": "License status",

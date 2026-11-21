@@ -6,6 +6,11 @@ from dms_metrics_client.config_client import (
     override_key_for_group,
     resolve_active,
 )
+from dms_metrics_client.cost import (
+    COST_LEVELS,
+    LEGACY_KEY_LEVELS,
+    normalize_cost,
+)
 from dms_metrics_client.http_middleware import (
     bootstrap_http_sensors,
     build_http_sensors,
@@ -20,9 +25,13 @@ from dms_metrics_client.sensors import (
     GuardedHistogram,
     SensorRegistry,
     SensorSpec,
+    throttled,
 )
 
 __all__ = [
+    "COST_LEVELS",
+    "LEGACY_KEY_LEVELS",
+    "normalize_cost",
     "GuardedCounter",
     "GuardedGauge",
     "GuardedHistogram",
@@ -42,4 +51,5 @@ __all__ = [
     "override_key_for_group",
     "resolve_active",
     "run_gauge_sampler_loop",
+    "throttled",
 ]

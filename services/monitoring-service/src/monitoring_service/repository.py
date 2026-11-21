@@ -1,4 +1,6 @@
-from dms_metrics_client import resolve_active
+import logging
+
+from dms_metrics_client import COST_LEVELS, LEGACY_KEY_LEVELS, normalize_cost, resolve_active
 from monitoring_service.clients import RegistryInstance
 from monitoring_service.models import GLOBAL_DEFAULT_KEY, SensorConfigEntry
 from monitoring_service.schemas import SensorConfigOut, SensorOut
@@ -20,32 +22,69 @@ async def get_sensor_config(session: AsyncSession) -> SensorConfigOut:
     return SensorConfigOut(global_default=global_default, overrides=entries)
 
 
+logger = logging.getLogger(__name__)
+
+
 def is_sensor_active(
-    config: SensorConfigOut, name: str, *, group: str | None = None, cost: str | None = None
+    config: SensorConfigOut,
+    name: str,
+    *,
+    group: str | None = None,
+    cost: int | str | None = None,
+    default_enabled: bool = True,
 ) -> bool:
-    return resolve_active(config.global_default, config.overrides, name, group=group, cost=cost)[0]
+    return resolve_active(
+        config.global_default,
+        config.overrides,
+        name,
+        group=group,
+        cost=cost,
+        default_enabled=default_enabled,
+    )[0]
 
 
-VALID_COSTS = frozenset({"cheap", "expensive"})
-
-
-def validate_override_key(key: str) -> None:
-    """P88-S2 (ADR 0243): a sensor name, `group:<group>` or `cost:<cheap|
-    expensive>`. Any other prefixed key is a typo that would silently
-    match nothing, so it is refused."""
+def expand_override_key(key: str) -> list[str]:
+    """Validates an override key and returns the key(s) to store (P88-S2/
+    S2c, ADR 0243): a sensor name, `group:<group>` or `cost:<1-5>` as is; a
+    legacy `cost:cheap`/`cost:expensive` (an old export, an old script)
+    becomes its levels. Any other prefixed key is a typo that would
+    silently match nothing, so it is refused."""
     if ":" not in key:
-        return
+        return [key]
     prefix, _, value = key.partition(":")
     if not value:
         raise ValueError(f"Leerer Wert in {key!r}")
     if prefix == "group":
-        return
-    if prefix == "cost" and value in VALID_COSTS:
-        return
+        return [key]
+    if prefix == "cost":
+        if value in LEGACY_KEY_LEVELS:
+            return [f"cost:{level}" for level in LEGACY_KEY_LEVELS[value]]
+        if value.isdigit() and int(value) in COST_LEVELS:
+            return [key]
     raise ValueError(
         f"Unbekannter Schlüssel {key!r} - erlaubt: Sensorname, 'group:<Gruppe>', "
-        "'cost:cheap', 'cost:expensive'"
+        "'cost:1' bis 'cost:5'"
     )
+
+
+async def migrate_legacy_cost_keys(session: AsyncSession) -> list[str]:
+    """Rewrites stored `cost:cheap`/`cost:expensive` overrides into their
+    levels on startup (P88-S2c). A level that already has its own override
+    keeps it. Returns the legacy keys that were migrated."""
+    migrated = []
+    for legacy, levels in LEGACY_KEY_LEVELS.items():
+        entry = await session.get(SensorConfigEntry, f"cost:{legacy}")
+        if entry is None:
+            continue
+        for level in levels:
+            if await session.get(SensorConfigEntry, f"cost:{level}") is None:
+                session.add(SensorConfigEntry(key=f"cost:{level}", enabled=entry.enabled))
+        await session.delete(entry)
+        migrated.append(entry.key)
+    if migrated:
+        await session.flush()
+        logger.info("sensor_cost_keys_migrated", extra={"keys": migrated})
+    return migrated
 
 
 async def set_global_default(session: AsyncSession, enabled: bool) -> SensorConfigOut:
@@ -89,21 +128,25 @@ async def list_sensors(session: AsyncSession, instances: list[RegistryInstance])
             service_types.setdefault(name, set()).add(instance.service_type)
     sensors = []
     for name, sensor in catalog.items():
+        cost = normalize_cost(sensor["cost"])
+        default_enabled = bool(sensor.get("default_enabled", True))
         active, source = resolve_active(
             config.global_default,
             config.overrides,
             name,
             group=sensor["group"],
-            cost=sensor["cost"],
+            cost=cost,
+            default_enabled=default_enabled,
         )
         sensors.append(
             SensorOut(
                 name=sensor["name"],
                 group=sensor["group"],
-                cost=sensor["cost"],
+                cost=cost,
                 description=sensor["description"],
                 service_types=sorted(service_types[name]),
                 active=active,
+                default_enabled=default_enabled,
                 source=source,
             )
         )

@@ -1587,12 +1587,14 @@ export async function resetExpectedReplicas(token: string, serviceType: string):
   );
 }
 
-// Monitoring sensors (P88-S2, ADR 0243): the catalog every running service
-// declares, and the activation config. An override key is a sensor name,
-// `group:<group>` or `cost:<cheap|expensive>`; the most specific one wins,
-// then the global default. Writes need `admin.monitoring`.
-export type SensorCost = "cheap" | "expensive";
-export type SensorSource = "sensor" | "group" | "cost" | "global";
+// Monitoring sensors (P88-S2/S2c, ADR 0243): the catalog every running
+// service declares, and the activation config. An override key is a sensor
+// name, `group:<group>` or `cost:<1-5>`; the most specific one wins, then
+// the global default (or "off" for a sensor declared off by default).
+// Writes need `admin.monitoring`.
+// A level from 1 (very cheap) to 5 (very expensive), P88-S2c.
+export type SensorCost = 1 | 2 | 3 | 4 | 5;
+export type SensorSource = "sensor" | "group" | "cost" | "global" | "default";
 
 export interface Sensor {
   name: string;
@@ -1601,6 +1603,8 @@ export interface Sensor {
   description: string;
   service_types: string[];
   active: boolean;
+  // Off unless an override switches it on (expensive breakdowns, probes).
+  default_enabled: boolean;
   source: SensorSource;
 }
 

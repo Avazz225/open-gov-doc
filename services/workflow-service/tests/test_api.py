@@ -2196,3 +2196,28 @@ def test_metrics_report_the_p88_s2b_sensors(client):
     text = client.get("/metrics").text
     assert "workflow_instances_running " in text
     assert "# TYPE workflow_tasks_escalated_total counter" in text
+
+
+def test_p88_s2c_breakdown_is_off_by_default_and_on_with_its_cost_level(client):
+    """P88-S2c: workflow.instances.by_definition is declared level 5 and off by default, so it stays
+    off under "monitor everything" until a `cost:5` override switches it on
+    (set directly on the running app's config client)."""
+    from workflow_service.main import app as running_app
+
+    declared = {d["name"]: d for d in running_app.state.sensor_registry.declarations()}
+    spec = declared["workflow.instances.by_definition"]
+    assert (spec["cost"], spec["default_enabled"]) == (5, False)
+
+    config = running_app.state.sensor_config_client
+
+    def active() -> bool:
+        return config.is_active(
+            spec["name"], group=spec["group"], cost=spec["cost"], default_enabled=False
+        )
+
+    assert active() is False
+    config._overrides = {"cost:5": True}
+    try:
+        assert active() is True
+    finally:
+        config._overrides = {}

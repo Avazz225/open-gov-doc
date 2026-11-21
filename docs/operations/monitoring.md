@@ -121,31 +121,66 @@ The first is in the group `performance`, the pool sensors in `capacity`, the res
 
 After a comparison with an external reference system, the user approved packages A–D:
 
-| Sensor | Service | Group / cost | Notes |
+| Sensor | Service | Group / cost level (P88-S2c) | Notes |
 |---|---|---|---|
-| `license.expiration.days` | license | capacity / cheap | from the poll loop's usage snapshot |
-| `license.usage.users.current`, `license.usage.documents.current` | license | capacity / cheap | same snapshot, no extra HTTP calls |
-| `auth.sessions.active` | auth | capacity / cheap | Keycloak admin API, in a thread |
-| `storage.target.healthy{target}` | storage | reliability / cheap | one `exists()` probe per target, 3 s timeout |
-| `storage.target.used_percent{target}` | storage | capacity / cheap | local targets only (`shutil.disk_usage`) |
-| `storage.replication.failed_permanent` | storage | reliability / cheap | stands in for a "purge backlog", which doesn't exist: deletes are immediate |
-| `ocr.results.failed{state}`, `ocr.results.needs_review` | ocr | reliability / cheap | there is no OCR queue; `state` is `retrying` or `permanent` |
-| `rendering.renditions.failed{kind,state}` | rendering | reliability / cheap | `kind` is `thumbnail`, `pdf_archive`, `substitute_text` |
-| `rendering.renditions.produced{kind}` | rendering | performance / cheap | counter |
-| `virus_scan.quarantined` | virus-scan | security / cheap | scanning is synchronous; open quarantine instead of a queue |
-| `workflow.instances.running` | workflow | capacity / cheap | |
-| `workflow.tasks.escalated` | workflow | reliability / cheap | counter. There is no failed-instance status and no task due date, so SLA escalations are the overdue measure |
-| `archival.transfers.active{kind}`, `archival.transfers.failed{kind}` | archival | capacity, reliability / cheap | `kind` is `document` or `case`; failed means `failed_permanent` |
-| `notification.deliveries.failed{channel,state}` | notification | reliability / cheap | |
-| `document.locks.oldest_age_hours` | document | reliability / cheap | active locks only |
-| `document.trash.overdue` | document | reliability / cheap | past the restore period and not yet purged; holds are not subtracted |
-| `search.index.failures` | search | reliability / cheap | counter; failures were only logged and redelivered before |
-| `search.query.duration_seconds` | search | performance / **expensive** | the database search only, without the permission filter |
-| `auth.logins{method,result}` | auth | security / cheap | `method` is `technical_account`, `keycloak`, `sso` or `password` (refused before the method is known). `result` is `success`, `rejected` or `maintenance` |
-| `permission.cache.lookups{result}`, `permission.cache.invalidations` | permission | security / cheap | counters |
-| `permission.cache.rebuild.duration_seconds` | permission | performance / **expensive** | timed only while on |
+| `license.expiration.days` | license | capacity / 1 | from the poll loop's usage snapshot |
+| `license.usage.users.current`, `license.usage.documents.current` | license | capacity / 1 | same snapshot, no extra HTTP calls |
+| `auth.sessions.active` | auth | capacity / 3 | Keycloak admin API, in a thread |
+| `storage.target.healthy{target}` | storage | reliability / 3 | one `exists()` probe per target, 3 s timeout |
+| `storage.target.used_percent{target}` | storage | capacity / 1 | local targets only (`shutil.disk_usage`) |
+| `storage.replication.failed_permanent` | storage | reliability / 2 | stands in for a "purge backlog", which doesn't exist: deletes are immediate |
+| `ocr.results.failed{state}`, `ocr.results.needs_review` | ocr | reliability / 3 | there is no OCR queue; `state` is `retrying` or `permanent` |
+| `rendering.renditions.failed{kind,state}` | rendering | reliability / 3 | `kind` is `thumbnail`, `pdf_archive`, `substitute_text` |
+| `rendering.renditions.produced{kind}` | rendering | performance / 1 | counter |
+| `virus_scan.quarantined` | virus-scan | security / 2 | scanning is synchronous; open quarantine instead of a queue |
+| `workflow.instances.running` | workflow | capacity / 2 | |
+| `workflow.tasks.escalated` | workflow | reliability / 1 | counter. There is no failed-instance status and no task due date, so SLA escalations are the overdue measure |
+| `archival.transfers.active{kind}`, `archival.transfers.failed{kind}` | archival | capacity, reliability / 3 | `kind` is `document` or `case`; failed means `failed_permanent` |
+| `notification.deliveries.failed{channel,state}` | notification | reliability / 3 | |
+| `document.locks.oldest_age_hours` | document | reliability / 2 | active locks only |
+| `document.trash.overdue` | document | reliability / 2 | past the restore period and not yet purged; holds are not subtracted |
+| `search.index.failures` | search | reliability / 1 | counter; failures were only logged and redelivered before |
+| `search.query.duration_seconds` | search | performance / 4 | the database search only, without the permission filter |
+| `auth.logins{method,result}` | auth | security / 1 | `method` is `technical_account`, `keycloak`, `sso` or `password` (refused before the method is known). `result` is `success`, `rejected` or `maintenance` |
+| `permission.cache.lookups{result}`, `permission.cache.invalidations` | permission | security / 1 | counters |
+| `permission.cache.rebuild.duration_seconds` | permission | performance / 4 | timed only while on |
 
-Package E (expensive breakdowns, off by default) follows in P88-S2c. Alerting on these follows in P88-S5.
+## Cost levels and default-off sensors (P88-S2c)
+
+The cost is a level from 1 (very cheap) to 5 (very expensive) instead of cheap/expensive, at the user's
+request. The rubric is the work per measurement plus the number of series a sensor produces:
+
+| Level | Meaning | Examples |
+|---|---|---|
+| 1 | in-memory counters and values, no I/O | `auth.logins`, `process.*`, `http.requests.in_flight`, `license.*` |
+| 2 | one indexed count, a cheap syscall, labelled counter with few series | `virus_scan.quarantined`, `http.requests` |
+| 3 | grouped counts, histograms with moderate cardinality, one network probe | `ocr.results.failed`, `http.request.duration_seconds`, `storage.target.healthy` |
+| 4 | timing histograms on hot paths | `document.upload.duration`, `search.query.duration_seconds` |
+| 5 | high-cardinality breakdowns, active probes | package E below |
+
+- **Override keys** are `cost:1` … `cost:5`. Legacy keys are mapped: `cost:cheap` means levels 1–3 and
+  `cost:expensive` means 4–5.
+  - monitoring-service rewrites stored legacy keys on startup and expands them on write (old exports,
+    old scripts).
+  - The resolution in `dms-metrics-client` honours a not-yet-migrated legacy key as a safety net.
+  - A declared legacy cost reads as 2 (`cheap`) or 4 (`expensive`), so a mixed fleet during a rolling
+    update keeps registering.
+- **`SensorSpec.default_enabled=False`:** such a sensor stays off under "monitor everything" until its own,
+  group or cost-level override turns it on; its catalog source is `default`.
+- **admin-ui:** five dots with a green → light green → yellow → orange → red scale, always with the
+  filled-dot count and the level in words. One switch per level.
+
+**Package E**, all level 5 and off by default:
+
+| Sensor | Service | Notes |
+|---|---|---|
+| `document.count.by_type{object_type_id}` | document | active documents per object type |
+| `workflow.instances.by_definition{process_definition_id}` | workflow | running instances per definition |
+| `rendering.probe.duration_seconds{result}` | rendering | renders a generated 64×64 image to PDF/A with the real renderer |
+| `search.probe.duration_seconds{result}` | search | one full-text search against the real index |
+
+The two probes run at most once per 300 s (`dms_metrics_client.throttled`) however often Prometheus
+scrapes, and report `result="failed"` instead of raising. Alerting on sensors follows in P88-S5.
 
 ## Deliberate simplifications of this build-out stage
 

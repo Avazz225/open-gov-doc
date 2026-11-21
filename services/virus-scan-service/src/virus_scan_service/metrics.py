@@ -12,7 +12,7 @@ from virus_scan_service.models import ScanResult
 QUARANTINED = SensorSpec(
     name="virus_scan.quarantined",
     group="security",
-    cost="cheap",
+    cost=2,
     description="Als infiziert erkannte Dateien in Quarantaene (weder freigegeben noch geloescht)",
 )
 

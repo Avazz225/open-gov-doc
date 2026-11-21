@@ -6,6 +6,8 @@ import logging
 
 import httpx
 
+from dms_metrics_client.cost import LEGACY_KEY_LEVELS, normalize_cost
+
 logger = logging.getLogger(__name__)
 
 # Override keys besides a plain sensor name (P88-S2, ADR 0243): a whole
@@ -19,7 +21,7 @@ def override_key_for_group(group: str) -> str:
     return f"{GROUP_PREFIX}{group}"
 
 
-def override_key_for_cost(cost: str) -> str:
+def override_key_for_cost(cost: int | str) -> str:
     return f"{COST_PREFIX}{cost}"
 
 
@@ -29,19 +31,35 @@ def resolve_active(
     name: str,
     *,
     group: str | None = None,
-    cost: str | None = None,
+    cost: int | str | None = None,
+    default_enabled: bool = True,
 ) -> tuple[bool, str]:
     """The one resolution rule, shared by every service's sensors and by
     monitoring-service's catalog: the most specific setting wins - the
-    sensor's own override, then its group's, then its cost class's, then
-    the global default. Returns the value and where it came from
-    (`sensor`/`group`/`cost`/`global`)."""
+    sensor's own override, then its group's, then its cost level's
+    (`cost:<1-5>`), then the default. The default is the global setting,
+    except for a sensor declared `default_enabled=False` (P88-S2c), which
+    stays off until an override turns it on.
+
+    Returns the value and where it came from (`sensor`/`group`/`cost`/
+    `global`/`default` - the last for a default-off sensor left off)."""
     if name in overrides:
         return overrides[name], "sensor"
     if group is not None and override_key_for_group(group) in overrides:
         return overrides[override_key_for_group(group)], "group"
-    if cost is not None and override_key_for_cost(cost) in overrides:
-        return overrides[override_key_for_cost(cost)], "cost"
+    if cost is not None:
+        level = normalize_cost(cost)
+        key = override_key_for_cost(level)
+        if key in overrides:
+            return overrides[key], "cost"
+        # A not-yet-migrated legacy key (monitoring-service rewrites them
+        # to levels on startup and on write, so this is only a safety net).
+        for legacy, levels in LEGACY_KEY_LEVELS.items():
+            legacy_key = override_key_for_cost(legacy)
+            if level in levels and legacy_key in overrides:
+                return overrides[legacy_key], "cost"
+    if not default_enabled:
+        return False, "default"
     return global_default, "global"
 
 
@@ -73,10 +91,22 @@ class SensorConfigClient:
         self._overrides: dict[str, bool] = {}
         self._task: asyncio.Task | None = None
 
-    def is_active(self, name: str, *, group: str | None = None, cost: str | None = None) -> bool:
-        return resolve_active(self._global_default, self._overrides, name, group=group, cost=cost)[
-            0
-        ]
+    def is_active(
+        self,
+        name: str,
+        *,
+        group: str | None = None,
+        cost: int | str | None = None,
+        default_enabled: bool = True,
+    ) -> bool:
+        return resolve_active(
+            self._global_default,
+            self._overrides,
+            name,
+            group=group,
+            cost=cost,
+            default_enabled=default_enabled,
+        )[0]
 
     async def _refresh_once(self) -> None:
         try:
@@ -134,7 +164,16 @@ class SensorConfigProxy:
     def unbind(self) -> None:
         self._client = None
 
-    def is_active(self, name: str, *, group: str | None = None, cost: str | None = None) -> bool:
+    def is_active(
+        self,
+        name: str,
+        *,
+        group: str | None = None,
+        cost: int | str | None = None,
+        default_enabled: bool = True,
+    ) -> bool:
+        # Unbound (before startup, in tests): everything on, except sensors
+        # that are off by default - those are never switched on implicitly.
         if self._client is None:
-            return True
-        return self._client.is_active(name, group=group, cost=cost)
+            return default_enabled
+        return self._client.is_active(name, group=group, cost=cost, default_enabled=default_enabled)

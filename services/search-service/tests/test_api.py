@@ -390,3 +390,17 @@ def test_metrics_time_the_database_search_and_count_index_failures():
             asyncio.run(pipeline.reindex_document("doc-without-dependencies"))
         after = _metric(client.get("/metrics").text, "search_index_failures_total")
     assert after == failures_before + 1
+
+
+def test_p88_s2c_search_probe_is_off_by_default_and_runs_when_switched_on():
+    """P88-S2c: level 5, off by default; with `cost:5` on, one throttled
+    test search is reported with its result label."""
+    with TestClient(app) as client:
+        assert "search_probe_duration_seconds{" not in client.get("/metrics").text
+        config = app.state.sensor_config_client
+        config._overrides = {"cost:5": True}
+        try:
+            text = client.get("/metrics").text
+        finally:
+            config._overrides = {}
+    assert 'search_probe_duration_seconds{result="ok"}' in text

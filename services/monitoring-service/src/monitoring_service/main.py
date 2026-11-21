@@ -85,6 +85,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     async with app.state.session_factory() as session:
         await repository.ensure_global_default_seeded(session)
+        await repository.migrate_legacy_cost_keys(session)
         await session.commit()
 
     app.state.auth_client = AuthServiceClient(settings.auth_service_base_url)
@@ -219,14 +220,16 @@ async def set_sensor_override(
 ) -> SensorConfigOut:
     await _require_monitoring_permission(x_dms_principal)
     try:
-        repository.validate_override_key(sensor_name)
+        keys = repository.expand_override_key(sensor_name)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    result = await repository.set_sensor_override(session, sensor_name, payload.enabled)
+    for key in keys:
+        result = await repository.set_sensor_override(session, key, payload.enabled)
     await session.commit()
-    await publish_event(
-        "monitoring.sensor.config_changed",
-        subject=sensor_name,
-        payload={"enabled": payload.enabled, "actor": x_dms_principal},
-    )
+    for key in keys:
+        await publish_event(
+            "monitoring.sensor.config_changed",
+            subject=key,
+            payload={"enabled": payload.enabled, "actor": x_dms_principal},
+        )
     return result

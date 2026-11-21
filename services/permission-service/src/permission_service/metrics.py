@@ -9,19 +9,19 @@ from dms_metrics_client import GuardedCounter, GuardedHistogram, SensorRegistry,
 LOOKUPS = SensorSpec(
     name="permission.cache.lookups",
     group="security",
-    cost="cheap",
+    cost=1,
     description="Abfragen des Rechte-Caches je Ergebnis (hit, miss)",
 )
 INVALIDATIONS = SensorSpec(
     name="permission.cache.invalidations",
     group="security",
-    cost="cheap",
+    cost=1,
     description="Komplette Invalidierungen des Rechte-Caches (jede Rechteaenderung)",
 )
 REBUILD_DURATION = SensorSpec(
     name="permission.cache.rebuild.duration_seconds",
     group="performance",
-    cost="expensive",
+    cost=4,
     description="Dauer, einen Cache-Eintrag neu zu berechnen (Rollen ueber den Ressourcenbaum)",
 )
 

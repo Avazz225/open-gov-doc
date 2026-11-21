@@ -8,13 +8,13 @@ from dms_metrics_client import GuardedCounter, SensorRegistry, SensorSpec
 SESSIONS_ACTIVE = SensorSpec(
     name="auth.sessions.active",
     group="capacity",
-    cost="cheap",
+    cost=3,
     description="Aktive Keycloak-Sitzungen des DMS-Clients",
 )
 LOGINS = SensorSpec(
     name="auth.logins",
     group="security",
-    cost="cheap",
+    cost=1,
     description=(
         "Anmeldeversuche je Methode (technical_account, keycloak, sso, password) "
         "und Ergebnis (success, rejected, maintenance)"

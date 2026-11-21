@@ -3925,6 +3925,14 @@ installation's replica health.
   - Then the E sensors: documents per object type, workflow instances per definition, and probes (a
     test rendition, a test search).
   - The admin page marks default-off sensors.
+  - ✅ **Result:**
+    - the scale 1–5, with every sensor re-rated by the rubric;
+    - legacy keys migrated on startup and expanded on write, legacy declared costs normalized
+      (registry-service too, which would otherwise have rejected every registration);
+    - `default_enabled` and package E (two breakdowns, two probes throttled to every 300 s);
+    - the dot scale in admin-ui.
+    - **Live:** 49 sensors; level 5 on brought the probes (ok, 87 ms/9 ms) and the breakdowns (685/77
+      series).
 - **P88-S3 — Object-type status transitions.** An editor for `status_transitions`, plus guided forms for
   `naming_constraints`/`conditions` (today passed through raw in `ObjectTypeEditor`).
 - **P88-S4 — Mailboxes and realm roles.**

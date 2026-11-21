@@ -1120,11 +1120,14 @@
     "activeCount": "{active} von {total} aktiv",
     "cost": {
       "heading": "Nach Kosten",
-      "hint": "Teure Sensoren (hohe Auflösung, viel CPU/IO oder viele Label-Werte) lassen sich gemeinsam schalten, etwa im Dauerbetrieb aus. Eine Gruppen- oder Sensor-Einstellung geht vor."
+      "hint": "Jeder Sensor hat eine Kostenstufe von 1 (sehr günstig) bis 5 (sehr teuer): Aufwand je Messung und Zahl der erzeugten Zeitreihen. Stufen lassen sich gemeinsam schalten, etwa die teuren im Dauerbetrieb aus. Eine Gruppen- oder Sensor-Einstellung geht vor. Sensoren, die standardmäßig aus sind, brauchen eine eigene Einschaltung – auch bei „Alles überwachen“."
     },
     "costs": {
-      "cheap": "Günstig",
-      "expensive": "Teuer"
+      "1": "Sehr günstig",
+      "2": "Günstig",
+      "3": "Mittel",
+      "4": "Teuer",
+      "5": "Sehr teuer"
     },
     "list": {
       "heading": "Gruppen und Sensoren",
@@ -1159,13 +1162,17 @@
       "sensor": "eigene Einstellung",
       "group": "über die Gruppe",
       "cost": "über die Kosten",
-      "global": "über die Grundeinstellung"
+      "global": "über die Grundeinstellung",
+      "default": "standardmäßig aus"
     },
     "orphaned": {
       "heading": "Einstellungen ohne laufenden Sensor",
       "hint": "Diese Einstellungen gehören zu Sensoren oder Gruppen, die gerade kein Dienst meldet (gestoppt oder umbenannt). Sie greifen wieder, sobald der Sensor zurückkommt.",
       "reset": "Zurücksetzen"
-    }
+    },
+    "costLevel": "Kostenstufe {level} von 5: {name}",
+    "defaultOff": "standardmäßig aus",
+    "costSetting": "Einstellung für Kostenstufe {level}"
   },
   "license": {
     "pageTitle": "Lizenzstatus",

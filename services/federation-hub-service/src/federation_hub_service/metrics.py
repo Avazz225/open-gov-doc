@@ -24,7 +24,7 @@ from federation_hub_service import repository
 FORWARD_RETRY_CACHE_DEPTH = SensorSpec(
     name="federation_hub.retry_cache.forward_pending",
     group="capacity",
-    cost="cheap",
+    cost=1,
     description=(
         "Anzahl persistent zwischengespeicherter, noch nicht erfolgreich "
         "zugestellter Handover-Payloads (Hinweg, ADR 0081/ADR 0213)"
@@ -33,7 +33,7 @@ FORWARD_RETRY_CACHE_DEPTH = SensorSpec(
 RESULT_RETRY_CACHE_DEPTH = SensorSpec(
     name="federation_hub.retry_cache.result_pending",
     group="capacity",
-    cost="cheap",
+    cost=1,
     description=(
         "Anzahl persistent zwischengespeicherter, noch nicht erfolgreich "
         "zugestellter Ergebnis-Payloads (Rückweg, Phase 40 Session 3/ADR 0213)"

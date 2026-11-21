@@ -14,16 +14,26 @@ from workflow_service.models import ProcessInstance
 RUNNING = SensorSpec(
     name="workflow.instances.running",
     group="capacity",
-    cost="cheap",
+    cost=2,
     description="Laufende Prozessinstanzen",
 )
 ESCALATED = SensorSpec(
     name="workflow.tasks.escalated",
     group="reliability",
-    cost="cheap",
+    cost=1,
     description=(
         "Aufgaben, deren SLA-Frist abgelaufen ist (Eskalation ausgeloest), seit Prozessstart"
     ),
+)
+
+# P88-S2c (package E): one series per process definition - level 5, off by
+# default.
+RUNNING_BY_DEFINITION = SensorSpec(
+    name="workflow.instances.by_definition",
+    group="capacity",
+    cost=5,
+    description="Laufende Prozessinstanzen je Prozessdefinition (eine Zeitreihe je Definition)",
+    default_enabled=False,
 )
 
 _escalated: GuardedCounter | None = None
@@ -43,6 +53,20 @@ def build_sensors(registry: SensorRegistry, app) -> None:
         return float(count or 0)
 
     registry.on_scrape_async(registry.gauge(RUNNING), running)
+
+    async def running_by_definition() -> dict[tuple[str, ...], float]:
+        async with app.state.session_factory() as session:
+            rows = await session.execute(
+                select(ProcessInstance.process_definition_id, func.count())
+                .where(ProcessInstance.status == "running")
+                .group_by(ProcessInstance.process_definition_id)
+            )
+        return {(str(definition_id),): float(n) for definition_id, n in rows.all()}
+
+    registry.on_scrape_async(
+        registry.gauge(RUNNING_BY_DEFINITION, labelnames=("process_definition_id",)),
+        running_by_definition,
+    )
 
 
 def count_escalation() -> None:

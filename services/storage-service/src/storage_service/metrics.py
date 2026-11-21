@@ -25,7 +25,7 @@ from storage_service.models import ObjectCopy
 REPLICATION_BACKLOG = SensorSpec(
     name="storage.replication.backlog",
     group="reliability",
-    cost="cheap",
+    cost=3,
     description=(
         "Anzahl object_copy-Zeilen mit Status 'pending'/'failed' ueber alle "
         "konfigurierten Ziele hinweg (Replikations-Rueckstand, 3.6)"
@@ -38,19 +38,19 @@ REPLICATION_BACKLOG = SensorSpec(
 TARGET_HEALTHY = SensorSpec(
     name="storage.target.healthy",
     group="reliability",
-    cost="cheap",
+    cost=3,
     description="Erreichbarkeit je Speicherziel (1 erreichbar, 0 nicht) - ein Lesezugriff je Abruf",
 )
 TARGET_USED_PERCENT = SensorSpec(
     name="storage.target.used_percent",
     group="capacity",
-    cost="cheap",
+    cost=1,
     description="Belegung des Dateisystems je lokalem Speicherziel in Prozent",
 )
 REPLICATION_FAILED_PERMANENT = SensorSpec(
     name="storage.replication.failed_permanent",
     group="reliability",
-    cost="cheap",
+    cost=2,
     description="Kopien, deren Replikation endgueltig aufgegeben wurde (failed_permanent)",
 )
 

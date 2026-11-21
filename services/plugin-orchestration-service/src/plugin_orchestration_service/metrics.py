@@ -15,13 +15,13 @@ from dms_metrics_client import GuardedGauge, SensorRegistry, SensorSpec, http_se
 CPU_USAGE_PERCENT = SensorSpec(
     name="plugin_orchestration.node.cpu_usage_percent",
     group="capacity",
-    cost="cheap",
+    cost=1,
     description="Aktuelle CPU-Auslastung des eigenen Knotens in Prozent (psutil, 3.8)",
 )
 AVAILABLE_RAM_MB = SensorSpec(
     name="plugin_orchestration.node.available_ram_mb",
     group="capacity",
-    cost="cheap",
+    cost=1,
     description="Verfuegbarer Arbeitsspeicher des eigenen Knotens in MB (psutil, 3.8)",
 )
 

@@ -93,7 +93,22 @@ def test_register_with_sensor_declarations_roundtrips(client):
     )
     response = client.post("/instances", json=payload)
     assert response.status_code == 201
-    assert response.json()["sensors"] == payload["sensors"]
+    # P88-S2c: the legacy "cheap" is stored as level 2, default_enabled added.
+    assert response.json()["sensors"] == [
+        {**payload["sensors"][0], "cost": 2, "default_enabled": True}
+    ]
+
+
+def test_register_with_cost_levels_and_rejects_out_of_range(client):
+    sensor = {"name": "x.breakdown", "group": "capacity", "description": "x"}
+    ok = client.post(
+        "/instances",
+        json=make_payload(sensors=[{**sensor, "cost": 5, "default_enabled": False}]),
+    )
+    assert ok.status_code == 201
+    assert ok.json()["sensors"][0]["cost"] == 5
+    bad = client.post("/instances", json=make_payload(sensors=[{**sensor, "cost": 7}]))
+    assert bad.status_code == 422
 
 
 def test_metrics_endpoint_exposes_own_pilot_sensors(client):

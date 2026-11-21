@@ -80,3 +80,18 @@ def test_metrics_report_the_p88_s2b_sensors(client):
     text = client.get("/metrics").text
     assert "# TYPE rendering_renditions_failed gauge" in text
     assert "# TYPE rendering_renditions_produced_total counter" in text
+
+
+def test_p88_s2c_breakdown_is_off_by_default_and_on_with_its_cost_level(client):
+    """P88-S2c: rendering.probe.duration_seconds is level 5 and off by default; a `cost:5` override
+    switches it on (set directly on the running app's config client)."""
+    from rendering_service.main import app as running_app
+
+    assert "rendering_probe_duration_seconds{" not in client.get("/metrics").text
+    config = running_app.state.sensor_config_client
+    config._overrides = {"cost:5": True}
+    try:
+        text = client.get("/metrics").text
+    finally:
+        config._overrides = {}
+    assert "rendering_probe_duration_seconds{" in text

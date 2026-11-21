@@ -4,25 +4,37 @@ import inspect
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Literal
 
 from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram
 from prometheus_client.core import GaugeMetricFamily
 
-SensorCost = Literal["cheap", "expensive"]
+from dms_metrics_client.cost import normalize_cost
+
+# A level 1-5 (see `cost.py`); the legacy "cheap"/"expensive" are accepted
+# and normalized to 2/4.
+SensorCost = int | str
 
 
 @dataclass(frozen=True)
 class SensorSpec:
     """A single, clearly named measurement point (10.1) - knows its own
-    group (business categorization, e.g. for a future admin UI overview)
-    and its cost (CPU/IO overhead), so an "everything on" setting doesn't
-    accidentally place a noticeable load on the system."""
+    group (business categorization, shown in the admin UI) and its cost,
+    a level from 1 (very cheap) to 5 (very expensive) since P88-S2c, so an
+    "everything on" setting doesn't accidentally place a noticeable load on
+    the system.
+
+    `default_enabled=False` (P88-S2c) marks a sensor that stays off under
+    "monitor everything" until its own, its group's or its cost level's
+    override switches it on - for expensive breakdowns and probes."""
 
     name: str
     group: str
     cost: SensorCost
     description: str
+    default_enabled: bool = True
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "cost", normalize_cost(self.cost))
 
     def as_dict(self) -> dict:
         return {
@@ -30,10 +42,37 @@ class SensorSpec:
             "group": self.group,
             "cost": self.cost,
             "description": self.description,
+            "default_enabled": self.default_enabled,
         }
 
 
 IsActiveFn = Callable[[str], bool]
+
+
+def throttled(
+    sampler: Callable[[], Awaitable[SampleValue]],
+    *,
+    min_interval_seconds: float,
+    clock: Callable[[], float] | None = None,
+) -> Callable[[], Awaitable[SampleValue]]:
+    """Wraps an async scrape sampler so its real work (an active probe, a
+    heavy query) runs at most once per `min_interval_seconds`; scrapes in
+    between get the last result (P88-S2c). Prometheus scrapes every ~15 s,
+    which is far too often for a test rendition."""
+    import time
+
+    now = clock or time.monotonic
+    state: dict[str, object] = {"at": None, "value": None}
+
+    async def sample() -> SampleValue:
+        last = state["at"]
+        if last is None or now() - last >= min_interval_seconds:
+            state["value"] = await sampler()
+            state["at"] = now()
+        return state["value"]
+
+    return sample
+
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +90,7 @@ def _accepts_group_and_cost(fn: Callable[..., bool]) -> bool:
         parameters = inspect.signature(fn).parameters
     except (TypeError, ValueError):
         return False
-    return "group" in parameters and "cost" in parameters
+    return "group" in parameters and "cost" in parameters and "default_enabled" in parameters
 
 
 class GuardedCounter:
@@ -235,7 +274,9 @@ class SensorRegistry:
         is_active = self._is_active
 
         def check(name: str) -> bool:
-            return is_active(name, group=spec.group, cost=spec.cost)
+            return is_active(
+                name, group=spec.group, cost=spec.cost, default_enabled=spec.default_enabled
+            )
 
         return check
 

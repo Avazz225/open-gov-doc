@@ -32,13 +32,13 @@ from dms_metrics_client.sensors import (
 HTTP_REQUESTS = SensorSpec(
     name="http.requests",
     group="performance",
-    cost="cheap",
+    cost=2,
     description="Anzahl HTTP-Anfragen je Methode/Route/Statuscode",
 )
 HTTP_REQUEST_DURATION = SensorSpec(
     name="http.request.duration_seconds",
     group="performance",
-    cost="cheap",
+    cost=3,
     description=(
         "Dauer von HTTP-Anfragen in Sekunden je Methode/Route - Basis fuer "
         "Durchschnitt (Sum/Count) sowie p95/p99 (histogram_quantile)"

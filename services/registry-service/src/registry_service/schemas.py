@@ -1,22 +1,33 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from dms_metrics_client import normalize_cost
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 LicenseComponentStatus = Literal["licensed", "demo", "unlicensed"]
 InstanceStatus = Literal["active", "draining"]
-SensorCost = Literal["cheap", "expensive"]
 
 
 class SensorDeclaration(BaseModel):
     """Selbstdeklaration eines von einer Instanz angebotenen Sensors (10.1,
     P11-S1) - registry-service reicht das nur durch, `monitoring-service`
-    aggregiert/loest die Aktivierung auf."""
+    aggregiert/loest die Aktivierung auf.
+
+    P88-S2c: `cost` is a level 1-5; an older instance still sending
+    "cheap"/"expensive" is accepted and stored as 2/4, so a mixed fleet
+    during a rolling update keeps registering. `default_enabled` is new and
+    defaults to on for instances that don't send it."""
 
     name: str
     group: str
-    cost: SensorCost
+    cost: int
     description: str
+    default_enabled: bool = True
+
+    @field_validator("cost", mode="before")
+    @classmethod
+    def _normalize_cost(cls, value: int | str) -> int:
+        return normalize_cost(value)
 
 
 class RegisterRequest(BaseModel):

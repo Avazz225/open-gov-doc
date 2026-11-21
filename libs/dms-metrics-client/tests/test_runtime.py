@@ -104,3 +104,22 @@ def test_optional_gauge_is_absent_until_it_has_a_value():
     assert samples() == []  # never set: absent, not 0
     assert samples() == ["t_days 12.0"]
     assert samples() == []  # sampler reports None again: removed
+
+
+async def test_throttled_sampler_runs_at_most_once_per_interval():
+    from dms_metrics_client import throttled
+
+    calls = []
+    clock = {"t": 0.0}
+
+    async def probe():
+        calls.append(clock["t"])
+        return float(len(calls))
+
+    sample = throttled(probe, min_interval_seconds=300, clock=lambda: clock["t"])
+    assert await sample() == 1.0
+    clock["t"] = 299
+    assert await sample() == 1.0  # cached
+    clock["t"] = 300
+    assert await sample() == 2.0
+    assert calls == [0.0, 300]

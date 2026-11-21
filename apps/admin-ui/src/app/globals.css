@@ -211,6 +211,71 @@
   color: var(--dms-fg);
 }
 
+/* Sensor cost scale (P88-S2c): five dots, the first n filled, coloured on a
+   sequential scale from green (1, very cheap) to red (5, very expensive).
+   Light green rather than blue at 2, so the scale reads as one ordered
+   progression. The filled-dot count carries the level without colour. */
+:root {
+  --dms-cost-1: #16a34a;
+  --dms-cost-2: #65a30d;
+  --dms-cost-3: #ca8a04;
+  --dms-cost-4: #ea580c;
+  --dms-cost-5: #dc2626;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --dms-cost-1: #4ade80;
+    --dms-cost-2: #a3e635;
+    --dms-cost-3: #facc15;
+    --dms-cost-4: #fb923c;
+    --dms-cost-5: #f87171;
+  }
+}
+
+:root[data-theme="light"] {
+  --dms-cost-1: #16a34a;
+  --dms-cost-2: #65a30d;
+  --dms-cost-3: #ca8a04;
+  --dms-cost-4: #ea580c;
+  --dms-cost-5: #dc2626;
+}
+
+:root[data-theme="dark"],
+:root[data-theme="high-contrast"] {
+  --dms-cost-1: #4ade80;
+  --dms-cost-2: #a3e635;
+  --dms-cost-3: #facc15;
+  --dms-cost-4: #fb923c;
+  --dms-cost-5: #f87171;
+}
+
+.cost-dots {
+  display: inline-flex;
+  gap: 3px;
+  vertical-align: middle;
+}
+
+.cost-dots[data-level="1"] { --cost-color: var(--dms-cost-1); }
+.cost-dots[data-level="2"] { --cost-color: var(--dms-cost-2); }
+.cost-dots[data-level="3"] { --cost-color: var(--dms-cost-3); }
+.cost-dots[data-level="4"] { --cost-color: var(--dms-cost-4); }
+.cost-dots[data-level="5"] { --cost-color: var(--dms-cost-5); }
+
+.cost-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1px solid var(--cost-color);
+  box-sizing: border-box;
+  opacity: 0.45;
+}
+
+.cost-dot.filled {
+  background: var(--cost-color);
+  opacity: 1;
+}
+
 /* Geführter Objekttyp-Editor + Layout-Designer (P5b-S3, Konzept 2.2/2.2b) */
 
 .attribute-row {

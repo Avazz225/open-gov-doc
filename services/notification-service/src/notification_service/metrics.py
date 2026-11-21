@@ -12,7 +12,7 @@ from notification_service.models import Notification
 FAILURES = SensorSpec(
     name="notification.deliveries.failed",
     group="reliability",
-    cost="cheap",
+    cost=3,
     description="Fehlgeschlagene Zustellungen je Kanal (email, webhook, in_app) und Zustand",
 )
 

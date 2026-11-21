@@ -15,13 +15,13 @@ from registry_service import repository
 ACTIVE_INSTANCES = SensorSpec(
     name="registry.instances.active_total",
     group="capacity",
-    cost="cheap",
+    cost=2,
     description="Anzahl aktuell aktiver, gesunder Service-Instanzen",
 )
 HEARTBEAT_MISS = SensorSpec(
     name="registry.service.heartbeat.miss",
     group="reliability",
-    cost="cheap",
+    cost=2,
     description=(
         "Anzahl registrierter Instanzen, deren letzter Heartbeat aktuell "
         "überfällig ist (Live-Zählung, kein monotoner Event-Counter)"
@@ -35,25 +35,25 @@ HEARTBEAT_MISS = SensorSpec(
 REPLICAS_REACHABLE = SensorSpec(
     name="registry.replicas.reachable",
     group="capacity",
-    cost="cheap",
+    cost=1,
     description="Erreichbare, aktive Instanzen je Service-Typ",
 )
 REPLICAS_EXPECTED_MIN = SensorSpec(
     name="registry.replicas.expected_min",
     group="capacity",
-    cost="cheap",
+    cost=1,
     description="Erwartete Mindestanzahl Instanzen je Service-Typ (nur wenn gesetzt)",
 )
 REPLICAS_EXPECTED_MAX = SensorSpec(
     name="registry.replicas.expected_max",
     group="capacity",
-    cost="cheap",
+    cost=1,
     description="Erwartete Höchstanzahl Instanzen je Service-Typ (nur wenn gesetzt)",
 )
 REPLICAS_STATE = SensorSpec(
     name="registry.replicas.state",
     group="reliability",
-    cost="cheap",
+    cost=1,
     description="Replika-Zustand je Service-Typ: -1 zu wenig/verschwunden, 0 ok, 1 zu viele",
 )
 REPLICA_SPECS = (REPLICAS_REACHABLE, REPLICAS_EXPECTED_MIN, REPLICAS_EXPECTED_MAX, REPLICAS_STATE)

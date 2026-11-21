@@ -116,3 +116,55 @@ async def test_registry_sensors_follow_group_and_cost_overrides():
     finally:
         proxy.unbind()
         await client.stop()
+
+
+# --- P88-S2c: cost levels 1-5 and default-off sensors -------------------------
+
+
+def test_cost_levels_and_legacy_values():
+    from dms_metrics_client import SensorSpec, normalize_cost, resolve_active
+
+    assert SensorSpec("a", "g", "cheap", "x").cost == 2
+    assert SensorSpec("a", "g", "expensive", "x").cost == 4
+    assert SensorSpec("a", "g", 5, "x").as_dict()["cost"] == 5
+    assert normalize_cost("3") == 3
+    for bad in (0, 6, "medium"):
+        try:
+            normalize_cost(bad)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(bad)
+
+    overrides = {"cost:4": False}
+    assert resolve_active(True, overrides, "s", cost=4) == (False, "cost")
+    assert resolve_active(True, overrides, "s", cost=5) == (True, "global")
+    # A legacy key still applies to its levels until it is migrated.
+    assert resolve_active(True, {"cost:cheap": False}, "s", cost=3) == (False, "cost")
+    assert resolve_active(True, {"cost:cheap": False}, "s", cost=4) == (True, "global")
+
+
+def test_default_off_sensor_needs_an_explicit_override():
+    from dms_metrics_client import resolve_active
+
+    assert resolve_active(True, {}, "s", cost=5, default_enabled=False) == (False, "default")
+    assert resolve_active(True, {"cost:5": True}, "s", cost=5, default_enabled=False) == (
+        True,
+        "cost",
+    )
+    assert resolve_active(True, {"group:g": True}, "s", group="g", default_enabled=False) == (
+        True,
+        "group",
+    )
+    assert resolve_active(False, {"s": True}, "s", default_enabled=False) == (True, "sensor")
+
+
+def test_unbound_proxy_keeps_default_off_sensors_off():
+    from dms_metrics_client import SensorConfigProxy, SensorRegistry, SensorSpec
+
+    proxy = SensorConfigProxy()
+    registry = SensorRegistry("t", is_active=proxy.is_active)
+    normal = registry.counter(SensorSpec("t.normal", "g", 1, "x"))
+    breakdown = registry.counter(SensorSpec("t.breakdown", "g", 5, "x", default_enabled=False))
+    assert normal.is_active() is True
+    assert breakdown.is_active() is False

@@ -12,13 +12,13 @@ from sqlalchemy import func, select
 FAILURES = SensorSpec(
     name="ocr.results.failed",
     group="reliability",
-    cost="cheap",
+    cost=3,
     description="Fehlgeschlagene OCR-Ergebnisse je Zustand (retrying = wird wiederholt, permanent)",
 )
 NEEDS_REVIEW = SensorSpec(
     name="ocr.results.needs_review",
     group="reliability",
-    cost="cheap",
+    cost=2,
     description="OCR-Ergebnisse mit geringer Erkennungsqualitaet, die auf Pruefung warten",
 )
 
