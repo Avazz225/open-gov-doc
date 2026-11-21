@@ -2,6 +2,45 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P87-S1, scoping
+([ADR 0241](docs/adr/0241-service-instance-replacement-and-expected-replicas.md)). No code changed.
+
+**What was decided:**
+- **One forgetting rule per type:** if R ≥ 1 reachable `active` instances, keep at most
+  `max(0, min − R)` unreachable entries (the most recently seen), and forget the rest after a 60 s grace.
+  - No expectation counts as min = 1. R = 0 keeps everything and flags the type `vanished`.
+  - The plan's two rules ("one-for-one, oldest first" and "surplus on scale-down") both fall out of
+    this one.
+- **Removed:** the 7-day blanket cleanup, which deleted vanished types too, against the user's rule.
+- **New:** admins forget entries by hand (`POST /instances/{id}/forget`, `admin.monitoring`), and
+  `registry.instance.forgotten` carries `reason: replaced|admin` into the audit trail.
+- **Expectation is a range** `min..max`.
+  - Sources: admin override table, else a Helm default from `replicas`/HPA min/max, else none.
+  - Without a source there are no alarms; compose sets none, so the dev stack stays quiet.
+- **Alarm states**, debounced 120 s and persisted with a conditional transition (safe with several
+  registry replicas):
+  - `ok`/`under`/`vanished`/`over`/`unmonitored`;
+  - events `registry.replicas.under`/`.over`/`.restored`;
+  - four sensors labelled by `service_type`;
+  - mail to a new `operations_admin_email`.
+- **fleet-management:** a replica summary per installation, but no pruning. Installations are added
+  and removed by operators, and their debris comes from e2e runs (→ S3).
+
+**Found on the way:** the plan's "one new instance supersedes one old one" alone wouldn't have covered
+scale-down or a rolling restart where the replacements registered before the old ones timed out.
+
+**Next session:** **P87-S2**, registry-service per ADR 0241:
+- the forgetting rule in the poll loop (30 s) and `forget_after_seconds`;
+- removing the 7-day cleanup;
+- `POST /instances/{id}/forget`;
+- `registry.instance.forgotten`;
+- the `expected_replicas` table and API (`admin.monitoring`), plus Helm `DMS_EXPECTED_REPLICAS_DEFAULTS`;
+- the alarm state with debounce and the conditional transition, the three events, the four sensors;
+- tests for restart, rolling restart, scale up/down, a crashed replica, a vanished type,
+  over-provisioning, debounce, a late heartbeat and concurrent transitions.
+
+---
+
 **Last completed:** P86-S2, UX bundle. **Phase 86 is closed.**
 
 **What changed:**
@@ -54,7 +93,7 @@
 
 The stack was stopped afterwards.
 
-**Next session:** **P87-S1**, scoping ADR 0241 for service instances:
+**Next session (at the time):** P87-S1. It was done next; see the entry above. Original note:, scoping ADR 0241 for service instances:
 - successor semantics (same `service_name`; one new instance supersedes one unreachable old one, oldest
   first);
 - forgetting on scale-down;

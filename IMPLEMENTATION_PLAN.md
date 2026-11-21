@@ -3796,6 +3796,25 @@ installations are never pruned.
   - The alarm path: registry events into notification-service plus a Prometheus metric.
   - Whether fleet-management applies the same rules to installations, or only shows each installation's
     instance health.
+  - ✅ **Result: [ADR 0241](docs/adr/0241-service-instance-replacement-and-expected-replicas.md).**
+    - **One rule instead of two:** per type, once at least one instance is reachable, only as many
+      unreachable entries stay as the expectation is short (`max(0, min − R)`, the most recently seen).
+      Everything else is forgotten after a 60 s grace. This covers restart, rolling restart and
+      scale-down. A crashed replica under an expectation stays visible. A vanished type (R = 0) keeps
+      everything.
+    - **The 7-day cleanup goes:** it contradicted "vanished stays". Instead admins can forget entries by
+      hand (`POST /instances/{id}/forget`, `admin.monitoring`), and `registry.instance.forgotten`
+      carries a reason (`replaced`/`admin`) into the audit trail.
+    - **Expectation as a range `min..max`** (the user's "2–3"; Helm HPA is already min/max).
+      - Sources: admin override (`registry.expected_replicas`), else the Helm default
+        (`DMS_EXPECTED_REPLICAS_DEFAULTS` from `replicas`/`autoscaling`), else none.
+      - With no source there are no alarms, so the dev stack stays quiet.
+      - Expectations are not part of config packages.
+    - **States:** `ok`/`under`/`vanished`/`over`/`unmonitored`, debounced 120 s, persisted, one event per
+      transition (`registry.replicas.under`/`.over`/`.restored`), four labelled sensors.
+      notification-service mails a new `operations_admin_email`.
+    - **Fleet:** no pruning or superseding of installations (an operator adds and removes them), only
+      a per-installation replica summary. The fleet debris comes from e2e runs (→ S3 hygiene).
 - **P87-S2 — registry-service build.** Supersede logic on register/heartbeat, `expected_replicas` per
   service type (new table plus admin API), and under/over-replica detection with events
   (`registry.replicas.under`/`.over`/`.restored`) and a metric. Tests for restart, scale up, scale down,
