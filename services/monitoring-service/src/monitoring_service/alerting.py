@@ -84,6 +84,26 @@ def sample_values(
     ]
 
 
+def matching_series(
+    families: dict, sensor: str, aggregation: str, label_filter: dict[str, str]
+) -> list[tuple[dict[str, str], float]]:
+    """Like `sample_values`, with each sample's labels (P88-S6: the rule
+    editor's preview shows which series a filter matches). The merge's
+    opaque `instance` id is dropped - `service` names the source."""
+    family = families.get(family_name(sensor))
+    if family is None:
+        return []
+    if aggregation == RATE_AGGREGATION and family.type != "gauge":
+        wanted = {f"{family.name}_total", f"{family.name}_count"}
+    else:
+        wanted = {family.name}
+    return [
+        ({k: v for k, v in sample.labels.items() if k != "instance"}, float(sample.value))
+        for sample in family.samples
+        if sample.name in wanted and _matches(sample.labels, label_filter)
+    ]
+
+
 @dataclass(frozen=True)
 class Measurement:
     value: float | None

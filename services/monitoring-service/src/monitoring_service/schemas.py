@@ -94,3 +94,19 @@ class DowntimeWindowOut(DowntimeWindowIn):
     active: bool
     updated_at: datetime
     updated_by: str | None
+
+
+class AlertSeriesOut(BaseModel):
+    labels: dict[str, str]
+    value: float
+
+
+class AlertPreviewOut(BaseModel):
+    """P88-S6: a draft rule evaluated against a fresh scrape, without
+    persisting anything - the current value as a reference while editing."""
+
+    value: float | None
+    level: AlertLevel
+    series: list[AlertSeriesOut]
+    # Why there is no value: "no_samples", "rate_needs_history".
+    reason: str | None = None

@@ -1747,6 +1747,110 @@ export async function listSensors(token: string): Promise<Sensor[]> {
   return response.json();
 }
 
+// Sensor alerting (P88-S5/S6, ADR 0245): rules with four thresholds and
+// repeat counts, evaluated every minute by monitoring-service; downtime
+// windows suppress the mail, not the evaluation. Writes need
+// `admin.monitoring`, reads are open.
+export type AlertLevel = "ok" | "warning" | "error" | "unknown";
+export type AlertAggregation = "max" | "min" | "sum" | "avg" | "rate_per_minute";
+
+export interface AlertRuleInput {
+  name: string;
+  sensor: string;
+  label_filter: Record<string, string>;
+  aggregation: AlertAggregation;
+  min_error: number | null;
+  min_warning: number | null;
+  max_warning: number | null;
+  max_error: number | null;
+  warning_repeat: number;
+  error_repeat: number;
+  enabled: boolean;
+  description: string | null;
+}
+
+export interface AlertRule extends AlertRuleInput {
+  id: string;
+  updated_at: string;
+  updated_by: string | null;
+  level: AlertLevel;
+  value: number | null;
+  since: string | null;
+  evaluated_at: string | null;
+  notified_level: AlertLevel | null;
+  suppressed: boolean;
+}
+
+export interface AlertPreview {
+  value: number | null;
+  level: AlertLevel;
+  series: { labels: Record<string, string>; value: number }[];
+  reason: "no_samples" | "rate_needs_history" | null;
+}
+
+export interface DowntimeWindowInput {
+  name: string;
+  starts_at: string | null;
+  ends_at: string | null;
+  weekdays: number[] | null;
+  daily_start: string | null;
+  daily_end: string | null;
+  rule_ids: string[] | null;
+  enabled: boolean;
+}
+
+export interface DowntimeWindow extends DowntimeWindowInput {
+  id: string;
+  active: boolean;
+  updated_at: string;
+  updated_by: string | null;
+}
+
+const jsonBody = (method: string, body: unknown): RequestInit => ({
+  method,
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(body),
+});
+
+export async function listAlertRules(token: string): Promise<AlertRule[]> {
+  return (await request("monitoring-service", "alert-rules", {}, token)).json();
+}
+
+export async function createAlertRule(token: string, input: AlertRuleInput): Promise<AlertRule> {
+  return (await request("monitoring-service", "alert-rules", jsonBody("POST", input), token)).json();
+}
+
+export async function updateAlertRule(token: string, id: string, input: AlertRuleInput): Promise<AlertRule> {
+  return (
+    await request("monitoring-service", `alert-rules/${encodeURIComponent(id)}`, jsonBody("PUT", input), token)
+  ).json();
+}
+
+export async function deleteAlertRule(token: string, id: string): Promise<void> {
+  await request("monitoring-service", `alert-rules/${encodeURIComponent(id)}`, { method: "DELETE" }, token);
+}
+
+export async function previewAlertRule(token: string, input: AlertRuleInput): Promise<AlertPreview> {
+  return (await request("monitoring-service", "alert-rules/preview", jsonBody("POST", input), token)).json();
+}
+
+export async function listDowntimeWindows(token: string): Promise<DowntimeWindow[]> {
+  return (await request("monitoring-service", "downtime-windows", {}, token)).json();
+}
+
+export async function saveDowntimeWindow(
+  token: string,
+  input: DowntimeWindowInput,
+  id?: string
+): Promise<DowntimeWindow> {
+  const path = id ? `downtime-windows/${encodeURIComponent(id)}` : "downtime-windows";
+  return (await request("monitoring-service", path, jsonBody(id ? "PUT" : "POST", input), token)).json();
+}
+
+export async function deleteDowntimeWindow(token: string, id: string): Promise<void> {
+  await request("monitoring-service", `downtime-windows/${encodeURIComponent(id)}`, { method: "DELETE" }, token);
+}
+
 export async function getSensorConfig(token: string): Promise<SensorConfig> {
   const response = await request("monitoring-service", "sensor-config", {}, token);
   return response.json();

@@ -2,6 +2,44 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P88-S6, the alerting UI on the sensors page
+([ADR 0245](docs/adr/0245-sensor-alerting-thresholds-downtime-and-notification.md)). **Phase 88 is
+closed.**
+
+**What changed:**
+- **admin-ui `SensorAlerts.tsx`:**
+  - **Pieces:** `LevelBadge`, `worstLevel`, `thresholdsSummary`, `ruleProblem`; `AlertRuleForm` (name,
+    aggregation, label filter rows, four thresholds, repeats, active, preview with label chips →
+    filter, sensor-off warning); `SensorAlertRules` (per sensor); `ActiveAlerts`; `DowntimeWindows`
+    (list with schedule summary and scope; a form with from/until, weekdays plus a daily range, scope
+    all or selected rules).
+  - **In `SensorSettings`:** "Aktive Alarme" at the top, an "Alarm" column with the worst level per
+    sensor and group and an expand link, and the windows below the table.
+  - **API helpers:** alert rules CRUD, preview, windows CRUD. A new `.badge.warn` token pair covers
+    light/dark/high contrast.
+- **monitoring-service:** `POST /alert-rules/preview` (draft vs. fresh scrape: value, would-be level,
+  series without `instance`, `reason`), `alerting.matching_series`, and `_scrape_families` shared with
+  the tick.
+- **Docs:** admin-ui "Sensor Alerts", the monitoring-service UI pointer, the ADR 0245 status, the plan
+  result and the Phase 88 result.
+
+**Checks:**
+- monitoring 45 (+1 preview).
+- admin-ui vitest 373 (+8 in `sensor-alerts.test.tsx`), `tsc`/`eslint` clean.
+- e2e 15/15, with the new `sensor-alerts.spec.ts`: a rule created through the UI after a live preview
+  (warning badge, label chip → filter), a window for that rule (So 22:00–02:00, 1 rule), both deleted.
+  Temporary grant revoked in `finally`.
+- **Live:** three rules (OCR needs_review > 600 → Fehler at 700; storage local > 30 → Warnung at
+  35.2; running processes < 5000 → OK at 1287) showed on the page. **They are left in place as
+  examples** for the user to look at (mail goes to mailpit); delete them on the sensors page with
+  `admin.monitoring`, or with `DELETE /alert-rules/{id}`.
+- No page overflow at 390px.
+- **Phase-close regression:** PHASE88_REGRESSION
+
+**Next session:** **P89-S1**, case destruction in case-service (build ADR 0235).
+
+---
+
 **Last completed:** P88-S5, alerting on sensors, backend
 ([ADR 0245](docs/adr/0245-sensor-alerting-thresholds-downtime-and-notification.md)). The UI moved to a
 new P88-S6, the same split as P88-S4.
@@ -52,8 +90,7 @@ new P88-S6, the same split as P88-S4.
   - `domain-admin-monitoring` was granted temporarily (assignment 4962) and revoked; the rule was
     deleted.
 
-**Next session:** **P88-S6**, the alerting UI on the sensors page (level badges per sensor and group,
-rule editor with the current value, downtime windows). That closes Phase 88 (phase-close regression).
+**Next session:** P88-S6 (done, see above).
 
 ---
 

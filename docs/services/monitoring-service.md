@@ -118,7 +118,7 @@ allowed), and `rule_ids` (null = all).
 - **Audit and export:** both appeared in the audit trail, and the exported rule file passes
   `promtool check rules`.
 
-**The UI follows in P88-S6.**
+**UI (P88-S6):** admin-ui's sensors page, see `docs/services/admin-ui.md` "Sensor Alerts". For its rule editor, `POST /alert-rules/preview` evaluates a draft against a fresh scrape (value, would-be level, matching series without `instance`; `reason` `no_samples`/`rate_needs_history`), ungated like `GET /metrics`.
 
 ## Limitations of this stage
 

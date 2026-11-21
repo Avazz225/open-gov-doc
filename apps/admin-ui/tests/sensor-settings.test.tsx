@@ -18,6 +18,9 @@ vi.mock("@/lib/api", () => ({
   getSensorConfig: (...a: unknown[]) => mocks.getSensorConfig(...a),
   setSensorGlobalDefault: (...a: unknown[]) => mocks.setSensorGlobalDefault(...a),
   setSensorOverride: (...a: unknown[]) => mocks.setSensorOverride(...a),
+  // P88-S6: alerting has its own test file; here nothing is configured.
+  listAlertRules: async () => [],
+  listDowntimeWindows: async () => [],
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {

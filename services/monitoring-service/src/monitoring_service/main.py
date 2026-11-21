@@ -16,8 +16,10 @@ from monitoring_service import alert_store, alerting, repository, scraper
 from monitoring_service.clients import AuthServiceClient, PermissionServiceClient, RegistryClient
 from monitoring_service.models import Base
 from monitoring_service.schemas import (
+    AlertPreviewOut,
     AlertRuleIn,
     AlertRuleOut,
+    AlertSeriesOut,
     DowntimeWindowIn,
     DowntimeWindowOut,
     GlobalSensorConfigIn,
@@ -149,6 +151,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await engine.dispose()
 
 
+async def _scrape_families() -> dict:
+    """Scrapes and merges every instance, exactly like `GET /metrics`."""
+    instances = await app.state.registry_client.list_active_instances()
+    bodies = await scraper.scrape_targets(
+        app.state.scrape_client,
+        instances,
+        timeout_seconds=settings.scrape_timeout_seconds,
+        on_failure=app.state.scrape_failures_counter.inc,
+    )
+    service_types = {i.instance_id: i.service_type for i in instances}
+    return {family.name: family for family in scraper.merge_metric_families(bodies, service_types)}
+
+
 async def run_alert_tick(families: dict | None = None) -> alert_store.TickResult | None:
     """One evaluation (Decision 4): only the replica that gets the advisory
     lock evaluates; events are published after the commit. `families` can
@@ -162,16 +177,7 @@ async def run_alert_tick(families: dict | None = None) -> alert_store.TickResult
         if not got_lock:
             return None
         if families is None:
-            instances = await app.state.registry_client.list_active_instances()
-            bodies = await scraper.scrape_targets(
-                app.state.scrape_client,
-                instances,
-                timeout_seconds=settings.scrape_timeout_seconds,
-                on_failure=app.state.scrape_failures_counter.inc,
-            )
-            service_types = {i.instance_id: i.service_type for i in instances}
-            merged = scraper.merge_metric_families(bodies, service_types)
-            families = {family.name: family for family in merged}
+            families = await _scrape_families()
         app.state.family_types = {name: family.type for name, family in families.items()}
         result = await alert_store.tick(session, families, now=now, timezone=settings.timezone)
         await session.commit()
@@ -333,6 +339,51 @@ async def list_alert_rules(session: AsyncSession = Depends(get_session)) -> list
     """Every rule with its evaluated state. Ungated, like `GET /sensors`."""
     states = await alert_store.states_by_rule(session)
     return [_rule_out(rule, states.get(rule.id)) for rule in await alert_store.list_rules(session)]
+
+
+@app.post("/alert-rules/preview", response_model=AlertPreviewOut)
+async def preview_alert_rule(payload: AlertRuleIn) -> AlertPreviewOut:
+    """Evaluates a draft rule against a fresh scrape (P88-S6), persisting
+    nothing - the rule editor's current value and the series the filter
+    matches. Ungated like `GET /metrics`, which serves the same values. A
+    rate has no value on a single scrape; the editor says so."""
+    families = await _scrape_families()
+    series = alerting.matching_series(
+        families, payload.sensor, payload.aggregation, payload.label_filter
+    )
+    reason = None
+    value = None
+    level = "unknown"
+    if not series:
+        reason = "no_samples"
+    elif payload.aggregation == alerting.RATE_AGGREGATION:
+        reason = "rate_needs_history"
+    else:
+        value = alerting.measure(
+            [v for _, v in series],
+            payload.aggregation,
+            last_total=None,
+            last_at=None,
+            now=datetime.now(UTC),
+        ).value
+        thresholds = alerting.Thresholds(
+            payload.min_error, payload.min_warning, payload.max_warning, payload.max_error
+        )
+        # Level as if the repeat counts were already met - "would alarm".
+        level = alerting.next_level(
+            value,
+            thresholds,
+            warning_repeat=1,
+            error_repeat=1,
+            warning_streak=0,
+            error_streak=0,
+        ).level
+    return AlertPreviewOut(
+        value=value,
+        level=level,
+        series=[AlertSeriesOut(labels=labels, value=v) for labels, v in series[:50]],
+        reason=reason,
+    )
 
 
 @app.get("/alert-rules/prometheus")

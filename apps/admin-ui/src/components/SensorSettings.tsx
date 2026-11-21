@@ -7,11 +7,22 @@ import {
   type Sensor,
   type SensorConfig,
   getSensorConfig,
+  listAlertRules,
+  listDowntimeWindows,
+  type AlertRule,
+  type DowntimeWindow,
   listSensors,
   setSensorGlobalDefault,
   setSensorOverride,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import {
+  ActiveAlerts,
+  DowntimeWindows,
+  LevelBadge,
+  SensorAlertRules,
+  worstLevel,
+} from "@/components/SensorAlerts";
 
 // Monitoring sensors (P88-S2, ADR 0243, concept 10.1): the global base
 // setting ("monitor everything"/"nothing"), switches per cost class and per
@@ -60,17 +71,25 @@ export function SensorSettings() {
   const [isLoading, setIsLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [filter, setFilter] = useState("");
+  // Alerting (P88-S6, ADR 0245).
+  const [rules, setRules] = useState<AlertRule[]>([]);
+  const [windows, setWindows] = useState<DowntimeWindow[]>([]);
+  const [expandedSensor, setExpandedSensor] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     if (!accessToken) return;
     setError(null);
     try {
-      const [loadedSensors, loadedConfig] = await Promise.all([
+      const [loadedSensors, loadedConfig, loadedRules, loadedWindows] = await Promise.all([
         listSensors(accessToken),
         getSensorConfig(accessToken),
+        listAlertRules(accessToken),
+        listDowntimeWindows(accessToken),
       ]);
       setSensors(loadedSensors);
       setConfig(loadedConfig);
+      setRules(loadedRules);
+      setWindows(loadedWindows);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("common.loadError"));
     } finally {
@@ -125,6 +144,12 @@ export function SensorSettings() {
       .sort();
   }, [config, sensors]);
 
+  const rulesBySensor = useMemo(() => {
+    const map = new Map<string, AlertRule[]>();
+    for (const rule of rules) map.set(rule.sensor, [...(map.get(rule.sensor) ?? []), rule]);
+    return map;
+  }, [rules]);
+
   const groupLabel = (group: string) => {
     const key = `sensors.groups.${group}`;
     const label = t(key);
@@ -161,6 +186,8 @@ export function SensorSettings() {
     <>
       <ErrorLine error={error} />
       {!canManage && <p className="text-sm opacity-80">{t("sensors.readOnly")}</p>}
+
+      <ActiveAlerts rules={rules} />
 
       <section className={card} aria-labelledby="sensors-global-heading">
         <h2 id="sensors-global-heading">{t("sensors.global.heading")}</h2>
@@ -233,6 +260,7 @@ export function SensorSettings() {
                   <th>{t("sensors.list.cost")}</th>
                   <th>{t("sensors.list.services")}</th>
                   <th>{t("sensors.list.state")}</th>
+                  <th>{t("alerts.column")}</th>
                   <th>{t("sensors.list.setting")}</th>
                 </tr>
               </thead>
@@ -240,6 +268,7 @@ export function SensorSettings() {
                 {groups.map(([group, members]) => {
                   const visible = members.filter(matches);
                   if (visible.length === 0) return null;
+                  const groupWorst = worstLevel(members.flatMap((m) => rulesBySensor.get(m.name) ?? []));
                   return (
                     <Fragment key={group}>
                       <tr className="bg-hover-bg">
@@ -253,12 +282,18 @@ export function SensorSettings() {
                           </span>
                         </th>
                         <td />
+                        <td>{groupWorst && <LevelBadge level={groupWorst} />}</td>
                         <td>
                           {choiceSelect(`group:${group}`, t("sensors.list.groupSetting", { group: groupLabel(group) }))}
                         </td>
                       </tr>
-                      {visible.map((sensor) => (
-                        <tr key={sensor.name}>
+                      {visible.map((sensor) => {
+                        const sensorRules = rulesBySensor.get(sensor.name) ?? [];
+                        const sensorWorst = worstLevel(sensorRules);
+                        const isOpen = expandedSensor === sensor.name;
+                        return (
+                        <Fragment key={sensor.name}>
+                        <tr>
                           <td>
                             <code className="font-mono text-xs">{sensor.name}</code>
                             {!sensor.default_enabled && (
@@ -298,11 +333,43 @@ export function SensorSettings() {
                             </span>
                             <div className="text-xs opacity-70">{t(`sensors.source.${sensor.source}`)}</div>
                           </td>
+                          <td className="whitespace-nowrap">
+                            {sensorWorst && <LevelBadge level={sensorWorst} />}
+                            {(sensorRules.length > 0 || canManage) && (
+                              <button
+                                type="button"
+                                className="ml-1 border-0 bg-transparent p-0 text-xs text-accent underline"
+                                aria-expanded={isOpen}
+                                aria-label={t("alerts.toggle", { sensor: sensor.name })}
+                                onClick={() => setExpandedSensor(isOpen ? null : sensor.name)}
+                              >
+                                {sensorRules.length > 0
+                                  ? t("alerts.ruleCount", { count: sensorRules.length })
+                                  : t("alerts.setUp")}
+                              </button>
+                            )}
+                          </td>
                           <td>
                             {choiceSelect(sensor.name, t("sensors.list.sensorSetting", { name: sensor.name }))}
                           </td>
                         </tr>
-                      ))}
+                        {isOpen && accessToken && (
+                          <tr>
+                            <td colSpan={6} className="bg-hover-bg">
+                              <SensorAlertRules
+                                token={accessToken}
+                                sensor={sensor.name}
+                                sensorActive={sensor.active}
+                                rules={sensorRules}
+                                canManage={canManage}
+                                onChange={reload}
+                              />
+                            </td>
+                          </tr>
+                        )}
+                        </Fragment>
+                        );
+                      })}
                     </Fragment>
                   );
                 })}
@@ -311,6 +378,16 @@ export function SensorSettings() {
           </div>
         )}
       </section>
+
+      {accessToken && (
+        <DowntimeWindows
+          token={accessToken}
+          windows={windows}
+          rules={rules}
+          canManage={canManage}
+          onChange={reload}
+        />
+      )}
 
       {orphaned.length > 0 && (
         <section className={card} aria-labelledby="sensors-orphaned-heading">

@@ -557,6 +557,32 @@ components no longer pass the user name into them. Super-user activation, approv
 **Fleet view:** below each installation's status it shows "Replikas im erwarteten Bereich" or the
 out-of-range types from the installation's replica summary.
 
+## Sensor Alerts (P88-S6, [ADR 0245](../adr/0245-sensor-alerting-thresholds-downtime-and-notification.md))
+
+The alerting UI is on the sensors page (`/sensors/`, "Monitoring-Sensoren"), in `SensorAlerts.tsx`;
+monitoring-service evaluates (P88-S5).
+- **"Aktive Alarme"** at the top: rules in warning/error, worst first, with value, thresholds, since
+  when, and "Mail unterdrückt (Wartung)" while a window covers them.
+- **Column "Alarm"** in "Gruppen und Sensoren": the worst level of a sensor's enabled rules, also per
+  group in the group row. A link ("einrichten" or "n Regel(n)") expands the sensor to its rules.
+  - Each rule shows level, aggregation and filter, the value, the thresholds in one line ("Warnung > 80
+    · Fehler > 95") and since when.
+  - With `admin.monitoring`: Bearbeiten, Löschen, Alarmregel hinzufügen.
+- **Rule form:**
+  - name, aggregation, a label filter (key=value rows), the four thresholds, the two repeat counts
+    (with the rule explained), active;
+  - a warning when the sensor is currently off.
+  - **"Aktuellen Wert prüfen"** calls `POST /alert-rules/preview`: the value now and the level it would
+    have, or why there is none (no samples; a rate needs two measurements). It also lists the matching
+    series, whose label chips take a label over into the filter.
+  - Threshold order and repeats are checked before saving.
+- **"Wartungsfenster":** a list with state (aktiv / nicht aktiv / deaktiviert), schedule ("Mo, Mi ·
+  06:00–07:00", absolute range) and scope. The form covers name, from/until (`datetime-local`), weekdays
+  plus a daily time range (spanning midnight explained), all rules or selected ones, and active.
+- **Badges:** a new `.badge.warn` (dark yellow on light, light yellow on dark, bordered in high
+  contrast) for "Warnung"; error uses `down`, unknown `neutral`.
+- **Read-only** without `admin.monitoring`: no edit/add/delete, no window form.
+
 ## Mailboxes (P88-S4b, [ADR 0244](../adr/0244-mail-connector-mailboxes-in-a-table-with-encrypted-credentials.md))
 
 `MailboxSettings.tsx` at `/mailboxes/` ("Postfächer", under Verarbeitung) manages mail-connector's

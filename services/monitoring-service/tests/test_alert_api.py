@@ -182,3 +182,26 @@ def test_downtime_window_validation(client):
     assert client.post("/downtime-windows", json=bad_time, headers=ADMIN).status_code == 422
     weekly = {"name": "Nacht", "weekdays": [6], "daily_start": "22:00", "daily_end": "02:00"}
     assert client.post("/downtime-windows", json=weekly, headers=ADMIN).status_code == 201
+
+
+def test_preview_shows_value_level_and_matching_series(client, monkeypatch):
+    """P88-S6: a draft against a fresh scrape, nothing persisted."""
+
+    async def fake_scrape():
+        return used(85)
+
+    monkeypatch.setattr(main, "_scrape_families", fake_scrape)
+    preview = client.post("/alert-rules/preview", json=RULE).json()
+    assert preview["value"] == 85.0
+    assert preview["level"] == "warning"
+    assert preview["series"] == [
+        {"labels": {"target": "local", "service": "storage-service"}, "value": 85.0}
+    ]
+    assert client.get("/alert-rules").json() == []
+
+    missing = client.post("/alert-rules/preview", json={**RULE, "sensor": "nope"}).json()
+    assert (missing["value"], missing["reason"]) == (None, "no_samples")
+    rate = client.post(
+        "/alert-rules/preview", json={**RULE, "aggregation": "rate_per_minute"}
+    ).json()
+    assert rate["reason"] == "rate_needs_history"

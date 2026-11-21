@@ -135,3 +135,14 @@ and shown, so the admin page reflects reality during maintenance.
 - Escalation chains and SMS (the reference has SMS; DMS has no SMS channel).
 - Histogram quantiles.
 - Alert rules in the configuration export (7.3); a candidate once the rules prove portable.
+
+## Implementation status
+
+- **P88-S5 (done):** the backend as described.
+  - **Live:** a rule raised and resolved with mails to ops-admin.
+  - **Export:** `promtool check rules` accepts the Prometheus file.
+- **P88-S6 (done):**
+  - the UI on the sensors page: "Aktive Alarme", the "Alarm" column with worst levels per sensor and
+    group, the rule editor, and the windows;
+  - a preview endpoint (`POST /alert-rules/preview`), so the editor shows the current value and the
+    matching series before saving.

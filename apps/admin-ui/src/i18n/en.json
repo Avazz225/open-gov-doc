@@ -1326,5 +1326,103 @@
     "close": "Close",
     "remove": "Remove role {role} from {user}",
     "filter": "Filter roles"
+  },
+  "alerts": {
+    "column": "Alarm",
+    "levels": {
+      "ok": "OK",
+      "warning": "Warning",
+      "error": "Error",
+      "unknown": "Unknown"
+    },
+    "toggle": "Alert rules for {sensor}",
+    "ruleCount": "{count} rule(s)",
+    "setUp": "set up",
+    "rulesFor": "Rules of {sensor}",
+    "noRules": "No alert rules for this sensor.",
+    "addRule": "Add alert rule",
+    "edit": "Edit",
+    "disabled": "disabled",
+    "suppressed": "mail suppressed (maintenance)",
+    "since": "since {date}",
+    "deleteConfirm": "Delete alert rule \"{name}\"?",
+    "aggregations": {
+      "max": "Maximum",
+      "min": "Minimum",
+      "sum": "Sum",
+      "avg": "Average",
+      "rate_per_minute": "Rate per minute"
+    },
+    "thresholds": {
+      "min_error": "Error below",
+      "min_warning": "Warning below",
+      "max_warning": "Warning above",
+      "max_error": "Error above"
+    },
+    "form": {
+      "newLabel": "New alert rule for {sensor}",
+      "editLabel": "Edit alert rule \"{name}\"",
+      "name": "Name",
+      "aggregation": "Aggregation",
+      "filter": "Only series with these labels",
+      "noFilter": "All series of the sensor.",
+      "filterKey": "Label {index}",
+      "filterValue": "Value {index}",
+      "removeFilter": "Remove label {index}",
+      "addFilter": "Add label",
+      "warningRepeat": "Warning after … measurements",
+      "errorRepeat": "Error after … measurements",
+      "enabled": "Active",
+      "repeatHint": "A level counts once it was measured that many times in a row (one measurement per minute). An error not yet measured often enough counts as a warning.",
+      "preview": "Check current value",
+      "sensorOff": "This sensor is off - the rule stays \"unknown\" until it is switched on."
+    },
+    "preview": {
+      "current": "Current value: {value}, therefore:",
+      "no_samples": "No samples - sensor off, service unreachable or the filter matches nothing.",
+      "rate_needs_history": "A rate needs two measurements; the value appears after the saved rule's first evaluation.",
+      "useAsFilter": "Use as filter"
+    },
+    "problems": {
+      "noThreshold": "At least one threshold is needed.",
+      "notANumber": "Thresholds must be numbers.",
+      "order": "Thresholds must ascend: error below ≤ warning below ≤ warning above ≤ error above.",
+      "repeat": "Repeats must be at least 1."
+    },
+    "active": {
+      "heading": "Active alarms",
+      "none": "No warnings or errors ({count} rules).",
+      "noRules": "No alert rules yet - they are set up per sensor in the table below."
+    },
+    "windows": {
+      "heading": "Maintenance windows",
+      "hint": "While a window is active no alarm mails are sent; evaluation continues. If an alarm still holds after the window, the mail comes then.",
+      "empty": "No maintenance windows.",
+      "active": "active",
+      "inactive": "not active",
+      "allRules": "All rules",
+      "someRules": "{count} rule(s)",
+      "add": "Add maintenance window",
+      "newLabel": "New maintenance window",
+      "editLabel": "Edit maintenance window",
+      "name": "Name",
+      "startsAt": "From",
+      "endsAt": "Until",
+      "weekly": "Weekly",
+      "dailyStart": "Daily from",
+      "dailyEnd": "until",
+      "weeklyHint": "Times in the installation's time zone; an end before the start spans midnight.",
+      "scope": "Applies to",
+      "deleteConfirm": "Delete maintenance window \"{name}\"?",
+      "weekdays": {
+        "0": "Mon",
+        "1": "Tue",
+        "2": "Wed",
+        "3": "Thu",
+        "4": "Fri",
+        "5": "Sat",
+        "6": "Sun"
+      }
+    }
   }
 }

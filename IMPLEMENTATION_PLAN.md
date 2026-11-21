@@ -4003,6 +4003,25 @@ installation's replica health.
     reference;
   - downtime windows;
   - read-only without `admin.monitoring`.
+  - ✅ **Result:**
+    - "Aktive Alarme"; the "Alarm" column with worst level per sensor and group, expanding to the
+      rules; the rule editor with "Aktuellen Wert prüfen" (new `POST /alert-rules/preview`, label
+      chips → filter); windows with schedule summaries; `.badge.warn`.
+    - **Live:** three rules showed error/warning/ok on the page.
+
+**Phase 88 result:** admin-ui gained the surfaces whose backends existed without a UI, plus what the
+sessions found along the way:
+- **Fleet:** groups, update plans, rollouts and operators, with a rollout lifecycle (cancel, delete,
+  completion).
+- **Sensors page:**
+  - group and cost switches; the cost scale 1–5;
+  - a catalog grown from 13 to 49 sensors after the comparison with an external reference system,
+    with default-off expensive breakdowns;
+  - alerting with thresholds, repeat counts, downtime windows and operations mail (ADR 0245).
+- **Object types:** guided rule editors. Two silent losses of status transitions were fixed.
+- **Mail:** mailboxes in a table with encrypted credentials and an admin page (ADR 0244).
+- **Users:** realm-role assignment.
+- PHASE88_REGRESSION
 
 ## Phase 89 — Compliance Completions
 

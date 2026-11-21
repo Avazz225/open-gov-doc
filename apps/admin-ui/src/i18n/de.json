@@ -1326,5 +1326,103 @@
     "close": "Schließen",
     "remove": "{user} die Rolle {role} entziehen",
     "filter": "Rollen filtern"
+  },
+  "alerts": {
+    "column": "Alarm",
+    "levels": {
+      "ok": "OK",
+      "warning": "Warnung",
+      "error": "Fehler",
+      "unknown": "Unbekannt"
+    },
+    "toggle": "Alarmregeln für {sensor}",
+    "ruleCount": "{count} Regel(n)",
+    "setUp": "einrichten",
+    "rulesFor": "Regeln von {sensor}",
+    "noRules": "Keine Alarmregeln für diesen Sensor.",
+    "addRule": "Alarmregel hinzufügen",
+    "edit": "Bearbeiten",
+    "disabled": "deaktiviert",
+    "suppressed": "Mail unterdrückt (Wartung)",
+    "since": "seit {date}",
+    "deleteConfirm": "Alarmregel „{name}“ löschen?",
+    "aggregations": {
+      "max": "Maximum",
+      "min": "Minimum",
+      "sum": "Summe",
+      "avg": "Durchschnitt",
+      "rate_per_minute": "Rate pro Minute"
+    },
+    "thresholds": {
+      "min_error": "Fehler unter",
+      "min_warning": "Warnung unter",
+      "max_warning": "Warnung über",
+      "max_error": "Fehler über"
+    },
+    "form": {
+      "newLabel": "Neue Alarmregel für {sensor}",
+      "editLabel": "Alarmregel „{name}“ bearbeiten",
+      "name": "Name",
+      "aggregation": "Zusammenfassung",
+      "filter": "Nur Messreihen mit diesen Labels",
+      "noFilter": "Alle Messreihen des Sensors.",
+      "filterKey": "Label {index}",
+      "filterValue": "Wert {index}",
+      "removeFilter": "Label {index} entfernen",
+      "addFilter": "Label hinzufügen",
+      "warningRepeat": "Warnung nach … Messungen",
+      "errorRepeat": "Fehler nach … Messungen",
+      "enabled": "Aktiv",
+      "repeatHint": "Eine Stufe gilt erst, wenn sie so oft hintereinander gemessen wurde (eine Messung pro Minute). Ein noch nicht oft genug gemessener Fehler zählt als Warnung.",
+      "preview": "Aktuellen Wert prüfen",
+      "sensorOff": "Dieser Sensor ist gerade aus – die Regel bleibt „unbekannt“, bis er eingeschaltet ist."
+    },
+    "preview": {
+      "current": "Aktueller Wert: {value}, damit:",
+      "no_samples": "Keine Messwerte – Sensor aus, Dienst nicht erreichbar oder der Filter passt auf nichts.",
+      "rate_needs_history": "Eine Rate braucht zwei Messungen; der Wert erscheint nach der ersten Auswertung der gespeicherten Regel.",
+      "useAsFilter": "Als Filter übernehmen"
+    },
+    "problems": {
+      "noThreshold": "Mindestens ein Schwellwert ist nötig.",
+      "notANumber": "Schwellwerte müssen Zahlen sein.",
+      "order": "Schwellwerte müssen aufsteigend sein: Fehler unter ≤ Warnung unter ≤ Warnung über ≤ Fehler über.",
+      "repeat": "Wiederholungen müssen mindestens 1 sein."
+    },
+    "active": {
+      "heading": "Aktive Alarme",
+      "none": "Keine Warnungen oder Fehler ({count} Regeln).",
+      "noRules": "Noch keine Alarmregeln – sie werden je Sensor in der Tabelle unten angelegt."
+    },
+    "windows": {
+      "heading": "Wartungsfenster",
+      "hint": "Während eines aktiven Fensters werden keine Alarm-Mails verschickt; bewertet wird weiter. Besteht ein Alarm nach dem Fenster noch, kommt die Mail dann.",
+      "empty": "Keine Wartungsfenster.",
+      "active": "aktiv",
+      "inactive": "nicht aktiv",
+      "allRules": "Alle Regeln",
+      "someRules": "{count} Regel(n)",
+      "add": "Wartungsfenster anlegen",
+      "newLabel": "Neues Wartungsfenster",
+      "editLabel": "Wartungsfenster bearbeiten",
+      "name": "Name",
+      "startsAt": "Von",
+      "endsAt": "Bis",
+      "weekly": "Wöchentlich",
+      "dailyStart": "Täglich ab",
+      "dailyEnd": "bis",
+      "weeklyHint": "Uhrzeiten in der Zeitzone der Installation; ein Ende vor dem Beginn reicht über Mitternacht.",
+      "scope": "Gilt für",
+      "deleteConfirm": "Wartungsfenster „{name}“ löschen?",
+      "weekdays": {
+        "0": "Mo",
+        "1": "Di",
+        "2": "Mi",
+        "3": "Do",
+        "4": "Fr",
+        "5": "Sa",
+        "6": "So"
+      }
+    }
   }
 }

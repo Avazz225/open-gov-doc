@@ -250,6 +250,40 @@
   --dms-cost-5: #f87171;
 }
 
+/* Alert level "warning" (P88-S6): a dark yellow that reads on light
+   backgrounds (~4.9:1), a light one on dark. */
+:root {
+  --dms-warn: #a16207;
+  --dms-warn-bg: #a1620722;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --dms-warn: #facc15;
+    --dms-warn-bg: #facc1526;
+  }
+}
+
+:root[data-theme="light"] {
+  --dms-warn: #a16207;
+  --dms-warn-bg: #a1620722;
+}
+
+:root[data-theme="dark"],
+:root[data-theme="high-contrast"] {
+  --dms-warn: #facc15;
+  --dms-warn-bg: #facc1526;
+}
+
+.badge.warn {
+  background: var(--dms-warn-bg);
+  color: var(--dms-warn);
+}
+
+:root[data-theme="high-contrast"] .badge.warn {
+  border: 1px solid currentColor;
+}
+
 .cost-dots {
   display: inline-flex;
   gap: 3px;
