@@ -4,27 +4,57 @@ import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "@/i18n";
 import {
   ApiError,
+  listCaseDeletionRegister,
   listDeletionRegister,
   listFolderDeletionRegister,
+  type CaseDeletionRegisterEntry,
   type DeletionRegisterEntry,
   type FolderDeletionRegisterEntry,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { PrincipalName } from "./PrincipalName";
 
+type Trigger =
+  | "forced_deletion"
+  | "trash_expiry"
+  | "manual_purge"
+  | "retention_tombstone"
+  | "retention_deleted"
+  | "restore_reconciliation";
+
 interface MergedEntry {
   key: string;
-  type: "document" | "folder";
+  type: "document" | "folder" | "case";
   objectId: string;
-  trigger: "forced_deletion" | "trash_expiry";
+  // Cases (P89-S2): the Vorgangsnummer is what people recognize.
+  label?: string | null;
+  trigger: Trigger;
   reason: string | null;
+  // Cases: how many document references went with the case.
+  referenceCount?: number;
   triggeredBy: string | null;
   occurredAt: string;
 }
 
-function mergeEntries(
+const TRIGGER_KEYS: Record<Trigger, string> = {
+  forced_deletion: "deletionRegister.triggerForcedDeletion",
+  trash_expiry: "deletionRegister.triggerTrashExpiry",
+  manual_purge: "deletionRegister.triggerManualPurge",
+  retention_tombstone: "deletionRegister.triggerRetentionTombstone",
+  retention_deleted: "deletionRegister.triggerRetentionDeleted",
+  restore_reconciliation: "deletionRegister.triggerRestoreReconciliation",
+};
+
+const TYPE_KEYS = {
+  document: "deletionRegister.typeDocument",
+  folder: "deletionRegister.typeFolder",
+  case: "deletionRegister.typeCase",
+} as const;
+
+export function mergeEntries(
   documents: DeletionRegisterEntry[],
-  folders: FolderDeletionRegisterEntry[]
+  folders: FolderDeletionRegisterEntry[],
+  cases: CaseDeletionRegisterEntry[] = []
 ): MergedEntry[] {
   const merged: MergedEntry[] = [
     ...documents.map((entry) => ({
@@ -45,6 +75,22 @@ function mergeEntries(
       triggeredBy: entry.triggered_by,
       occurredAt: entry.occurred_at,
     })),
+    ...cases.map((entry) => ({
+      key: `case-${entry.id}`,
+      type: "case" as const,
+      objectId: entry.case_id,
+      label: entry.vorgangsnummer,
+      trigger:
+        entry.trigger === "restore_reconciliation"
+          ? ("restore_reconciliation" as const)
+          : entry.mode === "deleted"
+            ? ("retention_deleted" as const)
+            : ("retention_tombstone" as const),
+      reason: entry.reason,
+      referenceCount: entry.document_reference_count,
+      triggeredBy: entry.triggered_by,
+      occurredAt: entry.occurred_at,
+    })),
   ];
   return merged.sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
 }
@@ -53,12 +99,15 @@ function mergeEntries(
 // - a pure read-only table that merges the two independent registers from
 // document-service and folder-service for display purposes (see
 // docs/services/document-service.md regarding the deliberately still
-// missing separate backup policy, phase 11).
+// missing separate backup policy, phase 11). Since P89-S2 also case-service's
+// register of destroyed case binders; if only that one is unreachable, the
+// documents and folders are still shown, with a note.
 export function DeletionRegister() {
   const { accessToken } = useAuth();
   const { t } = useI18n();
   const [entries, setEntries] = useState<MergedEntry[]>([]);
   const [unreachable, setUnreachable] = useState(false);
+  const [casesUnreachable, setCasesUnreachable] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -68,11 +117,13 @@ export function DeletionRegister() {
     setUnreachable(false);
     setError(null);
     try {
-      const [documents, folders] = await Promise.all([
+      const [documents, folders, cases] = await Promise.all([
         listDeletionRegister(accessToken),
         listFolderDeletionRegister(accessToken),
+        listCaseDeletionRegister(accessToken).catch(() => null),
       ]);
-      setEntries(mergeEntries(documents, folders));
+      setCasesUnreachable(cases === null);
+      setEntries(mergeEntries(documents, folders, cases ?? []));
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message);
@@ -99,6 +150,9 @@ export function DeletionRegister() {
           {error}
         </p>
       )}
+      {casesUnreachable && (
+        <p className="text-sm italic opacity-70">{t("deletionRegister.caseUnreachable")}</p>
+      )}
       {entries.length === 0 ? (
         <p className="italic opacity-70">{t("deletionRegister.empty")}</p>
       ) : (
@@ -117,16 +171,25 @@ export function DeletionRegister() {
             <tbody>
               {entries.map((entry) => (
                 <tr key={entry.key}>
+                  <td>{t(TYPE_KEYS[entry.type])}</td>
                   <td>
-                    {entry.type === "document"
-                      ? t("deletionRegister.typeDocument")
-                      : t("deletionRegister.typeFolder")}
+                    {entry.label ? (
+                      <>
+                        {entry.label}
+                        <span className="block font-mono text-xs opacity-70">{entry.objectId}</span>
+                      </>
+                    ) : (
+                      entry.objectId
+                    )}
                   </td>
-                  <td>{entry.objectId}</td>
                   <td>
-                    {entry.trigger === "forced_deletion"
-                      ? t("deletionRegister.triggerForcedDeletion")
-                      : t("deletionRegister.triggerTrashExpiry")}
+                    {/* An unknown trigger from a newer backend shows as is. */}
+                    {TRIGGER_KEYS[entry.trigger] ? t(TRIGGER_KEYS[entry.trigger]) : entry.trigger}
+                    {entry.referenceCount !== undefined && (
+                      <span className="block text-xs opacity-70">
+                        {t("deletionRegister.caseReferences", { count: entry.referenceCount })}
+                      </span>
+                    )}
                   </td>
                   <td>{entry.reason ?? "—"}</td>
                   <td>

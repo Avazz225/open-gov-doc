@@ -1085,3 +1085,83 @@ async def test_archival_resolves_the_destruction_schedule_from_the_config(
     retention = datetime.fromisoformat(archived["retention_until"])
     archived_at = datetime.fromisoformat(archived["archived_at"])
     assert retention - archived_at == timedelta(days=3650)
+
+
+# --- Deletion register and restore reconciliation (P89-S2) ------------------
+
+
+def _capture_events(monkeypatch) -> list[Event]:
+    published: list[Event] = []
+
+    async def fake_publish(subject: str, data: bytes) -> None:
+        published.append(Event.from_bytes(data))
+
+    monkeypatch.setattr(app.state.producer, "publish", fake_publish)
+    return published
+
+
+async def test_destruction_writes_a_register_entry_and_ledger_event(
+    client, session, document_id, monkeypatch
+):
+    published = _capture_events(monkeypatch)
+    case = await _archived_case(session, documents=[document_id])
+    client.post(f"/cases/{case.id}/destroy", headers=DISPOSAL_HEADERS).raise_for_status()
+
+    register = client.get("/deletion-register", params={"case_id": case.id}).json()
+    assert len(register) == 1
+    entry = register[0]
+    assert (entry["vorgangsnummer"], entry["trigger"], entry["mode"]) == (
+        case.vorgangsnummer,
+        "retention_expiry",
+        "tombstone",
+    )
+    assert (entry["document_reference_count"], entry["triggered_by"]) == (1, "archival-service")
+
+    destroyed = [e for e in published if e.event_type == "case.destroyed"]
+    assert len(destroyed) == 1
+    assert destroyed[0].payload["register_entry_id"] == entry["id"]
+    assert destroyed[0].payload["triggered_by"] == "archival-service"
+    # A tombstone stays readable, so its permission resource stays too.
+    assert not [e for e in published if e.event_type == "case.resource.deleted"]
+
+
+async def test_full_deletion_also_removes_the_permission_resource(client, session, monkeypatch):
+    published = _capture_events(monkeypatch)
+    case = await _archived_case(session, full_deletion=True)
+    client.post(f"/cases/{case.id}/destroy", headers=DISPOSAL_HEADERS).raise_for_status()
+
+    (entry,) = client.get("/deletion-register", params={"case_id": case.id}).json()
+    assert entry["mode"] == "deleted"
+    resource_events = [e for e in published if e.event_type == "case.resource.deleted"]
+    assert [e.payload for e in resource_events] == [{"resource_id": case.id}]
+
+
+async def test_reconcile_after_restore_destroys_a_resurrected_case_again(
+    client, session, case_headers, monkeypatch
+):
+    """10.4: a case destroyed after the backup comes back with the restored
+    database (here: simply a case that was never destroyed in this DB)."""
+    published = _capture_events(monkeypatch)
+    case = await _archived_case(session)
+    body = {"original_entry_id": "ledger-entry-1", "reason": "Restore-Abgleich"}
+    url = f"/cases/{case.id}/reconcile-restore-deletion"
+
+    assert client.post(url, json=body).status_code == 403
+    assert client.post(url, json=body, headers={"X-DMS-Roles": "dms-admin"}).status_code == 204
+
+    tombstone = client.get(f"/cases/{case.id}", headers=case_headers).json()
+    assert tombstone["destroyed_at"] is not None and tombstone["name"] == ""
+    (entry,) = client.get("/deletion-register", params={"case_id": case.id}).json()
+    assert (entry["trigger"], entry["reason"], entry["triggered_by"]) == (
+        "restore_reconciliation",
+        "Restore-Abgleich",
+        "system:restore-reconciliation",
+    )
+    (event,) = [e for e in published if e.event_type == "case.destroyed"]
+    assert event.payload["reconciliation_of_entry_id"] == "ledger-entry-1"
+
+    # A tombstone that came back as a tombstone needs nothing; no second entry.
+    assert client.post(url, json=body, headers={"X-DMS-Roles": "dms-admin"}).status_code == 204
+    assert len(client.get("/deletion-register", params={"case_id": case.id}).json()) == 1
+    missing = "/cases/does-not-exist/reconcile-restore-deletion"
+    assert client.post(missing, json=body, headers={"X-DMS-Roles": "dms-admin"}).status_code == 404

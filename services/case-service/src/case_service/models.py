@@ -150,11 +150,10 @@ class PseudonymizedAttribute(Base):
     """Reversible attribute-level pseudonymization vault for circulation
     folders (5.2, Phase 58 Session 1) - mirrors `document_service.
     PseudonymizedAttribute`/`folder_service.PseudonymizedAttribute`
-    exactly (ADR 0156's own named Open Point). No auto-purge-on-hard-
-    delete cleanup needed here - unlike documents/folders, a `Case` row is
-    never physically removed (only closed/archived, see `docs/services/
-    case-service.md`), so there is no `hard_delete_case` FK-violation risk
-    to mirror ADR 0169 for."""
+    exactly (ADR 0156's own named Open Point). Since P89-S1 a case can be
+    destroyed (ADR 0235); `repository.destroy_case` removes these rows
+    first, so a full deletion hits no FK violation (same concern as ADR
+    0169)."""
 
     __tablename__ = "pseudonymized_attribute"
 
@@ -169,3 +168,30 @@ class PseudonymizedAttribute(Base):
     last_revealed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+
+
+class CaseDeletionRegisterEntry(Base):
+    """Deletion register for cases (5.2a/10.4, P89-S2) - one row per
+    destroyed case, written in the same transaction as the destruction, so
+    there is no destruction without its entry. Same role as
+    `document_service.DeletionRegisterEntry`/folder-service's: deliberately
+    no FK on `cases.id` (a fully deleted case no longer exists, the register
+    is the remaining evidence). The Vorgangsnummer is kept because it is
+    what an archive or a citizen's request refers to; name and attributes
+    are not (they may hold personal data, which is why they were cleared).
+    `case.destroyed` additionally reaches audit-service's append-only
+    ledger, the copy a database restore can't roll back."""
+
+    __tablename__ = "case_deletion_register_entry"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    case_id: Mapped[str] = mapped_column(String(128), index=True)
+    vorgangsnummer: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # "retention_expiry" (the destruction pipeline) | "restore_reconciliation"
+    trigger: Mapped[str] = mapped_column(String(32))
+    # "tombstone" | "deleted"
+    mode: Mapped[str] = mapped_column(String(16))
+    document_reference_count: Mapped[int] = mapped_column(Integer, default=0)
+    reason: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    triggered_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

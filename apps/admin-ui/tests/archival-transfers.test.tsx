@@ -20,6 +20,8 @@ const retryCaseArchivalTransferMock = vi.fn();
 const getCaseArchivalConfigMock = vi.fn();
 const updateCaseArchivalConfigMock = vi.fn();
 const downloadCaseArchivalPackageMock = vi.fn();
+const listCaseDestructionsMock = vi.fn();
+const retryCaseDestructionMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   listArchivalTransfers: (...args: unknown[]) => listArchivalTransfersMock(...args),
@@ -31,6 +33,8 @@ vi.mock("@/lib/api", () => ({
   getCaseArchivalConfig: (...args: unknown[]) => getCaseArchivalConfigMock(...args),
   updateCaseArchivalConfig: (...args: unknown[]) => updateCaseArchivalConfigMock(...args),
   downloadCaseArchivalPackage: (...args: unknown[]) => downloadCaseArchivalPackageMock(...args),
+  listCaseDestructions: (...args: unknown[]) => listCaseDestructionsMock(...args),
+  retryCaseDestruction: (...args: unknown[]) => retryCaseDestructionMock(...args),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {
@@ -77,8 +81,28 @@ const RELEASED_TRANSFER = {
 const CASE_ARCHIVAL_CONFIG = {
   default_archive_after_days_closed: null,
   archive_encryption_enabled: false,
+  default_retention_days_after_archived: null,
+  default_full_deletion: false,
   updated_at: "2026-01-01T00:00:00Z",
 };
+
+function destructionRun(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "run-1",
+    case_id: "case-1",
+    status: "destroyed",
+    vorgangsnummer: "2026-0042",
+    mode: "tombstone",
+    document_reference_count: 3,
+    error_message: null,
+    attempts: 0,
+    next_retry_at: null,
+    destroyed_at: "2026-11-21T10:00:00Z",
+    created_at: "2026-11-21T09:59:00Z",
+    updated_at: "2026-11-21T10:00:00Z",
+    ...overrides,
+  };
+}
 
 describe("ArchivalTransfersView", () => {
   beforeEach(() => {
@@ -91,6 +115,8 @@ describe("ArchivalTransfersView", () => {
     getCaseArchivalConfigMock.mockReset().mockResolvedValue(CASE_ARCHIVAL_CONFIG);
     updateCaseArchivalConfigMock.mockReset();
     downloadCaseArchivalPackageMock.mockReset();
+    listCaseDestructionsMock.mockReset().mockResolvedValue([]);
+    retryCaseDestructionMock.mockReset();
   });
 
   it("lists transfers with status and archive format", async () => {
@@ -324,8 +350,82 @@ describe("ArchivalTransfersView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
 
     await vi.waitFor(() =>
-      expect(updateCaseArchivalConfigMock).toHaveBeenCalledWith("token-123", 90, true)
+      expect(updateCaseArchivalConfigMock).toHaveBeenCalledWith("token-123", 90, true, {
+        defaultRetentionDaysAfterArchived: null,
+        defaultFullDeletion: false,
+      })
     );
+  });
+
+  it("saves the case destruction schedule with the archival config (P89-S2)", async () => {
+    listArchivalTransfersMock.mockResolvedValue([]);
+    getCaseArchivalConfigMock.mockResolvedValue({
+      ...CASE_ARCHIVAL_CONFIG,
+      default_retention_days_after_archived: 3650,
+    });
+    updateCaseArchivalConfigMock.mockResolvedValue(CASE_ARCHIVAL_CONFIG);
+
+    renderView();
+    const days = await screen.findByLabelText("Vernichtung nach Aussonderung (Tage)");
+    expect(days).toHaveValue(3650);
+
+    fireEvent.change(days, { target: { value: "" } });
+    fireEvent.click(screen.getByLabelText("Vollständig löschen statt Nachweis behalten"));
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
+
+    await vi.waitFor(() =>
+      expect(updateCaseArchivalConfigMock).toHaveBeenCalledWith("token-123", null, false, {
+        defaultRetentionDaysAfterArchived: null,
+        defaultFullDeletion: true,
+      })
+    );
+  });
+
+  it("lists destruction runs with blocked reasons and retries a failed one (P89-S2)", async () => {
+    listArchivalTransfersMock.mockResolvedValue([]);
+    listCaseDestructionsMock.mockResolvedValue([
+      destructionRun(),
+      destructionRun({
+        id: "run-2",
+        case_id: "case-2",
+        vorgangsnummer: "2026-0043",
+        status: "blocked",
+        mode: null,
+        destroyed_at: null,
+        error_message: "Dokumente in aktiver Quarantäne: doc-9",
+      }),
+      destructionRun({
+        id: "run-3",
+        case_id: "case-3",
+        vorgangsnummer: null,
+        status: "failed_permanent",
+        mode: null,
+        destroyed_at: null,
+        error_message: "503",
+      }),
+    ]);
+    retryCaseDestructionMock.mockResolvedValue(destructionRun({ id: "run-3", status: "pending" }));
+
+    renderView();
+    const section = (await screen.findByRole("heading", { name: "Vernichtung von Umlaufmappen" }))
+      .closest("section") as HTMLElement;
+
+    const destroyed = within(section).getByText("2026-0042").closest("tr") as HTMLElement;
+    expect(within(destroyed).getByText("Vernichtet")).toBeInTheDocument();
+    expect(within(destroyed).getByText("Nachweis")).toBeInTheDocument();
+    expect(within(destroyed).queryByRole("button")).not.toBeInTheDocument();
+
+    const blocked = within(section).getByText("2026-0043").closest("tr") as HTMLElement;
+    expect(within(blocked).getByText("Blockiert (Quarantäne)")).toBeInTheDocument();
+    expect(within(blocked).getByText(/doc-9/)).toBeInTheDocument();
+    expect(within(blocked).queryByRole("button")).not.toBeInTheDocument();
+
+    const failed = within(section).getByText("case-3").closest("tr") as HTMLElement;
+    fireEvent.click(within(failed).getByRole("button", { name: "Erneut versuchen" }));
+    await vi.waitFor(() =>
+      expect(retryCaseDestructionMock).toHaveBeenCalledWith("token-123", "run-3")
+    );
+    await vi.waitFor(() => expect(listCaseDestructionsMock).toHaveBeenCalledTimes(2));
   });
 
   it("requests immediate archival for a document by ID and shows a success hint", async () => {

@@ -778,7 +778,7 @@
   },
   "deletionRegister": {
     "pageTitle": "Deletion register",
-    "hint": "Every physical deletion (forced deletion or expired trash period) is recorded here and additionally published as a regular audit event. After a restore from a backup, the restore run reconciles against these entries so that deleted objects stay deleted. Shows documents and folders together.",
+    "hint": "Every physical deletion (forced deletion or expired trash period) and every destruction of a case binder after its retention is recorded here and additionally published as a regular audit event. After a restore from a backup, the restore run reconciles against these entries so that deleted objects stay deleted. Shows documents, folders and case binders together.",
     "unreachable": "Document service not reachable.",
     "empty": "No entries yet.",
     "type": "Type",
@@ -790,7 +790,14 @@
     "triggerTrashExpiry": "Trash period expired",
     "reason": "Reason",
     "triggeredBy": "Triggered by",
-    "occurredAt": "Time"
+    "occurredAt": "Time",
+    "typeCase": "Case binder",
+    "triggerRetentionTombstone": "Retention expired (record kept)",
+    "triggerRetentionDeleted": "Retention expired (fully deleted)",
+    "triggerRestoreReconciliation": "Restore reconciliation",
+    "caseReferences": "{count} document references removed",
+    "caseUnreachable": "Case service not reachable - case binders are missing from the list.",
+    "triggerManualPurge": "Purged manually"
   },
   "archivalTransfers": {
     "pageTitle": "Records disposal & archiving",
@@ -843,7 +850,25 @@
     "caseStatusFailedPermanent": "Permanently failed",
     "caseId": "Case binder ID",
     "caseDownload": "Download package",
-    "downloadError": "Download failed"
+    "downloadError": "Download failed",
+    "caseRetentionDaysLabel": "Destruction after disposal (days)",
+    "caseRetentionDaysPlaceholder": "Keep indefinitely",
+    "caseFullDeletionLabel": "Delete fully instead of keeping a record",
+    "caseFullDeletionHint": "By default a record stays: id, case number and dates are kept; name, attributes and document references are removed. The documents themselves have their own retention. Applies to case binders disposed from now on.",
+    "destructionHeading": "Case binder destruction",
+    "destructionHint": "Disposed case binders whose retention has expired are destroyed automatically and recorded in the deletion register. If a referenced document is under active quarantine, the destruction waits until the quarantine is lifted.",
+    "destructionEmpty": "No destruction runs yet.",
+    "destructionStatusPending": "Pending",
+    "destructionStatusBlocked": "Blocked (quarantine)",
+    "destructionStatusCancelled": "Cancelled (no longer due)",
+    "destructionStatusDestroyed": "Destroyed",
+    "destructionStatusFailedPermanent": "Permanently failed",
+    "destructionCase": "Case binder",
+    "destructionMode": "Kind",
+    "destructionModeTombstone": "Record kept",
+    "destructionModeDeleted": "Fully deleted",
+    "destructionDestroyedAt": "Destroyed at",
+    "destructionUnreachable": "Destruction runs could not be loaded."
   },
   "reports": {
     "pageTitle": "Standard reports",

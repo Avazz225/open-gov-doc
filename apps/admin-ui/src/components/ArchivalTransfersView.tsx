@@ -8,13 +8,16 @@ import {
   getCaseArchivalConfig,
   listArchivalTransfers,
   listCaseArchivalTransfers,
+  listCaseDestructions,
   requestDocumentArchive,
   retrieveArchivalTransfer,
   retryArchivalTransfer,
   retryCaseArchivalTransfer,
+  retryCaseDestruction,
   updateCaseArchivalConfig,
   type ArchivalTransfer,
   type CaseArchivalTransfer,
+  type CaseDestruction,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
@@ -94,6 +97,7 @@ export function ArchivalTransfersView() {
     <div>
       <DocumentArchivalSection />
       <CaseArchivalSection />
+      <CaseDestructionSection />
     </div>
   );
 }
@@ -344,6 +348,9 @@ function CaseArchivalSection() {
 
   const [defaultDays, setDefaultDays] = useState("");
   const [encryptionEnabled, setEncryptionEnabled] = useState(false);
+  // Destruction schedule (P89-S2, ADR 0235).
+  const [retentionDays, setRetentionDays] = useState("");
+  const [fullDeletion, setFullDeletion] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [configError, setConfigError] = useState<string | null>(null);
@@ -365,6 +372,12 @@ function CaseArchivalSection() {
           : String(config.default_archive_after_days_closed)
       );
       setEncryptionEnabled(config.archive_encryption_enabled);
+      setRetentionDays(
+        config.default_retention_days_after_archived == null
+          ? ""
+          : String(config.default_retention_days_after_archived)
+      );
+      setFullDeletion(config.default_full_deletion ?? false);
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message);
@@ -390,7 +403,11 @@ function CaseArchivalSection() {
       await updateCaseArchivalConfig(
         accessToken,
         defaultDays.trim() === "" ? null : Number(defaultDays),
-        encryptionEnabled
+        encryptionEnabled,
+        {
+          defaultRetentionDaysAfterArchived: retentionDays.trim() === "" ? null : Number(retentionDays),
+          defaultFullDeletion: fullDeletion,
+        }
       );
       setSavedAt(Date.now());
     } catch (err) {
@@ -458,7 +475,28 @@ function CaseArchivalSection() {
             />
             {t("archivalTransfers.caseEncryptionEnabledLabel")}
           </label>
+          <label>
+            {t("archivalTransfers.caseRetentionDaysLabel")}
+            <input
+              type="number"
+              min="0"
+              value={retentionDays}
+              onChange={(e) => setRetentionDays(e.target.value)}
+              placeholder={t("archivalTransfers.caseRetentionDaysPlaceholder")}
+              className={fieldInput}
+            />
+          </label>
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={fullDeletion}
+              onChange={(e) => setFullDeletion(e.target.checked)}
+              className={checkbox}
+            />
+            {t("archivalTransfers.caseFullDeletionLabel")}
+          </label>
         </div>
+        <p className="text-sm opacity-80">{t("archivalTransfers.caseFullDeletionHint")}</p>
         <div className="flex gap-2">
           <button type="submit" disabled={isSaving} className={primaryBtn}>
             {t("common.save")}
@@ -558,5 +596,173 @@ function CaseArchivalSection() {
         </div>
       )}
     </div>
+  );
+}
+
+const DESTRUCTION_STATUS_OPTIONS = [
+  "pending",
+  "blocked",
+  "cancelled",
+  "destroyed",
+  "failed_permanent",
+] as const;
+
+function destructionStatusLabel(t: (key: string) => string, status: string): string {
+  const key = `archivalTransfers.destructionStatus${toPascalCase(status)}`;
+  const label = t(key);
+  return label === key ? status : label;
+}
+
+function destructionBadge(status: string): string {
+  if (status === "destroyed") return "ok";
+  if (status === "failed_permanent") return "down";
+  if (status === "blocked") return "warn";
+  return "neutral";
+}
+
+// Case destruction after retention (P89-S2, ADR 0235): archival-service's
+// runs. The destruction itself and its register entry happen in
+// case-service; this shows what is waiting, blocked by a records quarantine,
+// cancelled or done, and restarts a permanently failed run.
+function CaseDestructionSection() {
+  const { accessToken } = useAuth();
+  const { t } = useI18n();
+  const [runs, setRuns] = useState<CaseDestruction[]>([]);
+  const [statusFilter, setStatusFilter] = useState("");
+  const [unreachable, setUnreachable] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
+
+  const reload = useCallback(async () => {
+    if (!accessToken) return;
+    setIsLoading(true);
+    setUnreachable(false);
+    setError(null);
+    try {
+      setRuns(await listCaseDestructions(accessToken, statusFilter || undefined));
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setError(err.message);
+      } else {
+        setUnreachable(true);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  }, [accessToken, statusFilter]);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  async function handleRetry(run: CaseDestruction) {
+    if (!accessToken) return;
+    setError(null);
+    setRetryingId(run.id);
+    try {
+      await retryCaseDestruction(accessToken, run.id);
+      await reload();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t("archivalTransfers.retryError"));
+    } finally {
+      setRetryingId(null);
+    }
+  }
+
+  if (isLoading) return <p>{t("common.loading")}</p>;
+  if (unreachable)
+    return <p className="italic opacity-70">{t("archivalTransfers.destructionUnreachable")}</p>;
+
+  return (
+    <section
+      className="rounded-lg border border-border p-4 mb-6"
+      aria-labelledby="case-destruction-heading"
+    >
+      <h2 id="case-destruction-heading">{t("archivalTransfers.destructionHeading")}</h2>
+      <p className="text-sm opacity-80">{t("archivalTransfers.destructionHint")}</p>
+
+      <label>
+        {t("archivalTransfers.filterStatus")}
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          className={fieldInput}
+        >
+          <option value="">{t("archivalTransfers.statusAll")}</option>
+          {DESTRUCTION_STATUS_OPTIONS.map((status) => (
+            <option key={status} value={status}>
+              {destructionStatusLabel(t, status)}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      {error && (
+        <p className="text-danger" role="alert">
+          {error}
+        </p>
+      )}
+
+      {runs.length === 0 ? (
+        <p className="italic opacity-70">{t("archivalTransfers.destructionEmpty")}</p>
+      ) : (
+        <div className="dms-scroll-x">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>{t("archivalTransfers.destructionCase")}</th>
+                <th>{t("archivalTransfers.status")}</th>
+                <th>{t("archivalTransfers.destructionMode")}</th>
+                <th>{t("archivalTransfers.destructionDestroyedAt")}</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {runs.map((run) => (
+                <tr key={run.id}>
+                  <td>
+                    {run.vorgangsnummer ?? "—"}
+                    <span className="block font-mono text-xs opacity-70">{run.case_id}</span>
+                  </td>
+                  <td>
+                    <span className={`badge ${destructionBadge(run.status)}`}>
+                      {destructionStatusLabel(t, run.status)}
+                    </span>
+                    {run.status !== "destroyed" && run.error_message && (
+                      <p className="text-sm opacity-80">
+                        {t("archivalTransfers.errorMessage")}: {run.error_message}
+                      </p>
+                    )}
+                  </td>
+                  <td>
+                    {run.mode === "deleted"
+                      ? t("archivalTransfers.destructionModeDeleted")
+                      : run.mode === "tombstone"
+                        ? t("archivalTransfers.destructionModeTombstone")
+                        : "—"}
+                  </td>
+                  <td className="whitespace-nowrap">
+                    {run.destroyed_at ? new Date(run.destroyed_at).toLocaleString() : "—"}
+                  </td>
+                  <td>
+                    {run.status === "failed_permanent" && (
+                      <button
+                        type="button"
+                        onClick={() => handleRetry(run)}
+                        disabled={retryingId !== null}
+                        className={secondaryBtn}
+                      >
+                        {retryingId === run.id ? t("common.loading") : t("archivalTransfers.retry")}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }

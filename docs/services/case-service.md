@@ -24,6 +24,8 @@
 | `GET` | `/cases/{id}/archive-status` | Read disposal status (`archive_after`/`archived_at`, since P7-S3b) |
 | `PUT` | `/cases/{id}/archived` | Internal callback from `archival-service`, once the XDOMEA package is verified (since P7-S3b) — publishes `case.archived`. Since P89-S1 it also resolves `retention_until`/`full_deletion` from the config |
 | `GET` | `/cases/due-for-destruction` | P89-S1 ([ADR 0235](../adr/0235-case-service-destruction-scheduling-scoping.md)): archived cases whose `retention_until` has passed and that aren't destroyed. Ungated like `due-for-archival`; registered before `/cases/{id}` |
+| `GET` | `/deletion-register?case_id=` | P89-S2: the deletion register for cases, newest first. Ungated like document-/folder-service's registers (ids, Vorgangsnummern, dates; no names or attribute values) |
+| `POST` | `/cases/{id}/reconcile-restore-deletion` | P89-S2: deletion reconciliation after a restore (10.4), `X-DMS-Roles: dms-admin` (`403` otherwise). Destroys a case that came back with the restored database again, without the due/quarantine checks; a tombstone is a no-op `204`; `404` for an unknown case |
 | `POST` | `/cases/{id}/destroy` | P89-S1: destroys a due case. **Gated** by the disposal-callback capability (`document.disposal_callback`, role `archival-service-callback`) because it is irreversible. `409` when not due/already destroyed or while a referenced document is actively quarantined; `503` when that can't be checked. Returns `{case_id, vorgangsnummer, mode, destroyed_at, document_reference_count}`, publishes `case.destroyed` |
 | `GET`/`PUT` | `/case-archival-config` | Installation-wide disposal configuration (`default_archive_after_days_closed`, `archive_encryption_enabled`, since P7-S3b) |
 | `GET`/`PUT` | `/case-number-config` | Case reference number format string (2.5, since P15-S3, default `{YYYY}-{Laufende_Nummer}`) — `400` on an unknown placeholder or missing `{Laufende_Nummer}` |
@@ -82,7 +84,8 @@ The archival lifecycle had no end: an archived case stayed forever. Destruction 
     reset them.
   - A `retention_until` set earlier stays.
 - **Due:** `GET /cases/due-for-destruction` lists archived, not yet destroyed cases with `retention_until
-  <= now`. archival-service polls it (P89-S2), as it does `due-for-archival`.
+  <= now`. archival-service polls it (since P89-S2, see `docs/services/archival-service.md` "Case
+  Destruction"), as it does `due-for-archival`.
 - **Destroy:** `POST /cases/{id}/destroy`.
   - **Always removed:** the case's document references and pseudonymized attribute values, its
     contents.
@@ -98,6 +101,17 @@ The archival lifecycle had no end: an archived case stayed forever. Destruction 
 - **Gate:** archival-service's existing disposal-callback capability rather than a new `case.*` one.
   Seeded roles aren't updated on existing installations, so a new capability would need a manual
   migration everywhere.
+- **Deletion register (P89-S2):** every destruction writes a `case_deletion_register_entry`
+  in the same transaction: case id, Vorgangsnummer, `trigger` (`retention_expiry`/
+  `restore_reconciliation`), `mode`, `document_reference_count`, `reason`, `triggered_by` and the time.
+  So there is no destruction without its entry.
+  - `case.destroyed` carries the same fields plus `register_entry_id`. audit-service appends it to its
+    append-only deletion ledger, the copy a database restore can't roll back.
+  - A full deletion also publishes `case.resource.deleted`, and permission-service drops the case's
+    resource node. A tombstone keeps its node because it stays readable.
+- **Restore (10.4, P89-S2):** `scripts/restore.sh` checks ledger entries of type `case` against the
+  restored database. A case "came back" when its row exists and `destroyed_at` is null; for such a case
+  it prints the `reconcile-restore-deletion` call.
 
 ## Attribute-Level Pseudonymization (5.2, Phase 58 Session 1, [ADR 0177](../adr/0177-pseudonymization-retention-trigger-and-folder-case-mirroring.md))
 
@@ -144,6 +158,8 @@ existing rows were backfilled the same way, once, the moment the column was adde
 | `case.closed` | `{process_instance_id}` |
 | `case.close_blocked` | `{errors}` (**since Phase 45 Session 4**) — the object type rejected the `"open"`→`"closed"` transition, see "Object Type Integration" above |
 | `case.archived` | `{}` (5.6, since P7-S3b) — callback from `archival-service`, once the XDOMEA package is verified |
+| `case.destroyed` | `{mode, vorgangsnummer, document_reference_count, trigger, reason, triggered_by, register_entry_id}` (+ `reconciliation_of_entry_id` on a restore reconciliation), **since P89-S1/S2** — also lands in audit-service's deletion ledger |
+| `case.resource.deleted` | `{resource_id}` (**since P89-S2**) — only for a full deletion, consumed by permission-service's `structure_consumer.py` |
 | `case.resource.created` | `{resource_id, parent_id, resource_type}` (Post-Roadmap Phase 35 Session 2, ADR 0144) — same generic structure-event contract `folder-service` produces (`permission-service`'s `structure_consumer.py` is prefix-agnostic); published for symmetry/self-healing alongside the SYNCHRONOUS `POST /resources` call that's the actual authoritative registration, see "Open Points" |
 
 **Consumes:** `workflow.instance.completed` (see "Closure Snapshot" above).
@@ -200,12 +216,12 @@ case as `mail-connector` on behalf of the mailbox's user (before: the non-servic
 
 ## Open Points
 
-- ~~**No destruction for cases**~~ (ADR 0235, never listed here before) — **case-service part built in
-  P89-S1**: schedule on archival, the due list and a gated destroy with quarantine block (see
-  "Destruction"). archival-service's pipeline, the deletion-register entries and the admin visibility
-  follow in P89-S2.
-- **A fully deleted case leaves its permission `ResourceNode`** (`full_deletion=true`): permission-service
-  has no delete for resource nodes yet. It is harmless (no case answers to it), but it is clutter.
+- ~~**No destruction for cases**~~ (ADR 0235, never listed here before) — **built in P89-S1/S2**:
+  schedule on archival, the due list and a gated destroy with quarantine block (P89-S1); archival-service's
+  pipeline, the deletion register, the ledger/restore integration and the admin visibility (P89-S2). See
+  "Destruction".
+- ~~**A fully deleted case leaves its permission `ResourceNode`**~~ — **closed in P89-S2**: a full deletion
+  publishes `case.resource.deleted`, which permission-service's structure consumer already handled.
 
 - ~~No role check/RBAC~~ — **fixed in Post-Roadmap Phase 19 Session 5** ([ADR 0070](../adr/0070-case-service-rbac.md)): all human-usable endpoints now check `case.read`/`case.write` against `permission-service` (`X-DMS-Principal` required). The two purely internal machine-to-machine callbacks (`GET /cases/due-for-archival`, `PUT /cases/{id}/archived`) remain deliberately ungated, see ADR 0070 "Decision".
 - ~~No resource tree entry in permission-service~~ — **fixed in Post-Roadmap Phase 35 Session 2** ([ADR 0144](../adr/0144-case-per-case-resource-type.md)): `case-service` now registers a real `ResourceNode` per case (`resource_type="case"`, `parent_id="root"`) via a new, synchronous `POST /resources` on `permission-service` (not just an async `case.resource.created` event, unlike `folder-service`'s own registration — a purely event-driven path would leave a race window where a freshly created case is briefly unreadable by anyone, since an unregistered resource_id denies every check outright). Every per-case endpoint now checks `resource_id=<case_id>`; an admin can scope a `RoleAssignment` to one specific case through the already-generic `POST /role-assignments` (`resource_id` free-text), no new admin-ui needed. A startup backfill loop registers every case created before this session (self-healing, idempotent, re-run on every restart). ~~Documents still have no per-document resource tree entry~~ — **closed in Post-Roadmap Phase 39 Session 4** ([ADR 0154](../adr/0154-document-per-document-resource-case-list-filtering-org-hierarchy-case-scope.md)): `document-service` now registers an identical per-document `ResourceNode`, mirroring this exact pattern — see `docs/services/document-service.md`.

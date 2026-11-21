@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from archival_service import crypto, repository, xdomea
 from archival_service.clients import CaseClient, DocumentClient, StorageClient
 from archival_service.keystore import KeyStore
-from archival_service.models import CaseArchivalTransfer
+from archival_service.models import CaseArchivalTransfer, CaseDestruction
 from archival_service.pipeline import PipelineError
 
 logger = logging.getLogger(__name__)
@@ -228,6 +228,130 @@ async def run_case_transfers_tick(
                     await repository.mark_failed(
                         failure_session,
                         failed_transfer,
+                        error_message=str(exc),
+                        max_attempts=max_attempts,
+                    )
+                    await failure_session.commit()
+
+
+# --- Destruction after retention (P89-S2, ADR 0235) -------------------------
+
+
+async def discover_due_case_destructions(session: AsyncSession, case_client: CaseClient) -> int:
+    """Phase 1: a run per due case without an open one - same shape as
+    `discover_due_case_transfers`."""
+    created = 0
+    for case in await case_client.list_due_for_destruction():
+        if await repository.get_open_case_destruction(session, case["id"]) is not None:
+            continue
+        await repository.create_case_destruction(
+            session, case["id"], vorgangsnummer=case.get("vorgangsnummer")
+        )
+        created += 1
+    return created
+
+
+def _mark_destroyed(destruction: CaseDestruction, *, mode, reference_count, destroyed_at) -> None:
+    destruction.status = "destroyed"
+    destruction.mode = mode
+    if reference_count is not None:
+        destruction.document_reference_count = reference_count
+    destruction.destroyed_at = destroyed_at
+    destruction.error_message = None
+    destruction.next_retry_at = None
+    destruction.updated_at = datetime.now(UTC)
+
+
+async def _explain_conflict(
+    destruction: CaseDestruction, detail: str, *, case_client: CaseClient
+) -> None:
+    """case-service answers `409` for three different reasons; the case's
+    current state tells them apart without parsing the message:
+    - gone or a tombstone: it was destroyed already - a previous tick's
+      destroy went through but this row wasn't updated (a crash in between);
+    - no longer due (retention extended, not archived): `cancelled`;
+    - otherwise: a referenced document is in active quarantine - `blocked`."""
+    case = await case_client.find_case(destruction.case_id)
+    now = datetime.now(UTC)
+    if case is None:
+        _mark_destroyed(destruction, mode="deleted", reference_count=None, destroyed_at=now)
+        return
+    if case.get("destroyed_at"):
+        _mark_destroyed(
+            destruction,
+            mode="tombstone",
+            reference_count=None,
+            destroyed_at=datetime.fromisoformat(case["destroyed_at"]),
+        )
+        return
+    retention_until = case.get("retention_until")
+    due = (
+        case.get("archived_at") is not None
+        and retention_until is not None
+        and datetime.fromisoformat(retention_until) <= now
+    )
+    destruction.status = "blocked" if due else "cancelled"
+    destruction.error_message = detail
+    destruction.updated_at = now
+
+
+async def advance_case_destruction(
+    session: AsyncSession, destruction: CaseDestruction, *, case_client: CaseClient
+) -> None:
+    """Phase 2: asks case-service to destroy. Technical failures raise and are
+    backed off by the tick; a refusal is a state, not a failure."""
+    response = await case_client.destroy_case(destruction.case_id)
+    if response.status_code == 200:
+        body = response.json()
+        _mark_destroyed(
+            destruction,
+            mode=body["mode"],
+            reference_count=body["document_reference_count"],
+            destroyed_at=datetime.fromisoformat(body["destroyed_at"]),
+        )
+        destruction.vorgangsnummer = body.get("vorgangsnummer") or destruction.vorgangsnummer
+    elif response.status_code == 409:
+        detail = response.json().get("detail", response.text)
+        await _explain_conflict(destruction, str(detail), case_client=case_client)
+    elif response.status_code == 404:
+        # Gone before the first attempt - nothing left to destroy.
+        _mark_destroyed(
+            destruction, mode="deleted", reference_count=None, destroyed_at=datetime.now(UTC)
+        )
+    else:
+        raise PipelineError(f"Vernichtung abgelehnt ({response.status_code}): {response.text}")
+    await session.commit()
+
+
+async def run_case_destructions_tick(
+    session_factory, *, case_client: CaseClient, max_attempts: int
+) -> None:
+    async with session_factory() as session:
+        await discover_due_case_destructions(session, case_client)
+        await session.commit()
+
+    async with session_factory() as session:
+        for destruction in await repository.list_active_case_destructions(session):
+            # Read before the attempt: a rollback expires the instance, and a
+            # lazy reload afterwards isn't possible in async SQLAlchemy.
+            destruction_id, case_id = destruction.id, destruction.case_id
+            try:
+                await advance_case_destruction(session, destruction, case_client=case_client)
+            except Exception as exc:
+                logger.exception(
+                    "Vernichtung der Umlaufmappe %r fehlgeschlagen (Lauf %r).",
+                    case_id,
+                    destruction_id,
+                )
+                await session.rollback()
+                async with session_factory() as failure_session:
+                    failed = await repository.get_case_destruction(failure_session, destruction_id)
+                    # A blocked run that now fails technically is pending
+                    # again: the backoff applies to it like to any other.
+                    failed.status = "pending"
+                    await repository.mark_failed(
+                        failure_session,
+                        failed,
                         error_message=str(exc),
                         max_attempts=max_attempts,
                     )

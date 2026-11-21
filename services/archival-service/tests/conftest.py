@@ -22,6 +22,7 @@ async def _clean_tables():
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text("TRUNCATE archival.archival_transfer"))
         await conn.execute(text("TRUNCATE archival.case_archival_transfer"))
+        await conn.execute(text("TRUNCATE archival.case_destruction"))
     await eng.dispose()
     yield
 

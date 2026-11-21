@@ -4,10 +4,12 @@ from dms_retry import compute_backoff_seconds
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from archival_service.models import ArchivalTransfer, CaseArchivalTransfer
+from archival_service.models import ArchivalTransfer, CaseArchivalTransfer, CaseDestruction
 
 _ACTIVE_STATUSES = ("pending", "locked", "copied", "verified")
 _ACTIVE_CASE_STATUSES = ("pending", "locked", "packaged", "verified")
+# P89-S2: a blocked destruction is still active - it is retried every tick.
+_ACTIVE_DESTRUCTION_STATUSES = ("pending", "blocked")
 
 
 class NotFoundError(Exception):
@@ -182,6 +184,65 @@ async def list_active_case_transfers(session: AsyncSession) -> list[CaseArchival
                 CaseArchivalTransfer.next_retry_at.is_(None),
                 CaseArchivalTransfer.next_retry_at <= now,
             ),
+        )
+    )
+    return list(result.scalars().all())
+
+
+# --- Case destruction (P89-S2, ADR 0235) ------------------------------------
+
+
+async def get_case_destruction(session: AsyncSession, destruction_id: str) -> CaseDestruction:
+    destruction = await session.get(CaseDestruction, destruction_id)
+    if destruction is None:
+        raise NotFoundError(destruction_id)
+    return destruction
+
+
+async def list_case_destructions(
+    session: AsyncSession, *, status: str | None = None
+) -> list[CaseDestruction]:
+    query = select(CaseDestruction)
+    if status is not None:
+        query = query.where(CaseDestruction.status == status)
+    result = await session.execute(query.order_by(CaseDestruction.created_at.desc()))
+    return list(result.scalars().all())
+
+
+async def get_open_case_destruction(session: AsyncSession, case_id: str) -> CaseDestruction | None:
+    """An active or permanently failed run for the case - a failed one is not
+    silently replaced by a new run; an admin retries it."""
+    result = await session.execute(
+        select(CaseDestruction).where(
+            CaseDestruction.case_id == case_id,
+            CaseDestruction.status.in_((*_ACTIVE_DESTRUCTION_STATUSES, "failed_permanent")),
+        )
+    )
+    return result.scalars().first()
+
+
+async def create_case_destruction(
+    session: AsyncSession, case_id: str, *, vorgangsnummer: str | None
+) -> CaseDestruction:
+    now = datetime.now(UTC)
+    destruction = CaseDestruction(
+        case_id=case_id,
+        vorgangsnummer=vorgangsnummer,
+        status="pending",
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(destruction)
+    await session.flush()
+    return destruction
+
+
+async def list_active_case_destructions(session: AsyncSession) -> list[CaseDestruction]:
+    now = datetime.now(UTC)
+    result = await session.execute(
+        select(CaseDestruction).where(
+            CaseDestruction.status.in_(_ACTIVE_DESTRUCTION_STATUSES),
+            or_(CaseDestruction.next_retry_at.is_(None), CaseDestruction.next_retry_at <= now),
         )
     )
     return list(result.scalars().all())

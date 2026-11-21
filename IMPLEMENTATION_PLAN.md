@@ -4057,6 +4057,21 @@ sessions found along the way:
     - the ADR 0235 build addendum and the case-service docs.
 - **P89-S2 — Case destruction, archival-service pipeline and admin visibility.** A new pipeline in
   `case_pipeline.py`, deletion-register entries, and the admin archival view.
+  - ✅ **Result:**
+    - **Pipeline:** `case_destruction` runs in archival-service: pending → destroyed. A quarantine
+      gives `blocked`, retried each tick without spending attempts; a case no longer due gives
+      `cancelled`; technical failures back off to `failed_permanent`. The 409s are classified by the
+      case's state.
+    - **Register:** case-service `case_deletion_register_entry` in the destroy transaction plus
+      `GET /deletion-register`.
+    - **Ledger and restore:** `case.destroyed` joins audit-service's ledger; `restore.sh` and
+      `POST /cases/{id}/reconcile-restore-deletion` cover cases.
+    - **Resource node:** a full deletion publishes `case.resource.deleted`, closing the P89-S1
+      leftover.
+    - **admin-ui:** schedule fields, the "Vernichtung von Umlaufmappen" section, and cases in the
+      deletion register (`manual_purge` labelled too).
+    - **Live:** two cases destroyed (tombstone and full) with register, ledger and resource node checked;
+      a simulated resurrection reconciled.
 - **P89-S3 — Small compliance bundle.**
   - **ADR 0236:** `is_tagged_pdf()` also checks `/MarkInfo /Marked`, `/Lang` and Figure `/Alt`; a doc
     section on an offline veraPDF CLI workflow.

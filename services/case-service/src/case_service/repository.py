@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from case_service.models import (
     Case,
     CaseArchivalConfig,
+    CaseDeletionRegisterEntry,
     CaseDocumentReference,
     CaseNumberConfig,
     CaseSequence,
@@ -422,14 +423,23 @@ def check_due_for_destruction(case: Case, now: datetime) -> None:
         )
 
 
-async def destroy_case(session: AsyncSession, case: Case, *, now: datetime) -> tuple[str, int]:
+async def destroy_case(
+    session: AsyncSession,
+    case: Case,
+    *,
+    now: datetime,
+    triggered_by: str | None,
+    trigger: str = "retention_expiry",
+    reason: str | None = None,
+) -> CaseDeletionRegisterEntry:
     """Destroys a due case (P89-S1, ADR 0235): its document references and
     pseudonymized attribute values always go - they are the case's contents.
     `full_deletion=False` keeps the row as a tombstone (id, Vorgangsnummer,
     dates, `destroyed_at`; name and attributes cleared, since both can hold
     personal data), `True` deletes it. Referenced documents themselves are
-    untouched: they have their own retention. Returns (mode, number of
-    references removed)."""
+    untouched: they have their own retention. Since P89-S2 writes the
+    deletion-register entry in the same flush and returns it."""
+    case_id, vorgangsnummer = case.id, case.vorgangsnummer
     references = await session.execute(
         select(CaseDocumentReference).where(CaseDocumentReference.case_id == case.id)
     )
@@ -449,8 +459,29 @@ async def destroy_case(session: AsyncSession, case: Case, *, now: datetime) -> t
         case.attributes = {}
         case.destroyed_at = now
         mode = "tombstone"
+    entry = CaseDeletionRegisterEntry(
+        case_id=case_id,
+        vorgangsnummer=vorgangsnummer,
+        trigger=trigger,
+        mode=mode,
+        document_reference_count=reference_count,
+        reason=reason,
+        triggered_by=triggered_by,
+        occurred_at=now,
+    )
+    session.add(entry)
     await session.flush()
-    return mode, reference_count
+    return entry
+
+
+async def list_deletion_register(
+    session: AsyncSession, *, case_id: str | None = None
+) -> list[CaseDeletionRegisterEntry]:
+    query = select(CaseDeletionRegisterEntry)
+    if case_id is not None:
+        query = query.where(CaseDeletionRegisterEntry.case_id == case_id)
+    result = await session.execute(query.order_by(CaseDeletionRegisterEntry.occurred_at.desc()))
+    return list(result.scalars().all())
 
 
 # --- Attribute-level pseudonymization vault (5.2, Phase 58 Session 1) ------

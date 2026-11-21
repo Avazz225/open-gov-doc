@@ -80,3 +80,40 @@ class CaseArchivalTransfer(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class CaseDestruction(Base):
+    """Destruction of one case after its retention (P89-S2, ADR 0235): the
+    pipeline polls case-service's `GET /cases/due-for-destruction` and calls
+    `POST /cases/{id}/destroy`. case-service does the destruction and writes
+    the deletion-register entry; this row is the pipeline's own record, so an
+    admin sees what is waiting, blocked or done.
+
+    `pending -> destroyed`, with two side states:
+    - `blocked`: case-service refused because a referenced document is under
+      active records quarantine (block, don't cascade). Not a failure - it
+      is retried every tick without using up attempts, until the quarantine
+      is lifted.
+    - `cancelled`: the case is no longer due (its retention was extended or
+      it is no longer archived). Terminal; it is rediscovered if it becomes
+      due again.
+    A technical failure (case-service unreachable, `503` from an unanswerable
+    quarantine check) keeps `pending` and backs off like the transfers
+    (ADR 0078) until `failed_permanent`."""
+
+    __tablename__ = "case_destruction"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    case_id: Mapped[str] = mapped_column(String(128), index=True)
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    vorgangsnummer: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # From case-service's answer: "tombstone" | "deleted"
+    mode: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    document_reference_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    destroyed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

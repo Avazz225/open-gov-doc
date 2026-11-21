@@ -105,3 +105,28 @@ Built as decided. The judgment calls this ADR left to the build session:
   - A new `case.disposal_callback` was avoided: seeded roles aren't updated on existing installations.
 - **Remaining for P89-S2:** archival-service's destruction pipeline, deletion-register entries, and the
   admin visibility.
+
+## Build — P89-S2 (pipeline, register, restore, admin visibility)
+
+- **Where the register lives:** in case-service, as `case_deletion_register_entry`, written in the
+  destroy transaction.
+  - This follows document-/folder-service, where each owner keeps its own register.
+  - It also means a destruction triggered by any caller (the pipeline, the restore reconciliation) is
+    registered.
+  - archival-service's `case_destruction` table is the pipeline's own record (waiting, blocked, cancelled,
+    done), not the register.
+- **Ledger and restore (10.4):**
+  - `case.destroyed` joins audit-service's append-only deletion ledger.
+  - `scripts/restore.sh` checks a ledger case against the restored DB. A tombstone restored as a
+    tombstone is already destroyed, so only a row with `destroyed_at` null counts as back.
+  - `POST /cases/{id}/reconcile-restore-deletion` (`dms-admin`, like document/folder) re-runs the
+    destruction without the due/quarantine checks, because the destruction already happened once.
+- **Blocked is a state, not a failure:** a quarantine refusal is retried every tick without spending
+  attempts. A quarantine can last months, and backing off into `failed_permanent` would turn a correct
+  refusal into an alarm.
+- **Telling the 409s apart:** the pipeline reads the case instead of parsing case-service's message:
+  - gone or a tombstone → already destroyed;
+  - no longer due → `cancelled`;
+  - otherwise → `blocked`.
+- **Resource node:** a full deletion publishes `case.resource.deleted`, which permission-service already
+  consumed. That closes the leftover noted in P89-S1.

@@ -41,6 +41,7 @@ from archival_service.models import Base
 from archival_service.schemas import (
     ArchivalTransferOut,
     CaseArchivalTransferOut,
+    CaseDestructionOut,
     ReleasedItemOut,
     XdomeaImportResultOut,
     XJustizImportResultOut,
@@ -122,6 +123,19 @@ async def _archival_poll_loop(session_factory) -> None:
         except Exception:
             logger.exception(
                 "Umlaufmappen-Aussonderungs-Poll-Tick fehlgeschlagen (5.6, seit P7-S3b) - "
+                "wird beim naechsten Tick erneut versucht."
+            )
+
+        # P89-S2 (ADR 0235): destruction of cases whose retention ran out.
+        try:
+            await case_pipeline.run_case_destructions_tick(
+                session_factory,
+                case_client=app.state.case_client,
+                max_attempts=settings.max_archival_attempts,
+            )
+        except Exception:
+            logger.exception(
+                "Umlaufmappen-Vernichtungs-Tick fehlgeschlagen - "
                 "wird beim naechsten Tick erneut versucht."
             )
 
@@ -466,6 +480,45 @@ async def retry_case_archival_transfer(
     await repository.reset_for_retry(session, transfer)
     await session.commit()
     return transfer
+
+
+@app.get("/case-destructions", response_model=list[CaseDestructionOut])
+async def list_case_destructions(
+    status: str | None = None,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> list[CaseDestructionOut]:
+    """P89-S2: the destruction pipeline's runs - what is waiting, blocked by a
+    records quarantine, cancelled or done. The destruction itself is recorded
+    in case-service's deletion register."""
+    await _require_archival_permission(x_dms_principal, access_type="read")
+    return await repository.list_case_destructions(session, status=status)
+
+
+@app.post("/case-destructions/{destruction_id}/retry", response_model=CaseDestructionOut)
+async def retry_case_destruction(
+    destruction_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> CaseDestructionOut:
+    """Restarts a `failed_permanent` run, like the transfer retries (ADR 0078).
+    A blocked run needs no retry: it is tried every tick."""
+    await _require_archival_permission(x_dms_principal, access_type="write")
+    try:
+        destruction = await repository.get_case_destruction(session, destruction_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if destruction.status != "failed_permanent":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Vernichtungslauf hat Status {destruction.status!r}, nur 'failed_permanent' "
+                "kann erneut versucht werden"
+            ),
+        )
+    await repository.reset_for_retry(session, destruction)
+    await session.commit()
+    return destruction
 
 
 @app.get("/case-archival-transfers/{transfer_id}/package")

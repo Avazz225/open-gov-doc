@@ -8,7 +8,11 @@ from dms_eventbus_client import Event
 # (siehe retention_actions.py in beiden Services). Absichtlich NICHT
 # "trash_expiry"-Loeschungen (Konzept 10.4: geringere Konsequenz bei
 # regulaeren, nicht-physischen Loeschungen - siehe docs/operations/backup-restore.md).
-FORCE_DELETION_EVENT_TYPES = {"document.force_deleted", "folder.force_deleted"}
+# Since P89-S2 also `case.destroyed` (case-service's destruction after
+# retention, ADR 0235): physical for a full deletion, and for a tombstone the
+# contents (references, pseudonymized values, name, attributes) are gone -
+# either way a restore must not bring the case back.
+FORCE_DELETION_EVENT_TYPES = {"document.force_deleted", "folder.force_deleted", "case.destroyed"}
 
 
 def append_if_force_deletion(event: Event, ledger_path: Path) -> None:
@@ -21,7 +25,7 @@ def append_if_force_deletion(event: Event, ledger_path: Path) -> None:
     if event.event_type not in FORCE_DELETION_EVENT_TYPES:
         return
 
-    object_type = "document" if event.event_type.startswith("document.") else "folder"
+    object_type = event.event_type.split(".", 1)[0]
     entry = {
         # event_id ist eine vom Producer erzeugte UUID (dms_eventbus_client.Event),
         # unabhaengig von jeder Postgres-Zeilen-ID - dient als stabile Referenz
@@ -36,6 +40,11 @@ def append_if_force_deletion(event: Event, ledger_path: Path) -> None:
         "reason": event.payload.get("reason"),
         "triggered_by": event.payload.get("triggered_by") or event.actor,
     }
+    if object_type == "case":
+        # `restore.sh` checks a tombstone differently from a deleted row, and
+        # the Vorgangsnummer is what a reader of the ledger recognizes.
+        entry["mode"] = event.payload.get("mode")
+        entry["vorgangsnummer"] = event.payload.get("vorgangsnummer")
     ledger_path.parent.mkdir(parents=True, exist_ok=True)
     with open(ledger_path, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")

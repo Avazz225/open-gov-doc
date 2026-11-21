@@ -2,6 +2,66 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P89-S2, case destruction: archival-service pipeline, deletion register, restore
+integration and admin visibility (build of
+[ADR 0235](docs/adr/0235-case-service-destruction-scheduling-scoping.md), addendum "Build — P89-S2").
+
+**What changed:**
+- **archival-service:**
+  - Table `case_destruction` and a fourth poll phase `run_case_destructions_tick`: due cases →
+    `POST /cases/{id}/destroy` as `archival-service`.
+  - **States:** `destroyed`; `blocked` (quarantine, retried every tick without spending attempts);
+    `cancelled` (no longer due); technical failures back off to `failed_permanent`.
+  - 409s are classified by reading the case, so a destroy that went through before a crash counts as
+    destroyed.
+  - `GET /case-destructions`, `POST /case-destructions/{id}/retry`; sensors gained
+    `kind="case_destruction"`.
+- **case-service:**
+  - `case_deletion_register_entry` written in the destroy transaction, and `GET /deletion-register`.
+  - `case.destroyed` carries trigger, reason, triggered_by and register_entry_id.
+  - A full deletion also publishes `case.resource.deleted`, which closes the P89-S1 resource-node
+    leftover.
+  - `POST /cases/{id}/reconcile-restore-deletion` (`dms-admin`).
+- **audit-service:** the deletion ledger takes `case.destroyed` (`object_type` case, plus mode and
+  Vorgangsnummer).
+- **`scripts/restore.sh`:** checks ledger cases (back = row exists and not a tombstone) and prints the
+  reconcile call; `CASE_SERVICE_URL`.
+- **admin-ui:**
+  - The case settings form has "Vernichtung nach Aussonderung (Tage)" and "Vollständig löschen statt
+    Nachweis behalten".
+  - New section "Vernichtung von Umlaufmappen" (status badges, blocking reason, retry).
+  - The deletion register shows case binders (Vorgangsnummer, mode, reference count); an unreachable
+    case-service only hides them.
+  - Found along the way: document-service's `manual_purge` trigger showed as "Papierkorb-Frist
+    abgelaufen"; it has its own label now.
+- **Docs:** case-service (API, Destruction, Events, Open Points closed), archival-service ("Case
+  Destruction"), backup-restore, admin-ui, the ADR 0235 addendum, the plan.
+
+**Checks:**
+- case-service 96 (+3: register entry and ledger event, full deletion drops the resource, restore
+  reconciliation incl. 403/404/tombstone no-op).
+- archival-service 159 (+7: destroyed, blocked→cleared without attempts, cancelled→rediscovered, crash
+  recovery tombstone/gone, 503→failed_permanent not replaced, unreachable→backoff, API list/filter/retry).
+- audit-service 38 (+1).
+- admin-ui vitest 377 (+4), tsc/eslint clean; e2e `case-destruction.spec.ts` green (schedule round trip,
+  section, register page).
+- ruff clean.
+- **Live (rebuilt case-, archival-, audit-service, admin-ui):**
+  - Two test cases inserted as archived with expired retention: `P89S2-0001` (tombstone) and `P89S2-0002`
+    (full). After the archival-service restart, both were destroyed on the first tick.
+  - Register entries and two ledger lines were written; the resource node of the full one is gone (404),
+    the tombstone's remains.
+  - Resurrection simulated by clearing `destroyed_at`: `restore.sh`'s query finds it; reconcile without
+    the role gave 403, with it 204, and a second register entry `restore_reconciliation` was written.
+  - **Left in place:** the tombstone, both register entries plus the reconciliation entry, the ledger
+    lines (append-only) and the two runs.
+- **Not live-tested:** a quarantine block (covered by the case-service test against the live
+  document-service and the pipeline tests).
+
+**Next session:** P89-S3, the small compliance bundle (ADR 0236 tagged-PDF checks, eGov package 1.3.0).
+
+---
+
 **Last completed:** P88-S7, the default alert package and alarm levels in Grafana
 ([ADR 0252](docs/adr/0252-alert-rules-as-config-category-default-package-and-grafana.md)), run after
 P89-S1 as agreed.

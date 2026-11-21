@@ -778,7 +778,7 @@
   },
   "deletionRegister": {
     "pageTitle": "Löschregister",
-    "hint": "Jede physische Löschung (Zwangslöschung oder abgelaufene Papierkorb-Frist) wird hier vermerkt und zusätzlich als reguläres Audit-Event publiziert. Nach einer Wiederherstellung aus einem Backup gleicht der Restore-Lauf diese Einträge ab, damit gelöschte Objekte gelöscht bleiben. Zeigt Dokumente und Ordner gemeinsam an.",
+    "hint": "Jede physische Löschung (Zwangslöschung oder abgelaufene Papierkorb-Frist) und jede Vernichtung einer Umlaufmappe nach Ablauf ihrer Aufbewahrung wird hier vermerkt und zusätzlich als reguläres Audit-Event publiziert. Nach einer Wiederherstellung aus einem Backup gleicht der Restore-Lauf diese Einträge ab, damit gelöschte Objekte gelöscht bleiben. Zeigt Dokumente, Ordner und Umlaufmappen gemeinsam an.",
     "unreachable": "Document Service nicht erreichbar.",
     "empty": "Noch keine Einträge.",
     "type": "Typ",
@@ -790,7 +790,14 @@
     "triggerTrashExpiry": "Papierkorb-Frist abgelaufen",
     "reason": "Grund",
     "triggeredBy": "Ausgelöst durch",
-    "occurredAt": "Zeitpunkt"
+    "occurredAt": "Zeitpunkt",
+    "typeCase": "Umlaufmappe",
+    "triggerRetentionTombstone": "Aufbewahrung abgelaufen (Nachweis bleibt)",
+    "triggerRetentionDeleted": "Aufbewahrung abgelaufen (vollständig gelöscht)",
+    "triggerRestoreReconciliation": "Restore-Abgleich",
+    "caseReferences": "{count} Dokumentverweise entfernt",
+    "caseUnreachable": "Case Service nicht erreichbar - Umlaufmappen fehlen in der Liste.",
+    "triggerManualPurge": "Manuell endgültig gelöscht"
   },
   "archivalTransfers": {
     "pageTitle": "Aussonderung & Archivierung",
@@ -843,7 +850,25 @@
     "caseStatusFailedPermanent": "Dauerhaft fehlgeschlagen",
     "caseId": "Umlaufmappen-ID",
     "caseDownload": "Paket herunterladen",
-    "downloadError": "Download fehlgeschlagen"
+    "downloadError": "Download fehlgeschlagen",
+    "caseRetentionDaysLabel": "Vernichtung nach Aussonderung (Tage)",
+    "caseRetentionDaysPlaceholder": "Unbefristet aufbewahren",
+    "caseFullDeletionLabel": "Vollständig löschen statt Nachweis behalten",
+    "caseFullDeletionHint": "Standard ist ein Nachweis: Kennung, Vorgangsnummer und Daten bleiben, Name, Attribute und Dokumentverweise werden entfernt. Die Dokumente selbst haben ihre eigene Aufbewahrung. Gilt für Umlaufmappen, die ab jetzt ausgesondert werden.",
+    "destructionHeading": "Vernichtung von Umlaufmappen",
+    "destructionHint": "Ausgesonderte Umlaufmappen, deren Aufbewahrung abgelaufen ist, werden automatisch vernichtet und im Löschregister vermerkt. Steht ein verwiesenes Dokument in aktiver Quarantäne, wartet die Vernichtung, bis die Quarantäne aufgehoben ist.",
+    "destructionEmpty": "Noch keine Vernichtungsläufe.",
+    "destructionStatusPending": "Ausstehend",
+    "destructionStatusBlocked": "Blockiert (Quarantäne)",
+    "destructionStatusCancelled": "Abgebrochen (nicht mehr fällig)",
+    "destructionStatusDestroyed": "Vernichtet",
+    "destructionStatusFailedPermanent": "Dauerhaft fehlgeschlagen",
+    "destructionCase": "Umlaufmappe",
+    "destructionMode": "Art",
+    "destructionModeTombstone": "Nachweis",
+    "destructionModeDeleted": "Vollständig gelöscht",
+    "destructionDestroyedAt": "Vernichtet am",
+    "destructionUnreachable": "Vernichtungsläufe nicht abrufbar."
   },
   "reports": {
     "pageTitle": "Standardberichte",

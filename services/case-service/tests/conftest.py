@@ -277,6 +277,8 @@ async def _clean_tables():
         # case_archival_config oben, hier von Anfang an mitgezogen).
         await conn.execute(text('TRUNCATE "case".case_number_config'))
         await conn.execute(text('TRUNCATE "case".case_sequence'))
+        # Deletion register for cases (P89-S2).
+        await conn.execute(text('TRUNCATE "case".case_deletion_register_entry'))
     await eng.dispose()
     yield
 

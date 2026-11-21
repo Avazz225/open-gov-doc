@@ -127,6 +127,44 @@ Deliberate simplifications (documented, not hidden):
 
 `case_archival_transfer`: `id` (UUID PK), `case_id`, `status`, `encrypted` (boolean), `storage_object_key` (nullable until `packaged`), `checksum_sha256` (nullable until `packaged`), `error_message` (nullable), `attempts` (integer, default 0, since P20-S2), `next_retry_at` (nullable, since P20-S2), `locked_at`/`packaged_at`/`verified_at`/`released_at` (each nullable), `created_at`/`updated_at`.
 
+## Case Destruction (P89-S2, [ADR 0235](../adr/0235-case-service-destruction-scheduling-scoping.md))
+
+The end of a case's lifecycle, after its XDOMEA disposal above. case-service does the destruction and
+writes the deletion-register entry. This service only schedules it, as it already schedules case
+archival.
+
+- **Tick:** a fourth independent phase of `_archival_poll_loop` (`case_pipeline.run_case_destructions_tick`):
+  - it polls `GET /cases/due-for-destruction` and creates a `case_destruction` row per due case without an
+    open run (active or `failed_permanent`; a failed run isn't silently replaced);
+  - it then calls `POST /cases/{id}/destroy` as `archival-service` (the `document.disposal_callback`
+    capability of the existing role `archival-service-callback`).
+- **States:**
+  - `pending` → `destroyed`, with mode, reference count and time from case-service's answer.
+  - **`blocked`:** `409` while a referenced document is under active records quarantine (block, don't
+    cascade). It isn't a failure: the run is retried every tick without using up attempts, until the
+    quarantine is lifted.
+  - **`cancelled`:** `409` because the case is no longer due (retention extended, no longer archived).
+    Terminal; a later due case gets a new run.
+  - **Already destroyed:** a `409` for a case that is a tombstone or gone counts as `destroyed`. This is
+    the crash case, where the previous destroy went through but the row wasn't updated.
+  - **Technical failures** (`503` from an unanswerable quarantine check, case-service unreachable)
+    keep `pending` with the transfer backoff (ADR 0078) until `failed_permanent`.
+- **Why the conflict is classified by the case's state:** case-service answers `409` for all three
+  refusals. The pipeline reads the case (`find_case`) instead of parsing the message.
+- **API:** see the two rows below. The admin view is the section "Vernichtung von Umlaufmappen" in
+  admin-ui's `/archival-transfers/`.
+- **Sensors:** `archival.transfers.active`/`.failed` gained `kind="case_destruction"`. A blocked run counts
+  as active, so the default alert "Aussonderungs-Transfers fehlgeschlagen" covers permanently failed
+  destructions too.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/case-destructions?status=...` | The runs, newest first (`archival.read`) |
+| `POST` | `/case-destructions/{id}/retry` | Restarts a `failed_permanent` run (`archival.write`); `409` for any other status, `404` unknown |
+
+`case_destruction`: `id`, `case_id`, `status`, `vorgangsnummer`, `mode`, `document_reference_count`,
+`error_message`, `attempts`, `next_retry_at`, `destroyed_at`, `created_at`/`updated_at`.
+
 ## General XDOMEA Export for Inter-Agency Handoff (14.2, Post-Roadmap Phase 31 Session 13a, [ADR 0127](../adr/0127-general-xdomea-export-abgabe-0401-synchronous-not-disposal-pipeline.md))
 
 Unlike the disposal pipeline above (async, multi-phase, closed-cases-only, always addressed to "Archiv"),

@@ -84,3 +84,22 @@ class CaseArchivalTransferOut(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class CaseDestructionOut(BaseModel):
+    """P89-S2: one run of the case destruction pipeline."""
+
+    id: str
+    case_id: str
+    status: str
+    vorgangsnummer: str | None
+    mode: str | None
+    document_reference_count: int | None
+    error_message: str | None
+    attempts: int
+    next_retry_at: datetime | None
+    destroyed_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}

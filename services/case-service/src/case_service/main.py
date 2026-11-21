@@ -36,6 +36,7 @@ from case_service.schemas import (
     CaseArchivalConfigOut,
     CaseArchiveStatusOut,
     CaseCreate,
+    CaseDeletionRegisterEntryOut,
     CaseDestroyedOut,
     CaseDocumentAdd,
     CaseDocumentReferenceOut,
@@ -46,6 +47,7 @@ from case_service.schemas import (
     CaseRegisterRequest,
     PseudonymizeAttributeRequest,
     PseudonymizedAttributeOut,
+    ReconcileRestoreDeletionRequest,
     RevealAttributeRequest,
     RevealedAttributeOut,
 )
@@ -785,26 +787,90 @@ async def destroy_case(
             status_code=409,
             detail=f"Dokumente in aktiver Quarantäne: {', '.join(sorted(quarantined))}",
         )
-    vorgangsnummer = case.vorgangsnummer
-    mode, reference_count = await repository.destroy_case(session, case, now=now)
+    entry = await repository.destroy_case(session, case, now=now, triggered_by=x_dms_principal)
     await session.commit()
-    await publish_event(
-        "case.destroyed",
-        subject=case_id,
-        payload={
-            "mode": mode,
-            "vorgangsnummer": vorgangsnummer,
-            "document_reference_count": reference_count,
-        },
-        actor=x_dms_principal,
-    )
+    await _publish_case_destroyed(entry)
     return CaseDestroyedOut(
         case_id=case_id,
-        vorgangsnummer=vorgangsnummer,
-        mode=mode,
+        vorgangsnummer=entry.vorgangsnummer,
+        mode=entry.mode,
         destroyed_at=now,
-        document_reference_count=reference_count,
+        document_reference_count=entry.document_reference_count,
     )
+
+
+async def _publish_case_destroyed(entry, *, reconciliation_of: str | None = None) -> None:
+    """`case.destroyed` - audit-service appends it to its deletion ledger
+    (P89-S2), the copy a database restore can't roll back."""
+    payload = {
+        "mode": entry.mode,
+        "vorgangsnummer": entry.vorgangsnummer,
+        "document_reference_count": entry.document_reference_count,
+        "trigger": entry.trigger,
+        "reason": entry.reason,
+        "triggered_by": entry.triggered_by,
+        "register_entry_id": entry.id,
+    }
+    if reconciliation_of is not None:
+        payload["reconciliation_of_entry_id"] = reconciliation_of
+    await publish_event(
+        "case.destroyed", subject=entry.case_id, payload=payload, actor=entry.triggered_by
+    )
+    if entry.mode == "deleted":
+        # A fully deleted case no longer needs its permission-service
+        # resource node (the leftover P89-S1 noted); a tombstone keeps it,
+        # since the tombstone stays readable.
+        await publish_event(
+            "case.resource.deleted",
+            subject=entry.case_id,
+            payload={"resource_id": entry.case_id},
+            actor=entry.triggered_by,
+        )
+
+
+@app.get("/deletion-register", response_model=list[CaseDeletionRegisterEntryOut])
+async def get_deletion_register(
+    case_id: str | None = None, session: AsyncSession = Depends(get_session)
+) -> list[CaseDeletionRegisterEntryOut]:
+    """Deletion register for cases (P89-S2). Ungated like document-/folder-
+    service's registers: it holds ids, Vorgangsnummern and dates, no names
+    or attribute values."""
+    return await repository.list_deletion_register(session, case_id=case_id)
+
+
+@app.post("/cases/{case_id}/reconcile-restore-deletion", status_code=204)
+async def reconcile_restore_deletion(
+    case_id: str,
+    payload: ReconcileRestoreDeletionRequest,
+    x_dms_roles: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    """Deletion reconciliation after a restore (10.4, P89-S2): a case
+    destroyed after the backup came back with the restored database. Same
+    mechanism as the original destruction, without the due/quarantine
+    checks - the destruction already happened and was registered; the
+    restore only undid it. `scripts/restore.sh` prints this call for every
+    case in the ledger window that is back and not destroyed."""
+    roles = {role.strip() for role in x_dms_roles.split(",") if role.strip()}
+    if settings.admin_role not in roles:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Nur die Rolle {settings.admin_role!r} darf einen Löschabgleich "
+            "nach Restore auslösen",
+        )
+    case = await _get_case_or_404(session, case_id)
+    if case.destroyed_at is not None:
+        return  # a tombstone came back as a tombstone - nothing to undo
+    entry = await repository.destroy_case(
+        session,
+        case,
+        now=datetime.now(UTC),
+        triggered_by="system:restore-reconciliation",
+        trigger="restore_reconciliation",
+        reason=payload.reason,
+    )
+    await session.commit()
+    await _publish_case_destroyed(entry, reconciliation_of=payload.original_entry_id)
 
 
 @app.get("/case-archival-config", response_model=CaseArchivalConfigOut)

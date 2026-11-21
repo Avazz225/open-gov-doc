@@ -1352,7 +1352,8 @@ export async function updateTrashConfig(
 export interface DeletionRegisterEntry {
   id: string;
   document_id: string;
-  trigger: "forced_deletion" | "trash_expiry";
+  // "manual_purge" since P15-S1 (missing from this type until P89-S2).
+  trigger: "forced_deletion" | "trash_expiry" | "manual_purge";
   reason: string | null;
   triggered_by: string | null;
   occurred_at: string;
@@ -1431,6 +1432,26 @@ export async function listFolderDeletionRegister(
   token: string
 ): Promise<FolderDeletionRegisterEntry[]> {
   const response = await request("folder-service", "deletion-register", {}, token);
+  return response.json();
+}
+
+// Deletion register for cases (P89-S2): case-service's own register.
+export interface CaseDeletionRegisterEntry {
+  id: string;
+  case_id: string;
+  vorgangsnummer: string | null;
+  trigger: "retention_expiry" | "restore_reconciliation";
+  mode: "tombstone" | "deleted";
+  document_reference_count: number;
+  reason: string | null;
+  triggered_by: string | null;
+  occurred_at: string;
+}
+
+export async function listCaseDeletionRegister(
+  token: string
+): Promise<CaseDeletionRegisterEntry[]> {
+  const response = await request("case-service", "deletion-register", {}, token);
   return response.json();
 }
 
@@ -2472,6 +2493,10 @@ export async function retryCaseArchivalTransfer(
 export interface CaseArchivalConfig {
   default_archive_after_days_closed: number | null;
   archive_encryption_enabled: boolean;
+  // Destruction schedule (P89-S1/S2, ADR 0235): resolved per case when it is
+  // archived. null = cases are kept indefinitely.
+  default_retention_days_after_archived: number | null;
+  default_full_deletion: boolean;
   updated_at: string;
 }
 
@@ -2483,19 +2508,74 @@ export async function getCaseArchivalConfig(token: string): Promise<CaseArchival
 export async function updateCaseArchivalConfig(
   token: string,
   defaultArchiveAfterDaysClosed: number | null,
-  archiveEncryptionEnabled: boolean
+  archiveEncryptionEnabled: boolean,
+  destruction?: {
+    defaultRetentionDaysAfterArchived: number | null;
+    defaultFullDeletion: boolean;
+  }
 ): Promise<CaseArchivalConfig> {
+  // case-service writes the destruction fields only when they are sent.
+  const body: Record<string, unknown> = {
+    default_archive_after_days_closed: defaultArchiveAfterDaysClosed,
+    archive_encryption_enabled: archiveEncryptionEnabled,
+  };
+  if (destruction) {
+    body.default_retention_days_after_archived = destruction.defaultRetentionDaysAfterArchived;
+    body.default_full_deletion = destruction.defaultFullDeletion;
+  }
   const response = await request(
     "case-service",
     "case-archival-config",
     {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        default_archive_after_days_closed: defaultArchiveAfterDaysClosed,
-        archive_encryption_enabled: archiveEncryptionEnabled,
-      }),
+      body: JSON.stringify(body),
     },
+    token
+  );
+  return response.json();
+}
+
+// Case destruction pipeline (P89-S2, ADR 0235): archival-service's runs.
+export type CaseDestructionStatus =
+  | "pending"
+  | "blocked"
+  | "cancelled"
+  | "destroyed"
+  | "failed_permanent";
+
+export interface CaseDestruction {
+  id: string;
+  case_id: string;
+  status: CaseDestructionStatus;
+  vorgangsnummer: string | null;
+  mode: "tombstone" | "deleted" | null;
+  document_reference_count: number | null;
+  error_message: string | null;
+  attempts: number;
+  next_retry_at: string | null;
+  destroyed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function listCaseDestructions(
+  token: string,
+  status?: string
+): Promise<CaseDestruction[]> {
+  const query = status ? `?status=${encodeURIComponent(status)}` : "";
+  const response = await request("archival-service", `case-destructions${query}`, {}, token);
+  return response.json();
+}
+
+export async function retryCaseDestruction(
+  token: string,
+  destructionId: string
+): Promise<CaseDestruction> {
+  const response = await request(
+    "archival-service",
+    `case-destructions/${destructionId}/retry`,
+    { method: "POST" },
     token
   );
   return response.json();

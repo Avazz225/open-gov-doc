@@ -112,7 +112,9 @@ supposed to be deleted.
   existing NATS consumer appends a line to an append-only file
   (`/deletion-ledger/deletion-register.jsonl`) on a **dedicated Docker volume**
   (`deletion-ledger-data`) on every `document.force_deleted`/
-  `folder.force_deleted` event — technically completely separate from the Postgres
+  `folder.force_deleted` event, and since P89-S2 on every `case.destroyed` (a case destroyed after its
+  retention, entries carry `mode` and `vorgangsnummer`; a restored case counts as "back" only when it is
+  not a tombstone, and `POST /cases/{id}/reconcile-restore-deletion` re-runs the destruction) — technically completely separate from the Postgres
   instance that `backup.sh`/`restore.sh` back up/restore. This is the only way the
   register stays "kept up to date" (10.4 literally), even when the DB itself is
   reset to an earlier point in time. Deliberately only `forced_deletion` events

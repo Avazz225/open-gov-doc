@@ -250,6 +250,33 @@ class CaseClient:
         response.raise_for_status()
         return response.json()
 
+    # Destruction (P89-S2, ADR 0235) ------------------------------------------
+
+    async def list_due_for_destruction(self) -> list[dict]:
+        """Ungated in case-service, like `due-for-archival`."""
+        response = await self._client.get("/cases/due-for-destruction")
+        response.raise_for_status()
+        return response.json()
+
+    async def destroy_case(self, case_id: str) -> httpx.Response:
+        """Gated by `document.disposal_callback`, which the `archival-service`
+        principal holds (role `archival-service-callback`) - the same identity
+        as the document disposal callbacks. Returns the raw response: the
+        pipeline tells a quarantine refusal (409) from a technical failure."""
+        return await self._client.post(
+            f"/cases/{case_id}/destroy", headers={"X-DMS-Principal": "archival-service"}
+        )
+
+    async def find_case(self, case_id: str) -> dict | None:
+        """`get_case`, with a fully deleted case as `None` instead of an error."""
+        response = await self._client.get(
+            f"/cases/{case_id}", headers=self._SYSTEM_PRINCIPAL_HEADERS
+        )
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        return response.json()
+
     async def create_case(
         self, *, name: str, process_definition_id: int, created_by: str, attributes: dict
     ) -> dict:

@@ -39,3 +39,7 @@ class Settings(BaseServiceSettings):
     # only creates missing ones), so a new capability would need a manual
     # migration everywhere.
     disposal_callback_permission: str = "document.disposal_callback"
+
+    # P89-S2: who may trigger the deletion reconciliation after a restore
+    # (10.4) - the same realm role document-/folder-service check.
+    admin_role: str = "dms-admin"

@@ -164,3 +164,29 @@ class CaseDestroyedOut(BaseModel):
     mode: Literal["tombstone", "deleted"]
     destroyed_at: datetime
     document_reference_count: int
+
+
+class CaseDeletionRegisterEntryOut(BaseModel):
+    """Deletion register for cases (P89-S2) - mirrors document-/folder-
+    service's `DeletionRegisterEntryOut`, plus the Vorgangsnummer, the
+    destruction mode and how many document references went."""
+
+    id: str
+    case_id: str
+    vorgangsnummer: str | None
+    trigger: Literal["retention_expiry", "restore_reconciliation"]
+    mode: Literal["tombstone", "deleted"]
+    document_reference_count: int
+    reason: str | None
+    triggered_by: str | None
+    occurred_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ReconcileRestoreDeletionRequest(BaseModel):
+    """Deletion reconciliation after a restore (10.4, P89-S2) - same shape
+    as document-/folder-service's."""
+
+    original_entry_id: str
+    reason: str | None = None

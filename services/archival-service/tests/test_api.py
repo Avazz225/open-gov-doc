@@ -1305,3 +1305,27 @@ def test_metrics_report_the_p88_s2b_sensors(client):
     text = client.get("/metrics").text
     assert 'archival_transfers_active{kind="document"}' in text
     assert 'archival_transfers_failed{kind="case"}' in text
+
+
+async def test_case_destructions_list_filter_and_retry(client, session):
+    """P89-S2: the destruction runs for the admin view, and the retry of a
+    permanently failed one."""
+    blocked = await repository.create_case_destruction(session, "case-1", vorgangsnummer="V-1")
+    blocked.status = "blocked"
+    failed = await repository.create_case_destruction(session, "case-2", vorgangsnummer="V-2")
+    await repository.mark_failed(session, failed, error_message="503", max_attempts=1)
+    await session.commit()
+
+    listed = client.get("/case-destructions").json()
+    assert {d["case_id"]: d["status"] for d in listed} == {
+        "case-1": "blocked",
+        "case-2": "failed_permanent",
+    }
+    only_blocked = client.get("/case-destructions", params={"status": "blocked"}).json()
+    assert [d["vorgangsnummer"] for d in only_blocked] == ["V-1"]
+
+    assert client.post(f"/case-destructions/{blocked.id}/retry").status_code == 409
+    retried = client.post(f"/case-destructions/{failed.id}/retry")
+    assert retried.status_code == 200
+    assert (retried.json()["status"], retried.json()["attempts"]) == ("pending", 0)
+    assert client.post("/case-destructions/does-not-exist/retry").status_code == 404

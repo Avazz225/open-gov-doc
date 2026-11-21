@@ -47,6 +47,7 @@ POSTGRES_USER="${POSTGRES_USER:-dms}"
 POSTGRES_DB="${POSTGRES_DB:-dms}"
 DOCUMENT_SERVICE_URL="${DOCUMENT_SERVICE_URL:-http://localhost:${DOCUMENT_SERVICE_PORT:-8006}}"
 FOLDER_SERVICE_URL="${FOLDER_SERVICE_URL:-http://localhost:${FOLDER_SERVICE_PORT:-8008}}"
+CASE_SERVICE_URL="${CASE_SERVICE_URL:-http://localhost:${CASE_SERVICE_PORT:-8016}}"
 
 SCRATCH_NAME="dms-postgres-restore-test"
 SCRATCH_VOLUME="dms-postgres-restore-test-data"
@@ -192,6 +193,7 @@ docker exec "$AUDIT_CONTAINER" cat /deletion-ledger/deletion-register.jsonl > "$
 BACKUP_CREATED_AT="$BACKUP_CREATED_AT" NOW="$NOW" SCRATCH_NAME="$SCRATCH_NAME" \
 POSTGRES_USER="$POSTGRES_USER" POSTGRES_DB="$POSTGRES_DB" \
 DOCUMENT_SERVICE_URL="$DOCUMENT_SERVICE_URL" FOLDER_SERVICE_URL="$FOLDER_SERVICE_URL" \
+CASE_SERVICE_URL="$CASE_SERVICE_URL" \
 LEDGER_FILE="$LEDGER_FILE" \
 python3 <<'PYEOF'
 import json
@@ -221,18 +223,26 @@ candidates = [e for e in entries if backup_created_at < e["occurred_at"] < now]
 print(f"    {len(entries)} Ledger-Eintraege gesamt, {len(candidates)} im Zeitfenster ({backup_created_at} .. {now}).")
 
 needs_reconciliation = []
-table_by_type = {"document": "document.document", "folder": "folder.folder"}
+# P89-S2: destroyed cases (`case.destroyed`). A case "came back" when its
+# row exists and is not a tombstone - a tombstone restored as a tombstone is
+# already in its destroyed state.
+query_by_type = {
+    "document": "SELECT 1 FROM document.document WHERE id = '{id}'",
+    "folder": "SELECT 1 FROM folder.folder WHERE id = '{id}'",
+    "case": 'SELECT 1 FROM "case".cases WHERE id = \'{id}\' AND destroyed_at IS NULL',
+}
 url_by_type = {
     "document": f"{os.environ['DOCUMENT_SERVICE_URL']}/documents",
     "folder": f"{os.environ['FOLDER_SERVICE_URL']}/folders",
+    "case": f"{os.environ['CASE_SERVICE_URL']}/cases",
 }
 for entry in candidates:
-    table = table_by_type.get(entry["object_type"])
-    if table is None:
+    query = query_by_type.get(entry["object_type"])
+    if query is None:
         continue
     result = subprocess.run(
         ["docker", "exec", container, "psql", "-U", user, "-d", db,
-         "-tAc", f"SELECT 1 FROM {table} WHERE id = '{entry['object_id']}'"],
+         "-tAc", query.format(id=entry["object_id"])],
         capture_output=True, text=True,
     )
     if result.stdout.strip() == "1":
@@ -263,7 +273,7 @@ gegen das unabhängig gepflegte Löschregister-Ledger.
 
 BEWUSST NICHT abgedeckt (siehe docs/operations/backup-restore.md, Zuständigkeit P11-S4):
   - Tatsächliche erneute Ausführung einer nötigen Reconciliation - braucht
-    ein laufendes document-/folder-service gegen die wiederhergestellte DB,
+    ein laufendes document-/folder-/case-service gegen die wiederhergestellte DB,
     das es in dieser isolierten Scratch-Umgebung bewusst nicht gibt. Der
     exakte Aufruf für das dann live angebundene System wird oben ausgegeben.
   - Suchindex-Neuaufbau (Schritt 7) - würde eine volle Wiederanbindung des

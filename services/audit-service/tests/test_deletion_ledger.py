@@ -52,6 +52,24 @@ def test_append_if_force_deletion_recognizes_folder_events(tmp_path):
     assert entry["object_type"] == "folder"
 
 
+def test_append_if_force_deletion_records_case_destruction(tmp_path):
+    """P89-S2: a destroyed case is in the ledger with its mode and number."""
+    ledger_path = tmp_path / "deletion-register.jsonl"
+    event = make_event(
+        "case.destroyed",
+        "case-1",
+        mode="tombstone",
+        vorgangsnummer="2026-0042",
+        triggered_by="archival-service",
+    )
+    deletion_ledger.append_if_force_deletion(event, ledger_path)
+
+    entry = json.loads(ledger_path.read_text(encoding="utf-8").strip())
+    assert (entry["object_type"], entry["object_id"]) == ("case", "case-1")
+    assert (entry["mode"], entry["vorgangsnummer"]) == ("tombstone", "2026-0042")
+    assert entry["triggered_by"] == "archival-service"
+
+
 def test_append_if_force_deletion_ignores_unrelated_events(tmp_path):
     ledger_path = tmp_path / "deletion-register.jsonl"
     event = make_event("document.created", "doc-1", title="x")
