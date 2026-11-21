@@ -1297,3 +1297,11 @@ async def test_import_xjustiz_rejects_a_package_missing_a_referenced_content_fil
     )
 
     assert response.status_code == 422
+
+
+def test_metrics_report_the_p88_s2b_sensors(client):
+    """P88-S2b: the service's own backlog/failure sensors, computed on
+    scrape (the sensor config is unreachable in tests: fail-open, all on)."""
+    text = client.get("/metrics").text
+    assert 'archival_transfers_active{kind="document"}' in text
+    assert 'archival_transfers_failed{kind="case"}' in text

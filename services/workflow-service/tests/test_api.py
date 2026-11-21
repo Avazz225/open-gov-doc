@@ -2188,3 +2188,11 @@ def test_retry_instance_requires_principal_header(no_tasks_bpmn, admin_headers):
 
         response = anonymous_client.post(f"/instances/{instance_id}/retry")
     assert response.status_code == 401
+
+
+def test_metrics_report_the_p88_s2b_sensors(client):
+    """P88-S2b: running instances (computed on scrape) and the escalation
+    counter (the sensor config is unreachable in tests: fail-open, all on)."""
+    text = client.get("/metrics").text
+    assert "workflow_instances_running " in text
+    assert "# TYPE workflow_tasks_escalated_total counter" in text

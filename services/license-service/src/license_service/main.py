@@ -11,7 +11,6 @@ from dms_eventbus_client import Event, NatsEventBusClient
 from dms_metrics_client import (
     SensorConfigClient,
     bootstrap_http_sensors,
-    http_sensor_declarations,
     metrics_payload,
 )
 from dms_registry_client import maybe_start_registration
@@ -19,7 +18,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from license_service import license_state, usage
+from license_service import license_state, metrics, usage
 from license_service.clients import (
     AuthServiceClient,
     DocumentClient,
@@ -58,7 +57,9 @@ async def _is_active_superuser(x_dms_principal: str) -> bool:
     try:
         active, superuser_principal_id = await app.state.auth_client.get_active_superuser()
     except Exception:
-        logger.warning("superuser_status_check_failed - auth-service nicht erreichbar?", exc_info=True)
+        logger.warning(
+            "superuser_status_check_failed - auth-service nicht erreichbar?", exc_info=True
+        )
         return False
     return active and bool(x_dms_principal) and superuser_principal_id == x_dms_principal
 
@@ -180,7 +181,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         self_address=settings.self_address,
         service_type=settings.service_name,
         version="0.1.0",
-        sensors=http_sensor_declarations(),
+        sensors=sensor_registry.declarations(),
     )
 
     startup_end = time.time()
@@ -213,6 +214,7 @@ app = FastAPI(title=settings.service_name, lifespan=lifespan)
 sensor_config_proxy, sensor_registry, _http_requests_sensor, _http_duration_sensor = (
     bootstrap_http_sensors(app, settings.service_name)
 )
+metrics.build_sensors(sensor_registry)
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:

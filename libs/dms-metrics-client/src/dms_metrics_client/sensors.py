@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram
+from prometheus_client.core import GaugeMetricFamily
 
 SensorCost = Literal["cheap", "expensive"]
 
@@ -75,6 +76,35 @@ class GuardedCounter:
             target.inc(amount)
 
 
+class _OptionalGauge:
+    """An unlabelled gauge that is absent from the exposition until it has a
+    value, and again after `clear()` (P88-S2b). A plain Gauge exports 0
+    before its first `set`, which reads as a real value - "0 days until the
+    license expires" when no license is installed at all."""
+
+    _labelnames: tuple[str, ...] = ()
+
+    def __init__(self, name: str, documentation: str, registry: CollectorRegistry) -> None:
+        self._name = name
+        self._documentation = documentation
+        self._value: float | None = None
+        registry.register(self)
+
+    def set(self, value: float) -> None:
+        self._value = float(value)
+
+    def inc(self, amount: float = 1.0) -> None:
+        self._value = (self._value or 0.0) + amount
+
+    def clear(self) -> None:
+        self._value = None
+
+    def collect(self):
+        if self._value is None:
+            return []
+        return [GaugeMetricFamily(self._name, self._documentation, value=self._value)]
+
+
 class GuardedGauge:
     def __init__(self, name: str, metric: Gauge, is_active: IsActiveFn) -> None:
         self._name = name
@@ -96,8 +126,9 @@ class GuardedGauge:
 
     def clear(self) -> None:
         """Drops every label set of a labelled gauge, e.g. for a service
-        type that is no longer reported. A no-op for unlabeled gauges."""
-        if self._metric._labelnames:
+        type that is no longer reported; unsets an optional gauge. A no-op
+        for other unlabeled gauges."""
+        if self._metric._labelnames or isinstance(self._metric, _OptionalGauge):
             self._metric.clear()
 
     def add(self, amount: float, *, checked: bool = True) -> None:
@@ -113,8 +144,11 @@ class GuardedGauge:
         return tuple(self._metric._labelnames)
 
     def apply(self, value: SampleValue) -> None:
-        """Writes a sampler's result (see `SampleValue`)."""
+        """Writes a sampler's result (see `SampleValue`). `None` keeps the
+        last value - except on an optional gauge, which it removes."""
         if value is None:
+            if isinstance(self._metric, _OptionalGauge):
+                self._metric.clear()
             return
         if isinstance(value, dict):
             self.clear()
@@ -208,6 +242,12 @@ class SensorRegistry:
     def specs(self) -> list[SensorSpec]:
         return list(self._specs.values())
 
+    def declarations(self) -> list[dict]:
+        """Everything registered here, for self-registration with
+        registry-service (P88-S2b) - so a service's declared catalog can't
+        drift from the sensors it actually built."""
+        return [spec.as_dict() for spec in self._specs.values()]
+
     def _register_spec(self, spec: SensorSpec) -> None:
         if spec.name in self._specs:
             raise ValueError(f"Sensor {spec.name!r} bereits registriert")
@@ -227,8 +267,19 @@ class SensorRegistry:
         )
         return GuardedCounter(spec.name, metric, self._check_for(spec))
 
-    def gauge(self, spec: SensorSpec, *, labelnames: tuple[str, ...] = ()) -> GuardedGauge:
+    def gauge(
+        self, spec: SensorSpec, *, labelnames: tuple[str, ...] = (), optional: bool = False
+    ) -> GuardedGauge:
+        """`optional=True` (unlabelled only): absent until it has a value,
+        see `_OptionalGauge`."""
         self._register_spec(spec)
+        if optional:
+            if labelnames:
+                raise ValueError("optional gauges are unlabelled")
+            optional_metric = _OptionalGauge(
+                self._prom_name(spec.name), spec.description, self.collector_registry
+            )
+            return GuardedGauge(spec.name, optional_metric, self._check_for(spec))
         metric = Gauge(
             self._prom_name(spec.name),
             spec.description,

@@ -74,9 +74,7 @@ def test_build_aussonderung_message_resolves_a_known_content_type_to_its_real_xd
     dateiformat` codelist (see `xdomea._XDOMEA_FORMAT_CODES`, values
     fetched directly from the KoSIT xrepository)."""
     case = {"id": "case-5", "name": "Bekannter Dateityp"}
-    xml_bytes = xdomea.build_aussonderung_message(
-        case, [_document("doc-1", 1, "application/pdf")]
-    )
+    xml_bytes = xdomea.build_aussonderung_message(case, [_document("doc-1", 1, "application/pdf")])
 
     root = etree.fromstring(xml_bytes)
     ns = {"xdomea": xdomea.XDOMEA_NS}

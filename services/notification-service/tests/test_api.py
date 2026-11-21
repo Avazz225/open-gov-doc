@@ -534,3 +534,10 @@ def test_delete_email_template_without_permission_is_403(client):
         headers={"X-DMS-Principal": "some-random-authenticated-caller"},
     )
     assert response.status_code == 403
+
+
+def test_metrics_report_the_p88_s2b_sensors(client):
+    """P88-S2b: the service's own backlog/failure sensors, computed on
+    scrape (the sensor config is unreachable in tests: fail-open, all on)."""
+    text = client.get("/metrics").text
+    assert "# TYPE notification_deliveries_failed gauge" in text

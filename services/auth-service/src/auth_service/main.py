@@ -19,8 +19,7 @@ from dms_eventbus_client import Event, NatsEventBusClient
 from dms_metrics_client import (
     SensorConfigClient,
     bootstrap_http_sensors,
-    http_sensor_declarations,
-    metrics_payload,
+    refreshed_metrics_payload,
 )
 from dms_registry_client import maybe_start_registration
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
@@ -35,6 +34,7 @@ from auth_service import (
     federation_crypto,
     keycloak_client,
     local_token_issuer,
+    metrics,
     superuser,
     tracking,
 )
@@ -358,7 +358,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         self_address=settings.self_address,
         service_type=settings.service_name,
         version="0.1.0",
-        sensors=http_sensor_declarations(),
+        sensors=sensor_registry.declarations(),
     )
 
     superuser_poll_task = asyncio.create_task(_superuser_poll_loop())
@@ -399,6 +399,8 @@ app = FastAPI(title=settings.service_name, lifespan=lifespan)
 sensor_config_proxy, sensor_registry, _http_requests_sensor, _http_duration_sensor = (
     bootstrap_http_sensors(app, settings.service_name)
 )
+# The sampler is defined further down; resolved at scrape time.
+metrics.build_sensors(sensor_registry, lambda: _sample_active_sessions())
 
 _issuer = f"{settings.keycloak_base_url}/realms/{settings.keycloak_realm}"
 _keycloak_validator = TokenValidator(
@@ -441,8 +443,8 @@ def healthz() -> dict:
 
 
 @app.get("/metrics")
-def get_metrics() -> Response:
-    body, content_type = metrics_payload(app.state.sensor_registry)
+async def get_metrics() -> Response:
+    body, content_type = await refreshed_metrics_payload(app.state.sensor_registry)
     return Response(content=body, media_type=content_type)
 
 
@@ -585,6 +587,7 @@ async def login(
     `_maybe_track_session_event`."""
     maintenance_active = x_dms_maintenance_active.lower() == "true"
     if maintenance_active and payload.username != superuser.SUPERUSER_USERNAME:
+        metrics.count_login("password", "maintenance")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Systemweite Notfallsperre aktiv - Login nur für den Superuser möglich",
@@ -594,15 +597,21 @@ async def login(
         select(TechnicalAccount).where(TechnicalAccount.username == payload.username)
     )
     if technical_account is not None:
-        tokens = await _login_technical_account(technical_account, payload.password)
+        try:
+            tokens = await _login_technical_account(technical_account, payload.password)
+        except HTTPException:
+            metrics.count_login("technical_account", "rejected")
+            raise
         auth_method = "technical_account"
     else:
         try:
             raw_tokens = await keycloak_client.login(settings, payload.username, payload.password)
         except InvalidCredentialsError as exc:
+            metrics.count_login("keycloak", "rejected")
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
         tokens = TokenResponse(**raw_tokens)
         auth_method = "keycloak"
+    metrics.count_login(auth_method, "success")
     await _maybe_track_session_event(
         session,
         access_token=tokens.access_token,
@@ -1007,17 +1016,27 @@ def count_users() -> dict:
     return {"count": len(admin_users.list_users(app.state.keycloak_admin))}
 
 
+def _active_session_count() -> int:
+    stats = app.state.keycloak_admin.get_client_sessions_stats()
+    for entry in stats:
+        if entry.get("clientId") == settings.keycloak_client_id:
+            return int(entry.get("active", 0))
+    return 0
+
+
+async def _sample_active_sessions() -> float:
+    """`auth.sessions.active` sensor (P88-S2b): the Keycloak admin client
+    is synchronous, so it runs in a thread instead of blocking the loop."""
+    return float(await asyncio.to_thread(_active_session_count))
+
+
 @app.get("/sessions/count")
 def count_sessions() -> dict:
     """Installation-wide count of concurrent sessions (9.1 "concurrent
     users" model, since P9-S1) - ready-made Keycloak admin API method, no
     new session tracking needed. Ungated, same rationale as
     `/users/count`."""
-    stats = app.state.keycloak_admin.get_client_sessions_stats()
-    for entry in stats:
-        if entry.get("clientId") == settings.keycloak_client_id:
-            return {"count": int(entry.get("active", 0))}
-    return {"count": 0}
+    return {"count": _active_session_count()}
 
 
 @app.post("/users", response_model=UserOut, status_code=status.HTTP_201_CREATED)
@@ -1653,16 +1672,19 @@ async def oidc_callback(
             settings, code=payload.code, redirect_uri=payload.redirect_uri
         )
     except InvalidCredentialsError as exc:
+        metrics.count_login("sso", "rejected")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
 
     if x_dms_maintenance_active.lower() == "true":
         claims = _keycloak_validator.validate(raw_tokens["access_token"])
         if claims.get("preferred_username") != superuser.SUPERUSER_USERNAME:
+            metrics.count_login("sso", "maintenance")
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Systemweite Notfallsperre aktiv - Login nur für den Superuser möglich",
             )
     tokens = TokenResponse(**raw_tokens)
+    metrics.count_login("sso", "success")
     await _maybe_track_session_event(
         session,
         access_token=tokens.access_token,

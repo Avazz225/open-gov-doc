@@ -3564,3 +3564,11 @@ def test_lock_holder_is_the_principal_not_the_body_field(client):
         "DELETE", f"/documents/{document_id}/lock", json={}, headers={"X-DMS-Principal": "alice"}
     )
     assert own.status_code == 204
+
+
+def test_metrics_report_lock_age_and_overdue_trash(client):
+    """P88-S2b: both computed on scrape (the sensor config is unreachable
+    in tests: fail-open, all on)."""
+    text = client.get("/metrics").text
+    assert _extract_metric_value(text, "document_locks_oldest_age_hours") >= 0.0
+    assert _extract_metric_value(text, "document_trash_overdue") >= 0.0

@@ -89,3 +89,18 @@ async def test_async_samplers_fill_labelled_gauges_and_drop_vanished_labels():
 
 async def _next(results):
     return results.pop(0)
+
+
+def test_optional_gauge_is_absent_until_it_has_a_value():
+    registry = SensorRegistry("t", is_active=lambda name: True)
+    gauge = registry.gauge(SensorSpec("t.days", "capacity", "cheap", "x"), optional=True)
+    values = [None, 12.0, None]
+    registry.on_scrape(gauge, lambda: values.pop(0))
+
+    def samples() -> list[str]:
+        body = metrics_payload(registry)[0].decode()
+        return [line for line in body.splitlines() if line.startswith("t_days")]
+
+    assert samples() == []  # never set: absent, not 0
+    assert samples() == ["t_days 12.0"]
+    assert samples() == []  # sampler reports None again: removed

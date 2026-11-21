@@ -14,15 +14,14 @@ from dms_eventbus_client import Event, NatsEventBusClient
 from dms_metrics_client import (
     SensorConfigClient,
     bootstrap_http_sensors,
-    http_sensor_declarations,
-    metrics_payload,
+    refreshed_metrics_payload,
 )
 from dms_registry_client import maybe_start_registration
 from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from permission_service import approval_consumer, repository, structure_consumer
+from permission_service import approval_consumer, metrics, repository, structure_consumer
 from permission_service.auth_client import AuthServiceClient
 from permission_service.models import ApprovalActionConfig, ApprovalRequest, Base, ResourceNode
 from permission_service.schemas import (
@@ -237,7 +236,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         self_address=settings.self_address,
         service_type=settings.service_name,
         version="0.1.0",
-        sensors=http_sensor_declarations(),
+        sensors=sensor_registry.declarations(),
     )
 
     startup_end = time.time()
@@ -265,6 +264,7 @@ app = FastAPI(title=settings.service_name, lifespan=lifespan)
 sensor_config_proxy, sensor_registry, _http_requests_sensor, _http_duration_sensor = (
     bootstrap_http_sensors(app, settings.service_name)
 )
+metrics.build_sensors(sensor_registry, app)
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:
@@ -294,8 +294,8 @@ def healthz() -> dict:
 
 
 @app.get("/metrics")
-def get_metrics() -> Response:
-    body, content_type = metrics_payload(app.state.sensor_registry)
+async def get_metrics() -> Response:
+    body, content_type = await refreshed_metrics_payload(app.state.sensor_registry)
     return Response(content=body, media_type=content_type)
 
 

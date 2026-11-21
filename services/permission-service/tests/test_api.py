@@ -1,3 +1,4 @@
+import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -2205,3 +2206,26 @@ def test_on_behalf_request_event_names_the_service_as_actor(client, monkeypatch)
     requested = [e for e in published if e.event_type == "permission.approval.requested"]
     assert requested[0].actor == "document-service"
     assert requested[0].on_behalf_of == "alice"
+
+
+def test_metrics_count_cache_hits_and_misses(client):
+    """P88-S2b: the first lookup for a principal misses (and is timed), the
+    same lookup again hits (the sensor config is unreachable in tests:
+    fail-open, all on)."""
+
+    def value(text: str, needle: str) -> float:
+        line = next((line for line in text.splitlines() if line.startswith(needle)), None)
+        return float(line.split()[-1]) if line else 0.0
+
+    principal = f"metrics-probe-{uuid.uuid4().hex[:8]}"
+    params = {"principal_id": principal, "resource_id": ROOT_RESOURCE_ID, "permission": "x"}
+    before = client.get("/metrics").text
+    client.get("/check", params=params)
+    client.get("/check", params=params)
+    after = client.get("/metrics").text
+
+    miss = 'permission_cache_lookups_total{result="miss"}'
+    hit = 'permission_cache_lookups_total{result="hit"}'
+    assert value(after, miss) >= value(before, miss) + 1
+    assert value(after, hit) >= value(before, hit) + 1
+    assert value(after, "permission_cache_rebuild_duration_seconds_count") >= 1

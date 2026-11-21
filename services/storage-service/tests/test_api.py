@@ -883,10 +883,7 @@ def test_metrics_endpoint_reports_the_live_replication_backlog(
     `primary_async` default), same before/after idiom document-service's
     own deactivated-sensor test uses (this service's DB isn't truncated
     between tests, so only a delta is reliable, not an absolute value)."""
-    from storage_service.main import replication_backlog_gauge
-
-    monkeypatch.setattr(replication_backlog_gauge, "_is_active", lambda name: True)
-
+    # The sensor config client is unreachable in tests: fail-open, all on.
     before = _extract_metric_value(
         second_target_client.get("/metrics").text, "storage_replication_backlog"
     )
@@ -904,3 +901,14 @@ def test_metrics_endpoint_reports_the_live_replication_backlog(
         second_target_client.get("/metrics").text, "storage_replication_backlog"
     )
     assert after == before + 1.0
+
+
+def test_metrics_report_target_health_fill_level_and_permanent_failures(client):
+    """P88-S2b: every configured local target is probed (reachable) and its
+    filesystem fill level reported; the permanent-failure count is there
+    even when zero."""
+    body = client.get("/metrics").text
+    assert 'storage_target_healthy{target="local"} 1.0' in body
+    used = _extract_metric_value(body, 'storage_target_used_percent{target="local"}')
+    assert 0.0 <= used <= 100.0
+    assert _extract_metric_value(body, "storage_replication_failed_permanent") >= 0.0

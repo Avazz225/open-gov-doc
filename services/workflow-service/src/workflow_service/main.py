@@ -22,8 +22,7 @@ from dms_eventbus_client import Event, NatsEventBusClient
 from dms_metrics_client import (
     SensorConfigClient,
     bootstrap_http_sensors,
-    http_sensor_declarations,
-    metrics_payload,
+    refreshed_metrics_payload,
 )
 from dms_registry_client import maybe_start_registration
 from fastapi import (
@@ -42,7 +41,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from workflow_service import consumer, federation_crypto, repository, spiff_adapter
+from workflow_service import consumer, federation_crypto, metrics, repository, spiff_adapter
 from workflow_service.approval_client import ApprovalClient
 from workflow_service.archival_client import ArchivalServiceClient
 from workflow_service.auth_client import AuthServiceClient
@@ -202,6 +201,7 @@ async def _sla_poll_loop(
                 await session.commit()
             for result in results:
                 for fired in result.fired:
+                    metrics.count_escalation()
                     await publish_event(
                         "workflow.task.escalated",
                         subject=result.instance.id,
@@ -542,7 +542,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         self_address=settings.self_address,
         service_type=settings.service_name,
         version="0.1.0",
-        sensors=http_sensor_declarations(),
+        sensors=sensor_registry.declarations(),
     )
 
     sla_poll_task = asyncio.create_task(
@@ -592,6 +592,7 @@ app = FastAPI(title=settings.service_name, lifespan=lifespan)
 sensor_config_proxy, sensor_registry, _http_requests_sensor, _http_duration_sensor = (
     bootstrap_http_sensors(app, settings.service_name)
 )
+metrics.build_sensors(sensor_registry, app)
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:
@@ -623,8 +624,8 @@ def healthz() -> dict:
 
 
 @app.get("/metrics")
-def get_metrics() -> Response:
-    body, content_type = metrics_payload(app.state.sensor_registry)
+async def get_metrics() -> Response:
+    body, content_type = await refreshed_metrics_payload(app.state.sensor_registry)
     return Response(content=body, media_type=content_type)
 
 

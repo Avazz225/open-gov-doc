@@ -1,7 +1,7 @@
 import logging
 from datetime import datetime
 
-from search_service import repository
+from search_service import metrics, repository
 from search_service.document_client import DocumentServiceClient
 from search_service.folder_client import FolderServiceClient
 from search_service.ocr_client import OcrServiceClient
@@ -11,7 +11,17 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 logger = logging.getLogger(__name__)
 
 
-async def reindex_document(
+async def reindex_document(*args, **kwargs) -> None:
+    """Counts failures for the `search.index.failures` sensor (P88-S2b) and
+    re-raises, so JetStream still redelivers the event."""
+    try:
+        await _reindex_document(*args, **kwargs)
+    except Exception:
+        metrics.count_index_failure()
+        raise
+
+
+async def _reindex_document(
     document_id: str,
     *,
     session_factory: async_sessionmaker[AsyncSession],

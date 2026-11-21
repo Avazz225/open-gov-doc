@@ -2,6 +2,72 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P88-S2b, sensor catalog extension A–D. The user approved it after a comparison
+with an external reference system (amendment to
+[ADR 0243](docs/adr/0243-sensor-group-and-cost-overrides-and-admin-page.md)).
+
+**What changed:**
+- **Library:**
+  - `SensorRegistry.on_scrape`/`on_scrape_async`: pull-on-scrape samplers, run only for active
+    sensors. A sampler returns a number, `{labels: value}` or `None`, and failures are logged and
+    skipped.
+  - `refreshed_metrics_payload`; `GuardedGauge.add`/`apply`; `SensorRegistry.declarations()`.
+  - **Runtime sensors in every service via `bootstrap_http_sensors`:**
+    - `http.requests.in_flight`;
+    - `db.pool.in_use`/`.size` (through the new `dms_db_base.live_engines()`);
+    - `process.memory_bytes`/`.cpu_seconds`/`.open_fds`;
+    - `service.startup.duration_seconds` (by wrapping the lifespan).
+    - New group `runtime` ("Laufzeit" in admin-ui).
+- **Service sensors**, adapted where the reference's notion has no DMS counterpart (table in
+  `docs/operations/monitoring.md`):
+  - **licence:** expiration days, users/documents current;
+  - **auth:** active sessions, logins by method and result;
+  - **storage:** target healthy/used %, replication `failed_permanent`;
+  - **ocr:** failed by state, needs_review;
+  - **rendering:** failed by kind and state, a produced counter by kind;
+  - **virus-scan:** quarantined;
+  - **workflow:** running instances, escalations;
+  - **archival:** active/failed by kind;
+  - **notification:** failed deliveries by channel and state;
+  - **document:** oldest lock age, overdue trash;
+  - **search:** index failures, query duration (expensive);
+  - **permission:** cache lookups hit/miss, invalidations, rebuild duration (expensive).
+- **Wiring:** each service registers through its own `metrics.py`. Their `/metrics` endpoints became
+  async with `refreshed_metrics_payload`, and their self-registration uses
+  `sensor_registry.declarations()`.
+- **Grafana:** `dms-sensor-overview.json` gained four rows (licence & capacity, backlogs & failures,
+  runtime, security), 34 panels in total.
+- **Docs:** `docs/operations/monitoring.md` (pull-on-scrape, runtime sensors, catalog table, closed
+  limitation), the monitoring-service pointer, and the ADR 0243 amendment.
+
+**Checks:**
+- dms-metrics-client 25 (+5: runtime values and startup time, inactive/failing samplers, labelled
+  async samplers, the optional gauge).
+- Service tests, each with a new `/metrics` assertion where it gained sensors:
+  - license 39, auth 167, storage 170, ocr 61, rendering 104, virus-scan 39;
+  - archival 152, notification 112, workflow 243, document 427, permission 202, search 77.
+- Unchanged but rerun (the lib touches them): registry 82, federation-hub 91, plugin-orchestration 49,
+  gateway 31, config 56.
+- ruff clean for every touched service; admin-ui e2e `sensors.spec.ts` green.
+- **Live, after rebuilding all images:**
+  - the catalog has 43 sensors in 5 groups, runtime sensors from all 28 instrumented services;
+  - a wrong and a right login gave `auth_logins_total{method="technical_account"}` rejected 1 and
+    success 1;
+  - both storage targets were healthy, used 34.7 %;
+  - OCR: 2 retrying, 80 permanent, 694 needs_review.
+- **Found live and fixed:** with no license installed, the license gauges exported `0` days, which
+  reads as "expired". There is now `SensorRegistry.gauge(optional=True)`, absent until it has a value,
+  and the poll loop clears the snapshot when the license is gone.
+
+**Next session:** **P88-S2c**:
+- the cost scale 1–5 (user request: five-dot colour scale, legacy cheap/expensive keys mapped to
+  1–3/4–5);
+- `SensorSpec.default_enabled` plus the expensive breakdowns (E).
+
+Then P88-S3.
+
+---
+
 **Last completed:** P88-S2, the monitoring sensors page
 ([ADR 0243](docs/adr/0243-sensor-group-and-cost-overrides-and-admin-page.md)).
 
@@ -39,8 +105,7 @@
 - `users-admin` temporarily had `domain-admin-monitoring` (assignment 4738), now revoked. The config
   ended with no overrides.
 
-**Next session:** **P88-S2b**, sensor catalog extension A–D, approved by the user after a comparison
-with an external reference system. Then P88-S2c (expensive breakdowns, off by default), P88-S3.
+**Next session:** P88-S2b (done, see above).
 - Alerting was added to the plan as P88-S5 (ADR 0244).
 - The planned ADR numbers 0242–0247 of Phases 90/91 moved to 0245–0250, because 0242/0243 went to
   P88-S1/S2.

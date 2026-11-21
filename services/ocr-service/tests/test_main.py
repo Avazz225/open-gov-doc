@@ -63,3 +63,12 @@ async def test_run_retry_tick_skips_results_not_yet_due(client, session_factory,
         fresh = await repository.get_ocr_result(fresh_session, result.id)
         # next_retry_at liegt noch in der Zukunft - der Tick darf es nicht anfassen.
         assert fresh.attempts == 1
+
+
+def test_metrics_report_the_p88_s2b_sensors(client):
+    """P88-S2b: the service's own backlog/failure sensors, computed on
+    scrape (the sensor config is unreachable in tests: fail-open, all on)."""
+    text = client.get("/metrics").text
+    assert 'ocr_results_failed{state="retrying"}' in text
+    assert 'ocr_results_failed{state="permanent"}' in text
+    assert "ocr_results_needs_review " in text

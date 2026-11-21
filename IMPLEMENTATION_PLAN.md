@@ -3900,7 +3900,26 @@ installation's replica health.
   - **D, security:** `auth.logins` by method and result; permission cache hits, misses and rebuild
     duration.
   - Each sensor needs a tested sampler. The catalog doc and the Grafana dashboard are updated.
-- **P88-S2c — Expensive breakdowns, off by default (E).**
+  - ✅ **Result:**
+    - **Library:** pull-on-scrape samplers, runtime sensors in every service through
+      `bootstrap_http_sensors`, `declarations()` from the registry, and optional gauges.
+    - **Services:** twelve gained their own sensors. Where the reference notion had no DMS
+      counterpart, the closest real measure was used (no OCR/rendering/virus-scan queue, no failed
+      workflow status or task due date, no purge backlog). The table is in
+      `docs/operations/monitoring.md`.
+    - **Grafana:** four new rows.
+    - **Live:** 43 sensors in 5 groups.
+- **P88-S2c — Cost scale 1–5, expensive breakdowns off by default (E).**
+  - **Cost scale (user request, 2026-11-21):** `SensorSpec.cost` becomes a level from 1 (very cheap) to
+    5 (very expensive) instead of cheap/expensive.
+    - Cost overrides become `cost:1` … `cost:5`. The legacy `cost:cheap` means levels 1–3 and
+      `cost:expensive` means 4–5, both in stored config and in old exports.
+    - Every existing sensor is re-rated: 1 in-memory counters/values, 2 indexed single counts,
+      3 grouped counts and network probes, 4 timing histograms, 5 high-cardinality breakdowns and
+      active probes.
+    - **admin-ui:** five dots with a sequential colour scale (green, light green, yellow, orange,
+      red), always together with the dot count and a text label, so the colour is never the only
+      carrier. One switch per level.
   - `SensorSpec.default_enabled`: a sensor declared off by default stays off under "monitor everything"
     until its own, group or cost override turns it on (amendment to ADR 0243).
   - Then the E sensors: documents per object type, workflow instances per definition, and probes (a

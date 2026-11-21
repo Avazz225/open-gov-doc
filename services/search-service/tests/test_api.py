@@ -362,3 +362,31 @@ async def test_folder_references_only_returns_folders_the_principal_may_read():
     folder_ids = {r["folder_id"] for r in results}
     assert readable_folder in folder_ids
     assert hidden_folder not in folder_ids
+
+
+def _metric(text: str, name: str) -> float:
+    line = next(line for line in text.splitlines() if line.startswith(name + " "))
+    return float(line.split()[1])
+
+
+def test_metrics_time_the_database_search_and_count_index_failures():
+    """P88-S2b: the search timing wraps the repository call, so even a
+    rejected (malformed) query is observed; a failed reindex counts and
+    still raises, so JetStream redelivers (the sensor config is
+    unreachable in tests: fail-open, all on)."""
+    import asyncio
+
+    import pytest
+    from search_service import pipeline
+
+    with TestClient(app) as client:
+        before = _metric(client.get("/metrics").text, "search_query_duration_seconds_count")
+        client.get("/search", params={"q": "a (b or c"}, headers={"X-DMS-Principal": "x"})
+        text = client.get("/metrics").text
+        assert _metric(text, "search_query_duration_seconds_count") == before + 1
+        failures_before = _metric(text, "search_index_failures_total")
+
+        with pytest.raises(TypeError):
+            asyncio.run(pipeline.reindex_document("doc-without-dependencies"))
+        after = _metric(client.get("/metrics").text, "search_index_failures_total")
+    assert after == failures_before + 1

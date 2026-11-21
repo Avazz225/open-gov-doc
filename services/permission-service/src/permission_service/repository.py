@@ -1,4 +1,5 @@
 import logging
+import time
 import uuid
 from datetime import UTC, datetime
 
@@ -6,6 +7,7 @@ from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from permission_service import metrics
 from permission_service.models import (
     ApprovalActionConfig,
     ApprovalRequest,
@@ -71,6 +73,7 @@ async def invalidate_cache(session: AsyncSession) -> None:
     as a miss. The upsert also creates the counter row if it is missing.
     Concurrent writers serialize on that one row lock, readers never touch
     it with a lock."""
+    metrics.count_invalidation()
     await session.execute(
         pg_insert(PermissionCacheGeneration)
         .values(id=CACHE_GENERATION_ROW_ID, generation=1)
@@ -1011,8 +1014,13 @@ async def get_effective_permissions(
         EffectivePermissionCache, (principal_id, resource_id), populate_existing=True
     )
     if cached is not None and cached.generation == generation:
+        metrics.count_lookup(hit=True)
         return cached
 
+    metrics.count_lookup(hit=False)
+    # Timed only while the (expensive) sensor is on - not even the clock
+    # read otherwise (10.1).
+    started = time.monotonic() if metrics.rebuild_timing_active() else None
     roles = await _collect_effective_roles(session, principal_id, resource_id)
     permissions = sorted({p for role in roles for p in role.permissions})
     # Concurrency-safe cache population (found live during post-roadmap
@@ -1056,6 +1064,8 @@ async def get_effective_permissions(
     )
     await session.execute(insert_stmt)
     await session.flush()
+    if started is not None:
+        metrics.observe_rebuild(time.monotonic() - started)
     return EffectivePermissionCache(
         principal_id=principal_id,
         resource_id=resource_id,

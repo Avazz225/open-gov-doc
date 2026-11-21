@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from license_service import license_state, usage
+from license_service import license_state, metrics, usage
 from license_service.clients import AuthServiceClient, DocumentClient, StorageClient
 from license_service.license_verifier import InvalidLicenseError, decode
 from license_service.models import InstalledLicense
@@ -89,6 +89,7 @@ async def run_tick(
     async with session_factory() as session:
         license_row = await license_state.get_installed(session)
         if license_row is None:
+            metrics.record_snapshot(None)
             return
         try:
             claims = decode(license_row.raw_token, public_key_pem=settings.license_public_key_pem)
@@ -102,6 +103,7 @@ async def run_tick(
             auth_client=clients.auth_client,
             local_installation_id=settings.installation_id,
         )
+        metrics.record_snapshot(snapshot)
         await _diff_and_publish(
             license_row,
             snapshot,

@@ -122,3 +122,31 @@ async def test_recovering_from_exceeded_allows_new_event_later(engine, session):
 
     event_types = [call[0][0] for call in publish_event.call_args_list]
     assert "license.limit_exceeded" in event_types
+
+
+async def test_tick_feeds_the_license_sensors_and_clears_them_without_a_license(engine, session):
+    """P88-S2b: the sensors read the tick's snapshot; with no license
+    installed they are absent, not 0."""
+    from dms_metrics_client import SensorRegistry, metrics_payload
+    from license_service import metrics
+
+    registry = SensorRegistry("license-test", is_active=lambda name: True)
+    metrics.build_sensors(registry)
+
+    def samples() -> dict[str, float]:
+        body = metrics_payload(registry)[0].decode()
+        return {
+            line.split()[0]: float(line.split()[1])
+            for line in body.splitlines()
+            if line.startswith("license_")
+        }
+
+    await _install(session, max_users=10, storage_limit_gb=100.0, document_limit=1000)
+    await run_tick(make_session_factory(engine), _clients(documents=42), Settings(), AsyncMock())
+    values = samples()
+    assert values["license_usage_documents_current"] == 42.0
+    assert values["license_usage_users_current"] == 3.0
+    assert "license_expiration_days" in values
+
+    metrics.record_snapshot(None)
+    assert samples() == {}

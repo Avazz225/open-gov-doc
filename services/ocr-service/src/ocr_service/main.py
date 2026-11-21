@@ -16,14 +16,13 @@ from dms_eventbus_client import Event, NatsEventBusClient
 from dms_metrics_client import (
     SensorConfigClient,
     bootstrap_http_sensors,
-    http_sensor_declarations,
-    metrics_payload,
+    refreshed_metrics_payload,
 )
 from dms_permission_client import PermissionServiceClient
 from dms_registry_client import maybe_start_registration
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import Response
-from ocr_service import repository
+from ocr_service import metrics, repository
 from ocr_service.consumer import start_consuming
 from ocr_service.document_client import DocumentServiceClient
 from ocr_service.models import Base, OcrResult
@@ -227,7 +226,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         self_address=settings.self_address,
         service_type=settings.service_name,
         version="0.1.0",
-        sensors=http_sensor_declarations(),
+        sensors=sensor_registry.declarations(),
     )
 
     retry_poll_task = asyncio.create_task(_ocr_retry_poll_loop(app.state.session_factory))
@@ -263,6 +262,7 @@ app = FastAPI(title=settings.service_name, lifespan=lifespan)
 sensor_config_proxy, sensor_registry, _http_requests_sensor, _http_duration_sensor = (
     bootstrap_http_sensors(app, settings.service_name)
 )
+metrics.build_sensors(sensor_registry, app)
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:
@@ -296,8 +296,8 @@ def healthz() -> dict:
 
 
 @app.get("/metrics")
-def get_metrics() -> Response:
-    body, content_type = metrics_payload(app.state.sensor_registry)
+async def get_metrics() -> Response:
+    body, content_type = await refreshed_metrics_payload(app.state.sensor_registry)
     return Response(content=body, media_type=content_type)
 
 

@@ -70,6 +70,8 @@ retrofit across all ~25 services, just the concrete cases that came up:
   infrastructure, additive to (not a replacement of) the `cluster_node` DB row `placement.py`'s
   scheduling algorithm still reads directly (a `GuardedGauge` has no getter).
 
+**Since P88-S2b** every service also reports seven runtime sensors, and twelve services gained their own backlog, failure, licence and security sensors. The full catalog is in [`docs/operations/monitoring.md`](../operations/monitoring.md) "Catalog extension".
+
 Further services get their sensors only once actually needed, in later sessions (`libs/dms-metrics-client` is already in place for this, see `docs/operations/monitoring.md`).
 
 ## Limitations of this stage

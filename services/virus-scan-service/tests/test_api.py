@@ -356,3 +356,10 @@ def test_purge_marks_scan_purged(client):
 
     again = client.post(f"/scans/{created['id']}/purge", headers=ADMIN_HEADERS)
     assert again.status_code == 409
+
+
+def test_metrics_report_the_p88_s2b_sensors(client):
+    """P88-S2b: the service's own backlog/failure sensors, computed on
+    scrape (the sensor config is unreachable in tests: fail-open, all on)."""
+    text = client.get("/metrics").text
+    assert "virus_scan_quarantined " in text

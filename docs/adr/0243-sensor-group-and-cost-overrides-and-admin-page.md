@@ -73,3 +73,27 @@ The tracing sampling ratio named in the plan doesn't exist yet. It joins the pag
 - admin-ui: `SensorSettings.tsx`, `/sensors/`, a nav entry, and the `sensors.*` i18n keys.
 - Every service image needs a rebuild to honour group and cost keys. The dev stack was rebuilt in
   P88-S2.
+
+## Amendment — P88-S2b: catalog extension and pull-on-scrape
+
+The user approved a sensor catalog extension (packages A–D) after a comparison with an external reference
+system. Three library decisions came with it:
+- **Pull-on-scrape is the default for new gauges.** `SensorRegistry.on_scrape`/`on_scrape_async` compute
+  a value when `/metrics` is read, and only while the sensor is active (the group/cost rule above
+  applies), with no background loop per service.
+  - Samplers return a number, a `{labels: value}` dict, or `None`. A failing sampler is logged and
+    skipped.
+  - storage-service's pre-existing pull-on-scrape idiom (ADR 0004) became the general mechanism.
+- **Runtime sensors come with `bootstrap_http_sensors`:** requests in flight, DB pool, process memory,
+  CPU, file descriptors and startup duration. No service needed code for them. The DB pool is read from
+  `dms_db_base.live_engines()`, a weak set of the engines the process built.
+- **Declarations come from the registry.** `SensorRegistry.declarations()` replaces hand-maintained
+  `sensor_declarations()` lists in the services that gained sensors, so the catalog shown in admin-ui
+  can't drift from what a service actually generates.
+
+Where the reference's sensor had no counterpart in the DMS data model, the closest real measure was used:
+- no OCR, rendering or virus-scan queue → failures and the open quarantine;
+- no failed workflow instance or task due date → running instances and SLA escalations;
+- no storage purge backlog → overdue trash and permanently failed replicas.
+
+The full table is in `docs/operations/monitoring.md`.

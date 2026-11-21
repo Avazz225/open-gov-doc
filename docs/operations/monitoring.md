@@ -54,6 +54,7 @@ sensor = registry.histogram(SPEC)  # or .counter()/.gauge()
 
 - **`counter()`/`histogram()`** are called inline at the point of the event (`sensor.inc()`/`sensor.observe(value)`) — when the sensor is disabled, nothing happens, not even a `time.monotonic()` call, provided the caller first checks `sensor.is_active()` (see `document_service.main.create_document`).
 - **`gauge()`** for "current state" values is updated periodically via `run_gauge_sampler_loop()` — the underlying (potentially expensive) computation only runs if the sensor is active.
+- **Pull-on-scrape gauges (since P88-S2b):** `registry.on_scrape(gauge, fn)` (sync) or `registry.on_scrape_async(gauge, async_fn)` compute the value when `/metrics` is read, and only while the sensor is active. A sampler returns a number, a `{label_tuple: value}` dict for a labelled gauge (label sets missing from the dict are dropped), or `None` to keep the last value. A sampler that raises is logged and skipped; it never breaks the scrape. Async samplers need an async `GET /metrics` that calls `await refreshed_metrics_payload(registry)`.
 - **`is_active`** comes either from `SensorConfigClient` (TTL poll against `monitoring-service`, for most services) or — if the service happens to be `monitoring-service` itself — directly from its own state.
 
 ## Connecting a service as a sensor source
@@ -87,8 +88,11 @@ any bespoke instrumentation:
    app.state.sensor_registry = sensor_registry
    # ... teardown, after yield: sensor_config_proxy.unbind(); await sensor_config_client.stop()
    ```
-5. Expose `GET /metrics` via `dms_metrics_client.metrics_payload(app.state.sensor_registry)`.
-6. On self-registration, include `sensors=http_sensor_declarations()` (merge
+5. Expose `GET /metrics` via `dms_metrics_client.metrics_payload(app.state.sensor_registry)`
+   (or `await refreshed_metrics_payload(...)` in an async endpoint, when the service has async
+   scrape samplers).
+6. On self-registration, include `sensors=sensor_registry.declarations()` (since P88-S2b: exactly
+   what the service registered, so the catalog can't drift). Older form: `http_sensor_declarations()` (merge
    with any bespoke sensor declarations the service also has, see
    `registry_service/metrics.py`'s `sensor_declarations()` for the pattern) -
    `monitoring-service` automatically reads them via `registry-service`'s
@@ -100,6 +104,49 @@ For a service's own **bespoke** sensors beyond the generic HTTP pair (e.g.
 `bootstrap_http_sensors` (one `SensorRegistry`/`CollectorRegistry` per
 service - see `registry_service/metrics.py`/`document_service/metrics.py`).
 
+## Runtime sensors in every service (P88-S2b)
+
+`bootstrap_http_sensors` also registers seven runtime sensors, all pull-on-scrape:
+- `http.requests.in_flight`;
+- `db.pool.in_use`/`db.pool.size`, summed over the engines `dms_db_base.build_engine` created in the
+  process (`dms_db_base.live_engines`);
+- `process.memory_bytes` (RSS from `/proc`), `process.cpu_seconds`, `process.open_fds`;
+- `service.startup.duration_seconds`, which times the lifespan up to its `yield` by wrapping the
+  router's lifespan context.
+
+The first is in the group `performance`, the pool sensors in `capacity`, the rest in the new group
+`runtime`.
+
+## Catalog extension (P88-S2b)
+
+After a comparison with an external reference system, the user approved packages A–D:
+
+| Sensor | Service | Group / cost | Notes |
+|---|---|---|---|
+| `license.expiration.days` | license | capacity / cheap | from the poll loop's usage snapshot |
+| `license.usage.users.current`, `license.usage.documents.current` | license | capacity / cheap | same snapshot, no extra HTTP calls |
+| `auth.sessions.active` | auth | capacity / cheap | Keycloak admin API, in a thread |
+| `storage.target.healthy{target}` | storage | reliability / cheap | one `exists()` probe per target, 3 s timeout |
+| `storage.target.used_percent{target}` | storage | capacity / cheap | local targets only (`shutil.disk_usage`) |
+| `storage.replication.failed_permanent` | storage | reliability / cheap | stands in for a "purge backlog", which doesn't exist: deletes are immediate |
+| `ocr.results.failed{state}`, `ocr.results.needs_review` | ocr | reliability / cheap | there is no OCR queue; `state` is `retrying` or `permanent` |
+| `rendering.renditions.failed{kind,state}` | rendering | reliability / cheap | `kind` is `thumbnail`, `pdf_archive`, `substitute_text` |
+| `rendering.renditions.produced{kind}` | rendering | performance / cheap | counter |
+| `virus_scan.quarantined` | virus-scan | security / cheap | scanning is synchronous; open quarantine instead of a queue |
+| `workflow.instances.running` | workflow | capacity / cheap | |
+| `workflow.tasks.escalated` | workflow | reliability / cheap | counter. There is no failed-instance status and no task due date, so SLA escalations are the overdue measure |
+| `archival.transfers.active{kind}`, `archival.transfers.failed{kind}` | archival | capacity, reliability / cheap | `kind` is `document` or `case`; failed means `failed_permanent` |
+| `notification.deliveries.failed{channel,state}` | notification | reliability / cheap | |
+| `document.locks.oldest_age_hours` | document | reliability / cheap | active locks only |
+| `document.trash.overdue` | document | reliability / cheap | past the restore period and not yet purged; holds are not subtracted |
+| `search.index.failures` | search | reliability / cheap | counter; failures were only logged and redelivered before |
+| `search.query.duration_seconds` | search | performance / **expensive** | the database search only, without the permission filter |
+| `auth.logins{method,result}` | auth | security / cheap | `method` is `technical_account`, `keycloak`, `sso` or `password` (refused before the method is known). `result` is `success`, `rejected` or `maintenance` |
+| `permission.cache.lookups{result}`, `permission.cache.invalidations` | permission | security / cheap | counters |
+| `permission.cache.rebuild.duration_seconds` | permission | performance / **expensive** | timed only while on |
+
+Package E (expensive breakdowns, off by default) follows in P88-S2c. Alerting on these follows in P88-S5.
+
 ## Deliberate simplifications of this build-out stage
 
 - **`federation-hub-service`/`fleet-management-service` are deliberately excluded** from the full HTTP-sensor rollout - both are independently-operated, explicitly **not** internal services of a single installation (ADR 0028, see their own `Settings` docstrings), and neither self-registers with `registry-service` at all. Instrumenting them the same way as installation-internal services would blur that architectural boundary.
@@ -107,7 +154,7 @@ service - see `registry_service/metrics.py`/`document_service/metrics.py`).
 - **TTL poll instead of NATS invalidation** for `SensorConfigClient` (default 15s) — simpler than the `ComponentLicenseCache` template (P9-S2), a deliberate scope decision given the overall size of this session.
 - **Static Prometheus target** (`infra/prometheus.yml`, a single entry `monitoring-service:8000`) instead of scrape configuration automatically derived from the registry — Concept 10.1 names the latter as an option, not a requirement; with only one scrape target, automation does not yet add value.
 - **No integration with 7.3** (configuration import/export) — the service only exists from P12-S3 on (the same backward-dependency pattern as the P10-S0 finding on 10.1). Until then, sensor configuration is persisted and audited independently in `monitoring-service`.
-- **No admin UI control surface** for sensor on/off toggling — only the backend API (`GET /sensors`, `PUT /sensor-config/...`).
+- ~~**No admin UI control surface** for sensor on/off toggling~~ — **closed in P88-S2**: admin-ui `/sensors/`, with group and cost-class switches (ADR 0243).
 - **No OpenTelemetry tracing connected** — `libs/dms-common.configure_tracing()` already exists (prepared but not called by any service), but per Concept 10.1 is a standalone, complementary topic ("distributed tracing... complements the sensor metrics") and not part of this session.
 - **The plugin orchestration service (P10-S1) does not switch to this sensor layer** — its `psutil` sampler remains in place. In the actually existing Docker Compose environment there is only one host anyway; a switch would provide no benefit ahead of real multi-node infrastructure (see P11-S0 finding).
 

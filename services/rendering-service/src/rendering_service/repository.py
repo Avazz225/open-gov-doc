@@ -4,6 +4,7 @@ from dms_retry import compute_backoff_seconds
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from rendering_service import metrics
 from rendering_service.models import Rendition
 
 
@@ -40,6 +41,8 @@ async def upsert_rendition(
     Failures go through `record_failure` below (Post-Roadmap Phase 20
     Session 4, ADR 0080)."""
     key = rendition_id(document_id, version_number, rendition_type)
+    if status == "ready":
+        metrics.count_produced(rendition_type)
     now = datetime.now(UTC)
     rendition = await session.get(Rendition, key)
     if rendition is None:
