@@ -108,3 +108,12 @@ class ReplicaTypeOut(BaseModel):
     state: ReplicaState
     since: datetime | None = None
     pending_state: ReplicaState | None = None
+
+
+class ReplicaSummaryOut(BaseModel):
+    """`GET /replicas/summary` for fleet-management (P87-S3, ADR 0241
+    Decision 5): how many types are in each state, plus the types in an
+    alarm state - no instance ids or addresses leave the installation."""
+
+    counts: dict[str, int]
+    alarms: list[ReplicaTypeOut]

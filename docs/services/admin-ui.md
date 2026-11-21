@@ -511,6 +511,27 @@ The client no longer sends who is acting (`created_by`, `deleted_by`, `approved_
 the services take it from the verified token. The API helpers lost those parameters, and the
 components no longer pass the user name into them. Super-user activation, approve/reject, emergency shutdown and lift, and the user-tracking toggle no longer pass `user.sub`/`user.username`.
 
+## Registry by Service Type (P87-S3, [ADR 0241](../adr/0241-service-instance-replacement-and-expected-replicas.md))
+
+`RegistryOverview.tsx` shows one row per service type (`GET /replicas` joined with `GET /instances`):
+- **Instances:** reachable, plus how many are draining or unreachable.
+- **Expected:** the range (`2–3`, `≥ 2`, a single number, or `—`) and its source (Admin/Standard).
+- **State:** OK, Zu wenige, Verschwunden, Zu viele or Nicht überwacht (a neutral badge), with "seit
+  <date>". A state still inside its debounce shows as `wechselt zu „…“`.
+
+**Rows:**
+- A type expands to its instances (id, version, address, last seen, status).
+- With `admin.monitoring`, a type row has "Erwartung", which opens min/max plus "Auf Standard
+  zurücksetzen" for an admin override.
+- An unreachable instance has "Vergessen". Without the capability the page is read-only; the server
+  checks it either way.
+- A hint says that replaced instances are forgotten automatically and that each forget is in the audit
+  trail (`registry.instance.forgotten`, 279 of them on the dev stack after P87-S2/S3).
+- At 390px the table scrolls inside its container (ADR 0238); type names stay on one line.
+
+**Fleet view:** below each installation's status it shows "Replikas im erwarteten Bereich" or the
+out-of-range types from the installation's replica summary.
+
 ## Names Instead of Principals (P86-S2)
 
 Since P85 (ADR 0240) recorded actors are principals: a Keycloak `sub`, or a technical account's integer

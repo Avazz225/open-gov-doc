@@ -250,6 +250,22 @@ export function FleetManagementView() {
                               ? t("fleetManagement.statusReachable")
                               : t("fleetManagement.statusUnreachable")
                             : t("fleetManagement.statusUnknown")}
+                          {/* P87-S3 (ADR 0241): the installation's replica
+                              health, named per type when something is off. */}
+                          {status?.replica_summary && (
+                            <div className="text-sm opacity-80">
+                              {status.replica_summary.alarms.length === 0
+                                ? t("fleetManagement.replicasOk")
+                                : status.replica_summary.alarms
+                                    .map((alarm) =>
+                                      t("fleetManagement.replicaAlarm", {
+                                        type: alarm.service_type,
+                                        state: t(`registry.states.${alarm.state}`),
+                                      })
+                                    )
+                                    .join(", ")}
+                            </div>
+                          )}
                         </td>
                         <td>
                           <div className="flex gap-2">

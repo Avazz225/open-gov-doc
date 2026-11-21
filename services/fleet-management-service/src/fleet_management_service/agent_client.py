@@ -4,7 +4,7 @@ address, so that an incoming delivery respects the same maintenance-mode/
 rate-limit logic as any other request (same principle as `workflow_service`'s
 ``callback_base_url`` to the Federation Hub, ADR 0028).
 
-Touches only `registry-service` (identity), `license-service` (license
+Touches only `registry-service` (identity, replica summary since P87-S3), `license-service` (license
 status/installation) and `config-service` (configuration import) - never
 `document-service`/`folder-service`. This is a literal concept requirement
 (3a: "However, this service has no access to document contents of individual
@@ -52,6 +52,16 @@ class FleetAgentClient:
         """``GET /api/license-service/license/status`` - likewise not gated
         on the target side (P9-S2/P13-S1)."""
         response = await self._client.get("/api/license-service/license/status")
+        response.raise_for_status()
+        return response.json()
+
+    async def get_replica_summary(self) -> dict:
+        """``GET /api/registry-service/replicas/summary`` (P87-S3, ADR 0241
+        Decision 5) - per-state counts of the installation's service types
+        plus the types in an alarm state. Gated on the target side by the
+        same `DMS_FLEET_AGENT_API_KEY` as the license upload; carries no
+        instance ids or addresses."""
+        response = await self._client.get("/api/registry-service/replicas/summary")
         response.raise_for_status()
         return response.json()
 

@@ -1529,11 +1529,71 @@ export interface ServiceInstance {
   healthy: boolean;
   registered_at: string;
   last_heartbeat_at: string;
+  status?: "active" | "draining";
 }
 
 export async function listServiceInstances(token: string): Promise<ServiceInstance[]> {
   const response = await request("registry-service", "instances", {}, token);
   return response.json();
+}
+
+// Expected replicas per service type (P87-S3, ADR 0241). Reading is open
+// like `GET /instances`; setting, resetting and forgetting need
+// `admin.monitoring`.
+export type ReplicaState = "ok" | "under" | "vanished" | "over" | "unmonitored";
+
+export interface ReplicaType {
+  service_type: string;
+  expected_min: number | null;
+  expected_max: number | null;
+  source: "admin" | "default" | "none";
+  reachable: number;
+  draining: number;
+  unreachable: number;
+  state: ReplicaState;
+  since: string | null;
+  pending_state: ReplicaState | null;
+}
+
+export async function listReplicas(token: string): Promise<ReplicaType[]> {
+  const response = await request("registry-service", "replicas", {}, token);
+  return response.json();
+}
+
+export async function setExpectedReplicas(
+  token: string,
+  serviceType: string,
+  expectation: { min_replicas: number; max_replicas: number | null }
+): Promise<ReplicaType> {
+  const response = await request(
+    "registry-service",
+    `replicas/${encodeURIComponent(serviceType)}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(expectation),
+    },
+    token
+  );
+  return response.json();
+}
+
+export async function resetExpectedReplicas(token: string, serviceType: string): Promise<void> {
+  await request(
+    "registry-service",
+    `replicas/${encodeURIComponent(serviceType)}`,
+    { method: "DELETE" },
+    token
+  );
+}
+
+export async function forgetServiceInstance(token: string, instanceId: string): Promise<void> {
+  await request(
+    "registry-service",
+    `instances/${encodeURIComponent(instanceId)}/forget`,
+    { method: "POST" },
+    token
+  );
 }
 
 // Superuser break-glass (4.6, P6-S5) - activation itself runs through the
@@ -2348,6 +2408,13 @@ export interface InstallationStatus {
   installation_id?: string | null;
   installation_display_name?: string | null;
   license_status?: Record<string, unknown> | null;
+  // P87-S3 (ADR 0241 Decision 5): per-state counts of the installation's
+  // service types plus the types in an alarm state; null when the
+  // installation's registry couldn't be read.
+  replica_summary?: {
+    counts: Record<string, number>;
+    alarms: { service_type: string; state: string; reachable: number }[];
+  } | null;
   error?: string | null;
 }
 

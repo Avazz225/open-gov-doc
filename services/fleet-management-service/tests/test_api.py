@@ -29,6 +29,16 @@ def _make_stub(*, license_installed: bool = True) -> FastAPI:
     def _license_status() -> dict:
         return {"installed": license_installed, "valid": license_installed}
 
+    @stub.get("/api/registry-service/replicas/summary")
+    def _replica_summary(authorization: str = Header(default="")) -> dict:
+        # P87-S3: gated like the license upload, by the fleet-agent key.
+        if authorization != f"Bearer {FLEET_KEY}":
+            raise HTTPException(status_code=403, detail="Fehlender/ungueltiger Fleet-Agent-Key")
+        return {
+            "counts": {"ok": 27, "under": 1, "vanished": 0, "over": 0, "unmonitored": 2},
+            "alarms": [{"service_type": "ocr-service", "state": "under", "reachable": 1}],
+        }
+
     @stub.post("/api/license-service/license")
     async def _upload_license(request: Request, authorization: str = Header(default="")) -> dict:
         if authorization != f"Bearer {FLEET_KEY}":
@@ -212,6 +222,20 @@ def test_get_installation_status_reachable(client):
     assert body["installation_id"] == "kunde-nord-001"
     assert body["installation_display_name"] == "Kunde Nord GmbH"
     assert body["license_status"]["installed"] is True
+    # P87-S3 (ADR 0241 Decision 5): the installation's replica summary.
+    assert body["replica_summary"]["counts"]["under"] == 1
+    assert body["replica_summary"]["alarms"][0]["service_type"] == "ocr-service"
+
+
+def test_replica_summary_missing_does_not_make_the_installation_unreachable(client):
+    """An installation whose registry refuses the summary (an older version,
+    or a different fleet-agent key there) stays reachable; only the summary
+    is absent (P87-S3)."""
+    created = _register(client, fleet_agent_api_key="some-other-key")
+    response = client.get(f"/installations/{created['id']}/status")
+    body = response.json()
+    assert body["reachable"] is True
+    assert body["replica_summary"] is None
 
 
 def test_get_installation_status_unreachable_reports_error_not_exception(client):

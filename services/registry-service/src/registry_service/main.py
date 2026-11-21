@@ -31,6 +31,7 @@ from registry_service.schemas import (
     InstanceOut,
     LicenseStatusForServiceOut,
     RegisterRequest,
+    ReplicaSummaryOut,
     ReplicaTypeOut,
 )
 from registry_service.settings import Settings
@@ -586,6 +587,31 @@ async def list_replicas(session: AsyncSession = Depends(get_session)) -> list[Re
     """Expected vs. actual per service type (P87-S2, ADR 0241). Readable
     like `GET /instances`: it describes the installation's topology."""
     return await replica_rows(session)
+
+
+@app.get("/replicas/summary", response_model=ReplicaSummaryOut)
+async def replica_summary(
+    authorization: str = Header(default="", alias="Authorization"),
+    session: AsyncSession = Depends(get_session),
+) -> ReplicaSummaryOut:
+    """fleet-management's per-installation replica health (P87-S3, ADR 0241
+    Decision 5). Public at the gateway (GET only), so it is gated here by
+    the installation-wide `DMS_FLEET_AGENT_API_KEY`, the same opt-in key
+    license-service checks for fleet license uploads: without a configured
+    key the path is closed."""
+    if not settings.fleet_agent_api_key or authorization != (
+        f"Bearer {settings.fleet_agent_api_key}"
+    ):
+        raise HTTPException(
+            status_code=403, detail="Fehlender oder ungültiger Fleet-Agent-Schlüssel"
+        )
+    rows = await replica_rows(session)
+    counts = {state: 0 for state in ("ok", "under", "vanished", "over", "unmonitored")}
+    for row in rows:
+        counts[row.state] += 1
+    return ReplicaSummaryOut(
+        counts=counts, alarms=[row for row in rows if row.state in replicas.ALARM_STATES]
+    )
 
 
 @app.put("/replicas/{service_type}", response_model=ReplicaTypeOut)

@@ -2,6 +2,56 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P87-S3, admin UI, alarms, fleet summary and hygiene. **Phase 87 is closed**
+([ADR 0241](docs/adr/0241-service-instance-replacement-and-expected-replicas.md)).
+
+**What changed:**
+- **admin-ui `RegistryOverview`:** one row per type, with:
+  - reachable plus draining/unreachable counts;
+  - the expected range and its source;
+  - a state badge (new neutral `.badge.neutral` for "Nicht überwacht") with `since` or a pending state.
+  - **Rows:** they expand to their instances. With `admin.monitoring` there is an expectation editor
+    (min/max, reset to default) and "Vergessen" on unreachable instances.
+  - **API helpers:** `listReplicas`, `setExpectedReplicas`, `resetExpectedReplicas`,
+    `forgetServiceInstance`.
+- **notification-service:** consumes `registry.replicas.under`/`.over`/`.restored` (own durables) and
+  mails the new `operations_admin_email` (`ops-admin@dms.local`). There are three template use cases.
+  - Mail only, a deviation from the ADR's "plus in-app", noted there.
+- **Fleet summary:**
+  - registry-service: `GET /replicas/summary` (fleet-agent key) and a gateway public route
+    `GET registry-service:replicas/summary`;
+  - fleet-management: `agent_client.get_replica_summary`, plus `replica_summary` in the installation
+    status (null on failure, never "unreachable");
+  - admin-ui's fleet view names the out-of-range types.
+- **Hygiene:**
+  - checked: the live fleet table is empty, the gateway tests deregister in `finally`, and the fleet e2e
+    removes its installation;
+  - the registry e2e moved to the grouped view.
+- **Docs:** admin-ui "Registry by Service Type", notification "Replica alarm consumers", the fleet
+  counterpart, the registry API and open points, and the ADR status.
+
+**Checks:**
+- registry-service 82, fleet-management 43, gateway 31, notification 111.
+- admin-ui vitest 324, `tsc`/`eslint` clean; e2e 37/37.
+- Live:
+  - an expectation of 2–3 for ocr-service committed `under` after about 2 min and mailed ops-admin;
+  - resetting it mailed "Wieder in Ordnung";
+  - audit has 279 `registry.instance.forgotten` events;
+  - no page overflow at 1400/390.
+- For the live check, `users-admin` (principal `2`) temporarily got `domain-admin-monitoring`; the
+  grant was revoked again.
+- **Phase-close regression:** 30/32 services green on the first run. rendering-service had 1 flaky
+  test (an asyncio event bound to another loop) and teamspace-service had 1 (a transient 500 from the
+  live permission-service during the run). Neither was touched this phase, and both passed
+  unchanged on rerun (103/103, 70/70), so 32/32. ruff shows only the 25 known findings (→ P91-S3).
+
+The stack was stopped afterwards.
+
+**Next session:** **P88-S1**, fleet groups, update plans and rollouts in admin-ui (the backend exists;
+it depends on P84-S4's operator identity).
+
+---
+
 **Last completed:** P87-S2, registry-service per
 [ADR 0241](docs/adr/0241-service-instance-replacement-and-expected-replicas.md).
 
@@ -47,7 +97,7 @@
 
 The stack was stopped afterwards.
 
-**Next session:** **P87-S3**, admin UI and hygiene:
+**Next session (at the time):** P87-S3. It was done next; see the entry above. Original note:, admin UI and hygiene:
 - registry view grouped by type: expected range and source, counts, state with `since`, an expectation
   editor, "Vergessen" on vanished entries, forgotten entries in the audit view;
 - notification-service: subscribe to `registry.replicas.*`, a new `operations_admin_email`, three

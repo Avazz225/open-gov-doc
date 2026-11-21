@@ -298,6 +298,14 @@ async def _fetch_status(installation: ManagedInstallation) -> InstallationStatus
     try:
         identity = await client.get_installation_identity()
         license_status = await client.get_license_status()
+        try:
+            replica_summary = await client.get_replica_summary()
+        except Exception as exc:  # noqa: BLE001 - optional detail (P87-S3)
+            logger.info(
+                "fleet_agent_replica_summary_unavailable",
+                extra={"installation_id": installation.id, "error": str(exc)},
+            )
+            replica_summary = None
         return InstallationStatusOut(
             id=installation.id,
             display_name=installation.display_name,
@@ -305,6 +313,7 @@ async def _fetch_status(installation: ManagedInstallation) -> InstallationStatus
             installation_id=identity.get("id"),
             installation_display_name=identity.get("display_name"),
             license_status=license_status,
+            replica_summary=replica_summary,
         )
     except Exception as exc:  # noqa: BLE001 - an unreachable installation
         # must not prevent the overview of the others (see schemas.py).

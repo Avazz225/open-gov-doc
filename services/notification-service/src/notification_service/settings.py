@@ -93,6 +93,10 @@ class Settings(BaseServiceSettings):
         # consumer.py.
         "storage.replication.failed_permanent",
         "storage.object_verify.mismatch",
+        # Replica alarms (P87-S3, ADR 0241) on the "registry" stream.
+        "registry.replicas.under",
+        "registry.replicas.over",
+        "registry.replicas.restored",
     ]
 
     # Recipient of the optional security notification on break-glass
@@ -110,6 +114,10 @@ class Settings(BaseServiceSettings):
     # fixed-address rationale as `security_officer_email`/
     # `license_admin_email` above.
     storage_admin_email: str = "storage-admin@dms.local"
+
+    # Recipient of registry-service's replica alarms (P87-S3, ADR 0241) -
+    # a service type is not a person, same fixed-address rationale.
+    operations_admin_email: str = "ops-admin@dms.local"
 
     # Retrofit P6-S6 (call authorization): recipient existence check for
     # `POST /notifications` against real auth-service accounts, via the

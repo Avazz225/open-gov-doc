@@ -54,6 +54,11 @@ class InstallationStatusOut(BaseModel):
     installation_id: str | None = None
     installation_display_name: str | None = None
     license_status: dict | None = None
+    # P87-S3 (ADR 0241 Decision 5): `{counts: {state: n}, alarms: [...]}`
+    # from the installation's registry. None when it couldn't be read (an
+    # older installation without the endpoint, or no fleet-agent key there)
+    # - that alone never makes the installation "unreachable".
+    replica_summary: dict | None = None
     error: str | None = None
 
 

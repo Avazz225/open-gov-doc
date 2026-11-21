@@ -203,3 +203,26 @@ reference.
     `over` → `under`) publishes the event of the new state. `unmonitored` → `ok` is silent.
   - **Live on the dev stack:** 287 registry rows (257 dead) shrank to 30 live ones on the first ticks
     after the upgrade, and the old registry-service instance itself went once its grace had passed.
+- **P87-S3 (done):**
+  - **admin-ui registry view grouped by type:**
+    - range and source, counts, state with `since` and a pending state;
+    - the expectation editor with "reset to default";
+    - "Vergessen" on unreachable instances, gated by `admin.monitoring` in the UI and on the server;
+    - a hint that every forget is an audit event.
+  - **notification-service** mails `operations_admin_email` for the three alarm events.
+    - **Deviation from Decision 4:** mail only, with no in-app notification. The recipient is an
+      address, not a user who reads the in-app list. That matches the storage alerts.
+  - **fleet-management:** the replica summary comes from a new `GET /replicas/summary` on
+    registry-service. It is gated by the installation's fleet-agent key and public at the gateway for
+    GET only. admin-ui's fleet view names the out-of-range types.
+  - **Test hygiene:** no change was needed.
+    - The live fleet table was empty.
+    - The gateway tests deregister their instances in `finally`, the fleet e2e removes its installation,
+      and the unit suites use the `dms_test` database.
+    - The registry's live debris came from restarts, and the forgetting rule now handles it.
+    - Only the registry e2e needed updating, to the grouped view.
+  - **Live:**
+    - setting 2–3 for ocr-service (1 reachable) committed `under` after the debounce and mailed
+      ops-admin;
+    - resetting it mailed "Wieder in Ordnung";
+    - audit holds 279 `registry.instance.forgotten` events.

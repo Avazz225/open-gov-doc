@@ -162,6 +162,27 @@ describe("FleetManagementView", () => {
     expect(getManagedInstallationsStatusMock).toHaveBeenCalledWith("test-operator-key");
   });
 
+  it("names an installation's service types that are out of their replica range (P87-S3)", async () => {
+    listManagedInstallationsMock.mockResolvedValue([INSTALLATION_A]);
+    getManagedInstallationsStatusMock.mockResolvedValue([
+      {
+        id: "inst-a",
+        display_name: "Standort A",
+        reachable: true,
+        replica_summary: {
+          counts: { ok: 27, under: 1, vanished: 0, over: 0, unmonitored: 2 },
+          alarms: [{ service_type: "ocr-service", state: "under", reachable: 1 }],
+        },
+      },
+    ]);
+
+    await loadWithKey();
+    await screen.findByText("Standort A");
+    fireEvent.click(screen.getByRole("button", { name: "Status aller Installationen prüfen" }));
+
+    expect(await screen.findByText("ocr-service: Zu wenige")).toBeInTheDocument();
+  });
+
   it("pushes a license token to an installation", async () => {
     listManagedInstallationsMock.mockResolvedValue([INSTALLATION_A]);
     pushInstallationLicenseMock.mockResolvedValue({ status: "ok" });

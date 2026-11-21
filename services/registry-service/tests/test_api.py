@@ -466,3 +466,32 @@ def test_forget_instance_is_admin_only_and_a_late_heartbeat_gets_404(
         ).status_code
         == 404
     )
+
+
+def test_replica_summary_is_closed_without_a_fleet_agent_key(client):
+    assert client.get("/replicas/summary").status_code == 403
+
+
+def test_replica_summary_counts_states_for_fleet_management(client, monitoring_admin_headers):
+    """P87-S3 (ADR 0241 Decision 5): per-state counts plus the alarm types,
+    behind the installation's fleet-agent key."""
+    service_type = f"type-{uuid.uuid4().hex[:8]}"
+    client.put(
+        f"/replicas/{service_type}", json={"min_replicas": 2}, headers=monitoring_admin_headers
+    )
+    registry_settings.fleet_agent_api_key = "fleet-key-for-test"
+    try:
+        assert (
+            client.get("/replicas/summary", headers={"Authorization": "Bearer wrong"}).status_code
+            == 403
+        )
+        response = client.get(
+            "/replicas/summary", headers={"Authorization": "Bearer fleet-key-for-test"}
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert set(body["counts"]) == {"ok", "under", "vanished", "over", "unmonitored"}
+        # The new expectation isn't committed yet (debounce), so no alarm.
+        assert service_type not in {a["service_type"] for a in body["alarms"]}
+    finally:
+        registry_settings.fleet_agent_api_key = None

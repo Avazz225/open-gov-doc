@@ -13,7 +13,9 @@
     "loadError": "Laden fehlgeschlagen",
     "deleteError": "Löschen fehlgeschlagen",
     "yes": "Ja",
-    "no": "Nein"
+    "no": "Nein",
+    "actionError": "Aktion fehlgeschlagen",
+    "cancel": "Abbrechen"
   },
   "theme": {
     "label": "Design",
@@ -488,7 +490,9 @@
     "delete": "Entfernen",
     "deleteError": "Entfernen fehlgeschlagen",
     "signedInAs": "Angemeldet als {name}",
-    "adminOperator": "Admin-Operator"
+    "adminOperator": "Admin-Operator",
+    "replicasOk": "Replikas im erwarteten Bereich",
+    "replicaAlarm": "{type}: {state}"
   },
   "delegationsAdmin": {
     "pageTitle": "Stellvertretungen",
@@ -954,7 +958,38 @@
     "status": "Status",
     "healthy": "Erreichbar",
     "down": "Nicht erreichbar",
-    "empty": "Keine Instanzen registriert."
+    "empty": "Keine Instanzen registriert.",
+    "hint": "Ersetzte Instanzen vergisst die Registry selbst; jedes Vergessen steht im Audit (registry.instance.forgotten).",
+    "reachable": "Instanzen",
+    "expected": "Erwartet",
+    "state": "Zustand",
+    "draining": "{count} im Drain",
+    "unreachable": "{count} nicht erreichbar",
+    "source": {
+      "admin": "Admin",
+      "default": "Standard"
+    },
+    "states": {
+      "ok": "OK",
+      "under": "Zu wenige",
+      "vanished": "Verschwunden",
+      "over": "Zu viele",
+      "unmonitored": "Nicht überwacht"
+    },
+    "since": "seit {date}",
+    "pending": "wechselt zu „{state}“",
+    "editExpectation": "Erwartung",
+    "expectationFormLabel": "Erwartete Replikas für {type}",
+    "min": "Mindestens",
+    "max": "Höchstens",
+    "maxPlaceholder": "offen",
+    "resetExpectation": "Auf Standard zurücksetzen",
+    "invalidRange": "Mindestens 1, und Höchstens darf nicht unter Mindestens liegen.",
+    "noInstances": "Keine Instanz registriert.",
+    "lastSeen": "Zuletzt gesehen",
+    "drainingBadge": "Im Drain",
+    "forget": "Vergessen",
+    "forgetConfirm": "Instanz {id} vergessen? Läuft sie doch noch, meldet sie sich beim nächsten Heartbeat neu an."
   },
   "license": {
     "pageTitle": "Lizenzstatus",

@@ -3837,6 +3837,25 @@ installations are never pruned.
   - **Notification on alarm.**
   - **Test hygiene:** suites that register instances or installations clean up after themselves, so the
     dev stack stops collecting debris.
+  - ✅ **Result:**
+    - **admin-ui registry grouped by type:** expected range and source, counts, state with `since` or
+      pending, an editor with reset, "Vergessen" on unreachable instances, and an audit hint. At 390px
+      the table scrolls in its container.
+    - **notification-service:** the three alarm events mail `operations_admin_email` (mail only, like
+      the storage alerts).
+    - **fleet:** replica summary from registry `GET /replicas/summary` (fleet-agent key, public GET at
+      the gateway); admin-ui's fleet view names the out-of-range types.
+    - **Hygiene:** nothing left to fix. The live fleet table was empty, the gateway tests deregister in
+      `finally`, and the fleet e2e removes its installation. Only the registry e2e moved to the
+      grouped view.
+    - **Live:** under → mail → reset → "Wieder in Ordnung" mail, and 279 forget events in the audit
+      trail.
+
+**Phase 87 result:** a restarted or rescaled service no longer leaves dead entries behind: the registry
+went from 287 rows (257 dead) to 30 live. A service that vanished for good keeps its entries until an
+admin forgets it. Each type can carry an expected range (from Helm or an admin) whose violations
+reach the operations mailbox once per debounced transition, and fleet-management shows each
+installation's replica health.
 
 ## Phase 88 — Admin UI Completions (user-requested)
 

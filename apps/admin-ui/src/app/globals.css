@@ -204,6 +204,13 @@
   color: var(--dms-danger);
 }
 
+/* A state that is neither good nor bad, e.g. a service type without an
+   expected replica count (P87-S3). */
+.badge.neutral {
+  background: var(--dms-hover-bg);
+  color: var(--dms-fg);
+}
+
 /* Geführter Objekttyp-Editor + Layout-Designer (P5b-S3, Konzept 2.2/2.2b) */
 
 .attribute-row {

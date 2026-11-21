@@ -130,6 +130,21 @@ EMAIL_TEMPLATE_USE_CASES: list[dict[str, object]] = [
         "description": "Prüfsummen-Abweichung bei Fixity-Prüfung (3.6, neu seit P71-S1)",
         "placeholders": ["object_key", "backend_ids"],
     },
+    {
+        "use_case": "registry.replicas.under",
+        "description": "Zu wenige oder keine Instanzen eines Service-Typs (P87-S3, ADR 0241)",
+        "placeholders": ["service_type", "reachable", "expected", "state"],
+    },
+    {
+        "use_case": "registry.replicas.over",
+        "description": "Zu viele Instanzen eines Service-Typs (P87-S3, ADR 0241)",
+        "placeholders": ["service_type", "reachable", "expected"],
+    },
+    {
+        "use_case": "registry.replicas.restored",
+        "description": "Service-Typ wieder im erwarteten Bereich (P87-S3, ADR 0241)",
+        "placeholders": ["service_type", "reachable", "expected", "previous_state"],
+    },
 ]
 
 

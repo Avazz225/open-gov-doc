@@ -1462,3 +1462,95 @@ async def test_storage_verify_mismatch_notifies_the_storage_admin(engine, settin
     assert notifications[0].channel == "email"
     assert notifications[0].recipient == settings.storage_admin_email
     assert "local" in notifications[0].body
+
+
+# --- Replica alarms (P87-S3, ADR 0241) ---------------------------------------
+
+
+async def _replica_mail(engine, settings, rate_limiter, event_type: str, payload: dict):
+    async def fake_publish(event_type, subject, payload, actor=None):
+        return None
+
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
+    event = Event(
+        event_type=event_type,
+        service_name="registry-service",
+        subject=payload["service_type"],
+        payload=payload,
+    )
+    await handler(event.to_bytes())
+    async with _session_factory(engine)() as session:
+        notifications = await repository.list_notifications(session)
+    assert len(notifications) == 1
+    assert notifications[0].channel == "email"
+    assert notifications[0].recipient == settings.operations_admin_email
+    return notifications[0]
+
+
+async def test_replicas_under_mails_the_operations_admin(engine, settings, rate_limiter):
+    mail = await _replica_mail(
+        engine,
+        settings,
+        rate_limiter,
+        "registry.replicas.under",
+        {
+            "service_type": "ocr-service",
+            "state": "under",
+            "previous_state": "ok",
+            "reachable": 1,
+            "min": 2,
+            "max": 3,
+        },
+    )
+    assert mail.subject == "Zu wenige Instanzen: ocr-service"
+    assert "1 erreichbare Instanz(en), erwartet sind 2 bis 3" in mail.body
+
+
+async def test_replicas_vanished_names_the_state(engine, settings, rate_limiter):
+    mail = await _replica_mail(
+        engine,
+        settings,
+        rate_limiter,
+        "registry.replicas.under",
+        {
+            "service_type": "ocr-service",
+            "state": "vanished",
+            "previous_state": "ok",
+            "reachable": 0,
+            "min": 2,
+            "max": None,
+        },
+    )
+    assert "keine erreichbare Instanz" in mail.body
+    assert "mindestens 2" in mail.body
+
+
+async def test_replicas_over_mails_the_operations_admin(engine, settings, rate_limiter):
+    over = await _replica_mail(
+        engine,
+        settings,
+        rate_limiter,
+        "registry.replicas.over",
+        {"service_type": "gateway-service", "state": "over", "reachable": 4, "min": 2, "max": 2},
+    )
+    assert over.subject == "Zu viele Instanzen: gateway-service"
+    assert "erwartet sind 2." in over.body
+
+
+async def test_replicas_restored_closes_the_loop(engine, settings, rate_limiter):
+    restored = await _replica_mail(
+        engine,
+        settings,
+        rate_limiter,
+        "registry.replicas.restored",
+        {
+            "service_type": "ocr-service",
+            "state": "ok",
+            "previous_state": "under",
+            "reachable": 2,
+            "min": 2,
+            "max": 3,
+        },
+    )
+    assert restored.subject == "Wieder in Ordnung: ocr-service"
+    assert "vorher: zu wenige Instanzen" in restored.body

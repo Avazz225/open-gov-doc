@@ -98,6 +98,10 @@ class Settings(BaseServiceSettings):
         # `proxy()`'s `method_route_key` for the matching rule: a bare
         # entry like the ones above stays method-agnostic/unchanged).
         "GET registry-service:installation/branding",
+        # Replica summary for fleet-management (P87-S3, ADR 0241 Decision 5)
+        # - like `license-service:license`, checked server-side against the
+        # installation's `DMS_FLEET_AGENT_API_KEY`; GET only.
+        "GET registry-service:replicas/summary",
     ]
 
     # Emergency shutdown (4.8, P6-S6): while maintenance mode is active,

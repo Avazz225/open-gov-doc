@@ -13,7 +13,9 @@
     "loadError": "Failed to load",
     "deleteError": "Failed to delete",
     "yes": "Yes",
-    "no": "No"
+    "no": "No",
+    "actionError": "Action failed",
+    "cancel": "Cancel"
   },
   "theme": {
     "label": "Theme",
@@ -488,7 +490,9 @@
     "delete": "Remove",
     "deleteError": "Removal failed",
     "signedInAs": "Signed in as {name}",
-    "adminOperator": "Admin operator"
+    "adminOperator": "Admin operator",
+    "replicasOk": "Replicas within the expected range",
+    "replicaAlarm": "{type}: {state}"
   },
   "delegationsAdmin": {
     "pageTitle": "Delegations",
@@ -954,7 +958,38 @@
     "status": "Status",
     "healthy": "Healthy",
     "down": "Down",
-    "empty": "No instances registered."
+    "empty": "No instances registered.",
+    "hint": "The registry forgets replaced instances by itself; each forget is in the audit trail (registry.instance.forgotten).",
+    "reachable": "Instances",
+    "expected": "Expected",
+    "state": "State",
+    "draining": "{count} draining",
+    "unreachable": "{count} unreachable",
+    "source": {
+      "admin": "admin",
+      "default": "default"
+    },
+    "states": {
+      "ok": "OK",
+      "under": "Too few",
+      "vanished": "Vanished",
+      "over": "Too many",
+      "unmonitored": "Not monitored"
+    },
+    "since": "since {date}",
+    "pending": "changing to \"{state}\"",
+    "editExpectation": "Expectation",
+    "expectationFormLabel": "Expected replicas for {type}",
+    "min": "At least",
+    "max": "At most",
+    "maxPlaceholder": "open",
+    "resetExpectation": "Reset to default",
+    "invalidRange": "At least 1, and at most must not be below at least.",
+    "noInstances": "No instance registered.",
+    "lastSeen": "Last seen",
+    "drainingBadge": "Draining",
+    "forget": "Forget",
+    "forgetConfirm": "Forget instance {id}? If it is still running, it registers again on its next heartbeat."
   },
   "license": {
     "pageTitle": "License status",

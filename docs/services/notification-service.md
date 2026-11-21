@@ -106,6 +106,23 @@ Six new branches of the same `consumer.py` handler, closing most of the "logs on
 - **`permission.approval.approved`**/**`permission.approval.rejected`** — second/third subjects on the `"permission"` stream (own durable names). `permission-service` has always published both unconditionally; the initiator of an approval request previously had no way to learn its outcome except by polling `GET /approval-requests/{id}` directly. Recipient = payload's `initiated_by`, in-app, payload also carries `action_type`/`approved_by`|`rejected_by`/`reason`/`request_id` (note: `request_id` comes from the payload, NOT `event.subject` — `permission-service`'s own `publish_event` never sets a subject, unlike `document-service`'s).
 - **`storage.replication.failed_permanent`**/**`storage.object_verify.mismatch`** — `storage-service`'s first ever event bus connection (a new `"storage"` stream; first subject needs no durable override, second one does). Permanently-failed replication and fixity mismatches were "logged instead of alerted" before this (see `docs/services/storage-service.md`) — an already-real operational pain point (30,410 orphaned rows once needed manual SQL cleanup). Neither payload carries any principal identity (an object key/backend id, not a person) — both go to the fixed `storage_admin_email` address, same pattern as `security_officer_email`/`license_admin_email`.
 
+## Replica alarm consumers (P87-S3, [ADR 0241](../adr/0241-service-instance-replacement-and-expected-replicas.md))
+
+`registry.replicas.under`, `.over` and `.restored` are on the `"registry"` stream, each with its own
+durable name (`notification-service-replicas-*`), because they share the stream with each other and
+with `registry.instance.*`.
+- **One mail per event** to the fixed `operations_admin_email` (`DMS_OPERATIONS_ADMIN_EMAIL`, default
+  `ops-admin@dms.local`). A service type is not a person, the same pattern as `storage_admin_email`.
+  registry-service already debounces and publishes each transition once, so there is no extra rate
+  limiting here.
+- **Subjects:** "Zu wenige Instanzen: <type>" (also for a vanished type, whose body then says "keine
+  erreichbare Instanz"), "Zu viele Instanzen: <type>" and "Wieder in Ordnung: <type>". `restored` closes
+  the loop.
+- **Placeholders** for configurable templates: `service_type`, `reachable`, `expected` ("2 bis 3",
+  "mindestens 2", a single number), `state`, `previous_state`.
+- **Live-verified:** an expectation of 2–3 for ocr-service (1 reachable) mailed ops-admin after the
+  debounce, and resetting it mailed "Wieder in Ordnung".
+
 ## Configurable email templates (Post-Roadmap Phase 30, [ADR 0111](../adr/0111-configurable-email-templates.md))
 
 `src/notification_service/templates.py` adds `EmailTemplate`-backed subject/body overrides for **most** `consumer.py` use cases (17 since P71-S1 added six more, see above — `virus_scan.completed` remains the one dispatch branch with no registered use case, a pre-existing gap this session didn't chase). `resolve_template(session, use_case, recipient)` tries an exact `(use_case, domain-of-recipient)` row, then the `(use_case, NULL)` catch-all row, then returns `None`. `consumer.py`'s new `_render_or_fallback()` helper wraps every handler's notification-send call: `None` → the handler's original hardcoded subject/body, unchanged from before this feature (guaranteeing zero behavior change for any installation that has never configured a template); a resolved template's `render_template()` (`str.format()`-based) either substitutes cleanly or raises `UnknownPlaceholderError` on a typo'd placeholder, in which case the fallback is used and a warning logged — a misconfigured template can never cause a broken/half-rendered email to actually be sent. Resolution runs **per notification, not per event**: an event producing both an in-app and an email notification (e.g. `workflow.task.escalated`) resolves separately per channel's own recipient, so a domain-specific override can legitimately change only the email wording, not the in-app one (which almost never carries an `"@"` recipient and therefore only ever matches a catch-all row). `GET /email-template-use-cases` exposes the fixed catalog (with each use case's known placeholders) for the admin-ui form (`apps/admin-ui/src/app/email-templates/`, `EmailTemplates.tsx`) - deliberately a closed catalog rather than free text, since it mirrors `consumer.py`'s actual fixed set of dispatch branches (see ADR 0111 for the full rationale against `ApprovalActionConfig`'s open free-text `action_type`).

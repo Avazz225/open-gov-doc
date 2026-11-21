@@ -38,6 +38,12 @@ _SHARED_STREAM_DURABLE_OVERRIDES: dict[str, str] = {
     # P71-S1: second subject on the new "storage" stream (first subject,
     # `storage.replication.failed_permanent`, needs no override).
     "storage.object_verify.mismatch": "notification-service-storage-verify-mismatch",
+    # P87-S3 (ADR 0241): the replica alarms share the "registry" stream with
+    # registry.instance.* (which only audit-service consumes) and with each
+    # other, so each gets its own durable name.
+    "registry.replicas.under": "notification-service-replicas-under",
+    "registry.replicas.over": "notification-service-replicas-over",
+    "registry.replicas.restored": "notification-service-replicas-restored",
 }
 
 
@@ -137,6 +143,11 @@ def make_handler(
             return
         if event.event_type == "storage.object_verify.mismatch":
             await _handle_storage_verify_mismatch(
+                session_factory, settings, publish_event, rate_limiter, event
+            )
+            return
+        if event.event_type in _REPLICA_FALLBACKS:
+            await _handle_replica_alarm(
                 session_factory, settings, publish_event, rate_limiter, event
             )
             return
@@ -1103,6 +1114,91 @@ async def _handle_storage_verify_mismatch(
             settings,
             channel="email",
             recipient=settings.storage_admin_email,
+            subject=subject,
+            body=body,
+            rate_limiter=rate_limiter,
+        )
+        await session.commit()
+        await publish_notification_result(publish_event, notification)
+
+
+_STATE_NAMES = {
+    "ok": "OK",
+    "under": "zu wenige Instanzen",
+    "vanished": "keine erreichbare Instanz",
+    "over": "zu viele Instanzen",
+    "unmonitored": "nicht überwacht",
+}
+
+# (subject, body) fallbacks per replica event; the body's placeholders are
+# filled from the event payload (P87-S3, ADR 0241).
+_REPLICA_FALLBACKS: dict[str, tuple[str, str]] = {
+    "registry.replicas.under": (
+        "Zu wenige Instanzen: {service_type}",
+        "{service_type} hat {reachable} erreichbare Instanz(en), erwartet sind {expected} "
+        "(Zustand: {state}).",
+    ),
+    "registry.replicas.over": (
+        "Zu viele Instanzen: {service_type}",
+        "{service_type} hat {reachable} erreichbare Instanzen, erwartet sind {expected}.",
+    ),
+    "registry.replicas.restored": (
+        "Wieder in Ordnung: {service_type}",
+        "{service_type} ist wieder im erwarteten Bereich: {reachable} erreichbare Instanz(en), "
+        "erwartet {expected} (vorher: {previous_state}).",
+    ),
+}
+
+
+def _expected_label(minimum: object, maximum: object) -> str:
+    if minimum is None:
+        return "keine Vorgabe"
+    if maximum is None:
+        return f"mindestens {minimum}"
+    if maximum == minimum:
+        return str(minimum)
+    return f"{minimum} bis {maximum}"
+
+
+async def _handle_replica_alarm(
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    publish_event: Callable[[str, str, dict], Awaitable[None]],
+    rate_limiter: RecipientRateLimiter,
+    event: Event,
+) -> None:
+    """Replica alarms from registry-service (P87-S3, ADR 0241 Decision 4):
+    too few, too many, and back in range. registry-service publishes each
+    debounced transition once, so every event here is one mail. The
+    recipient is the operations address - a service type is not a person,
+    same fixed-address pattern as `storage_admin_email`. `restored` closes
+    the loop, so a mailbox shows the alarm ended."""
+    data = event.payload
+    values = {
+        "service_type": str(data.get("service_type", event.subject)),
+        "reachable": str(data.get("reachable", "?")),
+        "expected": _expected_label(data.get("min"), data.get("max")),
+        "state": _STATE_NAMES.get(str(data.get("state")), str(data.get("state", "?"))),
+        "previous_state": _STATE_NAMES.get(
+            str(data.get("previous_state")), str(data.get("previous_state", "?"))
+        ),
+    }
+    fallback_subject, fallback_body = _REPLICA_FALLBACKS[event.event_type]
+
+    async with session_factory() as session:
+        subject, body = await _render_or_fallback(
+            session,
+            use_case=event.event_type,
+            recipient=settings.operations_admin_email,
+            fallback_subject=fallback_subject.format(**values),
+            fallback_body=fallback_body.format(**values),
+            **values,
+        )
+        notification = await repository.create_and_send(
+            session,
+            settings,
+            channel="email",
+            recipient=settings.operations_admin_email,
             subject=subject,
             body=body,
             rate_limiter=rate_limiter,
