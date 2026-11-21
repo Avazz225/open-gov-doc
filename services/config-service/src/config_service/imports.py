@@ -174,6 +174,86 @@ async def apply_sensor_config(client: MonitoringServiceClient, entry) -> Categor
     return result
 
 
+async def apply_alert_rules(client: MonitoringServiceClient, entries: list) -> CategoryResult:
+    """Upsert by `name` (P88-S7, ADR 0252). Rule names are not unique in
+    monitoring-service (the admin page doesn't enforce it); with duplicates,
+    the first one in list order is updated and the others are left alone. An
+    unchanged rule is `skipped`, not rewritten: monitoring-service restarts a
+    rule's streaks and rate on every save, and re-applying a package must not
+    reset alarms that are building up."""
+    result = CategoryResult()
+    existing: dict[str, dict] = {}
+    for rule in await client.list_alert_rules():
+        existing.setdefault(rule["name"], rule)
+    for entry in entries:
+        try:
+            payload = entry.model_dump()
+            match = existing.get(entry.name)
+            if match is None:
+                existing[entry.name] = await client.create_alert_rule(payload)
+                result.created += 1
+            elif all(match.get(k) == v for k, v in payload.items()):
+                result.skipped += 1
+            else:
+                await client.update_alert_rule(match["id"], payload)
+                result.updated += 1
+        except Exception as exc:  # noqa: BLE001
+            result.errors.append(f"{entry.name}: {_error_detail(exc)}")
+    return result
+
+
+async def apply_alert_downtime_windows(
+    client: MonitoringServiceClient, entries: list
+) -> CategoryResult:
+    """Upsert by `name`; `rule_names` are resolved to this installation's rule
+    ids, so `alert_rules` is applied first (see `apply_import`). A name with no
+    rule is an error for that window, not a silent narrowing: a window meant
+    for three rules that would cover two is not what the package said."""
+    result = CategoryResult()
+    rule_ids_by_name: dict[str, str] = {}
+    for rule in await client.list_alert_rules():
+        rule_ids_by_name.setdefault(rule["name"], rule["id"])
+    existing: dict[str, dict] = {}
+    for window in await client.list_downtime_windows():
+        existing.setdefault(window["name"], window)
+    for entry in entries:
+        try:
+            payload = entry.model_dump(mode="json")
+            rule_names = payload.pop("rule_names")
+            if rule_names is None:
+                payload["rule_ids"] = None
+            else:
+                missing = [n for n in rule_names if n not in rule_ids_by_name]
+                if missing:
+                    result.errors.append(f"{entry.name}: Alarmregel(n) unbekannt: {missing}")
+                    continue
+                payload["rule_ids"] = [rule_ids_by_name[n] for n in rule_names]
+            match = existing.get(entry.name)
+            if match is None:
+                await client.create_downtime_window(payload)
+                result.created += 1
+            else:
+                await client.update_downtime_window(match["id"], payload)
+                result.updated += 1
+        except Exception as exc:  # noqa: BLE001
+            result.errors.append(f"{entry.name}: {_error_detail(exc)}")
+    return result
+
+
+def _error_detail(exc: Exception) -> str:
+    """monitoring-service answers an unusable rule with 422 and a German
+    `detail`; surfacing that beats httpx's generic status line."""
+    response = getattr(exc, "response", None)
+    if response is not None:
+        try:
+            detail = response.json().get("detail")
+        except Exception:  # noqa: BLE001 - not JSON, fall back to the status line
+            detail = None
+        if detail:
+            return f"{response.status_code}: {detail}"
+    return str(exc)
+
+
 async def apply_federation_config(client: WorkflowServiceClient, entry) -> CategoryResult:
     result = CategoryResult()
     try:
@@ -418,5 +498,12 @@ async def apply_import(
     if "deletion_reason_catalogs" in categories and doc.deletion_reason_catalogs is not None:
         results["deletion_reason_catalogs"] = await apply_deletion_reason_catalogs(
             document_client, folder_client, doc.deletion_reason_catalogs
+        )
+    # `alert_rules` BEFORE `alert_downtime_windows`: windows name their rules.
+    if "alert_rules" in categories and doc.alert_rules is not None:
+        results["alert_rules"] = await apply_alert_rules(monitoring_client, doc.alert_rules)
+    if "alert_downtime_windows" in categories and doc.alert_downtime_windows is not None:
+        results["alert_downtime_windows"] = await apply_alert_downtime_windows(
+            monitoring_client, doc.alert_downtime_windows
         )
     return results

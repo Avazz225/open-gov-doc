@@ -4019,6 +4019,13 @@ installation's replica health.
     (`monitoring.alert.level{rule,sensor}`, 0 ok, 1 warning, 2 error), and the dashboard gets an
     "Alarme" row (state timeline). OG Doc stays the single evaluation engine; the Prometheus
     rule-file export stays an opt-in for installations that want Prometheus to alert instead.
+  - ✅ **Result:**
+    - Two list categories `alert_rules`/`alert_downtime_windows` instead of one bundle (per-rule
+      compare); unchanged rules are skipped so streaks survive a re-import; windows name their rules.
+    - The package has 19 rules plus a disabled example window; a pure test checks it.
+    - Grafana gets `monitoring_alert_level` (-1/0/1/2) and an "Alarme" row at the top of the sensor
+      dashboard.
+    - **Live:** 19 rules imported, re-import skipped all; timeline in Grafana.
 
 **Phase 88 result:** admin-ui gained the surfaces whose backends existed without a UI, plus what the
 sessions found along the way:
@@ -4029,6 +4036,7 @@ sessions found along the way:
   - a catalog grown from 13 to 49 sensors after the comparison with an external reference system,
     with default-off expensive breakdowns;
   - alerting with thresholds, repeat counts, downtime windows and operations mail (ADR 0245).
+  - a default alert package and the alarm levels in Grafana (P88-S7, ADR 0252, after the close).
 - **Object types:** guided rule editors. Two silent losses of status transitions were fixed.
 - **Mail:** mailboxes in a table with encrypted credentials and an admin page (ADR 0244).
 - **Users:** realm-role assignment.

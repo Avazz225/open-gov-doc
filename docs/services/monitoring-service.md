@@ -28,7 +28,7 @@
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/metrics` | Scrape proxy — the only target Prometheus actually queries. |
+| `GET` | `/metrics` | Scrape proxy — the only target Prometheus actually queries. Since P88-S7 also `monitoring_alert_level{rule,sensor}`, see "Alarm levels for Grafana". |
 | `GET` | `/sensors` | Aggregated sensor catalog (name/group/cost/description/service types/activation status), ungated. |
 | `GET` | `/sensor-config` | Resolved activation configuration (`global_default`, `overrides`), ungated — poll target for `dms_metrics_client.SensorConfigClient`. |
 | `PUT` | `/sensor-config/global` | Set the global baseline setting (`admin.monitoring` or activated superuser), audited. |
@@ -119,6 +119,17 @@ allowed), and `rule_ids` (null = all).
   `promtool check rules`.
 
 **UI (P88-S6):** admin-ui's sensors page, see `docs/services/admin-ui.md` "Sensor Alerts". For its rule editor, `POST /alert-rules/preview` evaluates a draft against a fresh scrape (value, would-be level, matching series without `instance`; `reason` `no_samples`/`rate_needs_history`), ungated like `GET /metrics`.
+
+## Alarm levels for Grafana (P88-S7, [ADR 0252](../adr/0252-alert-rules-as-config-category-default-package-and-grafana.md))
+
+`GET /metrics` appends a gauge `monitoring_alert_level{rule,sensor}` per **enabled** rule: `-1` unknown
+(also before the first evaluation), `0` ok, `1` warning, `2` error.
+- It is read from `alert_state` on every scrape, not cached: only the replica holding the advisory lock
+  evaluates, so another replica's memory would lag.
+- Like `monitoring_scrape_failures_total` it is always on and outside the sensor catalog.
+- Grafana's sensor dashboard shows it as the "Alarme" row. OG Doc stays the only engine; Grafana only
+  draws the levels. The rules themselves are kept on the admin page or in a configuration package
+  (`alert_rules` in config-service, default package `packages/monitoring-defaults`).
 
 ## Limitations of this stage
 

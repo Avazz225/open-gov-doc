@@ -367,6 +367,39 @@ class MonitoringServiceClient:
         response.raise_for_status()
         return response.json()
 
+    # Alerting (P88-S7, ADR 0252) - writes need `admin.monitoring`, which the
+    # same principal already holds for the sensor configuration above.
+
+    async def list_alert_rules(self) -> list[dict]:
+        response = await self._client.get("/alert-rules")
+        response.raise_for_status()
+        return response.json()
+
+    async def create_alert_rule(self, payload: dict) -> dict:
+        response = await self._client.post("/alert-rules", json=payload)
+        response.raise_for_status()
+        return response.json()
+
+    async def update_alert_rule(self, rule_id: str, payload: dict) -> dict:
+        response = await self._client.put(f"/alert-rules/{rule_id}", json=payload)
+        response.raise_for_status()
+        return response.json()
+
+    async def list_downtime_windows(self) -> list[dict]:
+        response = await self._client.get("/downtime-windows")
+        response.raise_for_status()
+        return response.json()
+
+    async def create_downtime_window(self, payload: dict) -> dict:
+        response = await self._client.post("/downtime-windows", json=payload)
+        response.raise_for_status()
+        return response.json()
+
+    async def update_downtime_window(self, window_id: str, payload: dict) -> dict:
+        response = await self._client.put(f"/downtime-windows/{window_id}", json=payload)
+        response.raise_for_status()
+        return response.json()
+
 
 class RegistryServiceClient:
     """P69-S2/ADR 0201: `branding_config` category, `registry-service`'s

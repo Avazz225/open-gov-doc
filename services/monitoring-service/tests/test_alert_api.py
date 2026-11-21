@@ -205,3 +205,32 @@ def test_preview_shows_value_level_and_matching_series(client, monkeypatch):
         "/alert-rules/preview", json={**RULE, "aggregation": "rate_per_minute"}
     ).json()
     assert rate["reason"] == "rate_needs_history"
+
+
+def _alert_levels(client) -> dict[str, float]:
+    body = client.get("/metrics").text
+    families = {f.name: f for f in text_string_to_metric_families(body)}
+    return {s.labels["rule"]: s.value for s in families["monitoring_alert_level"].samples}
+
+
+def test_metrics_expose_each_enabled_rules_level_for_grafana(client, published):
+    """P88-S7 (ADR 0252): the evaluated level as `monitoring_alert_level`."""
+    client.post("/alert-rules", json={**RULE, "error_repeat": 1}, headers=ADMIN)
+    off = client.post(
+        "/alert-rules", json={**RULE, "name": "Aus", "enabled": False}, headers=ADMIN
+    ).json()
+    assert _alert_levels(client) == {"Speicher voll": -1}  # not yet evaluated, disabled absent
+    tick(client, 85)
+    assert _alert_levels(client) == {"Speicher voll": 1}
+    tick(client, 99)
+    assert _alert_levels(client) == {"Speicher voll": 2}
+    tick(client, 10)
+    assert _alert_levels(client) == {"Speicher voll": 0}
+    sample = next(
+        s
+        for f in text_string_to_metric_families(client.get("/metrics").text)
+        if f.name == "monitoring_alert_level"
+        for s in f.samples
+    )
+    assert sample.labels == {"rule": "Speicher voll", "sensor": "storage.target.used_percent"}
+    assert off["enabled"] is False

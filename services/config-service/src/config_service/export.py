@@ -14,6 +14,8 @@ from config_service.clients import (
 )
 from config_service.schemas import (
     AdGroupMappingsExport,
+    AlertDowntimeWindowExport,
+    AlertRuleExport,
     ApprovalConfigExport,
     BrandingConfigExport,
     BusinessCalendarExport,
@@ -133,6 +135,40 @@ async def export_sensor_config(client: MonitoringServiceClient) -> SensorConfigE
     return SensorConfigExport(
         global_default=config["global_default"], overrides=config["overrides"]
     )
+
+
+async def export_alert_rules(client: MonitoringServiceClient) -> list[AlertRuleExport]:
+    fields = AlertRuleExport.model_fields
+    return [
+        AlertRuleExport(**{k: v for k, v in rule.items() if k in fields})
+        for rule in await client.list_alert_rules()
+    ]
+
+
+async def export_alert_downtime_windows(
+    client: MonitoringServiceClient,
+) -> list[AlertDowntimeWindowExport]:
+    """Rule ids are translated to rule names (see `AlertDowntimeWindowExport`);
+    an id with no rule left behind is dropped, it would match nothing."""
+    names_by_id = {rule["id"]: rule["name"] for rule in await client.list_alert_rules()}
+    result = []
+    for window in await client.list_downtime_windows():
+        rule_ids = window.get("rule_ids")
+        result.append(
+            AlertDowntimeWindowExport(
+                name=window["name"],
+                starts_at=window.get("starts_at"),
+                ends_at=window.get("ends_at"),
+                weekdays=window.get("weekdays"),
+                daily_start=window.get("daily_start"),
+                daily_end=window.get("daily_end"),
+                rule_names=None
+                if rule_ids is None
+                else [names_by_id[i] for i in rule_ids if i in names_by_id],
+                enabled=window.get("enabled", True),
+            )
+        )
+    return result
 
 
 async def export_federation_config(client: WorkflowServiceClient) -> FederationConfigExport:
@@ -259,4 +295,8 @@ async def build_export(
         doc.org_units = await export_org_units(permission_client)
     if "org_unit_role_links" in categories:
         doc.org_unit_role_links = await export_org_unit_role_links(permission_client)
+    if "alert_rules" in categories:
+        doc.alert_rules = await export_alert_rules(monitoring_client)
+    if "alert_downtime_windows" in categories:
+        doc.alert_downtime_windows = await export_alert_downtime_windows(monitoring_client)
     return doc

@@ -192,6 +192,16 @@ def notification_due(level: str, notified_level: str | None) -> str | None:
     return None
 
 
+# P88-S7 (ADR 0252): the level as a number for `monitoring_alert_level`, so
+# Grafana can draw a state timeline. `unknown` is -1, not missing, so a rule
+# whose sensor went silent is visible as such instead of as a gap.
+LEVEL_VALUES = {"unknown": -1, "ok": 0, "warning": 1, "error": 2}
+
+
+def level_value(level: str | None) -> int:
+    return LEVEL_VALUES.get(level or "unknown", -1)
+
+
 def _parse_time(value: str) -> time:
     hours, minutes = value.split(":")
     return time(int(hours), int(minutes))

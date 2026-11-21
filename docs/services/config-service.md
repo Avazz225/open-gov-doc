@@ -69,7 +69,7 @@ Since `config-service` otherwise has no own event bus connection, the consumer r
 `BaseServiceSettings` falls back to `nats://localhost:4222`, which is unreachable in the container
 (a bug found by P17-S3 itself, see [ADR 0060](../adr/0060-egov-paket-teil-2-vier-augen-luecken-und-umlaufmappen-prozessvorlagen.md)).
 
-## The fourteen categories
+## The sixteen categories
 
 | Category | Owner service | Natural key (upsert) | Special notes |
 |---|---|---|---|
@@ -87,6 +87,8 @@ Since `config-service` otherwise has no own event bus connection, the consumer r
 | `deletion_reason_catalogs` | document-service AND folder-service | — (singleton) | **Since P80-S2** ([ADR 0233](../adr/0233-config-service-org-unit-role-and-deletion-reason-categories.md)): the admin-curated deletion-reason catalog (ADR 0112). The only singleton category fanned out to **two** owner services (the catalog is duplicated per-service). The only category with **additive-merge** semantics on import instead of replace — a repeated import extends an installation's own existing catalog, it never truncates it. New bootstrap dependency: `config-service` needs `admin.retention` (`domain-admin-retention`) to write `PUT /retention-config` on both owners |
 | `org_units` | permission-service | `name` | **Since P80-S2** (ADR 0233): upserts a `Group` with `is_org_unit=True` (ADR 0143) — promotes an existing group of the same name if needed, never demotes one |
 | `org_unit_role_links` | permission-service | `org_unit_name` (compare only — see caveat below) | **Since P80-S2** (ADR 0233): grants a role to every member of an org-unit group via the already-existing group-based `RoleAssignment(principal_type="group", ...)` mechanism (Phase 19's `"everyone"` group uses the same resolution) — no new authorization logic. Depends on `org_units`/`roles` already existing; applied after both in `apply_import`. Idempotent (checked against `GET /role-assignments` first, since the unique constraint would otherwise reject a repeated import) |
+| `alert_rules` | monitoring-service | `name` | **Since P88-S7** ([ADR 0252](../adr/0252-alert-rules-as-config-category-default-package-and-grafana.md)): threshold rules on sensors (ADR 0245), without their evaluated state. An unchanged rule is `skipped`, not saved again, because a save restarts the rule's streaks and rate and re-applying a package must not reset alarms that are building up. Rule names aren't unique in monitoring-service; with duplicates the first one is matched. monitoring-service's `422` detail is passed through into `errors` |
+| `alert_downtime_windows` | monitoring-service | `name` | **Since P88-S7** (ADR 0252): downtime windows. Rules are named by `rule_names` (ids are local to an installation) and resolved on import, so this category is applied after `alert_rules`. A name with no rule is an error for that window, not a silent narrowing; `null` means every rule |
 
 "UI customizations" (branding/theming) is no longer missing — closed at P69-S2 by the `branding_config`
 category above. AD group mapping rules WERE also in this "not included" list until Post-Roadmap Phase 39
@@ -278,7 +280,11 @@ read-only/diagnostic, changes nothing on either side (7.5). See
 `normalize()`/`resolve_pattern()`, `diff_list_category()`/`diff_singleton_category()` each for
 only-in-base/only-in-compare/identical/differing, the ignore-regex example from 7.5 rebuilt verbatim
 (numeric prefixes, content comparison remains complete regardless), plus
-`compare_documents()` across all eleven categories. Since **P17-S1**: `diff_string_list_category()`
+`compare_documents()` across all eleven categories.
+
+`test_packages.py` (P88-S7, pure): the shipped `packages/monitoring-defaults/config.json` parses as a
+`ConfigDocument`, every rule would pass monitoring-service's validation (thresholds ascending, a known
+aggregation, repeats ≥ 1), and rule names are unique. Since **P17-S1**: `diff_string_list_category()`
 (new third diff mode for the pure `list[str]` category `realm_roles`) individually as well as as part
 of `compare_documents()`.
 
@@ -296,6 +302,9 @@ four-eyes-principle config upsert, a full export→re-import round trip, plus th
 service's own live export), with real content differences, with ignore-regex matching. Since
 **P17-S3**: `status="applied"` by default, the `config.import` four-eyes gate returns
 `pending_approval` and imports nothing (yet) (`test_import_with_approval_required_defers_execution`).
+Since **P88-S7**: `alert_rules`/`alert_downtime_windows` create → skip (unchanged) → update, with an
+export round trip translating window rule ids to names, and an unknown rule name or an invalid rule
+reported per entry.
 `test_consumer.py` (new) — pure unit test of `consumer.make_handler` with a fake `apply_import`
 callback instead of real DB/downstream calls: an approved `config.import` correctly
 invokes the callback, foreign action types are ignored, a missing `document` in the payload is

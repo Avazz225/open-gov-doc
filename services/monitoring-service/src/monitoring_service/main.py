@@ -29,6 +29,7 @@ from monitoring_service.schemas import (
 )
 from monitoring_service.settings import Settings
 from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, Counter, generate_latest
+from prometheus_client.core import GaugeMetricFamily
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -239,8 +240,40 @@ async def get_metrics() -> Response:
 
     combined_registry = CollectorRegistry()
     combined_registry.register(_StaticMetricsCollector(merged))
-    body = generate_latest(combined_registry) + generate_latest(app.state.own_registry)
+    level_registry = CollectorRegistry()
+    level_registry.register(_StaticMetricsCollector([await _alert_level_family()]))
+    body = (
+        generate_latest(combined_registry)
+        + generate_latest(app.state.own_registry)
+        + generate_latest(level_registry)
+    )
     return Response(content=body, media_type=CONTENT_TYPE_LATEST)
+
+
+async def _alert_level_family() -> GaugeMetricFamily:
+    """`monitoring_alert_level{rule,sensor}` (P88-S7, ADR 0252): each enabled
+    rule's evaluated level (-1 unknown, 0 ok, 1 warning, 2 error), so Grafana
+    shows the same alarm states as the admin page without a second engine.
+    Read from the database on every scrape rather than cached in memory: only
+    the replica holding the advisory lock evaluates (ADR 0245 Decision 4), so
+    another replica's memory would lag. Always on and outside the sensor
+    catalog, like `monitoring_scrape_failures_total`."""
+    family = GaugeMetricFamily(
+        "monitoring_alert_level",
+        "Ausgewerteter Alarmzustand je Regel (-1 unbekannt, 0 ok, 1 Warnung, 2 Fehler)",
+        labels=["rule", "sensor"],
+    )
+    async with app.state.session_factory() as session:
+        states = await alert_store.states_by_rule(session)
+        rules = await alert_store.list_rules(session)
+    for rule in rules:
+        if not rule.enabled:
+            continue
+        state = states.get(rule.id)
+        family.add_metric(
+            [rule.name, rule.sensor], alerting.level_value(state.level if state else None)
+        )
+    return family
 
 
 @app.get("/sensors", response_model=list[SensorOut])

@@ -210,6 +210,14 @@ point, not mandatory use)." Implemented as:
   (`registry.instances.active_total`, `registry.service.heartbeat.miss`,
   `document.upload.duration`, `document.count.active_total`) plus the always-active
   `monitoring_scrape_failures_total` counter and the `up{job="monitoring-service"}` target status.
+  - **"Alarme" row at the top (P88-S7, ADR 0252):** a state timeline per alert rule plus counts of rules
+    in error, in warning and without a value, from `monitoring_alert_level` (-1 unknown, 0 ok,
+    1 warning, 2 error). The alarms are not defined in Grafana: OG Doc evaluates them (ADR 0245) and
+    Grafana only draws the result, so the admin page, the mails and Grafana always agree. Installations
+    that want Prometheus/Alertmanager to alert instead take `GET /alert-rules/prometheus` (opt-in).
+  - **Default rules:** `packages/monitoring-defaults/config.json` (19 rules and a disabled example
+    downtime window). It is imported deliberately, like any configuration package, and not seeded on
+    start.
 - **`infra/grafana/dashboards/dms-service-http-overview.json`** — full-rollout
   dashboard for the generic `http.requests`/`http.request.duration_seconds`
   sensors: a `$service` template variable (populated from

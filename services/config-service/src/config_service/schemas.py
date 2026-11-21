@@ -24,6 +24,8 @@ CATEGORIES = (
     "deletion_reason_catalogs",
     "org_units",
     "org_unit_role_links",
+    "alert_rules",
+    "alert_downtime_windows",
 )
 
 
@@ -98,6 +100,41 @@ class ApprovalConfigExport(BaseModel):
 class SensorConfigExport(BaseModel):
     global_default: bool
     overrides: dict[str, bool]
+
+
+class AlertRuleExport(BaseModel):
+    """Threshold rule on a sensor (ADR 0245; exportable since P88-S7, ADR
+    0252). Mirrors `monitoring_service.schemas.AlertRuleIn` - upsert by
+    `name`. The evaluated state (level, streaks) is runtime data of the
+    installation and is never exported."""
+
+    name: str
+    sensor: str
+    label_filter: dict[str, str] = {}
+    aggregation: str = "max"
+    min_error: float | None = None
+    min_warning: float | None = None
+    max_warning: float | None = None
+    max_error: float | None = None
+    warning_repeat: int = 1
+    error_repeat: int = 1
+    enabled: bool = True
+    description: str | None = None
+
+
+class AlertDowntimeWindowExport(BaseModel):
+    """Downtime window (ADR 0245 Decision 5) - upsert by `name`. Rules are
+    referenced by NAME (`rule_names`), not by id: ids are local to an
+    installation, names travel. `None` = every rule, as in monitoring-service."""
+
+    name: str
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+    weekdays: list[int] | None = None
+    daily_start: str | None = None
+    daily_end: str | None = None
+    rule_names: list[str] | None = None
+    enabled: bool = True
 
 
 class FederationConfigExport(BaseModel):
@@ -227,6 +264,10 @@ class ConfigDocument(BaseModel):
     deletion_reason_catalogs: DeletionReasonCatalogExport | None = None
     org_units: list[OrgUnitExport] | None = None
     org_unit_role_links: list[OrgUnitRoleLinkExport] | None = None
+    # P88-S7 (ADR 0252): alerting travels in packages, e.g. the shipped
+    # `packages/monitoring-defaults`.
+    alert_rules: list[AlertRuleExport] | None = None
+    alert_downtime_windows: list[AlertDowntimeWindowExport] | None = None
 
 
 class CategoryResult(BaseModel):

@@ -2,6 +2,51 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P88-S7, the default alert package and alarm levels in Grafana
+([ADR 0252](docs/adr/0252-alert-rules-as-config-category-default-package-and-grafana.md)), run after
+P89-S1 as agreed.
+
+**What changed:**
+- **config-service:** two new list categories (16 in total), with export, import, compare and client
+  methods.
+  - **`alert_rules`:** upsert by name. An unchanged rule is `skipped`, because a save would restart its
+    streaks. monitoring-service's 422 detail is passed through.
+  - **`alert_downtime_windows`:** rules named by `rule_names`, resolved after `alert_rules`. An unknown
+    name is an error for that window.
+  - Two categories rather than the planned single bundle, so compare diffs per rule.
+- **`packages/monitoring-defaults/`:** `config.json` with 19 rules on default-on sensors plus a disabled
+  example window, and a README with the threshold table. Imported deliberately, not seeded.
+- **monitoring-service:** `GET /metrics` appends `monitoring_alert_level{rule,sensor}` (-1 unknown,
+  0 ok, 1 warning, 2 error) per enabled rule.
+  - It is read from the DB on every scrape, because only the lock-holding replica evaluates.
+  - Always on, outside the catalog, like `monitoring_scrape_failures_total`.
+- **Grafana `dms-sensor-overview.json`:** an "Alarme" row at the top with a state timeline per rule and
+  counters for error, warning and no value. The other panels moved down by 18.
+- **The user's question:** the alarms are inherited from OG Doc, not created again in Grafana.
+  Prometheus/Alertmanager alerting stays opt-in via `GET /alert-rules/prometheus`.
+- **Docs:** config-service (categories, tests), monitoring-service ("Alarm levels for Grafana"),
+  operations/monitoring.md, ADR 0252, and an ADR 0245 note (the config-export point is closed).
+
+**Checks:**
+- monitoring-service 46 (+1: the level gauge through ok/warning/error, unknown before the first tick,
+  disabled rules absent).
+- config-service 62 (+3 pure package checks, +2 live import tests: create/skip/update, the
+  window id↔name round trip, unknown rule name and invalid rule per entry).
+- ruff clean for both services.
+- **Live:**
+  - Containers rebuilt. Importing the package (temporary `domain-admin-config` grant, revoked) gave 19
+    created and one window; a second import skipped all 19.
+  - After a tick: 6 unknown (each with a clear reason), 2 warning (virus findings, the OCR review queue
+    over 500), 2 error (the earlier example rule "Viele OCR-Prüffälle" and "Suchindex-Fehler": the dev
+    search-service fails indexing at more than 10 per minute).
+  - Grafana reloaded the dashboard itself; the screenshot showed the timeline and counters.
+- **Left in place:** the package's 19 rules and the example window on the dev stack, so they are visible
+  on the sensors page and in Grafana. Delete them on the sensors page if they aren't wanted.
+
+**Next session:** P89-S2: archival-service destruction pipeline, deletion register, admin visibility.
+
+---
+
 **Last completed:** P89-S1, case destruction, case-service part (build of
 [ADR 0235](docs/adr/0235-case-service-destruction-scheduling-scoping.md)).
 

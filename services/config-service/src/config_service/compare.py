@@ -27,6 +27,8 @@ _LIST_IDENTITY_FIELD = {
     # tradeoff every other identity field here makes, and the primary use
     # case (one org unit, one role) is unaffected.
     "org_unit_role_links": "org_unit_name",
+    "alert_rules": "name",
+    "alert_downtime_windows": "name",
 }
 SINGLETON_CATEGORIES = (
     "sensor_config",

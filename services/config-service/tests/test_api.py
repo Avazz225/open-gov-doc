@@ -22,6 +22,7 @@ AUTH_SERVICE_URL = os.environ.get("TEST_AUTH_SERVICE_URL", "http://localhost:800
 REGISTRY_SERVICE_URL = os.environ.get("TEST_REGISTRY_SERVICE_URL", "http://localhost:8001")
 DOCUMENT_SERVICE_URL = os.environ.get("TEST_DOCUMENT_SERVICE_URL", "http://localhost:8006")
 FOLDER_SERVICE_URL = os.environ.get("TEST_FOLDER_SERVICE_URL", "http://localhost:8008")
+MONITORING_SERVICE_URL = os.environ.get("TEST_MONITORING_SERVICE_URL", "http://localhost:8026")
 
 
 def _client() -> httpx.Client:
@@ -980,3 +981,98 @@ def test_import_org_unit_role_link_grants_role_to_group(authorized_principal):
         permission_client.delete(
             f"/groups/{group['id']}", headers={"X-DMS-Principal": "config-service"}
         )
+
+
+def _monitoring_cleanup(rule_prefix: str) -> None:
+    """Removes the rules/windows a test created - as `config-service`, the
+    principal that holds `admin.monitoring` by bootstrap."""
+    headers = {"X-DMS-Principal": "config-service"}
+    with httpx.Client(base_url=MONITORING_SERVICE_URL, headers=headers) as client:
+        for window in client.get("/downtime-windows").json():
+            if window["name"].startswith(rule_prefix):
+                client.delete(f"/downtime-windows/{window['id']}")
+        for rule in client.get("/alert-rules").json():
+            if rule["name"].startswith(rule_prefix):
+                client.delete(f"/alert-rules/{rule['id']}")
+
+
+def test_import_alert_rules_and_windows_upsert_by_name_and_roundtrip(authorized_principal):
+    """P88-S7 (ADR 0252): rules upsert by name and skip when unchanged (a save
+    restarts streaks); windows name their rules, resolved to local ids."""
+    prefix = f"config-import-alert-{uuid.uuid4().hex[:8]}"
+    rule = {
+        "name": f"{prefix} Speicher",
+        "sensor": "storage.target.used_percent",
+        "aggregation": "max",
+        "max_warning": 80,
+        "max_error": 95,
+        "error_repeat": 2,
+    }
+    window = {
+        "name": f"{prefix} Nacht",
+        "weekdays": [5, 6],
+        "daily_start": "22:00",
+        "daily_end": "06:00",
+        "rule_names": [rule["name"]],
+    }
+    payload = {
+        "schema_version": "1.0",
+        "exported_at": "2026-01-01T00:00:00Z",
+        "alert_rules": [rule],
+        "alert_downtime_windows": [window],
+    }
+    headers = {"X-DMS-Principal": authorized_principal}
+    try:
+        with _client() as client:
+            results = client.post("/config/import", json=payload, headers=headers).json()["result"][
+                "results"
+            ]
+            assert results["alert_rules"]["created"] == 1
+            assert results["alert_downtime_windows"]["created"] == 1
+
+            again = client.post("/config/import", json=payload, headers=headers).json()
+            assert again["result"]["results"]["alert_rules"]["skipped"] == 1
+            assert again["result"]["results"]["alert_downtime_windows"]["updated"] == 1
+
+            rule["max_warning"] = 85
+            changed = client.post("/config/import", json=payload, headers=headers).json()
+            assert changed["result"]["results"]["alert_rules"]["updated"] == 1
+
+            exported = client.get(
+                "/config/export",
+                params=[("categories", "alert_rules"), ("categories", "alert_downtime_windows")],
+            ).json()
+        ours = next(r for r in exported["alert_rules"] if r["name"] == rule["name"])
+        assert (ours["max_warning"], ours["error_repeat"]) == (85, 2)
+        ours_window = next(
+            w for w in exported["alert_downtime_windows"] if w["name"] == window["name"]
+        )
+        assert ours_window["rule_names"] == [rule["name"]]
+        assert ours_window["daily_start"] == "22:00"
+    finally:
+        _monitoring_cleanup(prefix)
+
+
+def test_import_alert_window_with_unknown_rule_name_is_an_entry_error(authorized_principal):
+    prefix = f"config-import-alert-{uuid.uuid4().hex[:8]}"
+    payload = {
+        "schema_version": "1.0",
+        "exported_at": "2026-01-01T00:00:00Z",
+        "alert_rules": [
+            {"name": f"{prefix} kaputt", "sensor": "x.y", "max_warning": 9, "max_error": 1}
+        ],
+        "alert_downtime_windows": [
+            {"name": f"{prefix} Fenster", "weekdays": [0], "rule_names": [f"{prefix} fehlt"]}
+        ],
+    }
+    try:
+        with _client() as client:
+            results = client.post(
+                "/config/import", json=payload, headers={"X-DMS-Principal": authorized_principal}
+            ).json()["result"]["results"]
+        # monitoring-service's 422 detail is passed through, not a bare status line.
+        assert results["alert_rules"]["created"] == 0
+        assert "422" in results["alert_rules"]["errors"][0]
+        assert "unbekannt" in results["alert_downtime_windows"]["errors"][0]
+    finally:
+        _monitoring_cleanup(prefix)

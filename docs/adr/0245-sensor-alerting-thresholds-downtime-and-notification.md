@@ -134,7 +134,9 @@ and shown, so the admin page reflects reality during maintenance.
 - A Nagios/CheckMK endpoint (declined in P11-S2, still declined).
 - Escalation chains and SMS (the reference has SMS; DMS has no SMS channel).
 - Histogram quantiles.
-- Alert rules in the configuration export (7.3); a candidate once the rules prove portable.
+- ~~Alert rules in the configuration export (7.3); a candidate once the rules prove portable.~~ Done in
+  P88-S7 ([ADR 0252](0252-alert-rules-as-config-category-default-package-and-grafana.md)), together
+  with a default package and the alarm levels in Grafana.
 
 ## Implementation status
 
