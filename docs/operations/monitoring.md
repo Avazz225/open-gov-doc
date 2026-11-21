@@ -180,7 +180,7 @@ request. The rubric is the work per measurement plus the number of series a sens
 | `search.probe.duration_seconds{result}` | search | one full-text search against the real index |
 
 The two probes run at most once per 300 s (`dms_metrics_client.throttled`) however often Prometheus
-scrapes, and report `result="failed"` instead of raising. Alerting on sensors follows in P88-S5.
+scrapes, and report `result="failed"` instead of raising. Alerting on sensors: since P88-S5, see `docs/services/monitoring-service.md` "Alerting" and ADR 0245.
 
 ## Deliberate simplifications of this build-out stage
 

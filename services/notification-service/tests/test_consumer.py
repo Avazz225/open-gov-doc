@@ -1554,3 +1554,68 @@ async def test_replicas_restored_closes_the_loop(engine, settings, rate_limiter)
     )
     assert restored.subject == "Wieder in Ordnung: ocr-service"
     assert "vorher: zu wenige Instanzen" in restored.body
+
+
+# --- Sensor alerts (P88-S5, ADR 0245) -----------------------------------------
+
+
+async def _alert_mail(engine, settings, rate_limiter, event_type: str, payload: dict):
+    async def fake_publish(event_type, subject, payload, actor=None):
+        return None
+
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
+    event = Event(
+        event_type=event_type,
+        service_name="monitoring-service",
+        subject=payload["rule_id"],
+        payload=payload,
+    )
+    await handler(event.to_bytes())
+    async with _session_factory(engine)() as session:
+        notifications = await repository.list_notifications(session)
+    assert len(notifications) == 1
+    assert notifications[0].recipient == settings.operations_admin_email
+    return notifications[0]
+
+
+async def test_sensor_alert_raised_names_value_level_and_thresholds(engine, settings, rate_limiter):
+    mail = await _alert_mail(
+        engine,
+        settings,
+        rate_limiter,
+        "monitoring.alert.raised",
+        {
+            "rule_id": "r1",
+            "name": "Speicher voll",
+            "sensor": "storage.target.used_percent",
+            "label_filter": {"target": "local"},
+            "value": 96.5,
+            "level": "error",
+            "previous_level": "warning",
+            "since": "2026-11-21T15:00:00+00:00",
+            "thresholds": {"max_warning": 80, "max_error": 95},
+        },
+    )
+    assert mail.subject == "Fehler: Speicher voll"
+    assert "storage.target.used_percent (target=local) steht auf 96.50" in mail.body
+    assert "Warnung über 80, Fehler über 95" in mail.body
+
+
+async def test_sensor_alert_resolved_closes_the_loop(engine, settings, rate_limiter):
+    mail = await _alert_mail(
+        engine,
+        settings,
+        rate_limiter,
+        "monitoring.alert.resolved",
+        {
+            "rule_id": "r1",
+            "name": "Speicher voll",
+            "sensor": "storage.target.used_percent",
+            "label_filter": {},
+            "value": 60,
+            "level": "ok",
+            "previous_level": "error",
+        },
+    )
+    assert mail.subject == "Wieder in Ordnung: Speicher voll"
+    assert "steht wieder auf 60 (vorher: Fehler)" in mail.body

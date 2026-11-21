@@ -44,6 +44,10 @@ _SHARED_STREAM_DURABLE_OVERRIDES: dict[str, str] = {
     "registry.replicas.under": "notification-service-replicas-under",
     "registry.replicas.over": "notification-service-replicas-over",
     "registry.replicas.restored": "notification-service-replicas-restored",
+    # P88-S5 (ADR 0245): sensor alerts on the "monitoring" stream, which
+    # audit-service also consumes - own durable names.
+    "monitoring.alert.raised": "notification-service-alert-raised",
+    "monitoring.alert.resolved": "notification-service-alert-resolved",
 }
 
 
@@ -148,6 +152,11 @@ def make_handler(
             return
         if event.event_type in _REPLICA_FALLBACKS:
             await _handle_replica_alarm(
+                session_factory, settings, publish_event, rate_limiter, event
+            )
+            return
+        if event.event_type in _SENSOR_ALERT_FALLBACKS:
+            await _handle_sensor_alert(
                 session_factory, settings, publish_event, rate_limiter, event
             )
             return
@@ -1184,6 +1193,96 @@ async def _handle_replica_alarm(
         ),
     }
     fallback_subject, fallback_body = _REPLICA_FALLBACKS[event.event_type]
+
+    async with session_factory() as session:
+        subject, body = await _render_or_fallback(
+            session,
+            use_case=event.event_type,
+            recipient=settings.operations_admin_email,
+            fallback_subject=fallback_subject.format(**values),
+            fallback_body=fallback_body.format(**values),
+            **values,
+        )
+        notification = await repository.create_and_send(
+            session,
+            settings,
+            channel="email",
+            recipient=settings.operations_admin_email,
+            subject=subject,
+            body=body,
+            rate_limiter=rate_limiter,
+        )
+        await session.commit()
+        await publish_notification_result(publish_event, notification)
+
+
+_LEVEL_NAMES = {"ok": "OK", "warning": "Warnung", "error": "Fehler", "unknown": "unbekannt"}
+
+# (subject, body) fallbacks per sensor alert event (P88-S5, ADR 0245).
+_SENSOR_ALERT_FALLBACKS: dict[str, tuple[str, str]] = {
+    "monitoring.alert.raised": (
+        "{level}: {name}",
+        "Der Sensor {sensor}{filter} steht auf {value} ({level}, seit {since}). "
+        "Schwellwerte: {thresholds}.",
+    ),
+    "monitoring.alert.resolved": (
+        "Wieder in Ordnung: {name}",
+        "Der Sensor {sensor}{filter} steht wieder auf {value} (vorher: {previous_level}).",
+    ),
+}
+
+
+def _format_number(value: object) -> str:
+    if value is None:
+        return "?"
+    number = float(value)
+    return f"{number:.0f}" if number.is_integer() else f"{number:.2f}"
+
+
+def _thresholds_label(thresholds: dict) -> str:
+    parts = []
+    for key, label in (
+        ("min_error", "Fehler unter"),
+        ("min_warning", "Warnung unter"),
+        ("max_warning", "Warnung über"),
+        ("max_error", "Fehler über"),
+    ):
+        if thresholds.get(key) is not None:
+            parts.append(f"{label} {_format_number(thresholds[key])}")
+    return ", ".join(parts) or "keine"
+
+
+async def _handle_sensor_alert(
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    publish_event: Callable[[str, str, dict], Awaitable[None]],
+    rate_limiter: RecipientRateLimiter,
+    event: Event,
+) -> None:
+    """Sensor alerts from monitoring-service (P88-S5, ADR 0245): a rule
+    reached warning/error, or is back to ok after a notified alarm.
+    monitoring-service publishes one event per notified level (downtime
+    windows already applied), so every event here is one mail, to the same
+    operations address as the replica alarms."""
+    data = event.payload
+    label_filter = data.get("label_filter") or {}
+    values = {
+        "name": str(data.get("name", event.subject)),
+        "sensor": str(data.get("sensor", "?")),
+        "filter": (
+            " (" + ", ".join(f"{k}={v}" for k, v in label_filter.items()) + ")"
+            if label_filter
+            else ""
+        ),
+        "value": _format_number(data.get("value")),
+        "level": _LEVEL_NAMES.get(str(data.get("level")), str(data.get("level", "?"))),
+        "previous_level": _LEVEL_NAMES.get(
+            str(data.get("previous_level")), str(data.get("previous_level", "?"))
+        ),
+        "since": str(data.get("since", "?")),
+        "thresholds": _thresholds_label(data.get("thresholds") or {}),
+    }
+    fallback_subject, fallback_body = _SENSOR_ALERT_FALLBACKS[event.event_type]
 
     async with session_factory() as session:
         subject, body = await _render_or_fallback(

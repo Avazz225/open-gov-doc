@@ -33,6 +33,11 @@
 | `GET` | `/sensor-config` | Resolved activation configuration (`global_default`, `overrides`), ungated — poll target for `dms_metrics_client.SensorConfigClient`. |
 | `PUT` | `/sensor-config/global` | Set the global baseline setting (`admin.monitoring` or activated superuser), audited. |
 | `PUT` | `/sensor-config/{key}` | Set an override (`enabled: bool`) or clear it (`enabled: null`, the next less specific setting applies), audited. `key` is a sensor name, `group:<group>` or `cost:cheap|expensive` (since P88-S2; anything else with a prefix is `422`). |
+| `GET` | `/alert-rules` | P88-S5 ([ADR 0245](../adr/0245-sensor-alerting-thresholds-downtime-and-notification.md)): every alert rule with its evaluated state (`level`, `value`, `since`, `notified_level`, `suppressed`), ungated |
+| `POST`/`PUT`/`DELETE` | `/alert-rules[/{id}]` | Create/replace/delete a rule (`admin.monitoring`). `422` for no threshold, thresholds out of order, an unknown aggregation, repeat < 1. A change restarts streaks and rate but keeps the notified level |
+| `GET` | `/alert-rules/prometheus` | The rules as a Prometheus rule file (`promtool check rules` clean), for installations running Alertmanager |
+| `GET` | `/downtime-windows` | Windows with `active` now, ungated |
+| `POST`/`PUT`/`DELETE` | `/downtime-windows[/{id}]` | `admin.monitoring`; `422` without any range/weekday/time, half a daily range, a bad `HH:MM`, or an end before the start |
 | `GET` | `/healthz` | Own health check |
 
 ## Events
@@ -40,6 +45,12 @@
 Published (stream `monitoring`, `dms-eventbus-client`, after commit):
 
 - `monitoring.sensor.config_changed` — `subject`=sensor name or `"__global__"`, `payload`={`enabled`, `actor`}
+- Since P88-S5 (actor = the admin):
+  - `monitoring.alert_rule.created`/`.updated`/`.deleted`;
+  - `monitoring.downtime_window.saved`/`.deleted`.
+- Since P88-S5 (actor `system:monitoring-alerting`):
+  - `monitoring.alert.state_changed` on every level change;
+  - `monitoring.alert.raised`/`.resolved` when a notification is due (consumed by notification-service).
 
 Consumed by `audit-service` (`monitoring.>`).
 
@@ -73,6 +84,41 @@ retrofit across all ~25 services, just the concrete cases that came up:
 **Since P88-S2b** every service also reports seven runtime sensors, and twelve services gained their own backlog, failure, licence and security sensors. The full catalog is in [`docs/operations/monitoring.md`](../operations/monitoring.md) "Catalog extension".
 
 Further services get their sensors only once actually needed, in later sessions (`libs/dms-metrics-client` is already in place for this, see `docs/operations/monitoring.md`).
+
+## Alerting (P88-S5, [ADR 0245](../adr/0245-sensor-alerting-thresholds-downtime-and-notification.md))
+
+**Rules.** A rule names a sensor, an optional label filter (a subset of a sample's labels, including
+`service`/`instance`), an aggregation and up to four thresholds (`min_error ≤ min_warning ≤ max_warning
+≤ max_error`) with separate `warning_repeat`/`error_repeat`.
+- **Aggregations:** `max`/`min`/`sum`/`avg` for gauges.
+- **`rate_per_minute`** for counters (`_total`) and histograms (`_count`), from the persisted previous
+  total; a counter reset counts the new total.
+
+**Evaluation.** `run_alert_tick` runs every `alert_evaluation_interval_seconds` (60) in the replica that
+gets `pg_try_advisory_xact_lock`. It scrapes and merges exactly like `GET /metrics`; `alerting.py` holds
+the pure logic, `alert_store.py` the persistence.
+- **Levels:** `ok`/`warning`/`error`, or `unknown` without samples (sensor off, service down, filter
+  matches nothing).
+- **Streaks:** an error breach counts towards both, so an error not yet repeated enough shows as
+  warning, and a value back in range is `ok` at once.
+
+**Notification** follows the level: a mail is due when an alarm level differs from `notified_level`,
+or on `ok` after a notified alarm, and no active downtime window covers the rule.
+- A change during a window is therefore mailed when the window ends, if it still holds.
+- Initial `ok` and `unknown` are never mailed.
+
+**Downtime windows** suppress notification only, not evaluation. Each window has an optional absolute
+range, optional weekdays plus a daily `HH:MM` range in `timezone` (Europe/Berlin; spanning midnight
+allowed), and `rule_ids` (null = all).
+
+**Live:**
+- **Raise:** a rule `storage.target.used_percent{target=local}` with warning over 30 (35.2 % used) went
+  to `warning` on its first tick and mailed `ops-admin@dms.local` "Warnung: …".
+- **Resolve:** raising the threshold to 50 mailed "Wieder in Ordnung: …".
+- **Audit and export:** both appeared in the audit trail, and the exported rule file passes
+  `promtool check rules`.
+
+**The UI follows in P88-S6.**
 
 ## Limitations of this stage
 

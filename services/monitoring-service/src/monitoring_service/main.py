@@ -1,7 +1,10 @@
+import asyncio
+import contextlib
 import logging
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 
 import httpx
 from dms_common import configure_logging
@@ -9,10 +12,14 @@ from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
 from dms_registry_client import maybe_start_registration
 from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
-from monitoring_service import repository, scraper
+from monitoring_service import alert_store, alerting, repository, scraper
 from monitoring_service.clients import AuthServiceClient, PermissionServiceClient, RegistryClient
 from monitoring_service.models import Base
 from monitoring_service.schemas import (
+    AlertRuleIn,
+    AlertRuleOut,
+    DowntimeWindowIn,
+    DowntimeWindowOut,
     GlobalSensorConfigIn,
     SensorConfigOut,
     SensorOut,
@@ -28,12 +35,15 @@ configure_logging(settings)
 logger = logging.getLogger(__name__)
 
 
-async def publish_event(event_type: str, subject: str | None, payload: dict) -> None:
+async def publish_event(
+    event_type: str, subject: str | None, payload: dict, *, actor: str | None = None
+) -> None:
     event = Event(
         event_type=event_type,
         service_name=settings.service_name,
         subject=subject,
         payload=payload,
+        actor=actor,
     )
     await app.state.event_bus.publish(event_type, event.to_bytes())
 
@@ -116,12 +126,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         version="0.1.0",
     )
 
+    # Alerting (P88-S5, ADR 0245): one evaluator per tick across replicas.
+    app.state.family_types = {}
+    alert_task = asyncio.create_task(_alert_loop())
+
     startup_end = time.time()
     millis = round((startup_end - startup_start) * 1000, 3)
     logger.info("Startup completed in %s ms.", millis)
 
     yield
 
+    alert_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await alert_task
     if registration:
         await registration.stop()
     await event_bus.close()
@@ -130,6 +147,46 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await app.state.auth_client.close()
     await app.state.permission_client.close()
     await engine.dispose()
+
+
+async def run_alert_tick(families: dict | None = None) -> alert_store.TickResult | None:
+    """One evaluation (Decision 4): only the replica that gets the advisory
+    lock evaluates; events are published after the commit. `families` can
+    be passed in (tests); otherwise every instance is scraped like `GET
+    /metrics` does."""
+    now = datetime.now(UTC)
+    async with app.state.session_factory() as session:
+        got_lock = await session.scalar(
+            text("SELECT pg_try_advisory_xact_lock(:key)"), {"key": alert_store.ALERT_LOCK_KEY}
+        )
+        if not got_lock:
+            return None
+        if families is None:
+            instances = await app.state.registry_client.list_active_instances()
+            bodies = await scraper.scrape_targets(
+                app.state.scrape_client,
+                instances,
+                timeout_seconds=settings.scrape_timeout_seconds,
+                on_failure=app.state.scrape_failures_counter.inc,
+            )
+            service_types = {i.instance_id: i.service_type for i in instances}
+            merged = scraper.merge_metric_families(bodies, service_types)
+            families = {family.name: family for family in merged}
+        app.state.family_types = {name: family.type for name, family in families.items()}
+        result = await alert_store.tick(session, families, now=now, timezone=settings.timezone)
+        await session.commit()
+    for event_type, subject, payload in result.events:
+        await publish_event(event_type, subject, payload, actor="system:monitoring-alerting")
+    return result
+
+
+async def _alert_loop() -> None:
+    while True:
+        await asyncio.sleep(settings.alert_evaluation_interval_seconds)
+        try:
+            await run_alert_tick()
+        except Exception:
+            logger.exception("alert_tick_failed")
 
 
 app = FastAPI(title=settings.service_name, lifespan=lifespan)
@@ -233,3 +290,177 @@ async def set_sensor_override(
             payload={"enabled": payload.enabled, "actor": x_dms_principal},
         )
     return result
+
+
+# --- Alerting (P88-S5, ADR 0245) -------------------------------------------------
+
+
+def _rule_out(rule, state) -> AlertRuleOut:
+    fields = {key: getattr(rule, key) for key in AlertRuleIn.model_fields}
+    out = AlertRuleOut(**fields, id=rule.id, updated_at=rule.updated_at, updated_by=rule.updated_by)
+    if state is not None:
+        out.level = state.level
+        out.value = state.value
+        out.since = state.since
+        out.evaluated_at = state.evaluated_at
+        out.notified_level = state.notified_level
+        out.suppressed = state.suppressed
+    return out
+
+
+def _window_out(window) -> DowntimeWindowOut:
+    fields = {key: getattr(window, key) for key in DowntimeWindowIn.model_fields}
+    return DowntimeWindowOut(
+        **fields,
+        id=window.id,
+        updated_at=window.updated_at,
+        updated_by=window.updated_by,
+        active=alerting.window_active(
+            enabled=window.enabled,
+            starts_at=window.starts_at,
+            ends_at=window.ends_at,
+            weekdays=window.weekdays,
+            daily_start=window.daily_start,
+            daily_end=window.daily_end,
+            now=datetime.now(UTC),
+            timezone=settings.timezone,
+        ),
+    )
+
+
+@app.get("/alert-rules", response_model=list[AlertRuleOut])
+async def list_alert_rules(session: AsyncSession = Depends(get_session)) -> list[AlertRuleOut]:
+    """Every rule with its evaluated state. Ungated, like `GET /sensors`."""
+    states = await alert_store.states_by_rule(session)
+    return [_rule_out(rule, states.get(rule.id)) for rule in await alert_store.list_rules(session)]
+
+
+@app.get("/alert-rules/prometheus")
+async def export_alert_rules(session: AsyncSession = Depends(get_session)) -> Response:
+    """The rules as a Prometheus rule file, for installations that run
+    Alertmanager anyway (Decision 1) - an export, not a second engine."""
+    body = alert_store.prometheus_rules(
+        await alert_store.list_rules(session),
+        app.state.family_types,
+        settings.alert_evaluation_interval_seconds,
+    )
+    return Response(content=body, media_type="application/yaml")
+
+
+async def _save_rule(payload: AlertRuleIn, principal: str, session, rule_id: str | None):
+    await _require_monitoring_permission(principal)
+    try:
+        rule = await alert_store.save_rule(
+            session, payload.model_dump(), actor=principal, now=datetime.now(UTC), rule_id=rule_id
+        )
+    except alert_store.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await session.commit()
+    await publish_event(
+        "monitoring.alert_rule.created" if rule_id is None else "monitoring.alert_rule.updated",
+        rule.id,
+        {"name": rule.name, "sensor": rule.sensor, "enabled": rule.enabled},
+        actor=principal,
+    )
+    states = await alert_store.states_by_rule(session)
+    return _rule_out(rule, states.get(rule.id))
+
+
+@app.post("/alert-rules", response_model=AlertRuleOut, status_code=201)
+async def create_alert_rule(
+    payload: AlertRuleIn,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> AlertRuleOut:
+    return await _save_rule(payload, x_dms_principal, session, None)
+
+
+@app.put("/alert-rules/{rule_id}", response_model=AlertRuleOut)
+async def update_alert_rule(
+    rule_id: str,
+    payload: AlertRuleIn,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> AlertRuleOut:
+    """A changed definition restarts the streaks and the rate; the notified
+    level is kept, so an ongoing alarm isn't mailed again."""
+    return await _save_rule(payload, x_dms_principal, session, rule_id)
+
+
+@app.delete("/alert-rules/{rule_id}", status_code=204)
+async def delete_alert_rule(
+    rule_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    await _require_monitoring_permission(x_dms_principal)
+    try:
+        await alert_store.delete_rule(session, rule_id)
+    except alert_store.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await session.commit()
+    await publish_event("monitoring.alert_rule.deleted", rule_id, {}, actor=x_dms_principal)
+
+
+@app.get("/downtime-windows", response_model=list[DowntimeWindowOut])
+async def list_downtime_windows(
+    session: AsyncSession = Depends(get_session),
+) -> list[DowntimeWindowOut]:
+    return [_window_out(w) for w in await alert_store.list_windows(session)]
+
+
+async def _save_window(payload: DowntimeWindowIn, principal: str, session, window_id: str | None):
+    await _require_monitoring_permission(principal)
+    try:
+        window = await alert_store.save_window(
+            session,
+            payload.model_dump(),
+            actor=principal,
+            now=datetime.now(UTC),
+            window_id=window_id,
+        )
+    except alert_store.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await session.commit()
+    await publish_event(
+        "monitoring.downtime_window.saved", window.id, {"name": window.name}, actor=principal
+    )
+    return _window_out(window)
+
+
+@app.post("/downtime-windows", response_model=DowntimeWindowOut, status_code=201)
+async def create_downtime_window(
+    payload: DowntimeWindowIn,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> DowntimeWindowOut:
+    return await _save_window(payload, x_dms_principal, session, None)
+
+
+@app.put("/downtime-windows/{window_id}", response_model=DowntimeWindowOut)
+async def update_downtime_window(
+    window_id: str,
+    payload: DowntimeWindowIn,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> DowntimeWindowOut:
+    return await _save_window(payload, x_dms_principal, session, window_id)
+
+
+@app.delete("/downtime-windows/{window_id}", status_code=204)
+async def delete_downtime_window(
+    window_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    await _require_monitoring_permission(x_dms_principal)
+    try:
+        await alert_store.delete_window(session, window_id)
+    except alert_store.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await session.commit()
+    await publish_event("monitoring.downtime_window.deleted", window_id, {}, actor=x_dms_principal)

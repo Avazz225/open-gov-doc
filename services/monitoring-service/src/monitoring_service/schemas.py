@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel
@@ -41,3 +42,55 @@ class SensorOverrideIn(BaseModel):
     # `None` deletes an existing override again - the sensor then
     # falls back to the global base setting.
     enabled: bool | None
+
+
+# --- Alerting (P88-S5, ADR 0245) -------------------------------------------------
+
+AlertAggregation = Literal["max", "min", "sum", "avg", "rate_per_minute"]
+AlertLevel = Literal["ok", "warning", "error", "unknown"]
+
+
+class AlertRuleIn(BaseModel):
+    name: str
+    sensor: str
+    label_filter: dict[str, str] = {}
+    aggregation: AlertAggregation = "max"
+    min_error: float | None = None
+    min_warning: float | None = None
+    max_warning: float | None = None
+    max_error: float | None = None
+    warning_repeat: int = 1
+    error_repeat: int = 1
+    enabled: bool = True
+    description: str | None = None
+
+
+class AlertRuleOut(AlertRuleIn):
+    id: str
+    updated_at: datetime
+    updated_by: str | None
+    # The evaluated state; `level` "unknown" before the first evaluation.
+    level: AlertLevel = "unknown"
+    value: float | None = None
+    since: datetime | None = None
+    evaluated_at: datetime | None = None
+    notified_level: AlertLevel | None = None
+    suppressed: bool = False
+
+
+class DowntimeWindowIn(BaseModel):
+    name: str
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+    weekdays: list[int] | None = None
+    daily_start: str | None = None
+    daily_end: str | None = None
+    rule_ids: list[str] | None = None
+    enabled: bool = True
+
+
+class DowntimeWindowOut(DowntimeWindowIn):
+    id: str
+    active: bool
+    updated_at: datetime
+    updated_by: str | None

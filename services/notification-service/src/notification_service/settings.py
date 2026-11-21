@@ -97,6 +97,9 @@ class Settings(BaseServiceSettings):
         "registry.replicas.under",
         "registry.replicas.over",
         "registry.replicas.restored",
+        # Sensor alerts (P88-S5, ADR 0245) on the "monitoring" stream.
+        "monitoring.alert.raised",
+        "monitoring.alert.resolved",
     ]
 
     # Recipient of the optional security notification on break-glass

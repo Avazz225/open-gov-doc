@@ -3982,6 +3982,27 @@ installation's replica health.
   - an admin UI on the sensors page.
   - The ADR weighs this against Prometheus/Grafana alert rules generated from the same thresholds. A
     Nagios/CheckMK endpoint stays declined.
+  - **Scoped (2026-11-21, ADR 0245):**
+    - evaluation in monitoring-service (Prometheus rule-file export as an extra);
+    - four thresholds with separate warning/error repeat counts, gauge aggregations plus
+      `rate_per_minute` for counters/histograms;
+    - one evaluator via an advisory lock;
+    - notification follows the level (`notified_level`), so a change during a downtime window is
+      mailed when the window ends;
+    - windows absolute and/or weekly.
+    - **This session is the backend:** monitoring-service and notification-service.
+    - ✅ **Result:**
+      - **monitoring-service:** `alerting.py`, `alert_store.py`, the tables
+        `alert_rule`/`alert_state`/`downtime_window`, the tick with an advisory lock, CRUD, and the
+        Prometheus export (`promtool`-clean).
+      - **notification-service:** two consumers and templates.
+      - **Live:** a raise/resolve cycle mailed ops-admin, with audit events.
+- **P88-S6 — Alerting UI (ADR 0245).** On the sensors page:
+  - a level badge per sensor and the worst level per group;
+  - a rule editor (sensor, filter, aggregation, thresholds, repeats) with the current value as a
+    reference;
+  - downtime windows;
+  - read-only without `admin.monitoring`.
 
 ## Phase 89 — Compliance Completions
 

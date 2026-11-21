@@ -2,6 +2,61 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P88-S5, alerting on sensors, backend
+([ADR 0245](docs/adr/0245-sensor-alerting-thresholds-downtime-and-notification.md)). The UI moved to a
+new P88-S6, the same split as P88-S4.
+
+**What changed:**
+- **ADR 0245 (scoped first):**
+  - evaluation in monitoring-service, with a Prometheus rule-file export instead of Alertmanager as
+    the engine;
+  - four thresholds plus separate warning/error repeat counts;
+  - notification follows the level via `notified_level`, so a change inside a downtime window is
+    mailed when the window ends;
+  - one evaluator through an advisory lock; downtime windows absolute and/or weekly.
+- **monitoring-service:**
+  - **Pure logic (`alerting.py`):** validation, sample selection (gauges and `_total`/`_count`),
+    `measure` (max/min/sum/avg/rate_per_minute with counter resets), `next_level` (streaks),
+    `notification_due`, `window_active` (time zone, overnight).
+  - **Persistence (`alert_store.py`):** CRUD, `tick`, and the Prometheus export.
+  - **Tables:** `alert_rule`, `alert_state`, `downtime_window`.
+  - **`main.py`:** `run_alert_tick` (`pg_try_advisory_xact_lock`, scrape+merge as `/metrics`,
+    events after commit) and `_alert_loop` (60 s).
+  - **API:** `/alert-rules` CRUD and `/prometheus`, `/downtime-windows` CRUD; writes
+    `admin.monitoring`, reads open.
+  - **Events:** `monitoring.alert.*`, `monitoring.alert_rule.*`, `monitoring.downtime_window.*`.
+  - **Settings:** `alert_evaluation_interval_seconds`, `timezone`.
+- **notification-service:** `monitoring.alert.raised`/`.resolved` mail `operations_admin_email`
+  ("Warnung/Fehler: <rule>", "Wieder in Ordnung: <rule>", thresholds in words), with two template
+  use cases and their own durables.
+- **Docs:** ADR 0245; monitoring-service (API, events, "Alerting"), notification-service ("Sensor
+  alert consumers"), the operations pointer; the plan (scope, result, new P88-S6).
+
+**Checks:**
+- monitoring 44 (+21 over P88-S2c's 23):
+  - pure: bands, repeats, an unrepeated error shows as warning, unknown keeps streaks, gauge
+    aggregation with filter, rate with reset and histogram, notification rules, windows incl.
+    overnight, invalid rules;
+  - app: gate, 422s, raise→escalate→resolve with exactly three mails, a window deferring the mail
+    until it ends, an inactive sensor stays unknown without mail, the advisory lock skipping a
+    second evaluator, the export, window validation.
+- notification 114 (+2); ruff clean.
+- **Live:**
+  - A rule on `storage.target.used_percent{target=local}` with warning over 30 (35.2 %) raised
+    `warning` on its first tick. ops-admin got "Warnung: Speicherziel local fast voll" with value,
+    since and thresholds.
+  - Raising the threshold to 50 resolved it: "Wieder in Ordnung …" (vorher: Warnung).
+  - The audit trail shows the rule changes (actor `2`) and the alert events (actor
+    `system:monitoring-alerting`).
+  - `promtool check rules` (prom/prometheus v2.55.1) accepts the export.
+  - `domain-admin-monitoring` was granted temporarily (assignment 4962) and revoked; the rule was
+    deleted.
+
+**Next session:** **P88-S6**, the alerting UI on the sensors page (level badges per sensor and group,
+rule editor with the current value, downtime windows). That closes Phase 88 (phase-close regression).
+
+---
+
 **Last completed:** P88-S4b, the mailbox admin page and realm-role assignment. This completes P88-S4.
 
 **What changed:**
@@ -40,7 +95,7 @@
 - Screenshots of `/mailboxes/` at 1400/390 (no overflow) and the realm-role section.
 - The spec grants `domain-admin-mail` to `users-admin` and revokes it in `finally`; no grant is left.
 
-**Next session:** **P88-S5**, alerting on sensors (ADR 0245, scope first).
+**Next session:** P88-S5 (done, see above).
 
 ---
 

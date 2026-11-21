@@ -145,6 +145,16 @@ EMAIL_TEMPLATE_USE_CASES: list[dict[str, object]] = [
         "description": "Service-Typ wieder im erwarteten Bereich (P87-S3, ADR 0241)",
         "placeholders": ["service_type", "reachable", "expected", "previous_state"],
     },
+    {
+        "use_case": "monitoring.alert.raised",
+        "description": "Sensor-Alarm: Warnung oder Fehler (P88-S5, ADR 0245)",
+        "placeholders": ["name", "sensor", "filter", "value", "level", "since", "thresholds"],
+    },
+    {
+        "use_case": "monitoring.alert.resolved",
+        "description": "Sensor-Alarm wieder in Ordnung (P88-S5, ADR 0245)",
+        "placeholders": ["name", "sensor", "filter", "value", "previous_level"],
+    },
 ]
 
 

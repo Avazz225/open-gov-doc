@@ -17,3 +17,8 @@ class Settings(BaseServiceSettings):
     # see `scraper.scrape_and_merge` (parallel `asyncio.gather`
     # with `return_exceptions=True`).
     scrape_timeout_seconds: float = 5.0
+
+    # Alerting (P88-S5, ADR 0245): how often rules are evaluated, and the
+    # time zone downtime windows' daily times are read in.
+    alert_evaluation_interval_seconds: float = 60.0
+    timezone: str = "Europe/Berlin"

@@ -19,6 +19,12 @@ async def _clean_tables():
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS monitoring"))
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text("TRUNCATE monitoring.sensor_config"))
+        # P88-S5: alerting tables.
+        await conn.execute(
+            text(
+                "TRUNCATE monitoring.alert_rule, monitoring.alert_state, monitoring.downtime_window"
+            )
+        )
     await eng.dispose()
     yield
 
