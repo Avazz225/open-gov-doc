@@ -1145,7 +1145,8 @@
       "capacity": "Kapazität",
       "reliability": "Zuverlässigkeit",
       "errors": "Fehler",
-      "security": "Sicherheit"
+      "security": "Sicherheit",
+      "runtime": "Laufzeit"
     },
     "choice": {
       "inherit": "Übernehmen",

@@ -3881,6 +3881,31 @@ installation's replica health.
     - **Live:** with the group "performance" off, license-service's HTTP counter stood still; with a
       sensor override on, it counted again.
     - The tracing ratio follows with P91-S1.
+- **P88-S2b — Sensor catalog extension A–D (user-approved, 2026-11-21).** New sensors after a comparison
+  with an external reference system, adapted to the DMS services:
+  - **A, licence and capacity:**
+    - `license.expiration.days`;
+    - `license.usage.documents.current`/`.users.current`;
+    - `auth.sessions.active`;
+    - `storage.target.healthy`/`.used_percent`.
+  - **B, backlogs and failures:**
+    - ocr, search index, rendering (plus a counter per rendition kind), virus-scan;
+    - workflow failed instances and overdue tasks;
+    - archival failed transfers, failed notification mails;
+    - the oldest document lock, the storage purge backlog.
+  - **C, runtime (for every service through `dms-metrics-client`):**
+    - `http.requests.in_flight`, `db.pool.in_use`/`.size`;
+    - `process.memory_bytes`/`.cpu_seconds`/`.open_fds`, `service.startup.duration_seconds`;
+    - search query latency (expensive).
+  - **D, security:** `auth.logins` by method and result; permission cache hits, misses and rebuild
+    duration.
+  - Each sensor needs a tested sampler. The catalog doc and the Grafana dashboard are updated.
+- **P88-S2c — Expensive breakdowns, off by default (E).**
+  - `SensorSpec.default_enabled`: a sensor declared off by default stays off under "monitor everything"
+    until its own, group or cost override turns it on (amendment to ADR 0243).
+  - Then the E sensors: documents per object type, workflow instances per definition, and probes (a
+    test rendition, a test search).
+  - The admin page marks default-off sensors.
 - **P88-S3 — Object-type status transitions.** An editor for `status_transitions`, plus guided forms for
   `naming_constraints`/`conditions` (today passed through raw in `ObjectTypeEditor`).
 - **P88-S4 — Mailboxes and realm roles.**
@@ -3888,6 +3913,16 @@ installation's replica health.
     migration of the existing env config, then the admin page.
   - Realm-role assignment in user management.
   - If the mailbox backend turns out to be large, this session splits in two.
+- **P88-S5 — Alerting on sensors (user-requested, ADR 0244).** Scope first, then build what fits one
+  session. Following the reference comparison:
+  - warning and error thresholds per sensor (min and max), with a repeat count before a level counts
+    (debounce);
+  - a level per sensor and group, with notification on change (mail to the operations mailbox, as for
+    the replica alarms in ADR 0241);
+  - maintenance/downtime windows that suppress notifications;
+  - an admin UI on the sensors page.
+  - The ADR weighs this against Prometheus/Grafana alert rules generated from the same thresholds. A
+    Nagios/CheckMK endpoint stays declined.
 
 ## Phase 89 — Compliance Completions
 
@@ -3909,7 +3944,7 @@ installation's replica health.
 
 ## Phase 90 — Collaboration Features (user-selected from the external comparison)
 
-- **P90-S1 — Follow-up reminders (Wiedervorlagen), backend: ADR 0242.** Set a date and note on a
+- **P90-S1 — Follow-up reminders (Wiedervorlagen), backend: ADR 0245.** Set a date and note on a
   document, folder or case. List "my reminders", clear or snooze, and notify when due, reusing the
   existing deletion-reminder/SLA timer infrastructure (Konzept names exactly this as a future add-on).
   The session decides the owning service (favorite-service vs. notification-service vs. a small new
@@ -3924,15 +3959,15 @@ installation's replica health.
     and by email.
 - **P90-S4 — Watch subscriptions.** Subscribe to a document or folder (and optionally a workflow
   instance), and get notified on new version, metadata change, move, or delete. Backend events are
-  already published. favorite-service's "watchlist" wording finally means watching. ADR 0243.
+  already published. favorite-service's "watchlist" wording finally means watching. ADR 0246.
 - **P90-S5 — Embedded-metadata extraction on upload.** Copy PDF info/XMP and Office core properties into
   document attributes, configured per object type (source property → attribute, overwrite policy). An
   admin UI mapping in the object-type editor.
-- **P90-S6 — Scoping: validating externally signed incoming documents (ADR 0244).** Validate PAdES (and
+- **P90-S6 — Scoping: validating externally signed incoming documents (ADR 0247).** Validate PAdES (and
   detached CAdES?) on ingest (upload, mail-connector), with trust lists, a stored validation report per
   document, and a UI badge. Stay format-agnostic and keep QES creation, HSM and XAdES out (still
   declined). No code.
-- **P90-S7 — Scoping: changing running processes, and lane semantics (ADR 0245).**
+- **P90-S7 — Scoping: changing running processes, and lane semantics (ADR 0248).**
   - Insert, remove or redirect a step in a running instance (circulation-folder routing by hand), against
     SpiffWorkflow's serialized state.
   - Decide in the same pass whether BPMN lanes become an authorization boundary (lane = role) or stay
@@ -3948,7 +3983,7 @@ installation's replica health.
     instrumentation and trace propagation through NATS headers.
   - An OTLP collector plus Tempo (or Jaeger) in compose and the Helm chart, a Grafana datasource, and the
     sampling ratio as a monitoring-service sensor parameter.
-  - ADR 0246.
+  - ADR 0249.
 - **P91-S2 — Central log aggregation (§10.1).** Loki plus promtail (or Alloy) in compose and Helm, with
   the JSON logs that already exist and a Grafana datasource. Trace-id ↔ log correlation with S1.
 - **P91-S3 — Hygiene bundle.**
@@ -3959,7 +3994,7 @@ installation's replica health.
   - `PROGRESS.md`'s "Open Decisions" section rewritten: about 38 stale bullets removed and the section
     split from the MVP-era session log it runs into.
   - The `process-designer.md` "stale specs" sentence annotated as closed in P79-S3.
-- **P91-S4 — Scoping: database schema migrations (ADR 0247).** Today schemas evolve through
+- **P91-S4 — Scoping: database schema migrations (ADR 0250).** Today schemas evolve through
   `create_all` plus ad-hoc `ALTER TABLE … IF NOT EXISTS` at startup. Options: Alembic per service,
   formalizing the current pattern, or accepting it, judged against fleet rolling updates and the
   Helm upgrade path. No code. **This is the last session of the plan:** phase-close regression, then

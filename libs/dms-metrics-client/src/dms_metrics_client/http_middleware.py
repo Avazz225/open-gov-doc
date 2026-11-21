@@ -5,7 +5,18 @@ import time
 from fastapi import FastAPI
 
 from dms_metrics_client.config_client import SensorConfigProxy
-from dms_metrics_client.sensors import GuardedCounter, GuardedHistogram, SensorRegistry, SensorSpec
+from dms_metrics_client.runtime import (
+    build_runtime_sensors,
+    instrument_startup,
+    runtime_sensor_declarations,
+)
+from dms_metrics_client.sensors import (
+    GuardedCounter,
+    GuardedGauge,
+    GuardedHistogram,
+    SensorRegistry,
+    SensorSpec,
+)
 
 # Generic per-request sensors (10.1 full rollout, post-pilot) - the same two
 # names/specs are registered by every instrumented service, so
@@ -42,7 +53,13 @@ _EXCLUDED_PATHS = frozenset({"/healthz", "/metrics"})
 
 
 def http_sensor_declarations() -> list[dict]:
-    return [HTTP_REQUESTS.as_dict(), HTTP_REQUEST_DURATION.as_dict()]
+    """The sensors every service registers through `bootstrap_http_sensors`:
+    the two HTTP sensors plus, since P88-S2b, the runtime sensors."""
+    return [
+        HTTP_REQUESTS.as_dict(),
+        HTTP_REQUEST_DURATION.as_dict(),
+        *runtime_sensor_declarations(),
+    ]
 
 
 def build_http_sensors(registry: SensorRegistry) -> tuple[GuardedCounter, GuardedHistogram]:
@@ -52,7 +69,10 @@ def build_http_sensors(registry: SensorRegistry) -> tuple[GuardedCounter, Guarde
 
 
 def install_http_metrics(
-    app: FastAPI, requests_counter: GuardedCounter, duration_histogram: GuardedHistogram
+    app: FastAPI,
+    requests_counter: GuardedCounter,
+    duration_histogram: GuardedHistogram,
+    in_flight: GuardedGauge | None = None,
 ) -> None:
     """Registers a generic request-instrumentation middleware. Both sensors
     are checked independently and skip their own work when inactive (10.1:
@@ -71,8 +91,14 @@ def install_http_metrics(
 
         counter_active = requests_counter.is_active()
         histogram_active = duration_histogram.is_active()
-        if not counter_active and not histogram_active:
+        # P88-S2b: decided once per request, so the decrement always
+        # matches the increment even if the sensor is switched meanwhile.
+        in_flight_active = in_flight is not None and in_flight.is_active()
+        if not counter_active and not histogram_active and not in_flight_active:
             return await call_next(request)
+
+        if in_flight_active:
+            in_flight.add(1, checked=False)
 
         started_at = time.monotonic() if histogram_active else None
         status_code = 500
@@ -81,6 +107,8 @@ def install_http_metrics(
             status_code = response.status_code
             return response
         finally:
+            if in_flight_active:
+                in_flight.add(-1, checked=False)
             route = request.scope.get("route")
             route_path = route.path if route is not None else "unmatched"
             if counter_active:
@@ -117,5 +145,7 @@ def bootstrap_http_sensors(
     proxy = SensorConfigProxy()
     sensor_registry = SensorRegistry(service_name, is_active=proxy.is_active)
     requests_counter, duration_histogram = build_http_sensors(sensor_registry)
-    install_http_metrics(app, requests_counter, duration_histogram)
+    in_flight = build_runtime_sensors(sensor_registry)
+    install_http_metrics(app, requests_counter, duration_histogram, in_flight)
+    instrument_startup(app, sensor_registry)
     return proxy, sensor_registry, requests_counter, duration_histogram

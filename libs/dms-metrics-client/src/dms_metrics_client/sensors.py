@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Callable
+import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Literal
 
@@ -32,6 +33,13 @@ class SensorSpec:
 
 
 IsActiveFn = Callable[[str], bool]
+
+logger = logging.getLogger(__name__)
+
+# What a scrape sampler returns (P88-S2b): one value for an unlabelled gauge,
+# a mapping from label tuples to values for a labelled one, or None when
+# there is nothing to report this time (the gauge keeps its last value).
+SampleValue = float | dict[tuple[str, ...], float] | None
 
 
 def _accepts_group_and_cost(fn: Callable[..., bool]) -> bool:
@@ -92,6 +100,30 @@ class GuardedGauge:
         if self._metric._labelnames:
             self._metric.clear()
 
+    def add(self, amount: float, *, checked: bool = True) -> None:
+        """Increments/decrements an unlabelled gauge (P88-S2b: requests in
+        flight). `checked=False` skips the activation check - for the
+        decrement that must match an increment made while the sensor was
+        still active, so switching it off mid-request can't skew the
+        value."""
+        if not checked or self.is_active():
+            self._metric.inc(amount)
+
+    def labelnames(self) -> tuple[str, ...]:
+        return tuple(self._metric._labelnames)
+
+    def apply(self, value: SampleValue) -> None:
+        """Writes a sampler's result (see `SampleValue`)."""
+        if value is None:
+            return
+        if isinstance(value, dict):
+            self.clear()
+            names = self.labelnames()
+            for label_values, item in value.items():
+                self.set(float(item), **dict(zip(names, label_values, strict=True)))
+        else:
+            self.set(float(value))
+
 
 class GuardedHistogram:
     def __init__(self, name: str, metric: Histogram, is_active: IsActiveFn) -> None:
@@ -125,6 +157,40 @@ class SensorRegistry:
         self._is_active = is_active
         self._with_group_and_cost = _accepts_group_and_cost(is_active)
         self._specs: dict[str, SensorSpec] = {}
+        self._sync_samplers: list[tuple[GuardedGauge, Callable[[], SampleValue]]] = []
+        self._async_samplers: list[tuple[GuardedGauge, Callable[[], Awaitable[SampleValue]]]] = []
+
+    # --- Pull-on-scrape samplers (P88-S2b) ---------------------------------
+    # A gauge whose value is computed when `/metrics` is read, and only
+    # while its sensor is active - no background loop, no cost when off
+    # (10.1). Sync samplers run in `metrics_payload`; async ones (database
+    # counts) need `refreshed_metrics_payload` in an async endpoint.
+
+    def on_scrape(self, gauge: GuardedGauge, sampler: Callable[[], SampleValue]) -> None:
+        self._sync_samplers.append((gauge, sampler))
+
+    def on_scrape_async(
+        self, gauge: GuardedGauge, sampler: Callable[[], Awaitable[SampleValue]]
+    ) -> None:
+        self._async_samplers.append((gauge, sampler))
+
+    def run_sync_samplers(self) -> None:
+        for gauge, sampler in self._sync_samplers:
+            if not gauge.is_active():
+                continue
+            try:
+                gauge.apply(sampler())
+            except Exception:
+                logger.exception("sensor_sample_failed", extra={"sensor": gauge._name})
+
+    async def run_async_samplers(self) -> None:
+        for gauge, sampler in self._async_samplers:
+            if not gauge.is_active():
+                continue
+            try:
+                gauge.apply(await sampler())
+            except Exception:
+                logger.exception("sensor_sample_failed", extra={"sensor": gauge._name})
 
     def _check_for(self, spec: SensorSpec) -> IsActiveFn:
         """The activation check one `Guarded*` sensor calls on every use -

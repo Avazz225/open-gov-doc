@@ -1145,7 +1145,8 @@
       "capacity": "Capacity",
       "reliability": "Reliability",
       "errors": "Errors",
-      "security": "Security"
+      "security": "Security",
+      "runtime": "Runtime"
     },
     "choice": {
       "inherit": "Inherit",

@@ -1,4 +1,4 @@
-from dms_metrics_client.asgi import metrics_payload
+from dms_metrics_client.asgi import metrics_payload, refreshed_metrics_payload
 from dms_metrics_client.config_client import (
     SensorConfigClient,
     SensorConfigProxy,
@@ -13,6 +13,7 @@ from dms_metrics_client.http_middleware import (
     install_http_metrics,
 )
 from dms_metrics_client.loop import run_gauge_sampler_loop
+from dms_metrics_client.runtime import RUNTIME_SPECS, runtime_sensor_declarations
 from dms_metrics_client.sensors import (
     GuardedCounter,
     GuardedGauge,
@@ -34,6 +35,9 @@ __all__ = [
     "http_sensor_declarations",
     "install_http_metrics",
     "metrics_payload",
+    "refreshed_metrics_payload",
+    "RUNTIME_SPECS",
+    "runtime_sensor_declarations",
     "override_key_for_cost",
     "override_key_for_group",
     "resolve_active",

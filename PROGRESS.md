@@ -39,7 +39,11 @@
 - `users-admin` temporarily had `domain-admin-monitoring` (assignment 4738), now revoked. The config
   ended with no overrides.
 
-**Next session:** **P88-S3**, object-type status transitions and the guided naming/conditions forms.
+**Next session:** **P88-S2b**, sensor catalog extension A–D, approved by the user after a comparison
+with an external reference system. Then P88-S2c (expensive breakdowns, off by default), P88-S3.
+- Alerting was added to the plan as P88-S5 (ADR 0244).
+- The planned ADR numbers 0242–0247 of Phases 90/91 moved to 0245–0250, because 0242/0243 went to
+  P88-S1/S2.
 
 ---
 
