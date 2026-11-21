@@ -67,9 +67,18 @@ class GuardedGauge:
         when the sensor is deactivated."""
         return self._is_active(self._name)
 
-    def set(self, value: float) -> None:
+    def set(self, value: float, **labels: str) -> None:
+        """Optional `**labels` (P87-S2: registry-service's per-type replica
+        gauges) work as on `GuardedCounter.inc`; unlabeled gauges pass none."""
         if self.is_active():
-            self._metric.set(value)
+            target = self._metric.labels(**labels) if labels else self._metric
+            target.set(value)
+
+    def clear(self) -> None:
+        """Drops every label set of a labelled gauge, e.g. for a service
+        type that is no longer reported. A no-op for unlabeled gauges."""
+        if self._metric._labelnames:
+            self._metric.clear()
 
 
 class GuardedHistogram:
@@ -126,10 +135,13 @@ class SensorRegistry:
         )
         return GuardedCounter(spec.name, metric, self._is_active)
 
-    def gauge(self, spec: SensorSpec) -> GuardedGauge:
+    def gauge(self, spec: SensorSpec, *, labelnames: tuple[str, ...] = ()) -> GuardedGauge:
         self._register_spec(spec)
         metric = Gauge(
-            self._prom_name(spec.name), spec.description, registry=self.collector_registry
+            self._prom_name(spec.name),
+            spec.description,
+            labelnames=labelnames,
+            registry=self.collector_registry,
         )
         return GuardedGauge(spec.name, metric, self._is_active)
 

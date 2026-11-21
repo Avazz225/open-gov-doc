@@ -20,6 +20,9 @@ os.environ["DMS_POSTGRES_DSN"] = DSN
 # `_grant_config_admin_permission` für dieselbe Capability `admin.object_config`.
 PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://localhost:8004")
 CONFIG_ADMIN_PRINCIPAL_ID = "registry-test-config-admin"
+# Expected replicas / manual forgetting (P87-S2, ADR 0241) - gated by
+# `admin.monitoring` (`domain-admin-monitoring`).
+MONITORING_ADMIN_PRINCIPAL_ID = "registry-test-monitoring-admin"
 
 
 @pytest.fixture
@@ -27,15 +30,17 @@ def config_admin_headers() -> dict[str, str]:
     return {"X-DMS-Principal": CONFIG_ADMIN_PRINCIPAL_ID}
 
 
-@pytest.fixture(scope="session", autouse=True)
-async def _grant_config_admin_permission():
+@pytest.fixture
+def monitoring_admin_headers() -> dict[str, str]:
+    return {"X-DMS-Principal": MONITORING_ADMIN_PRINCIPAL_ID}
+
+
+async def _grant(principal_id: str, role_name: str) -> None:
     async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL) as client:
         roles = (await client.get("/roles")).json()
-        role_id = next(r["id"] for r in roles if r["name"] == "domain-admin-config")
+        role_id = next(r["id"] for r in roles if r["name"] == role_name)
         existing = (
-            await client.get(
-                "/role-assignments", params={"principal_id": CONFIG_ADMIN_PRINCIPAL_ID}
-            )
+            await client.get("/role-assignments", params={"principal_id": principal_id})
         ).json()
         if any(a["role_id"] == role_id for a in existing):
             return
@@ -43,12 +48,18 @@ async def _grant_config_admin_permission():
             "/role-assignments",
             json={
                 "principal_type": "user",
-                "principal_id": CONFIG_ADMIN_PRINCIPAL_ID,
+                "principal_id": principal_id,
                 "role_id": role_id,
                 "resource_id": "root",
             },
         )
         response.raise_for_status()
+
+
+@pytest.fixture(scope="session", autouse=True)
+async def _grant_admin_permissions():
+    await _grant(CONFIG_ADMIN_PRINCIPAL_ID, "domain-admin-config")
+    await _grant(MONITORING_ADMIN_PRINCIPAL_ID, "domain-admin-monitoring")
 
 
 @pytest.fixture
@@ -61,6 +72,8 @@ async def engine():
     async with eng.begin() as conn:
         await conn.execute(text("DELETE FROM registry.service_instance"))
         await conn.execute(text("DELETE FROM registry.branding_config"))
+        await conn.execute(text("DELETE FROM registry.expected_replicas"))
+        await conn.execute(text("DELETE FROM registry.replica_alarm_state"))
     await eng.dispose()
 
 

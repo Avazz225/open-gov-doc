@@ -398,3 +398,27 @@ values.yaml, wie jeder andere FastAPI-Service).
 {{- define "dms.storageServiceBaseUrl" -}}
 http://{{ include "dms.fullname" . }}-storage-service:8000
 {{- end -}}
+
+{{/*
+Expected replicas per service type (P87-S2, ADR 0241 Decision 3), rendered
+as DMS_EXPECTED_REPLICAS_DEFAULTS into registry-service: for every enabled
+service that registers itself, `autoscaling.minReplicas..maxReplicas` when
+autoscaling is on, else `replicas..replicas`. Left out: the static
+frontends and services marked `registersWithRegistry: false` (they never
+appear in the registry, so an expectation would read as "vanished"). An
+admin override in registry-service wins over these defaults.
+*/}}
+{{- define "dms.expectedReplicasDefaults" -}}
+{{- $defaults := dict -}}
+{{- range $name, $svc := .Values.services -}}
+{{- if and $svc.enabled (not $svc.staticFrontend) (ne (toString $svc.registersWithRegistry) "false") -}}
+{{- $replicas := int (default 1 $svc.replicas) -}}
+{{- if and $svc.autoscaling $svc.autoscaling.enabled -}}
+{{- $_ := set $defaults $name (dict "min" (int $svc.autoscaling.minReplicas) "max" (int $svc.autoscaling.maxReplicas)) -}}
+{{- else -}}
+{{- $_ := set $defaults $name (dict "min" $replicas "max" $replicas) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- toJson $defaults -}}
+{{- end -}}

@@ -85,6 +85,9 @@ resources:
 #   resources                  - optional, selective override of resources.baseline
 #                                 (shape: {memory: {requests, limits}, cpu: {requests, limits}})
 #   autoscaling                - HPA configuration, see templates/hpa.yaml
+#   registersWithRegistry      - optional, default true; false for a service that doesn't
+#                                 self-register (no expected-replicas default for it, see
+#                                 dms.expectedReplicasDefaults, ADR 0241)
 #   podDisruptionBudget        - PDB configuration, see templates/pdb.yaml
 #   dependsOnServices          - optional, list of other services.<name> keys; for each
 #                                 entry a
@@ -604,6 +607,9 @@ services:
   # service simply doesn't read them.
   federation-hub-service:
     enabled: true
+    # Doesn't register with registry-service, so it gets no expected-replicas
+    # default (P87-S2, ADR 0241; see dms.expectedReplicasDefaults).
+    registersWithRegistry: false
     image:
       repository: dms/federation-hub-service
       tag: latest
@@ -936,6 +942,9 @@ services:
   # with federation-hub-service above.
   fleet-management-service:
     enabled: true
+    # Doesn't register with registry-service, so it gets no expected-replicas
+    # default (P87-S2, ADR 0241; see dms.expectedReplicasDefaults).
+    registersWithRegistry: false
     image:
       repository: dms/fleet-management-service
       tag: latest

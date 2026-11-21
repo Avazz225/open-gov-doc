@@ -192,3 +192,14 @@ supersede.
 
 **Docs:** `docs/services/registry-service.md`, the notification and fleet docs, and the Helm values
 reference.
+
+## Implementation status
+
+- **P87-S2 (done):** everything listed for P87-S2 above.
+  - Two details beyond the list:
+    - `dms-metrics-client` gauges accept `labelnames`, plus `GuardedGauge.clear()`;
+    - expectation changes publish `registry.replicas.expectation_set`/`_reset` with the admin as actor.
+  - **Transitions between alarm states:** a change from one alarm state to another (`under` → `vanished`,
+    `over` → `under`) publishes the event of the new state. `unmonitored` → `ok` is silent.
+  - **Live on the dev stack:** 287 registry rows (257 dead) shrank to 30 live ones on the first ticks
+    after the upgrade, and the old registry-service instance itself went once its grace had passed.

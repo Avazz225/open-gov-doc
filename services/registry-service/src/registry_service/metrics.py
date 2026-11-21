@@ -29,8 +29,64 @@ HEARTBEAT_MISS = SensorSpec(
 )
 
 
+# Expected replicas (P87-S2, ADR 0241 Decision 4) - one value per
+# `service_type` label, set by the replica loop in `main.py` after each
+# evaluation (not by the generic sampler loop, which knows no labels).
+REPLICAS_REACHABLE = SensorSpec(
+    name="registry.replicas.reachable",
+    group="capacity",
+    cost="cheap",
+    description="Erreichbare, aktive Instanzen je Service-Typ",
+)
+REPLICAS_EXPECTED_MIN = SensorSpec(
+    name="registry.replicas.expected_min",
+    group="capacity",
+    cost="cheap",
+    description="Erwartete Mindestanzahl Instanzen je Service-Typ (nur wenn gesetzt)",
+)
+REPLICAS_EXPECTED_MAX = SensorSpec(
+    name="registry.replicas.expected_max",
+    group="capacity",
+    cost="cheap",
+    description="Erwartete Höchstanzahl Instanzen je Service-Typ (nur wenn gesetzt)",
+)
+REPLICAS_STATE = SensorSpec(
+    name="registry.replicas.state",
+    group="reliability",
+    cost="cheap",
+    description="Replika-Zustand je Service-Typ: -1 zu wenig/verschwunden, 0 ok, 1 zu viele",
+)
+REPLICA_SPECS = (REPLICAS_REACHABLE, REPLICAS_EXPECTED_MIN, REPLICAS_EXPECTED_MAX, REPLICAS_STATE)
+_STATE_VALUES = {"under": -1.0, "vanished": -1.0, "ok": 0.0, "over": 1.0}
+
+
 def sensor_declarations() -> list[dict]:
-    return [ACTIVE_INSTANCES.as_dict(), HEARTBEAT_MISS.as_dict(), *http_sensor_declarations()]
+    return [
+        ACTIVE_INSTANCES.as_dict(),
+        HEARTBEAT_MISS.as_dict(),
+        *(spec.as_dict() for spec in REPLICA_SPECS),
+        *http_sensor_declarations(),
+    ]
+
+
+def build_replica_gauges(registry: SensorRegistry) -> dict[str, GuardedGauge]:
+    return {spec.name: registry.gauge(spec, labelnames=("service_type",)) for spec in REPLICA_SPECS}
+
+
+def observe_replicas(gauges: dict[str, GuardedGauge], rows: list) -> None:
+    """`rows` are `ReplicaTypeOut`s. Types without an expectation report
+    only their reachable count; min/max/state stay absent for them."""
+    for gauge in gauges.values():
+        gauge.clear()
+    for row in rows:
+        labels = {"service_type": row.service_type}
+        gauges[REPLICAS_REACHABLE.name].set(row.reachable, **labels)
+        if row.expected_min is not None:
+            gauges[REPLICAS_EXPECTED_MIN.name].set(row.expected_min, **labels)
+        if row.expected_max is not None:
+            gauges[REPLICAS_EXPECTED_MAX.name].set(row.expected_max, **labels)
+        if row.state in _STATE_VALUES:
+            gauges[REPLICAS_STATE.name].set(_STATE_VALUES[row.state], **labels)
 
 
 def build_sensor_registry(registry: SensorRegistry) -> tuple[GuardedGauge, GuardedGauge]:

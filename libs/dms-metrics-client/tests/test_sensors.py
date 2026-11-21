@@ -42,6 +42,22 @@ def test_gauge_set_guarded_by_active_flag():
     assert b"test_gauge 99.0" not in body
 
 
+def test_labelled_gauge_sets_and_clears_per_label():
+    """P87-S2: registry-service reports replica counts per service type."""
+    registry = SensorRegistry("test-service", is_active=lambda name: True)
+    gauge = registry.gauge(_spec("test.replicas"), labelnames=("service_type",))
+
+    gauge.set(2, service_type="document-service")
+    gauge.set(1, service_type="ocr-service")
+    body, _ = metrics_payload(registry)
+    assert b'test_replicas{service_type="document-service"} 2.0' in body
+    assert b'test_replicas{service_type="ocr-service"} 1.0' in body
+
+    gauge.clear()
+    body, _ = metrics_payload(registry)
+    assert b"document-service" not in body
+
+
 def test_histogram_is_active_lets_caller_skip_timing():
     registry = SensorRegistry("test-service", is_active=lambda name: False)
     histogram = registry.histogram(_spec("test.duration", cost="expensive"))

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
 LicenseComponentStatus = Literal["licensed", "demo", "unlicensed"]
 InstanceStatus = Literal["active", "draining"]
@@ -73,3 +73,38 @@ class BrandingConfigUpdate(BaseModel):
     product_name: str | None = None
     accent_color: str | None = None
     logo_url: str | None = None
+
+
+ExpectationSource = Literal["admin", "default", "none"]
+ReplicaState = Literal["ok", "under", "vanished", "over", "unmonitored"]
+
+
+class ExpectedReplicasUpdate(BaseModel):
+    """`PUT /replicas/{service_type}` (P87-S2, ADR 0241 Decision 3) - the
+    admin override. `max_replicas` None means "no upper limit"."""
+
+    min_replicas: int = Field(ge=1)
+    max_replicas: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def _max_not_below_min(self) -> "ExpectedReplicasUpdate":
+        if self.max_replicas is not None and self.max_replicas < self.min_replicas:
+            raise ValueError("max_replicas darf nicht kleiner als min_replicas sein")
+        return self
+
+
+class ReplicaTypeOut(BaseModel):
+    """One row of `GET /replicas` (P87-S2, ADR 0241): the expectation and
+    where it comes from, the live counts, and the committed alarm state
+    with `since` (plus a pending state still inside its debounce window)."""
+
+    service_type: str
+    expected_min: int | None
+    expected_max: int | None
+    source: ExpectationSource
+    reachable: int
+    draining: int
+    unreachable: int
+    state: ReplicaState
+    since: datetime | None = None
+    pending_state: ReplicaState | None = None

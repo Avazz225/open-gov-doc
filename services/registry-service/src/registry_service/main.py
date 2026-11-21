@@ -20,16 +20,18 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from registry_service import consumer, metrics, repository
+from registry_service import consumer, metrics, replicas, repository
 from registry_service.license_client import LicenseServiceClient
 from registry_service.licensing import ComponentLicenseCache
-from registry_service.models import Base, BrandingConfig
+from registry_service.models import Base, BrandingConfig, ExpectedReplicas, ServiceInstance
 from registry_service.schemas import (
     BrandingConfigOut,
     BrandingConfigUpdate,
+    ExpectedReplicasUpdate,
     InstanceOut,
     LicenseStatusForServiceOut,
     RegisterRequest,
+    ReplicaTypeOut,
 )
 from registry_service.settings import Settings
 
@@ -54,40 +56,112 @@ async def _get_or_seed_branding_config(session: AsyncSession) -> BrandingConfig:
     return config
 
 
-async def _cleanup_poll_loop(session_factory) -> None:
-    """Periodic cleanup of permanently-unreachable instance rows (3.2a,
-    Phase 58 Session 2) - same poll-loop idiom as `document_service.main.
-    _retention_poll_loop`/`workflow_service.main._sla_poll_loop`. An error
-    in one tick doesn't abort the loop. Reuses `repository.deregister`
-    (not a bulk DELETE) so each cleanup still publishes the existing
-    `registry.instance.deregistered` event - consistent with the manual
-    `DELETE /instances/{id}` path, just with a different actor."""
+async def replica_rows(session: AsyncSession) -> list[ReplicaTypeOut]:
+    """`GET /replicas` and the poll loop's view (P87-S2, ADR 0241): each
+    type's expectation, live counts and committed alarm state."""
+    rows = await replicas.overview(
+        session,
+        defaults=settings.expected_replicas_defaults,
+        timeout_seconds=settings.heartbeat_timeout_seconds,
+    )
+    states = await replicas.current_states(session)
+    result = []
+    for service_type, expectation, type_counts in rows:
+        alarm = states.get(service_type)
+        result.append(
+            ReplicaTypeOut(
+                service_type=service_type,
+                expected_min=expectation.min,
+                expected_max=expectation.max,
+                source=expectation.source,
+                reachable=type_counts.reachable,
+                draining=type_counts.draining,
+                unreachable=type_counts.unreachable,
+                state=alarm.state if alarm else "unmonitored",
+                since=alarm.since if alarm else None,
+                pending_state=alarm.pending_state if alarm else None,
+            )
+        )
+    return result
+
+
+async def run_replica_tick(session_factory) -> dict[str, list]:
+    """One tick of the replica loop (P87-S2, ADR 0241), callable from tests:
+    1. forget what Decision 1 lets go, one `registry.instance.forgotten`
+       (`reason: replaced`) each - this replaces the 7-day cleanup;
+    2. advance every type's alarm state and publish each committed
+       transition once (`registry.replicas.under`/`.over`/`.restored`);
+    3. refresh the per-type replica gauges."""
+    async with session_factory() as session:
+        forgotten = await replicas.forget_replaced(
+            session,
+            defaults=settings.expected_replicas_defaults,
+            timeout_seconds=settings.heartbeat_timeout_seconds,
+            forget_after_seconds=settings.forget_after_seconds,
+        )
+        await session.commit()
+    for instance_id, service_type in forgotten:
+        await publish_event(
+            "registry.instance.forgotten",
+            subject=instance_id,
+            payload={"service_type": service_type, "reason": "replaced"},
+            actor="system:registry",
+        )
+
+    transitions = []
+    async with session_factory() as session:
+        rows = await replica_rows(session)
+        observed = {
+            row.service_type: replicas.observed_state(
+                row.reachable, replicas.Expectation(row.expected_min, row.expected_max, row.source)
+            )
+            for row in rows
+        }
+        # A type that dropped out of the overview entirely (no instances, no
+        # expectation any more) still has to leave its alarm state.
+        for service_type in await replicas.current_states(session):
+            observed.setdefault(service_type, "unmonitored")
+        by_type = {row.service_type: row for row in rows}
+        for service_type, state in observed.items():
+            transition = await replicas.advance_alarm(
+                session,
+                service_type,
+                state,
+                debounce_seconds=settings.replica_alarm_after_seconds,
+            )
+            await session.commit()
+            if transition is not None:
+                transitions.append(transition)
+                event_type = replicas.event_for(transition)
+                row = by_type.get(service_type)
+                if event_type is not None:
+                    await publish_event(
+                        event_type,
+                        subject=service_type,
+                        payload={
+                            "service_type": service_type,
+                            "state": transition.new,
+                            "previous_state": transition.old,
+                            "reachable": row.reachable if row else 0,
+                            "min": row.expected_min if row else None,
+                            "max": row.expected_max if row else None,
+                        },
+                        actor="system:registry",
+                    )
+        rows = await replica_rows(session)
+    metrics.observe_replicas(replica_gauges, rows)
+    return {"forgotten": forgotten, "transitions": transitions}
+
+
+async def _replica_poll_loop(session_factory) -> None:
+    """Same poll-loop idiom as before (Phase 58): an error in one tick
+    doesn't abort the loop."""
     while True:
         try:
-            async with session_factory() as session:
-                stale = await repository.list_permanently_unreachable(
-                    session, cleanup_after_seconds=settings.unreachable_cleanup_after_seconds
-                )
-                for instance in stale:
-                    instance_id = instance.instance_id
-                    service_type = instance.service_type
-                    # Internal caller (Phase 59 Session 4): passes the
-                    # instance's own `service_type` as its identity - the
-                    # new `X-DMS-Principal` check on `repository.deregister`
-                    # exists to stop an EXTERNAL caller deregistering an
-                    # instance it doesn't own, not to gate this trusted,
-                    # already-instance-scoped internal cleanup loop.
-                    await repository.deregister(session, instance_id, service_type)
-                    await session.commit()
-                    await publish_event(
-                        "registry.instance.deregistered",
-                        subject=instance_id,
-                        payload={"service_type": service_type},
-                        actor="system:registry-cleanup",
-                    )
+            await run_replica_tick(session_factory)
         except Exception:
             logger.exception(
-                "Cleanup-Poll-Tick fehlgeschlagen - wird beim nächsten Tick erneut versucht."
+                "Replica-Poll-Tick fehlgeschlagen - wird beim nächsten Tick erneut versucht."
             )
         await asyncio.sleep(settings.cleanup_poll_interval_seconds)
 
@@ -185,7 +259,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         run_gauge_sampler_loop(samplers, interval_seconds=settings.sensor_sample_interval_seconds)
     )
 
-    cleanup_poll_task = asyncio.create_task(_cleanup_poll_loop(app.state.session_factory))
+    cleanup_poll_task = asyncio.create_task(_replica_poll_loop(app.state.session_factory))
 
     startup_end = time.time()
     millis = round((startup_end - startup_start) * 1000, 3)
@@ -221,6 +295,7 @@ sensor_config_proxy, sensor_registry, _http_requests_sensor, _http_duration_sens
     bootstrap_http_sensors(app, settings.service_name)
 )
 active_gauge, heartbeat_miss_gauge = metrics.build_sensor_registry(sensor_registry)
+replica_gauges = metrics.build_replica_gauges(sensor_registry)
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:
@@ -490,3 +565,98 @@ async def list_active_instances(
 async def get_license_status(service_type: str) -> LicenseStatusForServiceOut:
     status_value = await app.state.license_cache.status_for(service_type)
     return LicenseStatusForServiceOut(service_type=service_type, status=status_value)
+
+
+async def _require_monitoring_admin(x_dms_principal: str) -> None:
+    """Expectations and manual forgetting (P87-S2, ADR 0241) are operations
+    settings - gated by `admin.monitoring` (`domain-admin-monitoring`), the
+    capability monitoring-service's sensor configuration already uses."""
+    allowed = bool(x_dms_principal) and await app.state.permission_client.has_permission(
+        x_dms_principal, settings.monitoring_permission
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Fehlende Domain-Admin-Rolle 'Monitoring-/Sensor-Konfiguration'",
+        )
+
+
+@app.get("/replicas", response_model=list[ReplicaTypeOut])
+async def list_replicas(session: AsyncSession = Depends(get_session)) -> list[ReplicaTypeOut]:
+    """Expected vs. actual per service type (P87-S2, ADR 0241). Readable
+    like `GET /instances`: it describes the installation's topology."""
+    return await replica_rows(session)
+
+
+@app.put("/replicas/{service_type}", response_model=ReplicaTypeOut)
+async def set_expected_replicas(
+    service_type: str,
+    payload: ExpectedReplicasUpdate,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> ReplicaTypeOut:
+    """The admin override (Decision 3); it wins over the Helm default. The
+    alarm state follows on the next poll tick, after the debounce."""
+    await _require_monitoring_admin(x_dms_principal)
+    row = await session.get(ExpectedReplicas, service_type)
+    if row is None:
+        row = ExpectedReplicas(service_type=service_type)
+        session.add(row)
+    row.min_replicas = payload.min_replicas
+    row.max_replicas = payload.max_replicas
+    row.updated_by = x_dms_principal
+    row.updated_at = datetime.now(UTC)
+    await session.commit()
+    await publish_event(
+        "registry.replicas.expectation_set",
+        subject=service_type,
+        payload={"min": payload.min_replicas, "max": payload.max_replicas},
+        actor=x_dms_principal,
+    )
+    return next(r for r in await replica_rows(session) if r.service_type == service_type)
+
+
+@app.delete("/replicas/{service_type}", status_code=status.HTTP_204_NO_CONTENT)
+async def reset_expected_replicas(
+    service_type: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    """Drops the admin override; the Helm default (or none) applies again."""
+    await _require_monitoring_admin(x_dms_principal)
+    row = await session.get(ExpectedReplicas, service_type)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Keine Vorgabe für diesen Service-Typ")
+    await session.delete(row)
+    await session.commit()
+    await publish_event(
+        "registry.replicas.expectation_reset",
+        subject=service_type,
+        payload={},
+        actor=x_dms_principal,
+    )
+
+
+@app.post("/instances/{instance_id}/forget", status_code=status.HTTP_204_NO_CONTENT)
+async def forget_instance(
+    instance_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    """Manual forgetting (ADR 0241 Decision 2) - for a service that was
+    decommissioned for good. A vanished type keeps its entries until then,
+    since the 7-day cleanup is gone. `DELETE /instances/{id}` stays the
+    instance's own self-deregistration."""
+    await _require_monitoring_admin(x_dms_principal)
+    instance = await session.get(ServiceInstance, instance_id)
+    if instance is None:
+        raise HTTPException(status_code=404, detail="Instance not registered")
+    service_type = instance.service_type
+    await session.delete(instance)
+    await session.commit()
+    await publish_event(
+        "registry.instance.forgotten",
+        subject=instance_id,
+        payload={"service_type": service_type, "reason": "admin"},
+        actor=x_dms_principal,
+    )

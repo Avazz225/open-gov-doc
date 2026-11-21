@@ -3819,6 +3819,18 @@ installations are never pruned.
   service type (new table plus admin API), and under/over-replica detection with events
   (`registry.replicas.under`/`.over`/`.restored`) and a metric. Tests for restart, scale up, scale down,
   vanish, and over-provisioning.
+  - ✅ **Result** (per ADR 0241):
+    - **The rule:** `replicas.py` holds pure rules plus DB steps. `run_replica_tick` (every 30 s)
+      replaces the 7-day cleanup. Forgetting publishes `registry.instance.forgotten` with
+      `reason: replaced`.
+    - **New endpoints:** `POST /instances/{id}/forget` and `GET/PUT/DELETE /replicas/{service_type}`,
+      gated by `admin.monitoring`.
+    - **Persisted alarm state** with a 120 s debounce and a conditional transition. There are three
+      events and four labelled sensors (`dms-metrics-client` gauges got `labelnames`).
+    - **Helm** renders `DMS_EXPECTED_REPLICAS_DEFAULTS` from HPA/`replicas`. Static frontends and the
+      two non-registering services (`registersWithRegistry: false`) are skipped. `helm lint` passes.
+    - **Tests:** registry-service 80 (was 58, −2 obsolete, +24); metrics client 18.
+    - **Live:** the dev registry went from 287 rows (257 dead) to 30 live.
 - **P87-S3 — Admin UI and hygiene.**
   - **Registry/fleet view grouped by type:** expected vs. actual, last seen, the alarm state, an editor
     for expected replicas, and "forgotten because superseded" made visible in the audit trail.

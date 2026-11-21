@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from dms_db_base import make_declarative_base
-from sqlalchemy import JSON, DateTime, String
+from sqlalchemy import JSON, DateTime, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 Base = make_declarative_base("registry")
@@ -59,3 +59,34 @@ class BrandingConfig(Base):
     accent_color: Mapped[str | None] = mapped_column(String(16), nullable=True)
     logo_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ExpectedReplicas(Base):
+    """Admin override of the expected replica range of one service type
+    (P87-S2, ADR 0241 Decision 3). It wins over the Helm default from
+    `Settings.expected_replicas_defaults`; deleting the row restores that
+    default. `max_replicas` NULL means "no upper limit"."""
+
+    __tablename__ = "expected_replicas"
+
+    service_type: Mapped[str] = mapped_column(String(128), primary_key=True)
+    min_replicas: Mapped[int] = mapped_column(Integer)
+    max_replicas: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    updated_by: Mapped[str] = mapped_column(String(256))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ReplicaAlarmState(Base):
+    """The committed replica state of one service type plus a pending one
+    that becomes committed after `replica_alarm_after_seconds` (P87-S2, ADR
+    0241 Decision 4). Persisted, so a registry restart doesn't re-fire open
+    alarms; the commit is a conditional UPDATE, so with several registry
+    replicas only one publishes the transition."""
+
+    __tablename__ = "replica_alarm_state"
+
+    service_type: Mapped[str] = mapped_column(String(128), primary_key=True)
+    state: Mapped[str] = mapped_column(String(16))
+    since: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    pending_state: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    pending_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

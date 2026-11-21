@@ -2,6 +2,61 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P87-S2, registry-service per
+[ADR 0241](docs/adr/0241-service-instance-replacement-and-expected-replicas.md).
+
+**What changed:**
+- **`replicas.py`:**
+  - pure rules: `forgettable`, `expectation_for`, `observed_state`, `event_for`;
+  - DB steps: `forget_replaced`, `overview`, `advance_alarm` (debounce plus a conditional
+    `UPDATE … WHERE state = old`).
+- **`main.run_replica_tick`** (every 30 s) replaces the 7-day cleanup loop. Each tick:
+  - forgets with `registry.instance.forgotten` (`reason: replaced`);
+  - commits alarm transitions as `registry.replicas.under`/`.over`/`.restored`, each with
+    `previous_state`, `reachable`, `min` and `max`;
+  - sets four gauges labelled by `service_type`.
+- **Endpoints:** `GET /replicas`, `PUT`/`DELETE /replicas/{service_type}` (`admin.monitoring`,
+  expectation events with the admin as actor), `POST /instances/{id}/forget` (`admin.monitoring`,
+  `reason: admin`).
+- **New tables:** `expected_replicas`, `replica_alarm_state`.
+- **Settings:**
+  - added `forget_after_seconds` (60), `replica_alarm_after_seconds` (120),
+    `expected_replicas_defaults` and `monitoring_permission`;
+  - removed `unreachable_cleanup_after_seconds`;
+  - `cleanup_poll_interval_seconds` 3600 → 30.
+- **`dms-metrics-client`:** `gauge(..., labelnames=)`, `GuardedGauge.set(**labels)` and `clear()`.
+- **Helm:**
+  - the `dms.expectedReplicasDefaults` helper fills `DMS_EXPECTED_REPLICAS_DEFAULTS` for
+    registry-service;
+  - `registersWithRegistry: false` on federation-hub-service and fleet-management-service, which never
+    register.
+- **Docs:** the registry-service doc (API, the new section, events, data model, open points) and the
+  ADR's implementation status.
+
+**Checks:**
+- registry-service 80/80. That covers restart, rolling restart, scale up/down, a crashed replica under
+  an expectation, keeping only the newest dead one, a vanished type, the grace period, draining,
+  priorities, every state, the debounce, flapping, a concurrent transition reported once, the API gates,
+  the Helm default and override, 422, a late heartbeat → 404, and the tick events (forgotten; under →
+  restored).
+- dms-metrics-client 18/18.
+- `helm lint` passes, and `helm template` renders the expected JSON.
+- ruff clean for the changed code.
+- **Live:** the dev registry went from 287 rows (257 dead) to 30 live after the upgrade; `/replicas`
+  and the labelled metrics respond.
+
+The stack was stopped afterwards.
+
+**Next session:** **P87-S3**, admin UI and hygiene:
+- registry view grouped by type: expected range and source, counts, state with `since`, an expectation
+  editor, "Vergessen" on vanished entries, forgotten entries in the audit view;
+- notification-service: subscribe to `registry.replicas.*`, a new `operations_admin_email`, three
+  templates;
+- fleet-management: a per-installation replica summary;
+- test hygiene: registry, fleet and e2e suites clean up what they register.
+
+---
+
 **Last completed:** P87-S1, scoping
 ([ADR 0241](docs/adr/0241-service-instance-replacement-and-expected-replicas.md)). No code changed.
 
@@ -29,7 +84,7 @@
 **Found on the way:** the plan's "one new instance supersedes one old one" alone wouldn't have covered
 scale-down or a rolling restart where the replacements registered before the old ones timed out.
 
-**Next session:** **P87-S2**, registry-service per ADR 0241:
+**Next session (at the time):** P87-S2. It was done next; see the entry above. Original note:, registry-service per ADR 0241:
 - the forgetting rule in the poll loop (30 s) and `forget_after_seconds`;
 - removing the 7-day cleanup;
 - `POST /instances/{id}/forget`;

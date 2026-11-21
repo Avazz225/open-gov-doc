@@ -66,6 +66,10 @@ spec:
             - name: DMS_REDIS_URL
               value: {{ include "dms.redisUrl" $ | quote }}
             {{- end }}
+            {{- if eq $name "registry-service" }}
+            - name: DMS_EXPECTED_REPLICAS_DEFAULTS
+              value: {{ include "dms.expectedReplicasDefaults" $ | quote }}
+            {{- end }}
             {{- if $svc.storageTargetsEnv }}
             {{- include "dms.storageServiceTargetsEnv" $ | nindent 12 }}
             {{- end }}

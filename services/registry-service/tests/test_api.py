@@ -375,3 +375,94 @@ def test_update_branding_config_can_unset_fields_back_to_none(client, config_adm
             json={"product_name": None, "accent_color": None, "logo_url": None},
             headers=config_admin_headers,
         )
+
+
+# --- Expected replicas and manual forgetting (P87-S2, ADR 0241) ---------------
+
+
+def test_replica_expectation_requires_admin_monitoring(client):
+    response = client.put(
+        "/replicas/ocr-service",
+        json={"min_replicas": 2},
+        headers={"X-DMS-Principal": "someone-without-the-role"},
+    )
+    assert response.status_code == 403
+
+
+def test_replica_expectation_is_set_listed_and_reset(client, monitoring_admin_headers):
+    service_type = f"type-{uuid.uuid4().hex[:8]}"
+    response = client.put(
+        f"/replicas/{service_type}",
+        json={"min_replicas": 2, "max_replicas": 3},
+        headers=monitoring_admin_headers,
+    )
+    assert response.status_code == 200
+    row = response.json()
+    assert (row["expected_min"], row["expected_max"], row["source"]) == (2, 3, "admin")
+    # Expected but never registered: counted with zero reachable instances.
+    assert row["reachable"] == 0
+
+    listed = {r["service_type"]: r for r in client.get("/replicas").json()}
+    assert listed[service_type]["source"] == "admin"
+
+    assert (
+        client.delete(f"/replicas/{service_type}", headers=monitoring_admin_headers).status_code
+        == 204
+    )
+    assert service_type not in {r["service_type"] for r in client.get("/replicas").json()}
+    assert (
+        client.delete(f"/replicas/{service_type}", headers=monitoring_admin_headers).status_code
+        == 404
+    )
+
+
+def test_helm_default_applies_until_overridden(client, monitoring_admin_headers):
+    service_type = f"type-{uuid.uuid4().hex[:8]}"
+    registry_settings.expected_replicas_defaults = {service_type: {"min": 2, "max": 5}}
+    try:
+        listed = {r["service_type"]: r for r in client.get("/replicas").json()}
+        assert (listed[service_type]["expected_min"], listed[service_type]["source"]) == (
+            2,
+            "default",
+        )
+        client.put(
+            f"/replicas/{service_type}", json={"min_replicas": 3}, headers=monitoring_admin_headers
+        )
+        listed = {r["service_type"]: r for r in client.get("/replicas").json()}
+        assert (listed[service_type]["expected_min"], listed[service_type]["source"]) == (
+            3,
+            "admin",
+        )
+    finally:
+        registry_settings.expected_replicas_defaults = {}
+
+
+def test_replica_expectation_rejects_max_below_min(client, monitoring_admin_headers):
+    response = client.put(
+        "/replicas/ocr-service",
+        json={"min_replicas": 3, "max_replicas": 2},
+        headers=monitoring_admin_headers,
+    )
+    assert response.status_code == 422
+
+
+def test_forget_instance_is_admin_only_and_a_late_heartbeat_gets_404(
+    client, monitoring_admin_headers
+):
+    payload = make_payload()
+    client.post("/instances", json=payload)
+
+    assert client.post(f"/instances/{payload['instance_id']}/forget").status_code == 403
+    response = client.post(
+        f"/instances/{payload['instance_id']}/forget", headers=monitoring_admin_headers
+    )
+    assert response.status_code == 204
+    # The forgotten instance's next heartbeat is a 404, which
+    # dms-registry-client answers by registering again.
+    assert client.post(f"/instances/{payload['instance_id']}/heartbeat").status_code == 404
+    assert (
+        client.post(
+            f"/instances/{payload['instance_id']}/forget", headers=monitoring_admin_headers
+        ).status_code
+        == 404
+    )

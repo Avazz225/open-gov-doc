@@ -35,15 +35,25 @@ class Settings(BaseServiceSettings):
     monitoring_service_base_url: str = "http://localhost:8026"
     sensor_sample_interval_seconds: float = 15.0
 
-    # Periodic cleanup of permanently-unreachable instance rows (3.2a, Phase
-    # 58 Session 2) - a much longer window than `heartbeat_timeout_seconds`
-    # (which only decides routing eligibility, not row lifetime). Default 7
-    # days: long enough that a genuinely temporary outage/redeploy never
-    # gets cleaned up, short enough that stale rows from a permanently
-    # decommissioned instance don't accumulate indefinitely in the admin
-    # UI's registry overview.
-    unreachable_cleanup_after_seconds: float = 604800.0
-    cleanup_poll_interval_seconds: float = 3600.0
+    # Instance replacement and expected replicas (P87-S2, ADR 0241). The
+    # 7-day blanket cleanup (`unreachable_cleanup_after_seconds`, Phase 58)
+    # is gone: it also deleted types that vanished for good. Instead, per
+    # type, only as many unreachable entries stay as the expectation is
+    # short (`replicas.forgettable`), each after `forget_after_seconds`
+    # unreachable. The poll loop also evaluates the replica alarms.
+    cleanup_poll_interval_seconds: float = 30.0
+    forget_after_seconds: float = 60.0
+    # A replica state counts only once it has held this long - restarts and
+    # rolling updates must not alarm.
+    replica_alarm_after_seconds: float = 120.0
+    # Defaults per service type, rendered by the Helm chart from each
+    # service's `replicas`/`autoscaling` (`DMS_EXPECTED_REPLICAS_DEFAULTS`,
+    # JSON): {"document-service": {"min": 2, "max": 5}}. `max` may be null.
+    # An admin override (`registry.expected_replicas`) wins. Compose sets
+    # none, so the dev stack has no expectations and no alarms.
+    expected_replicas_defaults: dict[str, dict[str, int | None]] = {}
+    # Who may set expectations and forget entries by hand (ADR 0241).
+    monitoring_permission: str = "admin.monitoring"
 
     # Operator gate for drain/activate (10.5/3.8, Phase 59 Session 4) - same
     # bearer-secret pattern as `federation-hub-service`'s `hub_operator_key`

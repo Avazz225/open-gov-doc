@@ -21,11 +21,15 @@
 | `GET` | `/installation` | Installation identity (3a, P13-S1): `{id, display_name}` from `DMS_INSTALLATION_ID`/`DMS_INSTALLATION_DISPLAY_NAME` (`dms_common.BaseServiceSettings`) — ungated, pure configuration values, no DB access. |
 | `GET` | `/installation/branding` | **Since P69-S2** ([ADR 0202](../adr/0202-p69s2-branding-config-and-role-dependent-dashboard.md)): installation-level branding (7.3/8) — `{product_name, accent_color, logo_url, updated_at}`, all three nullable. Deliberately ungated (must render on the login screen, before any token exists) — the gateway allows only `GET` on this exact path through unauthenticated, see "Gateway Routing" below. |
 | `PUT` | `/installation/branding` | Update branding — requires `admin.object_config` (this service's first ever `PermissionServiceClient` check, reusing the existing capability rather than minting a new one). Reachable via `config-service`'s regular 7.3 export/import (`branding_config` category, singleton shape like `sensor_config`/`federation_config`). |
+| `POST` | `/instances/{instance_id}/forget` | **Since P87-S2** ([ADR 0241](../adr/0241-service-instance-replacement-and-expected-replicas.md)): an admin forgets an entry by hand, e.g. a service decommissioned for good. Requires `admin.monitoring`. Publishes `registry.instance.forgotten` with `reason: admin` |
+| `GET` | `/replicas` | **Since P87-S2**: per service type the expected range and its source (`admin`/`default`/`none`), `reachable`/`draining`/`unreachable` counts, and the committed alarm `state` with `since` (plus a `pending_state` still inside the debounce). Readable like `GET /instances` |
+| `PUT` | `/replicas/{service_type}` | **Since P87-S2**: admin override `{min_replicas, max_replicas?}` (`max` ≥ `min`, `null` = no upper limit). Requires `admin.monitoring`. Publishes `registry.replicas.expectation_set` |
+| `DELETE` | `/replicas/{service_type}` | **Since P87-S2**: drops the override; the Helm default (or none) applies again. Requires `admin.monitoring` |
 | `GET` | `/healthz` | Own health check |
 
 ## Data Model
 
-`service_instance`: `instance_id` (PK), `service_type`, `version`, `capabilities` (JSON list), `sensors` (JSON list, since P11-S1 — purely passed-through sensor self-declaration, see below), `health_endpoint`, `address`, `registered_at`, `last_heartbeat_at`, `status` (`"active"`/`"draining"`, default `"active"`, since P10-S2 — added additively via `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`, no Alembic in this phase). `healthy` is not a stored field but computed on every query from `last_heartbeat_at` vs. `heartbeat_timeout_seconds` (default 15s, configurable via `DMS_HEARTBEAT_TIMEOUT_SECONDS`). `license_status` (in `InstanceOut`) is likewise not a stored field but appended to every response via `ComponentLicenseCache`.
+`service_instance`: `instance_id` (PK), `service_type`, `version`, `capabilities` (JSON list), `sensors` (JSON list, since P11-S1 — purely passed-through sensor self-declaration, see below), `health_endpoint`, `address`, `registered_at`, `last_heartbeat_at`, `status` (`"active"`/`"draining"`, default `"active"`, since P10-S2 — added additively via `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`, no Alembic in this phase). `healthy` is not a stored field but computed on every query from `last_heartbeat_at` vs. `heartbeat_timeout_seconds` (default 15s, configurable via `DMS_HEARTBEAT_TIMEOUT_SECONDS`). `license_status` (in `InstanceOut`) is likewise not a stored field but appended to every response via `ComponentLicenseCache`. Since P87-S2 also `expected_replicas` (`service_type` PK, `min_replicas`, `max_replicas` nullable, `updated_by`, `updated_at`) and `replica_alarm_state` (`service_type` PK, `state`, `since`, `pending_state`, `pending_since`).
 
 ## Drain Mechanism (10.5/3.8, P10-S2/S3)
 
@@ -35,26 +39,51 @@
 - A **new** registration (row does not yet exist) always starts with `status="active"`; a re-registration of the same `instance_id` (self-healing after `404`, not a real restart, see `dms-registry-client`) leaves an existing `status` unchanged — only heartbeat/register never automatically revert it, only `/drain`/`/activate` set it.
 - **Rollback (10.5, P10-S3)**: `POST /instances/{instance_id}/activate` resets `status` back to `"active"` — without this reversal there would be no way to make an already-drained instance reachable for new requests again. Concept 10.5 explicitly requires that a rollback remains possible as long as the drain is not yet fully completed (i.e. the instance has not yet stopped). Used by `scripts/rolling-update.sh`'s manual rollback procedure, see `docs/operations/rolling-updates.md`.
 
-## Periodic Cleanup of Unreachable Instances (3.2a, Phase 58 Session 2)
+## Instance Replacement and Expected Replicas (P87-S2, [ADR 0241](../adr/0241-service-instance-replacement-and-expected-replicas.md))
 
-A background poll loop (`_cleanup_poll_loop`, same idiom as `document_service.main.
-_retention_poll_loop`/`workflow_service.main._sla_poll_loop`) periodically removes `ServiceInstance`
-rows whose `last_heartbeat_at` age exceeds `unreachable_cleanup_after_seconds` (default 7 days,
-`cleanup_poll_interval_seconds` default 1h) — a much longer window than `heartbeat_timeout_seconds`
-(15s), which only decides routing/`healthy` eligibility on read, not row lifetime.
+`replicas.py` holds the rules; `run_replica_tick` in `main.py` applies them every
+`cleanup_poll_interval_seconds` (30 s). The tick replaces Phase 58's 7-day cleanup, which also deleted
+types that vanished for good, against the user's rule.
 
-- **Reuses `repository.deregister`, not a bulk `DELETE`** — each cleaned-up row still publishes the
-  existing `registry.instance.deregistered` event (same as the manual `DELETE /instances/{id}` path),
-  just with `actor="system:registry-cleanup"` instead of `system:<service_type>` — visible in the
-  audit trail like any other deregistration, distinguishable by actor.
-- **Cosmetic fix, not a routing-correctness fix** — dead rows were already excluded from
-  `GET /instances/{service_type}` (the active routing table) and shown with `healthy: false` in the
-  raw `GET /instances` admin listing; this only stops that listing from accumulating permanently-dead
-  rows unbounded (real, observed pre-existing pain — see the now-closed Open Point below).
-- Live-verified against the real running stack: a manually-inserted row with `last_heartbeat_at` 10
-  days old was removed on the next poll tick (forced via a container restart); an otherwise-identical
-  row only 1 hour old (`healthy: false`, still within the 7-day cleanup window) was confirmed to
-  survive the same tick.
+**Forgetting (Decision 1).**
+- **The rule:** per `service_type`, once at least one instance is reachable and `active` (R ≥ 1), only
+  `max(0, min − R)` unreachable entries stay (the most recently seen). Every other entry that has been
+  unreachable for longer than `forget_after_seconds` (60 s) is forgotten. No expectation counts as
+  min = 1.
+- **What it covers:** restart, rolling restart and scale-down all come out of this one rule. A crashed
+  replica under an expectation stays visible.
+- **R = 0** (a vanished type) keeps everything until an admin forgets it (`POST .../forget`).
+- **Draining** instances are leaving on purpose: they count neither as reachable nor as dead.
+- **Late heartbeats:** a forgotten instance that is still alive gets a 404 on its next heartbeat, which
+  `dms-registry-client` answers by registering again.
+- **The event:** each forget publishes `registry.instance.forgotten` (`reason: replaced`, actor
+  `system:registry`). audit-service consumes `registry.>`, so the audit trail says why an entry went.
+
+**Expected replicas (Decision 3).**
+- **A range `min..max`.** An admin override (table `expected_replicas`) wins over the Helm default
+  `DMS_EXPECTED_REPLICAS_DEFAULTS` (JSON, `{"document-service": {"min": 2, "max": 6}}`).
+- **Helm** renders that default from each enabled, self-registering service: HPA `minReplicas..
+  maxReplicas`, else `replicas..replicas`. It skips static frontends and services marked
+  `registersWithRegistry: false`.
+- **Compose** sets none, so the dev stack has no expectations and no alarms.
+- A type that is expected but never registered counts as vanished.
+
+**Alarms (Decision 4).**
+- **States:** `ok`/`under`/`vanished`/`over`/`unmonitored`.
+- **Debounce:** an observed state becomes committed once it has held for `replica_alarm_after_seconds`
+  (120 s), so restarts and rolling updates don't alarm.
+- **Persistence:** the state lives in `replica_alarm_state`. The commit is a conditional
+  `UPDATE … WHERE state = <old>`, so with several registry replicas exactly one publishes.
+- **Events, one per committed transition:**
+  - `registry.replicas.under` (also for `vanished`, with `reachable: 0`);
+  - `registry.replicas.over`;
+  - `registry.replicas.restored` (leaving an alarm state).
+  - Payload: `service_type`, `state`, `previous_state`, `reachable`, `min`, `max`.
+- **Sensors,** labelled `service_type` and set after each tick:
+  - `registry.replicas.reachable`;
+  - `registry.replicas.expected_min` and `.expected_max` (only when set);
+  - `registry.replicas.state` (−1 under/vanished, 0 ok, 1 over).
+  - `dms-metrics-client` gauges take `labelnames` since this session.
 
 ## Authorization (Phase 59 Session 4, [ADR 0181](../adr/0181-registry-service-instance-mutation-authorization.md))
 
@@ -76,6 +105,9 @@ Published (stream `registry`, `dms-eventbus-client`, after commit):
 
 - `registry.instance.registered` — `subject`=`instance_id`, `payload`={`service_type`, `version`}
 - `registry.instance.deregistered` — `subject`=`instance_id`, `payload`={`service_type`}
+- `registry.instance.forgotten` (since P87-S2) — `subject`=`instance_id`, `payload`={`service_type`, `reason`: `replaced`|`admin`}
+- `registry.replicas.under`/`.over`/`.restored` (since P87-S2) — `subject`=`service_type`, see above
+- `registry.replicas.expectation_set`/`.expectation_reset` (since P87-S2) — `subject`=`service_type`, actor = the admin
 
 No event per heartbeat. This stream is consumed by the Audit Service (`docs/services/audit-service.md`). Since P9-S2, `registry-service` itself consumes `license.>` (see above) — a pure cache-invalidation trigger, no payload parsing.
 
@@ -113,4 +145,5 @@ statically configuring backend addresses.
 
 - Actively pinging the reported `health_endpoint` (instead of pure heartbeat push) as a possible later addition, not part of this session.
 - ~~**Zero authorization on every mutating instance endpoint** — any authenticated caller could register a fake instance at an attacker-controlled address, or drain/deregister a real one.~~ — **closed in Phase 59 Session 4**, see "Authorization" above ([ADR 0181](../adr/0181-registry-service-instance-mutation-authorization.md)). 54/54 tests (+9).
-- ~~**No cleanup of permanently unreachable instances** (observed since P4-S1: container restarts without a clean `DELETE /instances/{id}`, e.g. on `docker compose down` without prior deregistration, leave permanent `healthy=false` rows behind). Not critical for routing (`GET /instances/{service_type}` already filters them out), but they accumulate unbounded in the table — periodic cleanup (e.g. deletion after X days without a heartbeat) is not part of this session.~~ — **closed in Phase 58 Session 2**, see "Periodic Cleanup of Unreachable Instances" below.
+- ~~**No cleanup of permanently unreachable instances** (observed since P4-S1: container restarts without a clean `DELETE /instances/{id}`, e.g. on `docker compose down` without prior deregistration, leave permanent `healthy=false` rows behind). Not critical for routing (`GET /instances/{service_type}` already filters them out), but they accumulate unbounded in the table — periodic cleanup (e.g. deletion after X days without a heartbeat) is not part of this session.~~ — **closed in Phase 58 Session 2** by a 7-day cleanup, which **P87-S2 replaced** with the per-type forgetting rule (see "Instance Replacement and Expected Replicas" above).
+- **Admin UI for expectations, forgetting and alarm state** (`GET/PUT/DELETE /replicas`, `POST .../forget`) and notification-service's subscription to `registry.replicas.*` follow in P87-S3.
