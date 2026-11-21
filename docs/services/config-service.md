@@ -69,7 +69,7 @@ Since `config-service` otherwise has no own event bus connection, the consumer r
 `BaseServiceSettings` falls back to `nats://localhost:4222`, which is unreachable in the container
 (a bug found by P17-S3 itself, see [ADR 0060](../adr/0060-egov-paket-teil-2-vier-augen-luecken-und-umlaufmappen-prozessvorlagen.md)).
 
-## The sixteen categories
+## The seventeen categories
 
 | Category | Owner service | Natural key (upsert) | Special notes |
 |---|---|---|---|
@@ -77,7 +77,7 @@ Since `config-service` otherwise has no own event bus connection, the consumer r
 | `workflows` | workflow-service | — (always a new version) | Only the most recent version per process definition family; the target `workflow-service` automatically re-versions on import (ADR 0027) |
 | `dmn_definitions` | workflow-service | — (always a new version) | **Since P14-S4**: DMN 1.3 decision tables (7.1) — same pattern as `workflows`, only the most recent version per family, target re-versions automatically on import. Deliberately applied **before** `workflows` on import (`imports.py`), since a `businessRuleTask`'s `camunda:decisionRef` can only be resolved if the referenced DMN family already exists on the target `workflow-service` |
 | `business_calendars` | workflow-service | `name` | **Since P14-S5**: business calendars for SLA deadline calculation (7.1, [ADR 0042](../adr/0042-business-calendar-script-engine-injection.md)) — unlike `workflows`/`dmn_definitions`, an ordinary upsert like `roles` (NO versioning pattern, a calendar is maintained continuously rather than versioned) |
-| `roles` | permission-service | `name` | Role templates (`Role`), **not** resource-bound `role_assignment` rows |
+| `roles` | permission-service | `name` | Role templates (`Role`), **not** resource-bound `role_assignment` rows. **Since P89-S3:** an unchanged role (same description, same permission set) is `skipped`, not rewritten. With `permission.role.update` under four-eyes, every re-import would otherwise open an approval request per role. A create/update that went to four-eyes (`pending_approval`) is reported in `errors` with its request id instead of being counted as created/updated |
 | `approval_config` | permission-service | `action_type` | Four-eyes principle configuration (4.3) — target endpoint is already an upsert |
 | `sensor_config` | monitoring-service | — (singleton + overrides) | Global default + sensor overrides (10.1, P11-S1) |
 | `federation_config` | workflow-service | — (singleton) | Version compatibility range for federated workflows (7.4, P13-S3) — a `PUT` there immediately triggers a re-registration with the Federation Hub, see `docs/services/workflow-service.md` "Federation" |
@@ -88,6 +88,7 @@ Since `config-service` otherwise has no own event bus connection, the consumer r
 | `org_units` | permission-service | `name` | **Since P80-S2** (ADR 0233): upserts a `Group` with `is_org_unit=True` (ADR 0143) — promotes an existing group of the same name if needed, never demotes one |
 | `org_unit_role_links` | permission-service | `org_unit_name` (compare only — see caveat below) | **Since P80-S2** (ADR 0233): grants a role to every member of an org-unit group via the already-existing group-based `RoleAssignment(principal_type="group", ...)` mechanism (Phase 19's `"everyone"` group uses the same resolution) — no new authorization logic. Depends on `org_units`/`roles` already existing; applied after both in `apply_import`. Idempotent (checked against `GET /role-assignments` first, since the unique constraint would otherwise reject a repeated import) |
 | `alert_rules` | monitoring-service | `name` | **Since P88-S7** ([ADR 0252](../adr/0252-alert-rules-as-config-category-default-package-and-grafana.md)): threshold rules on sensors (ADR 0245), without their evaluated state. An unchanged rule is `skipped`, not saved again, because a save restarts the rule's streaks and rate and re-applying a package must not reset alarms that are building up. Rule names aren't unique in monitoring-service; with duplicates the first one is matched. monitoring-service's `422` detail is passed through into `errors` |
+| `export_config` | document-service | — (singleton) | **Since P89-S3:** PDF export and output-stamping settings (`history_position`, `stamp_enabled`/`_type`/`_value_template`/`_position`, ADR 0107/0117), so packages can ship stamping defaults (the gap deferred in P80-S2). A full replace like `branding_config`; document-service's own `422` (unknown placeholder, `diagonal-center` for a non-text stamp) reaches `errors` with its detail. New bootstrap role for `config-service`: `domain-admin-document-config` (`admin.document_config`) |
 | `alert_downtime_windows` | monitoring-service | `name` | **Since P88-S7** (ADR 0252): downtime windows. Rules are named by `rule_names` (ids are local to an installation) and resolved on import, so this category is applied after `alert_rules`. A name with no rule is an error for that window, not a silent narrowing; `null` means every rule |
 
 "UI customizations" (branding/theming) is no longer missing — closed at P69-S2 by the `branding_config`

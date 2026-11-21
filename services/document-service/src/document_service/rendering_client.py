@@ -103,11 +103,15 @@ class RenderingClient:
             raise RenderingUnavailableError(str(exc)) from exc
         return response.content
 
-    async def check_tagged_pdf(self, *, data: bytes, x_dms_principal: str) -> bool:
+    async def check_tagged_pdf(
+        self, *, data: bytes, x_dms_principal: str
+    ) -> tuple[bool, list[str]]:
         """Accessibility pass (14.2, post-roadmap phase 31 session 8) -
         proxies to rendering-service's `/render/pdf-tag-check`. Only ever
         called for an already-PDF source, see `get_document_export_
-        accessibility_check` in main.py."""
+        accessibility_check` in main.py. Returns (tagged, PDF/UA issues);
+        the issues exist since P89-S3 (ADR 0236) - an older rendering-service
+        without them yields none."""
         try:
             response = await self._client.post(
                 "/render/pdf-tag-check",
@@ -117,7 +121,8 @@ class RenderingClient:
             response.raise_for_status()
         except httpx.HTTPError as exc:
             raise RenderingUnavailableError(str(exc)) from exc
-        return bool(response.json()["is_tagged"])
+        body = response.json()
+        return bool(body["is_tagged"]), list(body.get("issues", []))
 
     async def stamp(
         self, *, data: bytes, stamp_type: str, value: str, position: str, x_dms_principal: str

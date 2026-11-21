@@ -837,6 +837,21 @@ export function PreviewPane({
             : t("preview.exportNotPdfWarning")}
         </p>
       )}
+      {/* P89-S3 (ADR 0236): a tagged PDF can still miss what screen readers
+          need. Named per finding; an unknown code from a newer backend shows
+          as is. Still a heads-up, not a gate. */}
+      {accessibilityCheck?.is_tagged && (accessibilityCheck.issues?.length ?? 0) > 0 && (
+        <div className="text-sm opacity-80" role="status">
+          <UiIcon icon={TriangleAlert} /> {t("preview.exportTaggedPdfIssues")}
+          <ul className="m-0 pl-5">
+            {accessibilityCheck.issues!.map((issue) => {
+              const key = `preview.accessibilityIssue.${issue}`;
+              const label = t(key);
+              return <li key={issue}>{label === key ? issue : label}</li>;
+            })}
+          </ul>
+        </div>
+      )}
       {/* General XDOMEA export for inter-agency handoff (14.2, post-roadmap
           phase 31 session 13a, ADR 0126) - a downloadable Abgabe.Abgabe.0401
           package (ZIP), unlike the plain-PDF Export button above. Needs the

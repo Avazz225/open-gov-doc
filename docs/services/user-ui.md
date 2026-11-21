@@ -370,6 +370,10 @@ Last session of Phase 5e — closes off the backend chain built in P5e-S1/S2 (Ob
   `docs/services/document-service.md` "Accessibility: Export Warning for Untagged PDFs") and, when the
   source isn't (or can't become) a tagged PDF, shows a non-blocking `role="status"` warning next to the
   "Exportieren" button — informational only, the export button itself is never disabled or gated by it.
+  Since **P89-S3** ([ADR 0236](../adr/0236-pdf-ua-conformance-validation-scoping.md)) a tagged source
+  that still breaks a checked PDF/UA rule gets a second hint listing the findings (no document language,
+  not marked as tagged, figures without alternative text), worded as a simplified check rather than a
+  certification. An unknown finding code from a newer backend shows as is.
 - **General XDOMEA export for inter-agency handoff (14.2, Post-Roadmap Phase 31 Session 13a,
   [ADR 0127](../adr/0127-general-xdomea-export-abgabe-0401-synchronous-not-disposal-pipeline.md))**: a
   separate "Export für Behördenübergabe" button next to "Exportieren" — unlike the plain-PDF export, this

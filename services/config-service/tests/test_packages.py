@@ -1,13 +1,18 @@
-"""The shipped monitoring-defaults package (P88-S7, ADR 0252) stays importable:
-it parses as a `ConfigDocument`, every rule would pass monitoring-service's
-validation, and names are unique (import upserts by name)."""
+"""The shipped configuration packages stay importable (P88-S7, P89-S3): each
+parses as a `ConfigDocument`; the monitoring-defaults rules would pass
+monitoring-service's validation; the eGov package's four-eyes and stamping
+defaults are what its README promises."""
 
 import json
+import string
 from pathlib import Path
 
+import pytest
 from config_service.schemas import ConfigDocument
 
-PACKAGE = Path(__file__).resolve().parents[3] / "packages" / "monitoring-defaults" / "config.json"
+PACKAGES = Path(__file__).resolve().parents[3] / "packages"
+PACKAGE = PACKAGES / "monitoring-defaults" / "config.json"
+EGOV = PACKAGES / "egov" / "config.json"
 AGGREGATIONS = {"max", "min", "sum", "avg", "rate_per_minute"}
 
 
@@ -50,3 +55,42 @@ def test_names_are_unique_and_windows_name_existing_rules():
     assert len(names) == len(set(names))
     for window in doc.alert_downtime_windows or []:
         assert window.rule_names is None or set(window.rule_names) <= set(names)
+
+
+@pytest.mark.parametrize(
+    "path", sorted(PACKAGES.glob("*/config.json")), ids=lambda p: p.parent.name
+)
+def test_every_shipped_package_parses_with_a_manifest(path):
+    doc = ConfigDocument.model_validate(json.loads(path.read_text(encoding="utf-8")))
+    assert doc.manifest is not None and doc.manifest.version
+
+
+def _egov() -> ConfigDocument:
+    return ConfigDocument.model_validate(json.loads(EGOV.read_text(encoding="utf-8")))
+
+
+def test_egov_four_eyes_covers_role_changes_and_ad_group_mapping():
+    """P89-S3: Konzept 14.2 "permission change" - role content and the
+    AD-group mapping decide who gets which rights, like role assignments."""
+    gated = {c.action_type for c in _egov().approval_config if c.requires_approval}
+    assert {
+        "permission.role.create",
+        "permission.role.update",
+        "permission.role_assignment.create",
+        "auth.ad_group_role_mapping.create",
+        "auth.ad_group_role_mapping.delete",
+        "auth.ad_group_role_composite_rule.create",
+        "auth.ad_group_role_composite_rule.delete",
+        "auth.ad_group_mapping.default_role_set",
+    } <= gated
+
+
+def test_egov_stamping_defaults_pass_document_service_validation():
+    """Mirrors document-service's `update_export_config` checks: only the
+    two known placeholders, and `diagonal-center` only for a text stamp."""
+    config = _egov().export_config
+    assert config is not None and config.stamp_enabled
+    parsed = string.Formatter().parse(config.stamp_value_template)
+    fields = {name for _, name, _, _ in parsed if name}
+    assert fields <= {"kennzeichen", "document_id"}
+    assert config.stamp_type == "text" or config.stamp_position != "diagonal-center"

@@ -46,12 +46,14 @@ _CONFIG_ADMIN_PRINCIPAL_ID = "config-service"
 # monitoring-service: admin.monitoring, since P17-S1 additionally auth-service:
 # admin.user_management for the `realm_roles` category, 14.1; since P80-S2
 # additionally document-service/folder-service: admin.retention for the new
-# `deletion_reason_catalogs` category) - see `_ensure_bootstrap_permissions`.
+# `deletion_reason_catalogs` category; since P89-S3 document-service:
+# admin.document_config for `export_config`) - see `_ensure_bootstrap_permissions`.
 _REQUIRED_ROLE_NAMES = (
     "domain-admin-config",
     "domain-admin-monitoring",
     "domain-admin-users",
     "domain-admin-retention",
+    "domain-admin-document-config",
 )
 
 

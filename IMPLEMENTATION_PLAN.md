@@ -4080,6 +4080,40 @@ sessions found along the way:
       (Konzept §14.2 "permission change");
     - the output-stamping defaults deferred in P80;
     - README rationale for what stays ungated.
+  - ✅ **Result:**
+    - **ADR 0236 item 1:** a separate `pdf_accessibility_issues()` rather than a stricter
+      `is_tagged_pdf()`, which keeps meaning "structure tree present" for the export pipeline's tag
+      preservation. It covers `/MarkInfo /Marked`, catalog `/Lang` and `/Figure` `/Alt`, with a
+      cycle-safe, bounded walk. The `issues` reach the user-ui as a second hint. A real LibreOffice
+      tagged PDF passes.
+    - **ADR 0236 item 2:** the offline veraPDF section in rendering-service.md.
+    - **config-service:**
+      - new singleton category `export_config` (17 categories; bootstrap role
+        `domain-admin-document-config`);
+      - `apply_roles` skips unchanged roles and reports four-eyes `pending_approval` instead of counting
+        it (pre-existing mis-report; with `permission.role.update` gated it would have hit every
+        re-import).
+    - **eGov 1.3.0:**
+      - `permission.role.update` plus five AD-mapping action types under four-eyes;
+      - QR stamping `{kennzeichen} {document_id}`;
+      - README Part 5 with the ungated rationale.
+    - **Live:** both changed categories imported and then restored directly.
+
+**Phase 89 result:**
+- **Case destruction is complete end to end:**
+  - the schedule set at archival;
+  - the gated destroy with the quarantine block;
+  - archival-service's pipeline with blocked/cancelled states;
+  - a deletion register written in the same transaction;
+  - ledger and restore reconciliation;
+  - the admin view.
+- **PDF/UA:**
+  - three more heuristics surfaced in the user-ui;
+  - a documented offline veraPDF path; the JVM verdict stands.
+- **eGov 1.3.0:** completes the "permission change" four-eyes set and ships output-stamping defaults
+  through the new `export_config` category.
+- **Phase-close regression:** 32/32 services green on the first run; ruff only the known 23 findings
+  (and the same 4 unformatted files); admin-ui 377 and user-ui 314 vitest green.
 
 ## Phase 90 — Collaboration Features (user-selected from the external comparison)
 
@@ -4138,6 +4172,10 @@ sessions found along the way:
     `config-import-realm-role-*` from config-service, `realm-role-test-*` from auth-service). Those
     tests should delete what they create (auth-service has no delete endpoint yet, so this needs one
     or a direct admin-client cleanup), and the existing debris should be removed once.
+  - **permission-service debris (found in P89-S3):** about 1,516 roles and about 40
+    `config.import.test.*` approval configs (several with `requires_approval: true`) left by test runs.
+    Same treatment: the tests clean up after themselves, and the existing debris is removed once
+    (roles have no delete endpoint today, so this needs one or a direct cleanup).
 - **P91-S4 — Scoping: database schema migrations (ADR 0251).** Today schemas evolve through
   `create_all` plus ad-hoc `ALTER TABLE … IF NOT EXISTS` at startup. Options: Alembic per service,
   formalizing the current pattern, or accepting it, judged against fleet rolling updates and the

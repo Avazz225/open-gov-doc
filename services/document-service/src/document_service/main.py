@@ -4528,18 +4528,18 @@ async def get_document_export_accessibility_check(
         raise HTTPException(status_code=403, detail="Kein Leserecht auf dieses Dokument")
 
     is_pdf = version.content_type == "application/pdf"
-    is_tagged = False
+    is_tagged, issues = False, []
     if is_pdf:
         data = await app.state.storage.download(version.storage_object_key)
         try:
-            is_tagged = await app.state.rendering_client.check_tagged_pdf(
+            is_tagged, issues = await app.state.rendering_client.check_tagged_pdf(
                 data=data, x_dms_principal=x_dms_principal
             )
         except RenderingUnavailableError as exc:
             raise HTTPException(
                 status_code=502, detail=f"Barrierefreiheits-Prüfung nicht möglich: {exc}"
             ) from exc
-    return AccessibilityCheckOut(is_pdf=is_pdf, is_tagged=is_tagged)
+    return AccessibilityCheckOut(is_pdf=is_pdf, is_tagged=is_tagged, issues=issues)
 
 
 @app.post("/documents/{document_id}/export")

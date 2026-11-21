@@ -3,9 +3,9 @@
   "exported_at": "2026-08-11T00:00:00Z",
   "manifest": {
     "name": "eGov-Konfigurationspaket",
-    "version": "1.2.0",
+    "version": "1.3.0",
     "compatibility_range": ">=1.0",
-    "description": "Standardkonfiguration für die deutsche öffentliche Verwaltung (Konzept 14.2) - vollständig: Aktenplan-Objekttyp-Hierarchie (Abteilung → Aktenplan → Akte, plus Handakte/Arbeitsvorrat als weitere Ordnerklassen), Aktenzeichen-Format, nach Verschlusssachen-Einstufung differenzierte Aufbewahrungs-/Aussonderungsfristen, alle vier VS-Einstufungsstufen demonstriert (VS-NfD/VS-VERTRAULICH/GEHEIM/STRENG GEHEIM, je mit passendem Mindest-Signaturniveau und verpflichtender Löschbegründung) (Teil 1, P17-S2, erweitert Phase 80 Session 1); Poststelle-Rollenvorlage, BPMN-Prozessvorlagen für Umlaufmappen (Freigabe/Kenntnisnahme/Aufgabe), Vier-Augen-Vorbelegung für sensible Aktionstypen (inkl. Rollen-Neuanlage), bundeseinheitlicher und landesspezifischer Geschäftskalender, erweiterte domänengetrennte Admin-Rollen (Teil 2, P17-S3); admin-kuratierter Löschgrund-Katalog sowie Organisationseinheiten mit automatischer Rollenzuweisung (Amtsleitung/Registratur, Teil 3, Phase 80 Session 2).",
+    "description": "Standardkonfiguration für die deutsche öffentliche Verwaltung (Konzept 14.2) - vollständig: Aktenplan-Objekttyp-Hierarchie (Abteilung → Aktenplan → Akte, plus Handakte/Arbeitsvorrat als weitere Ordnerklassen), Aktenzeichen-Format, nach Verschlusssachen-Einstufung differenzierte Aufbewahrungs-/Aussonderungsfristen, alle vier VS-Einstufungsstufen demonstriert (VS-NfD/VS-VERTRAULICH/GEHEIM/STRENG GEHEIM, je mit passendem Mindest-Signaturniveau und verpflichtender Löschbegründung) (Teil 1, P17-S2, erweitert Phase 80 Session 1); Poststelle-Rollenvorlage, BPMN-Prozessvorlagen für Umlaufmappen (Freigabe/Kenntnisnahme/Aufgabe), Vier-Augen-Vorbelegung für sensible Aktionstypen (inkl. Rollen-Neuanlage), bundeseinheitlicher und landesspezifischer Geschäftskalender, erweiterte domänengetrennte Admin-Rollen (Teil 2, P17-S3); admin-kuratierter Löschgrund-Katalog sowie Organisationseinheiten mit automatischer Rollenzuweisung (Amtsleitung/Registratur, Teil 3, Phase 80 Session 2); Vier-Augen-Vorbelegung auch für Rollenänderungen und die AD-Gruppen-Zuordnung sowie Ausgabe-Stempel (QR mit Aktenzeichen und Dokument-ID) für PDF-Exporte (Teil 5, P89-S3).",
     "origin": "dms-project",
     "license": "MIT"
   },
@@ -211,6 +211,30 @@
     },
     {
       "action_type": "permission.role.create",
+      "requires_approval": true
+    },
+    {
+      "action_type": "permission.role.update",
+      "requires_approval": true
+    },
+    {
+      "action_type": "auth.ad_group_role_mapping.create",
+      "requires_approval": true
+    },
+    {
+      "action_type": "auth.ad_group_role_mapping.delete",
+      "requires_approval": true
+    },
+    {
+      "action_type": "auth.ad_group_role_composite_rule.create",
+      "requires_approval": true
+    },
+    {
+      "action_type": "auth.ad_group_role_composite_rule.delete",
+      "requires_approval": true
+    },
+    {
+      "action_type": "auth.ad_group_mapping.default_role_set",
       "requires_approval": true
     }
   ],
@@ -726,5 +750,12 @@
       "org_unit_name": "Registratur",
       "role_name": "Registratur/Aktenverwaltung"
     }
-  ]
+  ],
+  "export_config": {
+    "history_position": "after",
+    "stamp_enabled": true,
+    "stamp_type": "qr",
+    "stamp_value_template": "{kennzeichen} {document_id}",
+    "stamp_position": "bottom-right"
+  }
 }

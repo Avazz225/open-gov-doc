@@ -183,7 +183,33 @@ def test_accessibility_check_untagged_pdf_source(client):
     )
 
     assert response.status_code == 200
-    assert response.json() == {"is_pdf": True, "is_tagged": False}
+    assert response.json() == {"is_pdf": True, "is_tagged": False, "issues": []}
+
+
+def test_accessibility_check_passes_pdf_ua_issues_through(client):
+    """P89-S3 (ADR 0236 item 1): a tagged PDF without `/MarkInfo` and `/Lang`
+    is tagged, but rendering-service names what it still lacks."""
+    from pypdf import PdfReader, PdfWriter
+    from pypdf.generic import DictionaryObject, NameObject
+
+    writer = PdfWriter(clone_from=PdfReader(BytesIO(_real_pdf("Getaggt"))))
+    writer._root_object[NameObject("/StructTreeRoot")] = writer._add_object(DictionaryObject())
+    tagged = BytesIO()
+    writer.write(tagged)
+    principal = f"principal-{uuid.uuid4().hex[:8]}"
+    _grant_document_read(principal)
+    document_id = upload(client, content=tagged.getvalue()).json()["id"]
+
+    response = client.get(
+        f"/documents/{document_id}/export/accessibility-check",
+        headers={"X-DMS-Principal": principal},
+    )
+
+    assert response.json() == {
+        "is_pdf": True,
+        "is_tagged": True,
+        "issues": ["not_marked", "no_lang"],
+    }
 
 
 def test_accessibility_check_non_pdf_source_is_trivially_untagged(client):
@@ -202,7 +228,7 @@ def test_accessibility_check_non_pdf_source_is_trivially_untagged(client):
     )
 
     assert response.status_code == 200
-    assert response.json() == {"is_pdf": False, "is_tagged": False}
+    assert response.json() == {"is_pdf": False, "is_tagged": False, "issues": []}
 
 
 def test_get_and_update_export_config(client):

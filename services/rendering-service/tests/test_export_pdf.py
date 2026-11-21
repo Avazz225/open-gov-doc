@@ -2,13 +2,21 @@ from datetime import UTC, datetime
 from io import BytesIO
 
 from pypdf import PdfReader, PdfWriter
-from pypdf.generic import ArrayObject, DictionaryObject, NameObject, NumberObject
+from pypdf.generic import (
+    ArrayObject,
+    BooleanObject,
+    DictionaryObject,
+    NameObject,
+    NumberObject,
+    TextStringObject,
+)
 from rendering_service.export_pdf import (
     ExportHistoryEntry,
     FolderExportEntry,
     build_document_export,
     build_folder_export,
     is_tagged_pdf,
+    pdf_accessibility_issues,
     render_history_pdf,
 )
 from reportlab.pdfgen import canvas
@@ -401,3 +409,77 @@ def test_build_folder_export_preserves_tags_for_the_tagged_document_in_a_mixed_f
     reader = PdfReader(BytesIO(result))
     assert _resolve_struct_tag_for_page(reader, 1) == "/P"
     assert reader.pages[3].get("/StructParents") is None
+
+
+# --- PDF/UA heuristics (P89-S3, ADR 0236 item 1) ----------------------------
+
+
+def _accessible_pdf(*, marked=True, lang="de-DE", figures=(), nested=False, cycle=False) -> bytes:
+    """A tagged PDF whose catalog carries `/MarkInfo`/`/Lang` as asked, with
+    a `/Document` element holding one `/Figure` per entry of `figures` (the
+    entry is its `/Alt`, `None` for none). `nested` puts the figures one
+    level deeper in a `/Sect`; `cycle` makes the `/Sect` point back at the
+    `/Document`, as a malformed file might."""
+    writer = PdfWriter(clone_from=PdfReader(BytesIO(_real_pdf(pages=1))))
+    figure_refs = []
+    for alt in figures:
+        figure = DictionaryObject({NameObject("/S"): NameObject("/Figure")})
+        if alt is not None:
+            figure[NameObject("/Alt")] = TextStringObject(alt)
+        figure_refs.append(writer._add_object(figure))
+    document = DictionaryObject({NameObject("/S"): NameObject("/Document")})
+    document_ref = writer._add_object(document)
+    if nested:
+        section = DictionaryObject({NameObject("/S"): NameObject("/Sect")})
+        kids = list(figure_refs) + ([document_ref] if cycle else [])
+        section[NameObject("/K")] = ArrayObject(kids)
+        document[NameObject("/K")] = ArrayObject([writer._add_object(section)])
+    else:
+        document[NameObject("/K")] = ArrayObject(figure_refs)
+    root = DictionaryObject({NameObject("/K"): ArrayObject([document_ref])})
+    writer._root_object[NameObject("/StructTreeRoot")] = writer._add_object(root)
+    if marked is not None:
+        writer._root_object[NameObject("/MarkInfo")] = DictionaryObject(
+            {NameObject("/Marked"): BooleanObject(marked)}
+        )
+    if lang is not None:
+        writer._root_object[NameObject("/Lang")] = TextStringObject(lang)
+    out = BytesIO()
+    writer.write(out)
+    return out.getvalue()
+
+
+def test_a_well_formed_tagged_pdf_has_no_issues():
+    assert pdf_accessibility_issues(_accessible_pdf(figures=["Logo der Behörde"])) == []
+
+
+def test_marked_must_be_true_and_lang_present():
+    assert pdf_accessibility_issues(_accessible_pdf(marked=False)) == ["not_marked"]
+    assert pdf_accessibility_issues(_accessible_pdf(marked=None)) == ["not_marked"]
+    assert pdf_accessibility_issues(_accessible_pdf(lang=None)) == ["no_lang"]
+    assert pdf_accessibility_issues(_accessible_pdf(lang="  ")) == ["no_lang"]
+
+
+def test_a_figure_without_alt_text_is_found_also_when_nested():
+    assert pdf_accessibility_issues(_accessible_pdf(figures=["ok", None])) == ["figure_without_alt"]
+    assert pdf_accessibility_issues(_accessible_pdf(figures=[""], nested=True)) == [
+        "figure_without_alt"
+    ]
+    assert pdf_accessibility_issues(_accessible_pdf(figures=["ok"], nested=True)) == []
+
+
+def test_a_cyclic_structure_tree_terminates():
+    data = _accessible_pdf(figures=[None], nested=True, cycle=True)
+    assert pdf_accessibility_issues(data) == ["figure_without_alt"]
+
+
+def test_untagged_or_unreadable_input_has_no_issues_to_report():
+    """Untagged is `is_tagged_pdf`'s verdict; there is no structure to judge."""
+    assert pdf_accessibility_issues(_real_pdf(pages=1)) == []
+    assert pdf_accessibility_issues(b"not a pdf") == []
+
+
+def test_is_tagged_pdf_keeps_its_meaning_for_a_pdf_with_issues():
+    """The heuristics add findings; they don't redefine "tagged" (the export
+    pipeline's structure-tree preservation is tested against it)."""
+    assert is_tagged_pdf(_accessible_pdf(marked=False, lang=None, figures=[None])) is True

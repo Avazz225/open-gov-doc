@@ -664,7 +664,13 @@
     "xjustizExportErrorGeneric": "XJustiz-Export fehlgeschlagen. Bitte später erneut versuchen.",
     "copyLink": "Link kopieren",
     "linkCopied": "Link in die Zwischenablage kopiert.",
-    "linkCopyError": "Link konnte nicht kopiert werden."
+    "linkCopyError": "Link konnte nicht kopiert werden.",
+    "exportTaggedPdfIssues": "Das Original-PDF ist getaggt, ihm fehlt aber noch etwas für die Barrierefreiheit (vereinfachte Prüfung, keine PDF/UA-Zertifizierung):",
+    "accessibilityIssue": {
+      "not_marked": "nicht als getaggt markiert (/MarkInfo /Marked fehlt)",
+      "no_lang": "keine Dokumentsprache angegeben",
+      "figure_without_alt": "Abbildungen ohne Alternativtext"
+    }
   },
   "search": {
     "paneLabel": "Suche",

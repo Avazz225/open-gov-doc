@@ -675,11 +675,13 @@ def test_export_import_roundtrip_preserves_role_count(authorized_principal):
         )
     assert reimport.status_code == 200
     result = reimport.json()["result"]["results"]["roles"]
-    # Alle bereits vorhandenen Rollen werden per Name gefunden -> ausschliesslich
-    # Updates, keine Duplikate (Upsert-Garantie, 7.3).
+    # Every existing role is found by name -> no duplicates (upsert, 7.3).
+    # Since P89-S3 an unchanged role is skipped instead of rewritten, so a
+    # round trip of the live state touches nothing.
     assert result["created"] == 0
     assert result["errors"] == []
-    assert result["updated"] == len(exported["roles"])
+    assert result["updated"] == 0
+    assert result["skipped"] == len(exported["roles"])
 
 
 def test_import_realm_roles_creates_new_keycloak_realm_role(authorized_principal):
@@ -1076,3 +1078,85 @@ def test_import_alert_window_with_unknown_rule_name_is_an_entry_error(authorized
         assert "unbekannt" in results["alert_downtime_windows"]["errors"][0]
     finally:
         _monitoring_cleanup(prefix)
+
+
+def test_import_export_config_roundtrips_and_reports_invalid_stamps(authorized_principal):
+    """P89-S3: `export_config` (document-service's PDF export and stamping
+    settings) as a singleton category. The live setting is put back."""
+    headers = {"X-DMS-Principal": authorized_principal}
+    with _client() as client:
+        original = client.get("/config/export", params={"categories": "export_config"}).json()[
+            "export_config"
+        ]
+        wanted = {
+            "history_position": "before",
+            "stamp_enabled": True,
+            "stamp_type": "qr",
+            "stamp_value_template": "Az. {kennzeichen}",
+            "stamp_position": "top-right",
+        }
+        try:
+            payload = {"schema_version": "1.0", "exported_at": "2026-01-01T00:00:00Z"}
+            result = client.post(
+                "/config/import", json={**payload, "export_config": wanted}, headers=headers
+            ).json()["result"]["results"]["export_config"]
+            assert (result["updated"], result["errors"]) == (1, [])
+            exported = client.get("/config/export", params={"categories": "export_config"}).json()
+            assert exported["export_config"] == wanted
+
+            # document-service's own validation comes back as an entry error.
+            bad = {**wanted, "stamp_value_template": "{unbekannt}"}
+            errors = client.post(
+                "/config/import", json={**payload, "export_config": bad}, headers=headers
+            ).json()["result"]["results"]["export_config"]["errors"]
+            assert errors and "422" in errors[0]
+        finally:
+            client.post(
+                "/config/import",
+                json={**payload, "export_config": original},
+                headers=headers,
+            )
+
+
+def test_import_role_skips_unchanged_and_reports_a_four_eyes_update(authorized_principal):
+    """P89-S3: an unchanged role is skipped (no write, so no approval request
+    under four-eyes); a gated update is an entry error naming the request,
+    not a silent "updated"."""
+    role_name = f"config-import-gated-{uuid.uuid4().hex[:8]}"
+    payload = {
+        "schema_version": "1.0",
+        "exported_at": "2026-01-01T00:00:00Z",
+        "roles": [{"name": role_name, "description": "d", "permissions": ["read", "write"]}],
+    }
+    headers = {"X-DMS-Principal": authorized_principal}
+    config_admin_headers = {"X-DMS-Principal": "config-service"}
+    with _client() as client:
+        client.post("/config/import", json=payload, headers=headers).raise_for_status()
+        httpx.put(
+            f"{PERMISSION_SERVICE_URL}/approval-config/permission.role.update",
+            json={"requires_approval": True},
+            headers=config_admin_headers,
+        ).raise_for_status()
+        try:
+            # Same content, permissions in another order: unchanged.
+            payload["roles"][0]["permissions"] = ["write", "read"]
+            same = client.post("/config/import", json=payload, headers=headers).json()
+            assert same["result"]["results"]["roles"]["skipped"] == 1
+
+            payload["roles"][0]["description"] = "geändert"
+            changed = client.post("/config/import", json=payload, headers=headers).json()
+            roles_result = changed["result"]["results"]["roles"]
+            assert roles_result["updated"] == 0
+            assert "wartet auf Genehmigung" in roles_result["errors"][0]
+            request_id = roles_result["errors"][0].split("approval_request_id=")[1].rstrip(")")
+            httpx.post(
+                f"{PERMISSION_SERVICE_URL}/approval-requests/{request_id}/reject",
+                json={"rejected_by": "supervisor"},
+                headers={"X-DMS-Principal": "supervisor"},
+            )
+        finally:
+            httpx.put(
+                f"{PERMISSION_SERVICE_URL}/approval-config/permission.role.update",
+                json={"requires_approval": False},
+                headers=config_admin_headers,
+            )

@@ -368,7 +368,7 @@ def test_render_pdf_tag_check_untagged():
             files={"file": ("akte.pdf", _real_pdf(pages=1), "application/pdf")},
         )
     assert response.status_code == 200
-    assert response.json() == {"is_tagged": False}
+    assert response.json() == {"is_tagged": False, "issues": []}
 
 
 def test_render_pdf_tag_check_rejects_garbage_as_untagged_not_error():
@@ -378,7 +378,24 @@ def test_render_pdf_tag_check_rejects_garbage_as_untagged_not_error():
             files={"file": ("kaputt.pdf", b"kein pdf", "application/pdf")},
         )
     assert response.status_code == 200
-    assert response.json() == {"is_tagged": False}
+    assert response.json() == {"is_tagged": False, "issues": []}
+
+
+def test_render_pdf_tag_check_reports_pdf_ua_issues_of_a_tagged_pdf():
+    """P89-S3 (ADR 0236 item 1): a structure tree alone isn't enough."""
+    from pypdf import PdfReader, PdfWriter
+    from pypdf.generic import DictionaryObject, NameObject
+
+    writer = PdfWriter(clone_from=PdfReader(BytesIO(_real_pdf(pages=1))))
+    writer._root_object[NameObject("/StructTreeRoot")] = writer._add_object(DictionaryObject())
+    out = BytesIO()
+    writer.write(out)
+    with TestClient(app, headers={"X-DMS-Principal": "rendering-service-tests"}) as client:
+        response = client.post(
+            "/render/pdf-tag-check",
+            files={"file": ("akte.pdf", out.getvalue(), "application/pdf")},
+        )
+    assert response.json() == {"is_tagged": True, "issues": ["not_marked", "no_lang"]}
 
 
 def test_render_pdf_page_image_rejects_out_of_range_page():

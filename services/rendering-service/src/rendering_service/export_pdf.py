@@ -8,6 +8,7 @@ from pypdf.generic import (
     ArrayObject,
     BooleanObject,
     DictionaryObject,
+    IndirectObject,
     NameObject,
     NumberObject,
     PdfObject,
@@ -55,6 +56,77 @@ def is_tagged_pdf(data: bytes) -> bool:
         return "/StructTreeRoot" in reader.root_object
     except Exception:
         return False
+
+
+# ADR 0236 item 1 (P89-S3): the three cheaply checkable PDF/UA (ISO 14289-1)
+# rules with the best signal for the effort, on top of `is_tagged_pdf`'s
+# structure-tree presence. Still an approximation, not conformance - see
+# docs/services/rendering-service.md "PDF/UA" for the offline veraPDF path.
+ISSUE_NOT_MARKED = "not_marked"  # /MarkInfo /Marked is missing or false
+ISSUE_NO_LANG = "no_lang"  # the catalog has no (non-empty) /Lang
+ISSUE_FIGURE_WITHOUT_ALT = "figure_without_alt"  # a /Figure element has no /Alt or /ActualText
+
+# A structure tree is a graph a hostile file could make huge or cyclic; the
+# walk visits each indirect object once and stops after this many elements.
+_MAX_STRUCT_ELEMENTS = 20_000
+
+
+def _figures_without_alt(struct_tree_root) -> int:
+    missing = 0
+    seen: set[tuple[int, int]] = set()
+    stack = [struct_tree_root.get("/K")]
+    visited = 0
+    while stack and visited < _MAX_STRUCT_ELEMENTS:
+        item = stack.pop()
+        # Only indirect objects can form a cycle; inline ones are nested.
+        if isinstance(item, IndirectObject):
+            key = (item.idnum, item.generation)
+            if key in seen:
+                continue
+            seen.add(key)
+            item = item.get_object()
+        if isinstance(item, ArrayObject):
+            stack.extend(item)
+            continue
+        if not isinstance(item, DictionaryObject):
+            continue  # marked-content ids (integers) are leaves
+        visited += 1
+        if item.get("/S") == "/Figure":
+            alt = item.get("/Alt") or item.get("/ActualText")
+            if not alt or not str(alt).strip():
+                missing += 1
+        kids = item.get("/K")
+        if kids is not None:
+            stack.append(kids)
+    return missing
+
+
+def pdf_accessibility_issues(data: bytes) -> list[str]:
+    """The PDF/UA rules a tagged PDF breaks among the three checked here
+    (ADR 0236 item 1): `/MarkInfo /Marked` true, a catalog `/Lang`, and
+    alternative text on every `/Figure`. Empty for a tagged PDF that passes
+    them; an untagged or unreadable PDF has no structure to judge, so callers
+    check `is_tagged_pdf` first (this returns `[]` for it)."""
+    try:
+        root = PdfReader(BytesIO(data)).root_object
+        if "/StructTreeRoot" not in root:
+            return []
+        issues = []
+        mark_info = root.get("/MarkInfo")
+        mark_info = mark_info.get_object() if mark_info is not None else None
+        # A pypdf BooleanObject is neither `is True` nor falsy by its value;
+        # its `.value` is the real bool.
+        marked = mark_info.get("/Marked") if isinstance(mark_info, DictionaryObject) else None
+        if getattr(marked, "value", None) is not True:
+            issues.append(ISSUE_NOT_MARKED)
+        lang = root.get("/Lang")
+        if lang is None or not str(lang).strip():
+            issues.append(ISSUE_NO_LANG)
+        if _figures_without_alt(root["/StructTreeRoot"].get_object()):
+            issues.append(ISSUE_FIGURE_WITHOUT_ALT)
+        return issues
+    except Exception:
+        return []
 
 
 _TABLE_STYLE = TableStyle(

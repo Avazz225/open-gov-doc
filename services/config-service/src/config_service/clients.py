@@ -293,6 +293,19 @@ class RetentionConfigClient:
         response.raise_for_status()
         return response.json()
 
+    # `export_config` (P89-S3) - document-service only; folder-service has no
+    # export config. `PUT` needs `admin.document_config`.
+
+    async def get_export_config(self) -> dict:
+        response = await self._client.get("/export-config")
+        response.raise_for_status()
+        return response.json()
+
+    async def put_export_config(self, payload: dict) -> dict:
+        response = await self._client.put("/export-config", json=payload)
+        response.raise_for_status()
+        return response.json()
+
 
 class AuthServiceClient:
     """For the `realm_roles` category (14.1, P17-S1) - Keycloak realm roles

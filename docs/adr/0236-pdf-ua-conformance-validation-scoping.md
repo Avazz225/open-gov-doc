@@ -72,3 +72,23 @@ as committed work.
   re-deriving the same JVM-departure argument from scratch a fourth time.
 - This closes the last open item of the Phase 78–82 plan. Per the user's own standing instruction, `graphify
   update .` runs once now, at the very end of this whole plan — not after this phase's own close alone.
+
+## Build — P89-S3
+
+Both recommended items are built; the verdict (no JVM integration) stands.
+
+- **Item 1:** `pdf_accessibility_issues()` in `export_pdf.py` checks `/MarkInfo /Marked`, a catalog
+  `/Lang`, and `/Alt` (or `/ActualText`) on every `/Figure`.
+  - **Deviation from the wording above:** it is a separate function, not an extension of
+    `is_tagged_pdf()`.
+    - `is_tagged_pdf()` answers "is there a structure tree", and the export pipeline's tag preservation
+      (ADR 0136) is tested against exactly that.
+    - Folding three more rules into the boolean would make a tagged PDF with a missing `/Lang` look
+      untagged, and would hide which rule failed.
+  - `/render/pdf-tag-check` returns `issues` alongside `is_tagged`; document-service passes them through;
+    the user-ui names them in a second, non-blocking hint.
+  - **Only the catalog `/Lang` counts.** Pages carry no language; per-element `/Lang` without a document
+    language is rarer than missing both.
+  - A LibreOffice tagged export passes all three, so the checks don't flag the platform's own output.
+- **Item 2:** `docs/services/rendering-service.md` "PDF/UA heuristics and the offline veraPDF path" covers
+  how to export, the CLI calls for PDF/UA-1 and PDF/A, and the licence caveat.

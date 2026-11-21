@@ -126,21 +126,42 @@ async def apply_business_calendars(client: WorkflowServiceClient, entries: list)
 
 
 async def apply_roles(client: PermissionServiceClient, entries: list) -> CategoryResult:
+    """Upsert by name. Since P89-S3:
+    - **An unchanged role is `skipped`,** not written again. With
+      `permission.role.update` under four-eyes (eGov package 1.3.0), every
+      re-import of an unchanged package would otherwise open an approval
+      request per role.
+    - **A write that went to four-eyes is reported, not counted.** Both
+      `POST /roles` and `PUT /roles/{id}` answer `pending_approval` when
+      gated; this used to count as created/updated, hiding that nothing
+      changed yet (same treatment as `apply_org_unit_role_links`)."""
     result = CategoryResult()
     existing = {r["name"]: r for r in await client.list_roles()}
     for entry in entries:
         try:
             match = existing.get(entry.name)
             if match is None:
-                await client.create_role(
+                action = await client.create_role(
                     name=entry.name, description=entry.description, permissions=entry.permissions
                 )
-                result.created += 1
+                counter = "created"
+            elif match["description"] == entry.description and sorted(
+                match["permissions"]
+            ) == sorted(entry.permissions):
+                result.skipped += 1
+                continue
             else:
-                await client.update_role(
+                action = await client.update_role(
                     match["id"], description=entry.description, permissions=entry.permissions
                 )
-                result.updated += 1
+                counter = "updated"
+            if action.get("status") == "pending_approval":
+                result.errors.append(
+                    f"{entry.name}: wartet auf Genehmigung "
+                    f"(approval_request_id={action.get('approval_request_id')})"
+                )
+                continue
+            setattr(result, counter, getattr(result, counter) + 1)
         except Exception as exc:  # noqa: BLE001
             result.errors.append(f"{entry.name}: {exc}")
     return result
@@ -252,6 +273,19 @@ def _error_detail(exc: Exception) -> str:
         if detail:
             return f"{response.status_code}: {detail}"
     return str(exc)
+
+
+async def apply_export_config(client: RetentionConfigClient, entry) -> CategoryResult:
+    """Singleton (P89-S3), a full replace like `branding_config`. document-
+    service's 422 (an unknown template placeholder, `diagonal-center` with a
+    non-text stamp) reaches `errors` with its detail."""
+    result = CategoryResult()
+    try:
+        await client.put_export_config(entry.model_dump())
+        result.updated += 1
+    except Exception as exc:  # noqa: BLE001
+        result.errors.append(_error_detail(exc))
+    return result
 
 
 async def apply_federation_config(client: WorkflowServiceClient, entry) -> CategoryResult:
@@ -499,6 +533,8 @@ async def apply_import(
         results["deletion_reason_catalogs"] = await apply_deletion_reason_catalogs(
             document_client, folder_client, doc.deletion_reason_catalogs
         )
+    if "export_config" in categories and doc.export_config is not None:
+        results["export_config"] = await apply_export_config(document_client, doc.export_config)
     # `alert_rules` BEFORE `alert_downtime_windows`: windows name their rules.
     if "alert_rules" in categories and doc.alert_rules is not None:
         results["alert_rules"] = await apply_alert_rules(monitoring_client, doc.alert_rules)

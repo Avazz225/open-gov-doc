@@ -664,7 +664,13 @@
     "xjustizExportErrorGeneric": "XJustiz export failed. Please try again later.",
     "copyLink": "Copy link",
     "linkCopied": "Link copied to clipboard.",
-    "linkCopyError": "Link could not be copied."
+    "linkCopyError": "Link could not be copied.",
+    "exportTaggedPdfIssues": "The original PDF is tagged but still lacks something for accessibility (simplified check, not a PDF/UA certification):",
+    "accessibilityIssue": {
+      "not_marked": "not marked as tagged (/MarkInfo /Marked missing)",
+      "no_lang": "no document language set",
+      "figure_without_alt": "figures without alternative text"
+    }
   },
   "search": {
     "paneLabel": "Search",

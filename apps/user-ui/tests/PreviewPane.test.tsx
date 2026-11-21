@@ -248,6 +248,27 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
     expect(within(previewPane).queryByText(/nicht barrierefrei/)).not.toBeInTheDocument();
   });
 
+  it("nennt fehlende PDF/UA-Merkmale eines getaggten PDFs (P89-S3, ADR 0236)", async () => {
+    const doc = makeDocument({ title: "vertrag.pdf" });
+    listDocumentVersionsMock.mockResolvedValue([makeVersion({ content_type: "application/pdf" })]);
+    downloadDocumentVersionMock.mockResolvedValue(new Blob(["%PDF-1.4"], { type: "application/pdf" }));
+    getExportAccessibilityCheckMock.mockResolvedValue({
+      is_pdf: true,
+      is_tagged: true,
+      issues: ["no_lang", "figure_without_alt", "future_rule"],
+    });
+
+    renderPreview(doc);
+
+    const previewPane = screen.getByLabelText("Vorschau: vertrag.pdf");
+    const hint = await within(previewPane).findByText(/ist getaggt, ihm fehlt aber/);
+    const status = hint.closest("[role=status]") as HTMLElement;
+    expect(within(status).getByText("keine Dokumentsprache angegeben")).toBeInTheDocument();
+    expect(within(status).getByText("Abbildungen ohne Alternativtext")).toBeInTheDocument();
+    expect(within(status).getByText("future_rule")).toBeInTheDocument();
+    expect(within(previewPane).queryByText(/enthält keine Dokumentstruktur/)).not.toBeInTheDocument();
+  });
+
   it("zeigt bei einem später erneut geöffneten PDF weiterhin das native Embed, selbst wenn inzwischen eine substitute_text-Rendition existiert", async () => {
     const doc = makeDocument({ title: "vertrag.pdf" });
     listDocumentVersionsMock.mockResolvedValue([makeVersion({ content_type: "application/pdf" })]);

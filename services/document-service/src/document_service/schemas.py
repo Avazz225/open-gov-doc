@@ -579,6 +579,11 @@ class AccessibilityCheckOut(BaseModel):
 
     is_pdf: bool
     is_tagged: bool
+    # P89-S3 (ADR 0236 item 1): PDF/UA rules a tagged PDF still breaks -
+    # "not_marked", "no_lang", "figure_without_alt". Empty when untagged
+    # (nothing to judge) or when the three checks pass; an approximation,
+    # not conformance.
+    issues: list[str] = []
 
 
 class FolderExportJobOut(BaseModel):

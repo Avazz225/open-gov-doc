@@ -22,6 +22,7 @@ from config_service.schemas import (
     ConfigDocument,
     DeletionReasonCatalogExport,
     DmnDefinitionExport,
+    ExportConfigExport,
     FederationConfigExport,
     ObjectTypeExport,
     ObjectTypeLayoutExport,
@@ -171,6 +172,11 @@ async def export_alert_downtime_windows(
     return result
 
 
+async def export_export_config(client: RetentionConfigClient) -> ExportConfigExport:
+    config = await client.get_export_config()
+    return ExportConfigExport(**{k: config[k] for k in ExportConfigExport.model_fields})
+
+
 async def export_federation_config(client: WorkflowServiceClient) -> FederationConfigExport:
     config = await client.get_federation_config()
     return FederationConfigExport(
@@ -299,4 +305,6 @@ async def build_export(
         doc.alert_rules = await export_alert_rules(monitoring_client)
     if "alert_downtime_windows" in categories:
         doc.alert_downtime_windows = await export_alert_downtime_windows(monitoring_client)
+    if "export_config" in categories:
+        doc.export_config = await export_export_config(document_client)
     return doc

@@ -29,6 +29,7 @@ from rendering_service.export_pdf import (
     build_document_export,
     build_folder_export,
     is_tagged_pdf,
+    pdf_accessibility_issues,
     render_history_pdf,
 )
 from rendering_service.models import Base, Rendition
@@ -525,7 +526,10 @@ async def render_pdf_tag_check(
     `content_type` first)."""
     await _require_rendering_permission(x_dms_principal, access_type="write")
     data = await file.read()
-    return {"is_tagged": is_tagged_pdf(data)}
+    # P89-S3 (ADR 0236 item 1): `issues` adds three PDF/UA rules a tagged PDF
+    # can still break; `is_tagged` keeps its meaning (structure tree present).
+    tagged = is_tagged_pdf(data)
+    return {"is_tagged": tagged, "issues": pdf_accessibility_issues(data) if tagged else []}
 
 
 @app.post("/render/pdf-page-image")

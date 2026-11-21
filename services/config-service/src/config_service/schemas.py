@@ -26,6 +26,7 @@ CATEGORIES = (
     "org_unit_role_links",
     "alert_rules",
     "alert_downtime_windows",
+    "export_config",
 )
 
 
@@ -135,6 +136,22 @@ class AlertDowntimeWindowExport(BaseModel):
     daily_end: str | None = None
     rule_names: list[str] | None = None
     enabled: bool = True
+
+
+class ExportConfigExport(BaseModel):
+    """PDF export settings (Phase 28, ADR 0107) with output stamping (ADR
+    0117) - document-service's `ExportConfigIn`, a singleton like
+    `branding_config`. Since P89-S3, so a package can ship stamping defaults
+    (the gap P80-S2 deferred). document-service validates the template's
+    placeholders and the type/position combination on write."""
+
+    history_position: Literal["before", "after"] = "after"
+    stamp_enabled: bool = False
+    stamp_type: Literal["text", "qr", "barcode"] = "qr"
+    stamp_value_template: str = "{kennzeichen}"
+    stamp_position: Literal[
+        "diagonal-center", "top-left", "top-right", "bottom-left", "bottom-right"
+    ] = "bottom-right"
 
 
 class FederationConfigExport(BaseModel):
@@ -268,6 +285,7 @@ class ConfigDocument(BaseModel):
     # `packages/monitoring-defaults`.
     alert_rules: list[AlertRuleExport] | None = None
     alert_downtime_windows: list[AlertDowntimeWindowExport] | None = None
+    export_config: ExportConfigExport | None = None
 
 
 class CategoryResult(BaseModel):

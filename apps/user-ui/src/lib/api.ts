@@ -1529,6 +1529,9 @@ export async function exportDocument(token: string, documentId: string): Promise
 export interface AccessibilityCheck {
   is_pdf: boolean;
   is_tagged: boolean;
+  // P89-S3 (ADR 0236): PDF/UA rules a tagged PDF still breaks. Optional:
+  // an older document-service doesn't send it.
+  issues?: ("not_marked" | "no_lang" | "figure_without_alt" | string)[];
 }
 
 export async function getExportAccessibilityCheck(

@@ -19,7 +19,7 @@
 | `POST` | `/render/pdf-page-count` | Multipart (`file`: PDF) → `{page_count}`, since **Post-Roadmap Phase 31 Session 4** ([ADR 0115](../adr/0115-document-redaction-genuine-content-removal.md)) — for the redaction UI's page navigation; `rendering.write`-gated |
 | `POST` | `/render/pdf-page-image` | Multipart (`file`: PDF, `page_number`) → PNG raster of that page (any PDF, not just scans — see "Document Redaction" below); `rendering.write`-gated |
 | `POST` | `/render/redact` | Multipart (`file`: PDF, `regions`: JSON array of `{page_number, x, y, width, height}` fractions) → the PDF with those regions' content genuinely removed (not just covered), returned directly, **without** persisting it; `rendering.write`-gated |
-| `POST` | `/render/pdf-tag-check` | Multipart (`file`: PDF) → `{is_tagged: bool}`, since **Post-Roadmap Phase 31 Session 8** ([ADR 0119](../adr/0119-accessibility-pass-badges-gender-neutral-text-tagged-pdf-warning.md)) — `/StructTreeRoot` presence check, see "Accessibility: Tagged-PDF Check" below; `rendering.write`-gated |
+| `POST` | `/render/pdf-tag-check` | Multipart (`file`: PDF) → `{is_tagged: bool, issues: [...]}` (`issues` since P89-S3, see "PDF/UA heuristics" below), since **Post-Roadmap Phase 31 Session 8** ([ADR 0119](../adr/0119-accessibility-pass-badges-gender-neutral-text-tagged-pdf-warning.md)) — `/StructTreeRoot` presence check, see "Accessibility: Tagged-PDF Check" below; `rendering.write`-gated |
 | `GET` | `/healthz` | Health check |
 
 The `id` of a rendition is a natural key `{document_id}:{version_number}:{rendition_type}` (see Data Model) — not a random UUID.
@@ -203,6 +203,50 @@ back-reference to the correct already-appended page with no extra code) and renu
 each source independently numbers its own pages from 0 and would otherwise collide once combined. See
 ADR 0158 for the full spec-level mechanism and its one deliberate scope cut.
 
+## PDF/UA heuristics and the offline veraPDF path (P89-S3, [ADR 0236](../adr/0236-pdf-ua-conformance-validation-scoping.md))
+
+ADR 0236 ruled out a veraPDF/JVM integration and named two cheaper steps. Both are built.
+
+**1. Three more checks for a tagged PDF** (`pdf_accessibility_issues`, `export_pdf.py`, pure pypdf).
+`/render/pdf-tag-check` returns them as `issues`:
+
+| Code | PDF/UA rule (ISO 14289-1) | Checked as |
+|---|---|---|
+| `not_marked` | The document declares itself tagged | `/MarkInfo /Marked` is `true` in the catalog |
+| `no_lang` | The natural language is specified | a non-empty `/Lang` in the catalog |
+| `figure_without_alt` | Figures have alternative text | every `/Figure` structure element has a non-empty `/Alt` or `/ActualText` |
+
+- **Only for tagged PDFs:** an untagged PDF has no structure to judge; its verdict stays `is_tagged: false`.
+  `is_tagged_pdf()` keeps its meaning (a structure tree is present) because the export pipeline's tag
+  preservation is tested against it.
+- **Robust against hostile files:** the structure-tree walk visits each indirect object once (cycles end)
+  and stops after 20,000 elements. Unreadable input yields no issues instead of an error.
+- **Still an approximation, not conformance:** reading order, tag-to-content correctness, table headers,
+  font Unicode mapping and the other roughly 80 machine-checkable rules aren't checked. The user-ui hint
+  says "vereinfachte Prüfung, keine PDF/UA-Zertifizierung".
+- **Checked against real output:** a LibreOffice tagged export passes all three. In this LibreOffice
+  version a default export is tagged too, and passes as well. So the checks don't flag what the platform
+  produces itself.
+
+**2. Certified conformance, offline.** For an installation that must prove PDF/UA (or PDF/A) conformance,
+for example for an audit, run the veraPDF CLI on exported files, outside OG Doc's request path.
+- **Get the files:** export them as usual ("Exportieren" in the user-ui, or
+  `POST /api/document-service/documents/{id}/export`).
+- **Run veraPDF** on a machine with Java and the veraPDF CLI installed:
+
+```bash
+# PDF/UA-1 for one file, as a readable report
+verapdf --flavour ua1 --format text export.pdf
+# A whole directory of exports, as machine-readable XML
+verapdf --flavour ua1 --format xml --recurse exports/ > ua-report.xml
+# PDF/A: let veraPDF pick the flavour from the file's own claim
+verapdf --flavour 0 --format text export.pdf
+```
+
+  The flag names follow current veraPDF releases; `verapdf --help` shows those of the installed version.
+- **Check the licence yourself:** ADR 0236 notes that veraPDF's licence wasn't verified there. It is an
+  operator tool and isn't shipped with OG Doc.
+
 ## Per-Document Permission (Phase 50 Session 3)
 
 Every rendition endpoint used to gate through one coarse, service-wide `_require_rendering_permission`
@@ -324,7 +368,10 @@ None yet — follows in Phase 11.
 - ~~**No cleanup of failed renditions**~~ — **fixed in Post-Roadmap Phase 20 Session 4** ([ADR 0080](../adr/0080-rendering-ocr-service-retry-backoff-failed-permanent.md)): automatic retry with full-jitter backoff up to `max_rendering_attempts`, after that `failed_permanent` + manual restart via `POST .../retry` (targeted only at the affected renderer).
 - ~~No authorization~~ — **fixed in Post-Roadmap Phase 19 Session 8** ([ADR 0073](../adr/0073-ocr-rendering-virus-scan-rbac.md)): all endpoints now check `rendering.read`/`rendering.write` via `permission-service`. ~~Still open: per 2.4, renditions should inherit the same permissions as the original (fine-grained, document-specific) — the new check is a coarse, service-wide `read`/`write`, not inheritance of the concrete document permission.~~ — **closed in Phase 50 Session 3** for the four `/renditions/*` endpoints, which operate on a real, persisted `Rendition` tied to a real `document_id` — see "Per-Document Permission (Phase 50 Session 3)" below. The eight stateless `/render/*` utility endpoints (raw bytes in, bytes out, no persisted document reference — the caller, typically `document-service` proxying for a UI action, has already checked the source document's own permission before forwarding bytes here) deliberately stay on the coarse, service-wide check — there is no document to scope against.
 - **Watermark endpoint deliberately minimal**: fixed diagonal stamp, no position/repetition/color configuration.
-- **`is_tagged_pdf()` is a `/StructTreeRoot`-presence check, not full PDF/UA validation** (Post-Roadmap
+- **`is_tagged_pdf()` is a `/StructTreeRoot`-presence check, not full PDF/UA validation** — **settled in
+  P89-S3 as a deliberate scope boundary** ([ADR 0236](../adr/0236-pdf-ua-conformance-validation-scoping.md)):
+  three further PDF/UA rules are now checked (see "PDF/UA heuristics"), and certified conformance has a
+  documented offline veraPDF path; no JVM integration. Original note (Post-Roadmap
   Phase 31 Session 8, ADR 0119) — same documented limitation category as the PDF/A-without-veraPDF gap
   above. ~~The export pipeline itself also still doesn't preserve a tagged source PDF's structure tree
   through conversion~~ — **fixed for single-document export in Post-Roadmap Phase 33 Session 2** ([ADR

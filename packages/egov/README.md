@@ -73,7 +73,7 @@ complete version of the package (now `1.1.0`, see Part 3 below). Details/rationa
 |---|---|
 | `realm_roles` | `dms-poststelle` — Keycloak realm role for incoming/outgoing mail (2.5), already enforced by `mail-connector` (since P15-S3), packaged here for the first time. |
 | `workflows` | Three BPMN process templates for the Umlaufmappe (circulation folder) pattern (2.3/7.1): `egov_freigabe` (approve/reject decision via `exclusiveGateway`), `egov_kenntnisnahme` and `egov_aufgabe` (each a linear `manualTask`). Source XML is additionally located under [`workflows/`](workflows/) for easier maintenance/diff readability. |
-| `approval_config` | Four-eyes default (4.3) for the sensitive action types named in 14.2 — `document.force_delete`, `folder.force_delete`, `document.force_unlock` (permanent deletion), `permission.role_assignment.create` (permission change, actually enforced since P17-S3), `config.import` (configuration import, actually enforced since P17-S3), and, since Phase 80 Session 1, `permission.role.create` (permission-*change*-family entry that had been missing — role *creation* itself, not just assigning an existing role, is the same sensitivity class) — each with `requires_approval: true`. |
+| `approval_config` | Four-eyes default (4.3) for the sensitive action types named in 14.2 — `document.force_delete`, `folder.force_delete`, `document.force_unlock` (permanent deletion), `permission.role_assignment.create` (permission change, actually enforced since P17-S3), `config.import` (configuration import, actually enforced since P17-S3), since Phase 80 Session 1 `permission.role.create` (permission-*change*-family entry that had been missing — role *creation* itself, not just assigning an existing role, is the same sensitivity class), and since P89-S3 (1.3.0) `permission.role.update` plus the five AD-group mapping actions (see Part 5) — each with `requires_approval: true`. |
 | `business_calendars` | `DE-Bund` (default, nine nationwide holidays) plus 16 state calendars `DE-BW` … `DE-TH` (each including federal holidays), real dates for 2026/2027. |
 | `roles` | `Registratur/Aktenverwaltung` (`read`, `write`) and `Amtsleitung` (`read`, `write`, `scope_lock.bypass`) — extended, domain-separated admin roles on top of the technical `domain-admin-*` system roles (4.6). |
 
@@ -143,3 +143,53 @@ apply, and were re-verified to apply, before that ordering fix would otherwise h
 them. Cleaned up all created objects afterward (object types, business calendars, groups, role
 assignments, catalog entries, approval-config); the two new roles remain as an accepted residual, same
 reasoning as Part 3.
+
+## Four-Eyes for Role Changes and AD Mapping, Output Stamping (Part 5, P89-S3, version 1.3.0)
+
+**Four-eyes, completing Konzept §14.2 "permission change".** Until 1.2.0 the package gated *creating* a
+role and *assigning* one, but not the other ways to change who gets which rights. 1.3.0 adds:
+
+| Action type | What it changes |
+|---|---|
+| `permission.role.update` | An existing, already-assigned role's permissions — one change reaches everyone holding it |
+| `auth.ad_group_role_mapping.create` / `.delete` | Which AD/Keycloak group grants which role |
+| `auth.ad_group_role_composite_rule.create` / `.delete` | Roles granted only for a combination of groups |
+| `auth.ad_group_mapping.default_role_set` | The role every user without a matching group gets |
+
+The AD mapping decides rights for whole groups at login, so it is at least as sensitive as a single role
+assignment.
+
+**What stays ungated, and why:**
+- **`permission.role_assignment.delete`:** taking a right away can't widen access. Under four-eyes,
+  revoking access from someone who left would wait for a second person.
+- **`permission.scope_lock.create`/`.release`:** a scope lock is itself a protective measure that is
+  often urgent. The service gates it by its own capability.
+- **`document.delete`/`folder.delete`:** these go to the trash and are recoverable. The final deletions
+  (`force_delete`) are gated.
+- **`object_type.update`, `workflow.process_definition.import`, `migration.transfer.start`:** these are
+  configuration work, and frequent during setup. Importing a whole configuration is already gated
+  (`config.import`).
+- **`auth.superuser.activate`, `system.not_shutdown.trigger`, `document.classification.declassify`:**
+  these carry their own approval rules from their services (break-glass approvers, VS declassification),
+  independent of this package.
+
+**Re-applying the package stays clean.** Since P89-S3 config-service skips an unchanged role instead of
+writing it again. With `permission.role.update` gated, re-applying 1.3.0 therefore opens no approval
+request for the package's own unchanged roles. A changed role is reported as "wartet auf Genehmigung"
+with the request id, never silently counted as updated.
+
+**Output stamping (`export_config`, the gap deferred in Part 4):**
+- Every PDF export carries a QR code at the bottom right with the Aktenzeichen and the document id
+  (`{kennzeichen} {document_id}`). So a printed copy can be matched to its record even when the document
+  has no Aktenzeichen.
+- The export history is appended after the document.
+- Uses the new `export_config` category of config-service. config-service needs `admin.document_config`
+  for it and grants itself that role at startup.
+
+**Live-verified** against the running stack by importing only the two changed categories
+(`approval_config`, `export_config`):
+- all 12 approval entries and the export config applied without errors;
+- the export afterwards showed the stamping defaults and all 12 action types gated.
+
+Both were then put back to their previous values directly at permission-service/document-service. A
+re-import would itself have needed four-eyes approval, since `config.import` was now gated.

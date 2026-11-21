@@ -2,6 +2,64 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P89-S3, the small compliance bundle. **Phase 89 is closed.**
+
+**What changed:**
+- **PDF/UA (ADR 0236, addendum "Build — P89-S3"):**
+  - **rendering-service:** `pdf_accessibility_issues()` reports `not_marked`, `no_lang` and
+    `figure_without_alt` for tagged PDFs. The structure-tree walk is cycle-safe and capped at 20,000
+    elements. `/render/pdf-tag-check` returns `issues`.
+  - **`is_tagged_pdf()` deliberately unchanged:** the export tag preservation (ADR 0136) is tested
+    against it, and folding the rules in would make a tagged PDF without `/Lang` look untagged.
+  - **document-service:** `AccessibilityCheckOut.issues`, passed through (an older rendering-service
+    yields `[]`).
+  - **user-ui:** a second, non-blocking hint in `PreviewPane` listing the findings ("vereinfachte
+    Prüfung, keine PDF/UA-Zertifizierung").
+  - **Offline veraPDF path** documented in rendering-service.md (CLI calls for PDF/UA-1 and PDF/A,
+    licence caveat).
+- **config-service:**
+  - **New singleton category `export_config`:** document-service's export/stamping settings, the gap
+    P80-S2 deferred. config-service bootstraps `domain-admin-document-config`.
+  - **`apply_roles` fix:**
+    - An unchanged role is `skipped` instead of rewritten.
+    - A `pending_approval` answer is reported in `errors` with its request id instead of being
+      counted as created/updated. That mis-report predates this session.
+    - With 1.3.0's `permission.role.update` gate, every re-import of the eGov package would have
+      opened silent approval requests.
+- **eGov package 1.3.0:**
+  - `approval_config` adds `permission.role.update` and the five AD-mapping action types (12 gated in
+    total).
+  - `export_config`: QR at the bottom right with `{kennzeichen} {document_id}`, history after.
+  - README Part 5 with the rationale for what stays ungated.
+- **Docs:** rendering-service ("PDF/UA heuristics and the offline veraPDF path", Open Point settled),
+  document-service, user-ui, config-service (17 categories, `roles` row), the eGov README, the ADR 0236
+  addendum, the plan.
+
+**Checks:**
+- **Per service:**
+  - rendering-service 112 (+7: issues per rule, nested and cyclic trees, untagged/garbage, `is_tagged`
+    unchanged, the endpoint);
+  - document-service 429 (+1: issues passed through from the live rendering-service);
+  - config-service 68 (+5: `export_config` round trip and invalid template, roles skip/four-eyes
+    report, every package parses, eGov four-eyes set, eGov stamping valid; one assertion adjusted
+    because an unchanged round trip now skips);
+  - user-ui vitest 314 (+1).
+- **Real LibreOffice PDFs** (inside the rendering container): a tagged export and a default export are
+  both tagged, with no issues.
+- **Live:** the eGov package's `approval_config` and `export_config` were imported (12 updated, 1
+  updated, no errors, export showed both). Both were restored directly at permission-/document-service,
+  because a re-import was now itself under four-eyes. The temporary grant was revoked.
+- **Phase-close regression** (`scripts/run-tests.sh`, unfiltered): 32/32 services green on the first
+  run; ruff only the known 23 findings, plus the same 4 unformatted files (LibreOffice add-in, loadtest
+  notebook, plugin-orchestration, reporting).
+- **Hygiene found (for P91-S3):** permission-service holds about 1,516 roles and about 40
+  `config.import.test.*` approval configs from earlier test runs, besides the Keycloak realm-role debris
+  already listed.
+
+**Next session:** P90-S1, follow-up reminders (Wiedervorlagen), backend (ADR 0246).
+
+---
+
 **Last completed:** P89-S2, case destruction: archival-service pipeline, deletion register, restore
 integration and admin visibility (build of
 [ADR 0235](docs/adr/0235-case-service-destruction-scheduling-scoping.md), addendum "Build — P89-S2").
