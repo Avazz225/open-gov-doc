@@ -36,6 +36,15 @@ class AuthServiceClient:
             return any(u.get("email") == recipient for u in users)
         return any(u["username"] == recipient for u in users)
 
+    async def directory_by_id(self) -> dict[str, dict]:
+        """The whole directory keyed by account id (the principal id, Keycloak
+        `sub`) - P90-S3: approval recipients arrive as principal ids."""
+        response = await self._client.get(
+            "/users/service-directory", headers=_SYSTEM_PRINCIPAL_HEADERS
+        )
+        response.raise_for_status()
+        return {user["id"]: user for user in response.json()}
+
     async def email_for(self, username: str) -> str | None:
         """The account's e-mail address, or None when it has none or doesn't
         exist (P90-S1: follow-up reminders mail their owner by user name)."""

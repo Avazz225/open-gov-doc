@@ -173,8 +173,16 @@ async def apply_approval_config(client: PermissionServiceClient, entries: list) 
         try:
             # `PUT /approval-config/{action_type}` is already an upsert
             # (permission-service creates a missing row as needed).
+            # Only the fields the entry contains (P90-S3): a package entry
+            # without `required_permission`/`recipient_role` keeps the
+            # installation's own values.
+            optional = {
+                field: getattr(entry, field)
+                for field in ("required_permission", "recipient_role")
+                if field in entry.model_fields_set
+            }
             await client.put_approval_config(
-                entry.action_type, requires_approval=entry.requires_approval
+                entry.action_type, requires_approval=entry.requires_approval, **optional
             )
             result.updated += 1
         except Exception as exc:  # noqa: BLE001

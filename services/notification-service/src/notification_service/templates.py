@@ -116,6 +116,11 @@ EMAIL_TEMPLATE_USE_CASES: list[dict[str, object]] = [
         "placeholders": ["document_id", "released_by", "reason", "link"],
     },
     {
+        "use_case": "permission.approval.requested",
+        "description": "Neue Vier-Augen-Genehmigungsanfrage an die Freigabe-Berechtigten (P90-S3)",
+        "placeholders": ["action_type", "initiated_by", "request_id", "link", "recipient_name"],
+    },
+    {
         "use_case": "permission.approval.approved",
         "description": "Vier-Augen-Genehmigungsanfrage bewilligt (4.3, neu seit P71-S1)",
         "placeholders": ["action_type", "approved_by", "request_id"],

@@ -205,7 +205,7 @@
   },
   "approvalSettings": {
     "pageTitle": "Four-eyes settings",
-    "hint": "Controls, per action type, whether a second person must confirm the action before it takes effect. An action type missing from the list is not gated (default behavior).",
+    "hint": "Controls, per action type, whether a second person must confirm the action before it takes effect. An action type missing from the list is not gated (default behavior). A new request notifies the holders of the chosen role (in the app and by e-mail) - without a choice the holders of the required permission, otherwise the \"Freigabe-Benachrichtigung\" role. Never the requester.",
     "unreachable": "Permission service not reachable.",
     "empty": "No action types configured yet.",
     "actionType": "Action type",
@@ -219,7 +219,20 @@
     "toggleError": "Failed to toggle",
     "createHeading": "Configure new action type",
     "createFormLabel": "Configure action type",
-    "createError": "Failed to save"
+    "createError": "Failed to save",
+    "recipientRole": "Notified",
+    "recipientRoleFor": "Notified role for {action}",
+    "recipientRoleDefault": "Default",
+    "showRecipients": "Who?",
+    "recipientsCount": "{count} person(s)",
+    "recipientsNone": "nobody - choose a role or grant the \"Freigabe-Benachrichtigung\" role",
+    "recipientsTruncated": "(truncated)",
+    "recipientsError": "Recipients could not be determined.",
+    "recipientSource": {
+      "recipient_role": "Chosen role",
+      "required_permission": "Holders of the required permission",
+      "approval_notify": "Default: role \"Freigabe-Benachrichtigung\""
+    }
   },
   "emailTemplates": {
     "pageTitle": "Email templates",

@@ -203,9 +203,14 @@ class PermissionServiceClient:
         response.raise_for_status()
         return response.json()
 
-    async def put_approval_config(self, action_type: str, *, requires_approval: bool) -> dict:
+    async def put_approval_config(
+        self, action_type: str, *, requires_approval: bool, **optional: str | None
+    ) -> dict:
+        """`optional` may hold `required_permission`/`recipient_role` (P90-S3);
+        permission-service changes only the fields that are sent."""
         response = await self._client.put(
-            f"/approval-config/{action_type}", json={"requires_approval": requires_approval}
+            f"/approval-config/{action_type}",
+            json={"requires_approval": requires_approval, **optional},
         )
         response.raise_for_status()
         return response.json()

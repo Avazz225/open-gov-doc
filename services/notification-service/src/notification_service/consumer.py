@@ -36,6 +36,8 @@ _SHARED_STREAM_DURABLE_OVERRIDES: dict[str, str] = {
     # P71-S1: second/third subjects on the "permission" stream.
     "permission.approval.approved": "notification-service-approval-approved",
     "permission.approval.rejected": "notification-service-approval-rejected",
+    # P90-S3 (ADR 0247): fourth subject on the "permission" stream.
+    "permission.approval.requested": "notification-service-approval-requested",
     # P71-S1: second subject on the new "storage" stream (first subject,
     # `storage.replication.failed_permanent`, needs no override).
     "storage.object_verify.mismatch": "notification-service-storage-verify-mismatch",
@@ -88,6 +90,11 @@ def make_handler(
             return
         if event.event_type == "folder.deletion.reminder":
             await _handle_folder_deletion_reminder(
+                session_factory, settings, publish_event, rate_limiter, event
+            )
+            return
+        if event.event_type == "permission.approval.requested":
+            await _handle_approval_requested(
                 session_factory, settings, publish_event, rate_limiter, event
             )
             return
@@ -1045,6 +1052,86 @@ async def _handle_force_unlock_failed(
         )
         await session.commit()
         await publish_notification_result(publish_event, notification)
+
+
+async def _handle_approval_requested(
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    publish_event: Callable[[str, str, dict], Awaitable[None]],
+    rate_limiter: RecipientRateLimiter,
+    event: Event,
+) -> None:
+    """A new four-eyes request (P90-S3, ADR 0247): tells the people who may
+    (or are meant to) decide, in-app and by e-mail. permission-service
+    resolved them when the request was made (`recipients`, principal ids,
+    initiator excluded); they are mapped to user names and addresses through
+    auth-service's directory. An id with no directory entry (a technical
+    account) still gets the in-app message under its id. The link opens the
+    reviewer-ui's approval inbox, where requests are decided."""
+    data = event.payload
+    recipients = [r for r in data.get("recipients") or [] if r]
+    if not recipients:
+        logger.info(
+            "approval_requested_without_recipients",
+            extra={"request_id": data.get("request_id"), "action_type": data.get("action_type")},
+        )
+        return
+    action_type = data.get("action_type", "?")
+    request_id = data.get("request_id", "?")
+    auth_client = AuthServiceClient(settings.auth_service_base_url)
+    try:
+        directory = await auth_client.directory_by_id()
+    except Exception:  # noqa: BLE001 - without names: in-app under the ids, no mail
+        logger.warning("approval_recipient_lookup_failed", exc_info=True)
+        directory = {}
+    finally:
+        await auth_client.close()
+    initiator_id = data.get("initiated_by", "?")
+    initiated_by = (directory.get(initiator_id) or {}).get("username") or initiator_id
+    link = (
+        f"{settings.reviewer_ui_public_base_url.rstrip('/')}/approvals/"
+        if settings.reviewer_ui_public_base_url
+        else ""
+    )
+    fallback_subject = f"Freigabe erbeten: {action_type}"
+    fallback_body = (
+        f"{initiated_by} bittet um Freigabe ({action_type}, Anfrage {request_id}). "
+        "Die Aktion wird erst ausgeführt, wenn eine zweite Person sie freigibt."
+    )
+    if link:
+        fallback_body += f"\n\nZur Freigabe: {link}"
+
+    for principal_id in recipients:
+        entry = directory.get(principal_id) or {}
+        username = entry.get("username") or principal_id
+        targets = [("in_app", username)]
+        if entry.get("email"):
+            targets.append(("email", entry["email"]))
+        async with session_factory() as session:
+            for channel, recipient in targets:
+                subject, body = await _render_or_fallback(
+                    session,
+                    use_case="permission.approval.requested",
+                    recipient=recipient,
+                    fallback_subject=fallback_subject,
+                    fallback_body=fallback_body,
+                    action_type=action_type,
+                    initiated_by=initiated_by,
+                    request_id=request_id,
+                    link=link,
+                    recipient_name=username,
+                )
+                notification = await repository.create_and_send(
+                    session,
+                    settings,
+                    channel=channel,
+                    recipient=recipient,
+                    subject=subject,
+                    body=body,
+                    rate_limiter=rate_limiter,
+                )
+                await session.commit()
+                await publish_notification_result(publish_event, notification)
 
 
 async def _handle_approval_approved(

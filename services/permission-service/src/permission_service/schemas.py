@@ -206,14 +206,31 @@ class ApprovalActionConfigOut(BaseModel):
     action_type: str
     requires_approval: bool
     required_permission: str | None
+    recipient_role: str | None = None
     updated_at: datetime
 
     model_config = {"from_attributes": True}
 
 
 class ApprovalActionConfigUpdate(BaseModel):
+    """`required_permission` and `recipient_role` are only changed when sent
+    (P90-S3): before, a body with only `requires_approval` cleared
+    `required_permission` - the configuration import did exactly that."""
+
     requires_approval: bool
     required_permission: str | None = None
+    recipient_role: str | None = None
+
+
+class ApprovalRecipientsOut(BaseModel):
+    """Who is notified of a new request of this action type (P90-S3, ADR
+    0247) - `source` names the rule that applied: "recipient_role",
+    "required_permission" or "approval_notify"."""
+
+    action_type: str
+    source: str
+    recipients: list[str]
+    truncated: bool = False
 
 
 class ApprovalRequestCreate(BaseModel):

@@ -38,7 +38,8 @@
 | `GET` | `/scope-locks/effective/{resource_id}` | Active locks affecting this resource (including inherited ones) |
 | `GET` | `/approval-config` | All configured action types (4.3, since P6-S4) |
 | `GET` | `/approval-config/{action_type}` | Configuration for an action type — default `requires_approval=false` if never set |
-| `PUT` | `/approval-config/{action_type}` | Set the approval requirement for an action type (upsert). Self-gated since Post-Roadmap Phase 32 Session 1 ([ADR 0130](../adr/0130-approval-config-self-gated-role-creation-four-eyes.md), supersedes [ADR 0089](../adr/0089-approval-settings-ui-config-endpoint-stays-ungated.md)): `X-DMS-Principal` must hold `admin.user_management`, otherwise `401`/`403` |
+| `GET` | `/approval-config/{action_type}/recipients` | P90-S3 ([ADR 0247](../adr/0247-approver-notification-and-role-based-recipients.md)): who a new request of this type would notify - `{source, recipients, truncated}`, gated like `PUT` |
+| `PUT` | `/approval-config/{action_type}` | Set the approval requirement for an action type (upsert). Since P90-S3 `required_permission` and the new `recipient_role` change only when sent (before, an omitted `required_permission` was cleared); an unknown `recipient_role` is `422`. Self-gated since Post-Roadmap Phase 32 Session 1 ([ADR 0130](../adr/0130-approval-config-self-gated-role-creation-four-eyes.md), supersedes [ADR 0089](../adr/0089-approval-settings-ui-config-endpoint-stays-ungated.md)): `X-DMS-Principal` must hold `admin.user_management`, otherwise `401`/`403` |
 | `POST` | `/approval-requests` | Create an approval request (`action_type`, `initiated_by`, `payload`) — `403` if the action type has a `required_permission` (since P6-S5) that `initiated_by` does not hold |
 | `GET` | `/approval-requests?status=&action_type=` | List requests, optionally filtered |
 | `GET` | `/approval-requests/{id}` | Request detail (`404`) |
@@ -101,6 +102,25 @@ A generic, per-action-type configurable approval mechanism — see [ADR 0022](..
 - **Permission/role changes wired up since P17-S3**: `POST /role-assignments` checks `permission.role_assignment.create` via the same mechanism (14.2 "permission change", one of the three action types gated by default by the eGov package, see `packages/egov/`) — response `RoleAssignmentActionResult` (`status`/`role_assignment`/`approval_request_id`), the same envelope pattern as with scope locks. For lack of its own requester field on `RoleAssignmentCreate`, `initiated_by` is the `principal_id` (the person who is to receive the role) — the same compromise as with the scope locks. Approved assignments are carried out in the same self-consumption branch of `approval_consumer.py` as scope locks/emergency shutdown.
 - **Role creation wired up since Post-Roadmap Phase 32 Session 1** ([ADR 0130](../adr/0130-approval-config-self-gated-role-creation-four-eyes.md)): `POST /roles` checks `permission.role.create` the same way — response `RoleActionResult` (`status`/`role`/`approval_request_id`). Unlike `RoleAssignmentCreate`, `RoleCreate` has no actor field at all, so `initiated_by` reuses the already-mandatory `X-DMS-Principal` header (the same one the baseline `admin.user_management` check consumes) rather than a body field.
 - **`required_permission` (4.6, since P6-S5)**: a generic extension of `ApprovalActionConfig` — if set, both `initiated_by` and `approved_by` must hold this capability per `GET /effective-permissions/.../root` (in addition to the initiator≠approver rule), otherwise `403` (`MissingRequiredPermissionError`). Fixed to `breakglass.approve` at startup for `auth.superuser.activate` (superuser break-glass, see below and `docs/services/auth-service.md`) — a stricter implementation of "two different members of a permission group" (4.6) than the mere "any second person" from 4.3. Remains `null` for scope locks/force unlock, unchanged behavior. **Since P70-S2** ([ADR 0204](../adr/0204-p70s2-declassification-build.md)): fixed to `admin.declassification` for `document.classification.declassify` (document-service, 14.2) — the SAME shared-capability shape as break-glass, not two distinct initiator/approver capabilities (a real design mistake caught by that session's own tests: the caller must pass the authenticated principal, already verified to hold this capability, as `initiated_by` — not an unrelated attribution field — or `create_approval_request` itself rejects it with `403` before an approver is ever involved).
+
+## Approver notification (P90-S3, [ADR 0247](../adr/0247-approver-notification-and-role-based-recipients.md))
+
+`_request_approval` resolves who is told about the new request (`repository.resolve_approval_recipients`)
+and puts the list into `permission.approval.requested`: `recipients` (principal ids),
+`recipient_source` and `recipients_truncated`. notification-service delivers.
+
+**Order:**
+1. the action type's `recipient_role` (new column);
+2. the holders of its `required_permission`;
+3. the holders of `approval.notify`, a new seeded role "approval-recipients" ("Freigabe-Benachrichtigung")
+   for the "any second person" case.
+
+**Holders:**
+- user principals with the role at root, directly or through a real group;
+- not "everyone", not service principals, never the initiator;
+- at most 50.
+
+It only decides who is told, never who may decide.
 
 ## Acting Identity (P85-S2, [ADR 0240](../adr/0240-acting-identity-from-verified-principal.md))
 

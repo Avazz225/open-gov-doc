@@ -103,6 +103,9 @@ class Settings(BaseServiceSettings):
         # Follow-up reminders (P90-S1, ADR 0246) - the first subject of this
         # service on the "favorite" stream, so no durable override.
         "favorite.reminder.due",
+        # Approver notification (P90-S3, ADR 0247) - fourth subject on the
+        # "permission" stream, own durable name.
+        "permission.approval.requested",
     ]
 
     # Recipient of the optional security notification on break-glass

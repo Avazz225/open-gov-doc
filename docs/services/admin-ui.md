@@ -149,6 +149,13 @@ page, same audience, since org-hierarchy data is administered exactly like group
 
 ## Four-Eyes Settings (Post-Roadmap Phase 22 Session 3, [ADR 0089](../adr/0089-approval-settings-ui-config-endpoint-stays-ungated.md))
 
+**Since P90-S3** ([ADR 0247](../adr/0247-approver-notification-and-role-based-recipients.md)):
+- **"Benachrichtigt" column:** a role choice per action type ("Standard" = holders of the required
+  permission, else the "Freigabe-Benachrichtigung" role), at most 14rem wide.
+- **"Wer?":** opens a row with the resolution source and the names (`PrincipalName`), refreshed after a
+  change.
+- **The toggle** sends only `requires_approval`, since the backend now keeps fields that aren't sent.
+
 New page `/approval-settings/` (`ApprovalSettings.tsx`) — the first Admin UI integration of the generic
 four-eyes mechanism (4.3) itself, previously configurable only via `curl`/direct HTTP calls.
 

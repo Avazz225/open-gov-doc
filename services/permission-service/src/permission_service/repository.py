@@ -413,6 +413,15 @@ DOMAIN_ADMIN_ROLES: list[tuple[str, str, list[str]]] = [
         "Nutzerverzeichnis-Abfrage (Service-zu-Service)",
         ["service.user_lookup"],
     ),
+    # P90-S3 (ADR 0247): who is told about a new four-eyes request when its
+    # action type names neither a recipient role nor a required permission
+    # ("any second person" may decide - notifying everyone would be noise).
+    # Only notification: holding it grants no right to decide.
+    (
+        "approval-recipients",
+        "Freigabe-Benachrichtigung",
+        ["approval.notify"],
+    ),
     # Post-Roadmap Phase 74 Session 3 (ADR 0160/ADR 0217): the specific
     # missing piece a teamspace AD-group invitation needs - "who is
     # currently a member of AD group X," as a queryable list
@@ -1201,28 +1210,104 @@ async def list_approval_configs(session: AsyncSession) -> list[ApprovalActionCon
     return list(result.scalars().all())
 
 
+_UNSET = object()
+
+
+class UnknownRoleError(Exception):
+    pass
+
+
 async def set_approval_config(
     session: AsyncSession,
     action_type: str,
     *,
     requires_approval: bool,
-    required_permission: str | None = None,
+    required_permission=_UNSET,
+    recipient_role=_UNSET,
 ) -> ApprovalActionConfig:
+    """Upsert. `required_permission`/`recipient_role` are only changed when
+    passed (P90-S3) - a caller that only toggles `requires_approval` no longer
+    clears them. A recipient role must exist (`UnknownRoleError`)."""
+    if recipient_role is not _UNSET and recipient_role is not None:
+        exists = await session.scalar(select(Role.id).where(Role.name == recipient_role))
+        if exists is None:
+            raise UnknownRoleError(f"Rolle {recipient_role!r} existiert nicht")
     config = await session.get(ApprovalActionConfig, action_type)
     if config is None:
-        config = ApprovalActionConfig(
-            action_type=action_type,
-            requires_approval=requires_approval,
-            required_permission=required_permission,
-            updated_at=datetime.now(UTC),
-        )
+        config = ApprovalActionConfig(action_type=action_type, requires_approval=requires_approval)
         session.add(config)
-    else:
-        config.requires_approval = requires_approval
+    config.requires_approval = requires_approval
+    if required_permission is not _UNSET:
         config.required_permission = required_permission
-        config.updated_at = datetime.now(UTC)
+    if recipient_role is not _UNSET:
+        config.recipient_role = recipient_role
+    config.updated_at = datetime.now(UTC)
     await session.flush()
     return config
+
+
+# Notification is a heads-up, not a broadcast: a role granted to hundreds of
+# people (or to "everyone") is not a sensible recipient list.
+APPROVAL_RECIPIENT_LIMIT = 50
+APPROVAL_NOTIFY_PERMISSION = "approval.notify"
+
+
+async def _principals_holding_roles(session: AsyncSession, role_ids: set[int]) -> set[str]:
+    """User principals holding one of `role_ids` at the root resource -
+    directly or through a real group's membership. The implicit "everyone"
+    group is skipped (it would mean every account), as are service
+    principals (machines don't read notifications)."""
+    if not role_ids:
+        return set()
+    rows = (
+        await session.execute(
+            select(RoleAssignment).where(
+                RoleAssignment.role_id.in_(role_ids),
+                RoleAssignment.resource_id == ROOT_RESOURCE_ID,
+            )
+        )
+    ).scalars()
+    principals: set[str] = set()
+    group_ids: set[str] = set()
+    for assignment in rows:
+        if assignment.principal_type == "user":
+            principals.add(assignment.principal_id)
+        elif assignment.principal_type == "group":
+            if assignment.principal_id != EVERYONE_PRINCIPAL_ID:
+                group_ids.add(assignment.principal_id)
+    if group_ids:
+        members = await session.execute(
+            select(GroupMembership.principal_id).where(GroupMembership.group_id.in_(group_ids))
+        )
+        principals.update(members.scalars())
+    return principals
+
+
+async def resolve_approval_recipients(
+    session: AsyncSession, action_type: str, *, initiated_by: str | None = None
+) -> tuple[str, list[str], bool]:
+    """Who is told about a new request of `action_type` (P90-S3, ADR 0247):
+    (source, sorted principal ids, truncated). In order:
+    1. the action type's `recipient_role`;
+    2. the holders of its `required_permission` (exactly who may decide);
+    3. the holders of `approval.notify` (the "Freigabe-Benachrichtigung"
+       role) - for the common "any second person" case.
+    The initiator is never among them: they can't approve their own request."""
+    config = await get_approval_config(session, action_type)
+    roles = list((await session.execute(select(Role))).scalars())
+    if config.recipient_role:
+        source = "recipient_role"
+        role_ids = {r.id for r in roles if r.name == config.recipient_role}
+    elif config.required_permission:
+        source = "required_permission"
+        role_ids = {r.id for r in roles if config.required_permission in (r.permissions or [])}
+    else:
+        source = "approval_notify"
+        role_ids = {r.id for r in roles if APPROVAL_NOTIFY_PERMISSION in (r.permissions or [])}
+    principals = await _principals_holding_roles(session, role_ids)
+    principals.discard(initiated_by or "")
+    ordered = sorted(principals)
+    return source, ordered[:APPROVAL_RECIPIENT_LIMIT], len(ordered) > APPROVAL_RECIPIENT_LIMIT
 
 
 async def require_capability(

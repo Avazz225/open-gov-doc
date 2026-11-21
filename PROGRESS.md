@@ -2,6 +2,61 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P90-S3, approver notification and role-based recipients
+([ADR 0247](docs/adr/0247-approver-notification-and-role-based-recipients.md)).
+
+**What changed:**
+- **permission-service:**
+  - `ApprovalActionConfig.recipient_role` (column plus ad-hoc ALTER).
+  - New seeded role "approval-recipients" ("Freigabe-Benachrichtigung", `approval.notify`).
+  - `resolve_approval_recipients`, in order: recipient role → holders of `required_permission` →
+    holders of `approval.notify`. User principals at root, real groups expanded; "everyone", service
+    principals and the initiator excluded; at most 50.
+  - The `permission.approval.requested` payload gains `recipients`, `recipient_source` and
+    `recipients_truncated`.
+  - New `GET /approval-config/{type}/recipients` (gated like `PUT`).
+- **Bug fixed:**
+  - `PUT /approval-config` now changes `required_permission`/`recipient_role` only when sent.
+  - Before, config import (`{requires_approval}` only) cleared an installation's `required_permission`;
+    for break-glass that would drop the group rule.
+  - An unknown recipient role is 422.
+- **notification-service:** consumes `permission.approval.requested` (own durable).
+  `AuthServiceClient.directory_by_id` maps recipients to user names and addresses: in-app plus mail,
+  in-app under the id when there is no entry. Template `permission.approval.requested`; link to the
+  reviewer-ui's `/approvals/`.
+- **config-service:** `approval_config` exports and imports `required_permission`/`recipient_role`
+  (sent only when the entry contains them).
+- **admin-ui:** "Benachrichtigt" column (role choice, max 14rem) and "Wer?" (source and names). The
+  toggle sends only the flag.
+- **Docs:** ADR 0247; permission-, notification-, config-service and admin-ui docs; the plan.
+
+**Checks:**
+- permission-service 210 (+5): resolution order; groups, everyone, services and initiator; cap;
+  partial PUT and the 422; event payload and preview via the API.
+- notification-service 118 (+2), config-service 69 (+1), admin-ui vitest 378 (+1, plus the toggle test
+  adjusted to the new contract).
+- ruff, tsc and eslint clean.
+- **Live:**
+  - A temporary user with the default role got the in-app message and the mail "Freigabe erbeten:
+    p90s3.live.check" with the inbox link, for a request by `users-admin`.
+  - **Cosmetic gap:** the initiator is shown as its id "2", because technical accounts aren't in the
+    directory.
+  - Request rejected, assignment and user deleted; no configuration row was created.
+- **Screenshots** of the settings page at 1400/390. The first one showed the role choice stretched by
+  the dev stack's roughly 1,500 test role names; it is now capped.
+
+**Planned (user request during this session):** Phase 93, "Filing Structure & Navigation".
+- Enforced filing structure from parent folder classes, with templates and "creation only from
+  templates".
+- A VS-Code-like explorer tree with upload by right-click.
+- Length limits for admin-ui lists.
+
+It runs after Phase 90 and before 91/92 (order 90 → 93 → 91 → 92); see the plan.
+
+**Next session:** P90-S4, watch subscriptions.
+
+---
+
 **Last completed:** P90-S2, follow-up reminders UI
 ([ADR 0246](docs/adr/0246-follow-up-reminders-in-favorite-service.md)).
 

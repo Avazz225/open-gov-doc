@@ -126,7 +126,12 @@ async def export_roles(client: PermissionServiceClient) -> list[RoleExport]:
 async def export_approval_config(client: PermissionServiceClient) -> list[ApprovalConfigExport]:
     configs = await client.list_approval_configs()
     return [
-        ApprovalConfigExport(action_type=c["action_type"], requires_approval=c["requires_approval"])
+        ApprovalConfigExport(
+            action_type=c["action_type"],
+            requires_approval=c["requires_approval"],
+            required_permission=c.get("required_permission"),
+            recipient_role=c.get("recipient_role"),
+        )
         for c in configs
     ]
 

@@ -28,6 +28,7 @@ from permission_service.schemas import (
     ApprovalActionConfigOut,
     ApprovalActionConfigUpdate,
     ApprovalDecision,
+    ApprovalRecipientsOut,
     ApprovalRejection,
     ApprovalRequestCreate,
     ApprovalRequestOut,
@@ -88,6 +89,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             text(
                 "ALTER TABLE permission.approval_action_config "
                 "ADD COLUMN IF NOT EXISTS required_permission VARCHAR(128)"
+            )
+        )
+        # P90-S3 (ADR 0247), same pattern.
+        await conn.execute(
+            text(
+                "ALTER TABLE permission.approval_action_config "
+                "ADD COLUMN IF NOT EXISTS recipient_role VARCHAR(128)"
             )
         )
         # P84-S1 (ADR 0239) - cache generation, same ad-hoc pattern. Existing
@@ -901,6 +909,11 @@ async def _request_approval(
         )
     except repository.MissingRequiredPermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
+    # Who to tell (P90-S3, ADR 0247), resolved now so the notification goes
+    # to who held the role when the request was made.
+    source, recipients, truncated = await repository.resolve_approval_recipients(
+        session, request.action_type, initiated_by=request.initiated_by
+    )
     await session.commit()
     await publish_event(
         "permission.approval.requested",
@@ -908,6 +921,9 @@ async def _request_approval(
             "request_id": request.id,
             "action_type": request.action_type,
             "initiated_by": request.initiated_by,
+            "recipients": recipients,
+            "recipient_source": source,
+            "recipients_truncated": truncated,
         },
         # A service creating the request for a user (P85-S2): the service
         # acted, on behalf of the initiator.
@@ -949,14 +965,38 @@ async def put_approval_config(
     (ADR 0071) - toggling four-eyes for permission-changing actions is
     squarely the same "user/permission management" domain."""
     await _require_role_management(session, x_dms_principal)
-    config = await repository.set_approval_config(
-        session,
-        action_type,
-        requires_approval=payload.requires_approval,
-        required_permission=payload.required_permission,
-    )
+    # Only what was sent changes (P90-S3).
+    optional = {
+        field: getattr(payload, field)
+        for field in ("required_permission", "recipient_role")
+        if field in payload.model_fields_set
+    }
+    try:
+        config = await repository.set_approval_config(
+            session, action_type, requires_approval=payload.requires_approval, **optional
+        )
+    except repository.UnknownRoleError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     await session.commit()
     return config
+
+
+@app.get("/approval-config/{action_type}/recipients", response_model=ApprovalRecipientsOut)
+async def preview_approval_recipients(
+    action_type: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> ApprovalRecipientsOut:
+    """Who a new request of this type would notify right now (P90-S3, ADR
+    0247) - for the approval settings page. Same gate as changing the
+    configuration: the list names who holds which role."""
+    await _require_role_management(session, x_dms_principal)
+    source, recipients, truncated = await repository.resolve_approval_recipients(
+        session, action_type
+    )
+    return ApprovalRecipientsOut(
+        action_type=action_type, source=source, recipients=recipients, truncated=truncated
+    )
 
 
 @app.post("/approval-requests", response_model=ApprovalRequestOut, status_code=201)

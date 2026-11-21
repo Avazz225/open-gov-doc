@@ -94,8 +94,16 @@ class RoleExport(BaseModel):
 
 
 class ApprovalConfigExport(BaseModel):
+    """Since P90-S3 also `required_permission` and `recipient_role` (ADR
+    0247) - before, an export/import round trip dropped `required_permission`
+    (break-glass needs `breakglass.approve`). Both are only written on import
+    when the entry contains them, so a package that only sets
+    `requires_approval` leaves an installation's own values alone."""
+
     action_type: str
     requires_approval: bool
+    required_permission: str | None = None
+    recipient_role: str | None = None
 
 
 class SensorConfigExport(BaseModel):

@@ -1173,3 +1173,101 @@ async def test_registering_a_node_keeps_existing_cache_entries(session):
     assert await repository.current_cache_generation(session) == generation
     cached = await repository.get_effective_permissions(session, "carol", ROOT_RESOURCE_ID)
     assert cached.generation == generation  # still the same, still a hit
+
+
+# --- Approval recipients (P90-S3, ADR 0247) ----------------------------------
+
+
+async def _assign(session, principal_type, principal_id, role):
+    await repository.create_role_assignment(
+        session,
+        principal_type=principal_type,
+        principal_id=principal_id,
+        role_id=role.id,
+        resource_id=ROOT_RESOURCE_ID,
+    )
+
+
+async def test_recipients_follow_role_then_required_permission_then_approval_notify(session):
+    notify = await repository.create_role(session, "approval-recipients", "", ["approval.notify"])
+    breakglass = await repository.create_role(session, "bg", "", ["breakglass.approve"])
+    custom = await repository.create_role(session, "Registratur", "", ["folder.read"])
+    await _assign(session, "user", "nora", notify)
+    await _assign(session, "user", "bert", breakglass)
+    await _assign(session, "user", "rita", custom)
+
+    # Nothing configured: the approval.notify holders.
+    assert await repository.resolve_approval_recipients(session, "document.force_delete") == (
+        "approval_notify",
+        ["nora"],
+        False,
+    )
+    # A required permission: exactly who may decide.
+    await repository.set_approval_config(
+        session,
+        "auth.superuser.activate",
+        requires_approval=True,
+        required_permission="breakglass.approve",
+    )
+    assert await repository.resolve_approval_recipients(session, "auth.superuser.activate") == (
+        "required_permission",
+        ["bert"],
+        False,
+    )
+    # A recipient role wins over both.
+    await repository.set_approval_config(
+        session, "auth.superuser.activate", requires_approval=True, recipient_role="Registratur"
+    )
+    source, recipients, _ = await repository.resolve_approval_recipients(
+        session, "auth.superuser.activate"
+    )
+    assert (source, recipients) == ("recipient_role", ["rita"])
+
+
+async def test_recipients_expand_groups_skip_everyone_services_and_the_initiator(session):
+    notify = await repository.create_role(session, "approval-recipients", "", ["approval.notify"])
+    group = await repository.create_group(session, "Amtsleitung", "")
+    await repository.add_group_member(session, group.id, "anna")
+    await repository.add_group_member(session, group.id, "otto")
+    await _assign(session, "group", group.id, notify)
+    await _assign(session, "group", "everyone", notify)
+    await _assign(session, "service", "config-service", notify)
+
+    source, recipients, truncated = await repository.resolve_approval_recipients(
+        session, "folder.force_delete", initiated_by="otto"
+    )
+    assert (source, recipients, truncated) == ("approval_notify", ["anna"], False)
+
+
+async def test_recipients_are_capped(session, monkeypatch):
+    notify = await repository.create_role(session, "approval-recipients", "", ["approval.notify"])
+    for i in range(4):
+        await _assign(session, "user", f"u{i}", notify)
+    monkeypatch.setattr(repository, "APPROVAL_RECIPIENT_LIMIT", 3)
+    _, recipients, truncated = await repository.resolve_approval_recipients(session, "x.y")
+    assert (recipients, truncated) == (["u0", "u1", "u2"], True)
+
+
+async def test_approval_config_only_changes_what_is_passed(session):
+    """The bug P90-S3 fixed: toggling `requires_approval` alone cleared
+    `required_permission` (the config import did exactly that)."""
+    await repository.create_role(session, "Registratur", "", [])
+    await repository.set_approval_config(
+        session, "a.b", requires_approval=True, required_permission="breakglass.approve"
+    )
+    await repository.set_approval_config(session, "a.b", requires_approval=False)
+    config = await repository.get_approval_config(session, "a.b")
+    assert (config.requires_approval, config.required_permission) == (False, "breakglass.approve")
+
+    await repository.set_approval_config(
+        session, "a.b", requires_approval=True, recipient_role="Registratur"
+    )
+    await repository.set_approval_config(
+        session, "a.b", requires_approval=True, required_permission=None
+    )
+    config = await repository.get_approval_config(session, "a.b")
+    assert (config.required_permission, config.recipient_role) == (None, "Registratur")
+    with pytest.raises(repository.UnknownRoleError):
+        await repository.set_approval_config(
+            session, "a.b", requires_approval=True, recipient_role="gibt-es-nicht"
+        )

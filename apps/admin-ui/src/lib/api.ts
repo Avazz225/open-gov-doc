@@ -860,7 +860,30 @@ export interface ApprovalActionConfig {
   action_type: string;
   requires_approval: boolean;
   required_permission: string | null;
+  // P90-S3 (ADR 0247): whose holders are told about a new request.
+  recipient_role?: string | null;
   updated_at: string;
+}
+
+// Who a new request of this type would notify (P90-S3, ADR 0247).
+export interface ApprovalRecipients {
+  action_type: string;
+  source: "recipient_role" | "required_permission" | "approval_notify";
+  recipients: string[];
+  truncated: boolean;
+}
+
+export async function getApprovalRecipients(
+  token: string,
+  actionType: string
+): Promise<ApprovalRecipients> {
+  const response = await request(
+    "permission-service",
+    `approval-config/${encodeURIComponent(actionType)}/recipients`,
+    {},
+    token
+  );
+  return response.json();
 }
 
 export async function listApprovalConfig(token: string): Promise<ApprovalActionConfig[]> {
@@ -868,25 +891,28 @@ export async function listApprovalConfig(token: string): Promise<ApprovalActionC
   return response.json();
 }
 
-// IMPORTANT: `required_permission` must always be sent explicitly (even if
-// only `requires_approval` is being changed) - otherwise the backend
-// overwrites it with `null`, see
-// `permission_service.repository.set_approval_config`.
+// Since P90-S3 the backend changes only the fields that are sent, so
+// `requiredPermission`/`recipientRole` are omitted when undefined (before,
+// an omitted `required_permission` was cleared).
 export async function putApprovalConfig(
   token: string,
   actionType: string,
-  params: { requiresApproval: boolean; requiredPermission: string | null }
+  params: {
+    requiresApproval: boolean;
+    requiredPermission?: string | null;
+    recipientRole?: string | null;
+  }
 ): Promise<ApprovalActionConfig> {
+  const body: Record<string, unknown> = { requires_approval: params.requiresApproval };
+  if (params.requiredPermission !== undefined) body.required_permission = params.requiredPermission;
+  if (params.recipientRole !== undefined) body.recipient_role = params.recipientRole;
   const response = await request(
     "permission-service",
     `approval-config/${encodeURIComponent(actionType)}`,
     {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        requires_approval: params.requiresApproval,
-        required_permission: params.requiredPermission,
-      }),
+      body: JSON.stringify(body),
     },
     token
   );

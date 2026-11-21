@@ -13,10 +13,14 @@ function renderApprovalSettings() {
 
 const listApprovalConfigMock = vi.fn();
 const putApprovalConfigMock = vi.fn();
+const listRolesMock = vi.fn();
+const getApprovalRecipientsMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   listApprovalConfig: (...args: unknown[]) => listApprovalConfigMock(...args),
   putApprovalConfig: (...args: unknown[]) => putApprovalConfigMock(...args),
+  listRoles: (...args: unknown[]) => listRolesMock(...args),
+  getApprovalRecipients: (...args: unknown[]) => getApprovalRecipientsMock(...args),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {
@@ -59,6 +63,10 @@ describe("ApprovalSettings", () => {
   beforeEach(() => {
     listApprovalConfigMock.mockReset();
     putApprovalConfigMock.mockReset();
+    listRolesMock
+      .mockReset()
+      .mockResolvedValue([{ id: 7, name: "Registratur", description: "", permissions: [] }]);
+    getApprovalRecipientsMock.mockReset();
   });
 
   it("shows an empty state without any configured action types", async () => {
@@ -91,7 +99,7 @@ describe("ApprovalSettings", () => {
     expect(within(rows[2]).getByText("Inaktiv")).toBeInTheDocument();
   });
 
-  it("toggles an action type while preserving its required_permission", async () => {
+  it("toggles an action type, sending only the flag (P90-S3: the backend keeps the rest)", async () => {
     listApprovalConfigMock
       .mockResolvedValueOnce([CONFIG_B])
       .mockResolvedValueOnce([{ ...CONFIG_B, requires_approval: false }]);
@@ -106,7 +114,6 @@ describe("ApprovalSettings", () => {
     await waitFor(() =>
       expect(putApprovalConfigMock).toHaveBeenCalledWith("token-123", "auth.superuser.activate", {
         requiresApproval: false,
-        requiredPermission: "breakglass.approve",
       })
     );
     await waitFor(() => expect(listApprovalConfigMock).toHaveBeenCalledTimes(2));
@@ -150,5 +157,37 @@ describe("ApprovalSettings", () => {
     fireEvent.click(within(row).getByRole("checkbox"));
 
     expect(await screen.findByText("Umschalten fehlgeschlagen")).toBeInTheDocument();
+  });
+
+  it("sets the notified role and previews who would be told (P90-S3)", async () => {
+    listApprovalConfigMock.mockResolvedValue([CONFIG_B]);
+    putApprovalConfigMock.mockResolvedValue({ ...CONFIG_B, recipient_role: "Registratur" });
+    getApprovalRecipientsMock.mockResolvedValue({
+      action_type: "auth.superuser.activate",
+      source: "required_permission",
+      recipients: ["bob", "carla"],
+      truncated: false,
+    });
+
+    renderApprovalSettings();
+    await screen.findByText("auth.superuser.activate");
+    const row = screen.getByText("auth.superuser.activate").closest("tr")!;
+
+    fireEvent.click(within(row).getByRole("button", { name: "Wer?" }));
+    const status = await screen.findByRole("status");
+    expect(status).toHaveTextContent("Inhaber der erforderlichen Berechtigung · 2 Person(en)");
+
+    fireEvent.change(
+      within(row).getByLabelText("Benachrichtigte Rolle für auth.superuser.activate"),
+      { target: { value: "Registratur" } }
+    );
+    await waitFor(() =>
+      expect(putApprovalConfigMock).toHaveBeenCalledWith("token-123", "auth.superuser.activate", {
+        requiresApproval: true,
+        recipientRole: "Registratur",
+      })
+    );
+    // The open preview is refreshed after the change.
+    await waitFor(() => expect(getApprovalRecipientsMock).toHaveBeenCalledTimes(2));
   });
 });

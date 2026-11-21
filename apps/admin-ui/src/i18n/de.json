@@ -205,7 +205,7 @@
   },
   "approvalSettings": {
     "pageTitle": "Vier-Augen-Einstellungen",
-    "hint": "Steuert je Aktionstyp, ob eine zweite Person die Aktion bestätigen muss, bevor sie wirksam wird. Fehlt ein Aktionstyp in der Liste, ist er nicht gegated (Standardverhalten).",
+    "hint": "Steuert je Aktionstyp, ob eine zweite Person die Aktion bestätigen muss, bevor sie wirksam wird. Fehlt ein Aktionstyp in der Liste, ist er nicht gegated (Standardverhalten). Bei einer neuen Anfrage werden die Personen benachrichtigt (in der App und per Mail), die die gewählte Rolle haben – ohne Auswahl die Inhaber der erforderlichen Berechtigung, sonst die Rolle „Freigabe-Benachrichtigung“. Die anfragende Person selbst nie.",
     "unreachable": "Permission Service nicht erreichbar.",
     "empty": "Noch keine Aktionstypen konfiguriert.",
     "actionType": "Aktionstyp",
@@ -219,7 +219,20 @@
     "toggleError": "Umschalten fehlgeschlagen",
     "createHeading": "Neuen Aktionstyp konfigurieren",
     "createFormLabel": "Aktionstyp konfigurieren",
-    "createError": "Speichern fehlgeschlagen"
+    "createError": "Speichern fehlgeschlagen",
+    "recipientRole": "Benachrichtigt",
+    "recipientRoleFor": "Benachrichtigte Rolle für {action}",
+    "recipientRoleDefault": "Standard",
+    "showRecipients": "Wer?",
+    "recipientsCount": "{count} Person(en)",
+    "recipientsNone": "niemand - bitte eine Rolle wählen oder die Rolle „Freigabe-Benachrichtigung“ vergeben",
+    "recipientsTruncated": "(gekürzt)",
+    "recipientsError": "Empfänger konnten nicht ermittelt werden.",
+    "recipientSource": {
+      "recipient_role": "Gewählte Rolle",
+      "required_permission": "Inhaber der erforderlichen Berechtigung",
+      "approval_notify": "Standard: Rolle „Freigabe-Benachrichtigung“"
+    }
   },
   "emailTemplates": {
     "pageTitle": "E-Mail-Vorlagen",

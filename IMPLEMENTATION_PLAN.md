@@ -3444,7 +3444,8 @@ ADR 0239**.
 4. Then compliance completions, the new collaboration features, and operations/hygiene last.
 
 `graphify update .` runs once, at the end of this whole plan (end of Phase 92, moved from Phase 91 when
-Phase 92 was added on 2026-11-21). The full backend regression runs at each phase close.
+Phase 92 was added on 2026-11-21). Phase 93, added the same day, runs between 90 and 91, so P92-S3 stays
+the last session. The full backend regression runs at each phase close.
 
 ## Phase 84 — Security & Correctness Hardening (cheap, high value)
 
@@ -4199,6 +4200,16 @@ sessions found along the way:
   - notification-service consumes `permission.approval.requested` (published, never consumed).
   - Resolve "who may decide" to concrete recipients (role → principals via permission-service), in-app
     and by email.
+  - ✅ **Result (ADR 0247):**
+    - **Recipients** resolved in permission-service at request time, in the event: `recipient_role` →
+      holders of `required_permission` → holders of `approval.notify` (new seeded role
+      "Freigabe-Benachrichtigung"). Groups expanded; "everyone", services and the initiator excluded;
+      capped at 50. Preview endpoint.
+    - **notification-service:** in-app plus mail through the directory, link to the reviewer-ui inbox.
+    - **Bug fixed:** `PUT /approval-config` cleared `required_permission` when it wasn't sent, which
+      config import did. config-service now carries both fields.
+    - **admin-ui:** a "Benachrichtigt" role choice and a "Wer?" preview.
+    - **Live:** mail to a temporary approver via the default role.
 - **P90-S4 — Watch subscriptions.** Subscribe to a document or folder (and optionally a workflow
   instance), and get notified on new version, metadata change, move, or delete. Backend events are
   already published. favorite-service's "watchlist" wording finally means watching. ADR 0247.
@@ -4217,6 +4228,79 @@ sessions found along the way:
     role-based routing.
 
   No code.
+
+## Phase 93 — Filing Structure & Navigation (user request 2026-11-21; runs after Phase 90, before 91)
+
+**Execution order:** 90 → **93** → 91 → 92. The number is new, but the phase runs before Operations and
+the AI skill. P92's skill should be able to set up and enforce a filing structure, so this has to exist
+first.
+
+The user's goals:
+- **Enforced structure:** admins can unify the filing structure organisation-wide and enforce it. The
+  kind of folder that can be created comes from its parent, for example
+  root → Abteilung → Team → Vorgang → Akten (documents). Structures can be created from templates, and
+  creation can be restricted to the templates.
+- **user-ui navigation** feels unintuitive in places. The document list should optionally be a
+  VS-Code-like expandable tree, and upload should work by right-click.
+- **admin-ui:** long lists need a length limit (scrolling and/or collapsing).
+
+**What exists (checked 2026-11-21):**
+- Folder object types declare `allowed_parent_types` (child → parent, `$ROOT` for the top). It is
+  enforced on folder creation and, since P79-S1, when applying a structure template. The eGov package
+  uses it (Abteilung → Aktenplan → Akte).
+- **But a folder without an object type bypasses every rule** (`_validate_against_object_type` returns
+  early). There is no parent-side "allowed children" view and no "structure is mandatory" switch.
+- **Structure templates** (`VorlagenPane`, P15-S6, ADR 0056) save and apply a folder subtree. Folders
+  are chosen by typed-in id (a documented simplification), and admins have no management for them.
+- **The explorer** has had a list/tree toggle (`FolderTree`, P5b-S4) for a long time. Why it doesn't feel
+  right is the first question for the navigation session.
+- **Upload** is a toolbar button plus a modal with drag and drop. There is no context-menu entry.
+
+- **P93-S1 — Scoping: enforced filing structure (ADR 0255). No code.**
+  - **Rule model:**
+    - keep the child-side `allowed_parent_types` and add a parent-side view (allowed child folder
+      classes, allowed document types per folder class);
+    - or derive one from the other; decide which is the source of truth and how the admin UI shows it.
+  - **Strictness:** where untyped folders and documents stay allowed. Options: per folder class
+    ("only these children"), per subtree, or installation-wide "structure mandatory", with the root's
+    allowed top-level classes.
+  - **Enforcement points:** create, move, rename-with-type-change, template apply, configuration
+    import, WebDAV, CMIS, mail-connector, migration and federation import. Each needs a clear error and
+    its own decision.
+  - **Existing data:** grandfather non-conforming folders (report, don't block reading), and the path to
+    conformity (an admin report, bulk retyping).
+  - **Templates:**
+    - who may create them (admin, centrally) and where they are offered;
+    - "creation only from templates" as a strictness level;
+    - their relation to the eGov package (templates as a config category?).
+- **P93-S2 — Enforced structure, backend.**
+  - The rule model and the strictness from S1 in object-type-service and folder-service, plus
+    document-service's document-type check.
+  - Every enforcement point S1 lists.
+  - The conformity report.
+  - Config-package support for the new fields and, if S1 decides so, templates.
+- **P93-S3 — Enforced structure, UI.**
+  - **admin-ui object types:** child classes and document types per folder class, the strictness
+    switch, central template management (choosing source folders with a tree picker, not raw ids), and
+    the conformity report.
+  - **user-ui:**
+    - "Neuer Ordner" offers only the classes allowed under the current folder;
+    - "Struktur aus Vorlage anlegen" from the folder context menu;
+    - upload offers only the allowed document types;
+    - clear messages when something isn't allowed.
+- **P93-S4 — user-ui navigation.**
+  - Start from what makes today's tree mode unintuitive (a short walkthrough with screenshots).
+  - Then a VS-Code-like explorer: an expandable tree with folders and documents, lazy loading, keyboard
+    navigation, selection opening the preview, and the same context menu as the list.
+  - Upload by right-click on a folder ("Hochladen …", into that folder) and by dropping onto a tree node.
+  - The tree/list choice is remembered. Narrow widths (390) keep working.
+- **P93-S5 — admin-ui long lists.**
+  - An audit of every admin-ui page for unbounded lists. Examples seen this round: approval settings
+    with dozens of action types, realm roles, sensors, deletion register, archival transfers, alert
+    rules.
+  - One shared pattern: max height with internal scrolling, a filter field above a threshold,
+    collapsible groups, and pagination where the backend supports it.
+  - Applied page by page, with screenshots at 1400/768/390.
 
 ## Phase 91 — Operations & Hygiene
 

@@ -1217,6 +1217,73 @@ def test_approval_request_lifecycle_publishes_events_with_actor(client, monkeypa
     assert approved[0].actor == "bob"
 
 
+def test_approval_request_event_names_its_recipients(client, monkeypatch, role_management_headers):
+    """P90-S3 (ADR 0247): `permission.approval.requested` carries who is to be
+    told, resolved when the request is made; the preview endpoint shows the
+    same list, and the config keeps fields that weren't sent."""
+    published: list[Event] = []
+
+    async def fake_publish(subject: str, data: bytes) -> None:
+        published.append(Event.from_bytes(data))
+
+    monkeypatch.setattr(app.state.publisher, "publish", fake_publish)
+    role_name = f"freigabe-{uuid.uuid4().hex[:8]}"
+    role = client.post(
+        "/roles",
+        json={"name": role_name, "description": "", "permissions": []},
+        headers=role_management_headers,
+    ).json()["role"]
+    for user in ("carla", "alice"):
+        client.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": user,
+                "role_id": role["id"],
+                "resource_id": "root",
+            },
+            headers=role_management_headers,
+        )
+    action = f"test.action.{uuid.uuid4().hex[:6]}"
+    assert (
+        client.put(
+            f"/approval-config/{action}",
+            json={"requires_approval": True, "recipient_role": "gibt-es-nicht"},
+            headers=role_management_headers,
+        ).status_code
+        == 422
+    )
+    client.put(
+        f"/approval-config/{action}",
+        json={"requires_approval": True, "recipient_role": role_name},
+        headers=role_management_headers,
+    )
+    # Toggling only `requires_approval` keeps the recipient role.
+    toggled = client.put(
+        f"/approval-config/{action}",
+        json={"requires_approval": True},
+        headers=role_management_headers,
+    ).json()
+    assert toggled["recipient_role"] == role_name
+
+    preview = client.get(
+        f"/approval-config/{action}/recipients", headers=role_management_headers
+    ).json()
+    assert (preview["source"], preview["recipients"]) == ("recipient_role", ["alice", "carla"])
+    assert client.get(f"/approval-config/{action}/recipients").status_code in (401, 403)
+
+    client.post(
+        "/approval-requests",
+        json={"action_type": action, "payload": {}},
+        headers={"X-DMS-Principal": "alice"},
+    )
+    (requested,) = [e for e in published if e.event_type == "permission.approval.requested"]
+    # The initiator isn't told about their own request.
+    assert requested.payload["recipients"] == ["carla"]
+    assert requested.payload["recipient_source"] == "recipient_role"
+    assert requested.payload["recipients_truncated"] is False
+
+
 def test_approval_request_lifecycle_via_api(client):
     created = client.post(
         "/approval-requests",

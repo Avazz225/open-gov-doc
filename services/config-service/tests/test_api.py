@@ -1160,3 +1160,36 @@ def test_import_role_skips_unchanged_and_reports_a_four_eyes_update(authorized_p
                 json={"requires_approval": False},
                 headers=config_admin_headers,
             )
+
+
+def test_import_approval_config_carries_and_preserves_permission_and_recipient_role(
+    authorized_principal,
+):
+    """P90-S3 (ADR 0247): `required_permission` and `recipient_role` travel
+    with the category, and an entry without them leaves them alone - before,
+    importing `{requires_approval}` cleared `required_permission`."""
+    action_type = f"config.import.test.{uuid.uuid4().hex[:8]}"
+    headers = {"X-DMS-Principal": authorized_principal}
+    base = {"schema_version": "1.0", "exported_at": "2026-01-01T00:00:00Z"}
+    full = {
+        "action_type": action_type,
+        "requires_approval": True,
+        "required_permission": "breakglass.approve",
+        "recipient_role": "domain-admin-users",
+    }
+    with _client() as client:
+        client.post(
+            "/config/import", json={**base, "approval_config": [full]}, headers=headers
+        ).raise_for_status()
+        # A package entry with only the flag keeps both fields.
+        client.post(
+            "/config/import",
+            json={
+                **base,
+                "approval_config": [{"action_type": action_type, "requires_approval": False}],
+            },
+            headers=headers,
+        ).raise_for_status()
+        exported = client.get("/config/export", params={"categories": "approval_config"}).json()
+    entry = next(c for c in exported["approval_config"] if c["action_type"] == action_type)
+    assert entry == {**full, "requires_approval": False}

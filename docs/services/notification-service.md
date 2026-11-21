@@ -135,6 +135,19 @@ with `registry.instance.*`.
 - **Placeholders:** `name`, `sensor`, `filter`, `value`, `level`, `since`, `thresholds`,
   `previous_level`.
 
+## Approver notification consumer (P90-S3, [ADR 0247](../adr/0247-approver-notification-and-role-based-recipients.md))
+
+`permission.approval.requested` (durable `notification-service-approval-requested`, fourth subject on
+the `"permission"` stream) carries the recipients permission-service resolved.
+- **Lookup:** each principal id is mapped through auth-service's `/users/service-directory`
+  (`AuthServiceClient.directory_by_id`).
+- **Delivery:** in-app under the user name and a mail to the address when there is one. An id without an
+  entry (a technical account) gets the in-app message under its id; a failed lookup sends in-app only.
+- **Template** `permission.approval.requested` (placeholders `action_type`, `initiated_by`, `request_id`,
+  `link`, `recipient_name`).
+- **Fallback text:** subject "Freigabe erbeten: <action type>", with a link to the reviewer-ui's
+  `/approvals/`.
+
 ## Follow-up reminder consumer (P90-S1, [ADR 0246](../adr/0246-follow-up-reminders-in-favorite-service.md))
 
 `favorite.reminder.due` (the first subject of this service on the `"favorite"` stream, default durable)

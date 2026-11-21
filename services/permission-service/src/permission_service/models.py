@@ -110,6 +110,11 @@ class ApprovalActionConfig(Base):
     # this, "any second person" (4.3) would be too weak for "two different
     # members of a permission group" (4.6).
     required_permission: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # P90-S3 (ADR 0247): the role whose holders are notified of a new request
+    # of this type. Optional; without it, the holders of `required_permission`
+    # are notified, and without that the holders of `approval.notify`. It
+    # only decides who is told, not who may decide.
+    recipient_role: Mapped[str | None] = mapped_column(String(128), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 

@@ -1690,3 +1690,72 @@ async def test_reminder_due_keeps_the_in_app_message_when_the_lookup_fails(
 
 async def _noop_publish(event_type, subject, payload, actor=None):
     pass
+
+
+async def test_approval_requested_notifies_each_recipient_in_app_and_by_mail(
+    engine, settings, rate_limiter, monkeypatch
+):
+    """P90-S3 (ADR 0247): the recipients permission-service resolved get an
+    in-app message under their user name and a mail when they have an
+    address; an id with no directory entry still gets the in-app one."""
+    from notification_service.auth_client import AuthServiceClient
+
+    async def directory_by_id(self):
+        return {
+            "sub-carla": {"id": "sub-carla", "username": "carla", "email": "carla@dms.local"},
+            "sub-dirk": {"id": "sub-dirk", "username": "dirk", "email": None},
+            "sub-alice": {"id": "sub-alice", "username": "alice", "email": "alice@dms.local"},
+        }
+
+    monkeypatch.setattr(AuthServiceClient, "directory_by_id", directory_by_id)
+    configured = settings.model_copy(
+        update={"reviewer_ui_public_base_url": "http://localhost:3005"}
+    )
+    handler = consumer.make_handler(
+        _session_factory(engine), configured, _noop_publish, rate_limiter
+    )
+    await handler(
+        Event(
+            event_type="permission.approval.requested",
+            service_name="permission-service",
+            payload={
+                "request_id": "req-1",
+                "action_type": "document.force_delete",
+                "initiated_by": "sub-alice",
+                "recipients": ["sub-carla", "sub-dirk", "svc-unknown"],
+                "recipient_source": "approval_notify",
+            },
+        ).to_bytes()
+    )
+
+    async with _session_factory(engine)() as session:
+        notifications = await repository.list_notifications(session)
+    targets = sorted((n.channel, n.recipient) for n in notifications)
+    assert targets == [
+        ("email", "carla@dms.local"),
+        ("in_app", "carla"),
+        ("in_app", "dirk"),
+        ("in_app", "svc-unknown"),
+    ]
+    mail = next(n for n in notifications if n.channel == "email")
+    assert mail.subject == "Freigabe erbeten: document.force_delete"
+    assert "alice bittet um Freigabe" in mail.body  # initiator by name, not id
+    assert "http://localhost:3005/approvals/" in mail.body
+
+
+async def test_approval_requested_without_recipients_sends_nothing(engine, settings, rate_limiter):
+    handler = consumer.make_handler(_session_factory(engine), settings, _noop_publish, rate_limiter)
+    await handler(
+        Event(
+            event_type="permission.approval.requested",
+            service_name="permission-service",
+            payload={
+                "request_id": "req-2",
+                "action_type": "x.y",
+                "initiated_by": "a",
+                "recipients": [],
+            },
+        ).to_bytes()
+    )
+    async with _session_factory(engine)() as session:
+        assert await repository.list_notifications(session) == []
