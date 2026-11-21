@@ -85,7 +85,8 @@
     "license": "License status",
     "openMenu": "Open navigation",
     "closeMenu": "Close navigation",
-    "sensors": "Monitoring sensors"
+    "sensors": "Monitoring sensors",
+    "mailboxes": "Mailboxes"
   },
   "home": {
     "title": "OG Doc Admin",
@@ -1268,5 +1269,62 @@
   },
   "account": {
     "menuLabel": "Account: {name}"
+  },
+  "mailboxes": {
+    "pageTitle": "Mailboxes",
+    "hint": "The mailboxes the inbox retrieves. Changes apply from the next retrieval, without a restart. Passwords are stored encrypted and never shown.",
+    "add": "Add mailbox",
+    "newHeading": "New mailbox",
+    "editHeading": "Edit mailbox \"{name}\"",
+    "newFormLabel": "New mailbox",
+    "editFormLabel": "Edit mailbox",
+    "id": "Identifier",
+    "idRule": "Lowercase letters, digits, - and _; immutable",
+    "name": "Name",
+    "kind": "Kind",
+    "kinds": {
+      "central": "Central mail room",
+      "departmental": "Department"
+    },
+    "owningGroup": "Responsible group",
+    "chooseGroup": "Please choose",
+    "connection": "Connection",
+    "protocol": "Protocol",
+    "host": "Server",
+    "port": "Port",
+    "useTls": "TLS",
+    "imapMailbox": "IMAP folder",
+    "username": "Username",
+    "password": "Password",
+    "passwordUnchanged": "unchanged",
+    "passwordHint": "Leave empty to keep the stored password.",
+    "enabledLabel": "Active (retrieved)",
+    "test": "Test connection",
+    "testOk": "Login succeeded",
+    "testFailed": "Login failed",
+    "empty": "No mailboxes yet.",
+    "lastPoll": "Last retrieval",
+    "messages": "Messages",
+    "disabled": "disabled",
+    "noPassword": "no password",
+    "notPolledYet": "not retrieved yet",
+    "pollOk": "OK",
+    "pollFailed": "Error",
+    "edit": "Edit",
+    "disable": "Disable",
+    "enable": "Enable",
+    "deleteConfirm": "Delete mailbox \"{name}\"?"
+  },
+  "realmRoles": {
+    "sectionTitle": "Realm roles (application access)",
+    "hint": "Realm roles control access to whole applications or areas, e.g. \"dms-poststelle\" for the inbox. They are independent of the permission roles below, which grant permissions on resources. A change applies from the person's next login.",
+    "empty": "No own realm roles exist.",
+    "memberCount": "{count} people",
+    "noMembers": "Nobody has this role.",
+    "username": "Username",
+    "assign": "Assign",
+    "close": "Close",
+    "remove": "Remove role {role} from {user}",
+    "filter": "Filter roles"
   }
 }

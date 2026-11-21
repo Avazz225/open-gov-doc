@@ -32,6 +32,11 @@ const deleteSupervisorAssignmentMock = vi.fn();
 const getSupervisorChainMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
+  // P88-S4b: the realm-role section has its own test file.
+  listRealmRoles: async () => [],
+  listRealmRoleMembers: async () => [],
+  assignRealmRole: async () => undefined,
+  unassignRealmRole: async () => undefined,
   listUsers: (...args: unknown[]) => listUsersMock(...args),
   listRoles: (...args: unknown[]) => listRolesMock(...args),
   listRoleAssignments: (...args: unknown[]) => listRoleAssignmentsMock(...args),

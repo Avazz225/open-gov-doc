@@ -85,7 +85,8 @@
     "license": "Lizenzstatus",
     "openMenu": "Navigation öffnen",
     "closeMenu": "Navigation schließen",
-    "sensors": "Monitoring-Sensoren"
+    "sensors": "Monitoring-Sensoren",
+    "mailboxes": "Postfächer"
   },
   "home": {
     "title": "OG Doc Admin",
@@ -1268,5 +1269,62 @@
   },
   "account": {
     "menuLabel": "Konto: {name}"
+  },
+  "mailboxes": {
+    "pageTitle": "Postfächer",
+    "hint": "Die Postfächer, die der Posteingang abruft. Änderungen gelten ab dem nächsten Abruf, ohne Neustart. Passwörter werden verschlüsselt gespeichert und nie angezeigt.",
+    "add": "Postfach anlegen",
+    "newHeading": "Neues Postfach",
+    "editHeading": "Postfach „{name}“ bearbeiten",
+    "newFormLabel": "Neues Postfach",
+    "editFormLabel": "Postfach bearbeiten",
+    "id": "Kennung",
+    "idRule": "Kleinbuchstaben, Ziffern, - und _; unveränderlich",
+    "name": "Name",
+    "kind": "Art",
+    "kinds": {
+      "central": "Zentrale Poststelle",
+      "departmental": "Abteilung"
+    },
+    "owningGroup": "Zuständige Gruppe",
+    "chooseGroup": "Bitte wählen",
+    "connection": "Verbindung",
+    "protocol": "Protokoll",
+    "host": "Server",
+    "port": "Port",
+    "useTls": "TLS",
+    "imapMailbox": "IMAP-Ordner",
+    "username": "Benutzername",
+    "password": "Passwort",
+    "passwordUnchanged": "unverändert",
+    "passwordHint": "Leer lassen, um das gespeicherte Passwort zu behalten.",
+    "enabledLabel": "Aktiv (wird abgerufen)",
+    "test": "Verbindung testen",
+    "testOk": "Anmeldung erfolgreich",
+    "testFailed": "Anmeldung fehlgeschlagen",
+    "empty": "Noch keine Postfächer.",
+    "lastPoll": "Letzter Abruf",
+    "messages": "Nachrichten",
+    "disabled": "deaktiviert",
+    "noPassword": "kein Passwort",
+    "notPolledYet": "noch nicht abgerufen",
+    "pollOk": "OK",
+    "pollFailed": "Fehler",
+    "edit": "Bearbeiten",
+    "disable": "Deaktivieren",
+    "enable": "Aktivieren",
+    "deleteConfirm": "Postfach „{name}“ löschen?"
+  },
+  "realmRoles": {
+    "sectionTitle": "Realm-Rollen (Anwendungszugang)",
+    "hint": "Realm-Rollen steuern den Zugang zu ganzen Anwendungen oder Bereichen, etwa „dms-poststelle“ für den Posteingang. Sie sind unabhängig von den Rollen der Rechteverwaltung unten, die Berechtigungen auf Ressourcen vergeben. Eine Änderung wirkt ab der nächsten Anmeldung der Person.",
+    "empty": "Keine eigenen Realm-Rollen vorhanden.",
+    "memberCount": "{count} Personen",
+    "noMembers": "Niemand hat diese Rolle.",
+    "username": "Benutzername",
+    "assign": "Zuweisen",
+    "close": "Schließen",
+    "remove": "{user} die Rolle {role} entziehen",
+    "filter": "Rollen filtern"
   }
 }

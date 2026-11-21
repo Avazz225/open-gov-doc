@@ -87,6 +87,8 @@ export const GROUPS: NavGroup[] = [
         requiresCapability: "admin.document_config",
       },
       { href: "/processing-failures/", labelKey: "nav.processingFailures" },
+      // P88-S4b (ADR 0244): mail-connector's mailboxes, formerly an env list.
+      { href: "/mailboxes/", labelKey: "nav.mailboxes", requiresCapability: "admin.mail_config" },
       {
         href: "/signature-config/",
         labelKey: "nav.signatureConfig",

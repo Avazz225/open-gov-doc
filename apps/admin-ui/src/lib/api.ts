@@ -227,6 +227,118 @@ export async function listUsers(token: string): Promise<KeycloakUser[]> {
   return response.json();
 }
 
+// Keycloak realm roles (P88-S4b): the roles that gate whole applications
+// or app areas (e.g. `dms-poststelle` for the mail room, `dms-admin`) -
+// unlike permission-service roles, which grant capabilities on resources.
+// Assigning needs `admin.user_management`; the endpoints exist since P78.
+export async function listRealmRoles(token: string): Promise<string[]> {
+  const response = await request("auth-service", "realm-roles", {}, token);
+  const roles: { name: string }[] = await response.json();
+  return roles.map((r) => r.name);
+}
+
+export async function listRealmRoleMembers(
+  token: string,
+  roleName: string
+): Promise<{ id: string; username: string }[]> {
+  const response = await request(
+    "auth-service",
+    `realm-roles/${encodeURIComponent(roleName)}/assignments`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function assignRealmRole(token: string, roleName: string, username: string): Promise<void> {
+  await request(
+    "auth-service",
+    `realm-roles/${encodeURIComponent(roleName)}/assignments`,
+    jsonInit({ username }),
+    token
+  );
+}
+
+export async function unassignRealmRole(token: string, roleName: string, username: string): Promise<void> {
+  await request(
+    "auth-service",
+    `realm-roles/${encodeURIComponent(roleName)}/assignments/${encodeURIComponent(username)}`,
+    { method: "DELETE" },
+    token
+  );
+}
+
+// mail-connector mailboxes (P88-S4a/S4b, ADR 0244). The password is
+// write-only: the server never returns it (`has_password`), and an empty or
+// omitted password on a write keeps the stored one.
+export interface MailboxConfig {
+  id: string;
+  name: string;
+  kind: "central" | "departmental";
+  owning_group_id: string | null;
+  inbound_protocol: "pop3" | "imap";
+  host: string;
+  port: number;
+  username: string;
+  has_password: boolean;
+  use_tls: boolean;
+  imap_mailbox: string;
+  enabled: boolean;
+  message_count: number;
+  updated_at: string;
+  updated_by: string | null;
+  last_poll_at: string | null;
+  last_poll_ok: boolean | null;
+  last_poll_error: string | null;
+}
+
+export interface MailboxConfigInput {
+  id: string;
+  name: string;
+  kind: "central" | "departmental";
+  owning_group_id: string | null;
+  inbound_protocol: "pop3" | "imap";
+  host: string;
+  port: number | null;
+  username: string;
+  password: string | null;
+  use_tls: boolean;
+  imap_mailbox: string;
+  enabled: boolean;
+}
+
+export async function listMailboxConfig(token: string): Promise<MailboxConfig[]> {
+  const response = await request("mail-connector", "mailbox-config", {}, token);
+  return response.json();
+}
+
+export async function createMailboxConfig(token: string, input: MailboxConfigInput): Promise<MailboxConfig> {
+  const response = await request("mail-connector", "mailbox-config", jsonInit(input), token);
+  return response.json();
+}
+
+export async function updateMailboxConfig(token: string, input: MailboxConfigInput): Promise<MailboxConfig> {
+  const response = await request(
+    "mail-connector",
+    `mailbox-config/${encodeURIComponent(input.id)}`,
+    { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) },
+    token
+  );
+  return response.json();
+}
+
+export async function deleteMailboxConfig(token: string, id: string): Promise<void> {
+  await request("mail-connector", `mailbox-config/${encodeURIComponent(id)}`, { method: "DELETE" }, token);
+}
+
+export async function testMailboxConfig(
+  token: string,
+  input: MailboxConfigInput
+): Promise<{ ok: boolean; error: string | null }> {
+  const response = await request("mail-connector", "mailbox-config/test", jsonInit(input), token);
+  return response.json();
+}
+
 export async function createUser(
   token: string,
   params: { username: string; email: string; password: string; firstName: string; lastName: string }

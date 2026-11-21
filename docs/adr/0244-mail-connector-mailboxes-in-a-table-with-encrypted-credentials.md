@@ -88,4 +88,5 @@ validator still checks kind/group and completeness, so the rules of ADR 0123/013
   - `cryptography` as a dependency.
 - permission-service: `domain-admin-mail`.
 - Compose: `DMS_MAILBOX_CREDENTIALS_KEY`. Helm: `DMS_MAILBOXES: "[]"` plus the key.
-- The admin page follows in P88-S4b.
+- The admin page followed in P88-S4b (admin-ui `/mailboxes/`): write-only password field, connection
+  test, enable/disable, and delete only without messages.

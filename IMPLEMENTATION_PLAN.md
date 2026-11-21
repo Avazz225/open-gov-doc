@@ -3965,6 +3965,13 @@ installation's replica health.
     - **P88-S4b — Mailbox admin page and realm-role assignment.** The admin-ui page for the
       mailbox API; realm-role assignment in user management (the auth-service endpoints exist since
       Phase 78).
+      - ✅ **Result:**
+        - `/mailboxes/` ("Postfächer"): table with the last poll and message count; a form with a
+          write-only password, a connection test, enable/disable, and delete only without messages.
+        - `RealmRoleAssignments` in user management: role-first, members by username, a filter.
+        - The fleet e2e "warm-up flake" was found: a page-wide `tr` selector matched the
+          installation's `<option>` in the groups table whenever fleet-orchestration ran in
+          parallel. It is scoped to the installations table now and cleans up in `finally`.
 - **P88-S5 — Alerting on sensors (user-requested, ADR 0245).** Scope first, then build what fits one
   session. Following the reference comparison:
   - warning and error thresholds per sensor (min and max), with a repeat count before a level counts
@@ -4046,6 +4053,11 @@ installation's replica health.
   - `PROGRESS.md`'s "Open Decisions" section rewritten: about 38 stale bullets removed and the section
     split from the MVP-era session log it runs into.
   - The `process-designer.md` "stale specs" sentence annotated as closed in P79-S3.
+  - **Realm-role debris (found in P88-S4b):** the dev Keycloak realm holds about 130 realm roles
+    created by test suites and never removed (`auditor-*` from document-service,
+    `config-import-realm-role-*` from config-service, `realm-role-test-*` from auth-service). Those
+    tests should delete what they create (auth-service has no delete endpoint yet, so this needs one
+    or a direct admin-client cleanup), and the existing debris should be removed once.
 - **P91-S4 — Scoping: database schema migrations (ADR 0251).** Today schemas evolve through
   `create_all` plus ad-hoc `ALTER TABLE … IF NOT EXISTS` at startup. Options: Alembic per service,
   formalizing the current pattern, or accepting it, judged against fleet rolling updates and the

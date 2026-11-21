@@ -1,5 +1,7 @@
 import { test, expect, loginViaUi } from "./fixtures";
 
+const FLEET_URL = process.env.E2E_FLEET_URL || "http://localhost:8031";
+
 // Fleet management (P67-S1) - wires up fleet-management-service, which had
 // no admin-ui caller at all before this session. Every fleet-management-
 // service endpoint (including the plain list) requires the operator key
@@ -12,35 +14,73 @@ import { test, expect, loginViaUi } from "./fixtures";
 // gave `infra/docker-compose.yml` a permanent `_dev_only`-style default for
 // this key (same convention every other dev secret in that file already
 // uses) - this constant's fallback must match it exactly.
-const OPERATOR_KEY = process.env.E2E_FLEET_OPERATOR_KEY || "fleet-operator-dev-only-key";
+const OPERATOR_KEY =
+  process.env.E2E_FLEET_OPERATOR_KEY || "fleet-operator-dev-only-key";
 
 test("registers a managed installation, shows the one-time key, then removes it", async ({
   page,
+  request,
 }) => {
   await loginViaUi(page);
   await page.goto("/fleet-management/");
 
-  await page.getByPlaceholder("Erforderlich für jede Aktion auf dieser Seite").fill(OPERATOR_KEY);
+  await page
+    .getByPlaceholder("Erforderlich für jede Aktion auf dieser Seite")
+    .fill(OPERATOR_KEY);
   await page.getByRole("button", { name: "Laden" }).click();
 
-  await expect(page.getByText("Neue Installation registrieren")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("Neue Installation registrieren")).toBeVisible({
+    timeout: 15_000,
+  });
 
   const displayName = `E2E-Installation-${Date.now()}`;
-  await page.getByLabel("Anzeigename").fill(displayName);
-  await page.getByLabel("Gateway-URL").fill("https://e2e-test-installation.example.com");
-  await page.getByRole("button", { name: "Registrieren" }).click();
+  try {
+    await page.getByLabel("Anzeigename").fill(displayName);
+    await page
+      .getByLabel("Gateway-URL")
+      .fill("https://e2e-test-installation.example.com");
+    await page.getByRole("button", { name: "Registrieren" }).click();
 
-  // The plaintext fleet-agent key is shown exactly once.
-  await expect(page.locator("code")).toBeVisible({ timeout: 15_000 });
-  const shownKey = await page.locator("code").textContent();
-  expect(shownKey).toBeTruthy();
-  expect(shownKey!.length).toBeGreaterThan(10);
-  await page.getByRole("button", { name: "Verstanden" }).click();
+    // The plaintext fleet-agent key is shown exactly once.
+    await expect(page.locator("code")).toBeVisible({ timeout: 15_000 });
+    const shownKey = await page.locator("code").textContent();
+    expect(shownKey).toBeTruthy();
+    expect(shownKey!.length).toBeGreaterThan(10);
+    await page.getByRole("button", { name: "Verstanden" }).click();
 
-  const row = page.locator("tr", { hasText: displayName });
-  await expect(row).toBeVisible({ timeout: 15_000 });
-  await expect(row.getByText("https://e2e-test-installation.example.com")).toBeVisible();
+    // Only the installations table (P88-S4b): since P88-S1 the groups table
+    // lists every installation as an <option> in its add-member select, so a
+    // page-wide `tr` filter matched two rows whenever a group existed - e.g.
+    // while fleet-orchestration.spec.ts ran in parallel (the "warm-up flake"
+    // noted in P88-S2c).
+    const installations = page.locator("table.data-table").first();
+    const row = installations.locator("tr", { hasText: displayName });
+    await expect(row).toBeVisible({ timeout: 15_000 });
+    await expect(
+      row.getByText("https://e2e-test-installation.example.com"),
+    ).toBeVisible();
 
-  await row.getByRole("button", { name: "Entfernen" }).click();
-  await expect(page.locator("tr", { hasText: displayName })).toHaveCount(0, { timeout: 15_000 });
+    await row.getByRole("button", { name: "Entfernen", exact: true }).click();
+    await expect(
+      installations.locator("tr", { hasText: displayName }),
+    ).toHaveCount(0, {
+      timeout: 15_000,
+    });
+  } finally {
+    // A failure above must not leave the installation behind.
+    const auth = { Authorization: `Bearer ${OPERATOR_KEY}` };
+    const listed = await (
+      await request.get(`${FLEET_URL}/installations`, { headers: auth })
+    ).json();
+    for (const installation of listed as {
+      id: string;
+      display_name: string;
+    }[]) {
+      if (installation.display_name === displayName) {
+        await request.delete(`${FLEET_URL}/installations/${installation.id}`, {
+          headers: auth,
+        });
+      }
+    }
+  }
 });

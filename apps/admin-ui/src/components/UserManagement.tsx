@@ -32,6 +32,7 @@ import {
   setGroupOrgUnit,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { RealmRoleAssignments } from "@/components/RealmRoleAssignments";
 
 const ROOT_RESOURCE_ID = "root";
 
@@ -417,6 +418,10 @@ export function UserManagement() {
         </div>
         {users.length === 0 && <p className="italic opacity-70">{t("users.empty")}</p>}
       </section>
+
+      {/* P88-S4b: Keycloak realm roles (app-level access), next to the
+          users they are assigned to. */}
+      <RealmRoleAssignments users={users} />
 
       <section className="rounded-lg border border-border p-4 mb-6">
         <h2>{t("roles.sectionTitle")}</h2>

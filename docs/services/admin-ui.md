@@ -557,6 +557,38 @@ components no longer pass the user name into them. Super-user activation, approv
 **Fleet view:** below each installation's status it shows "Replikas im erwarteten Bereich" or the
 out-of-range types from the installation's replica summary.
 
+## Mailboxes (P88-S4b, [ADR 0244](../adr/0244-mail-connector-mailboxes-in-a-table-with-encrypted-credentials.md))
+
+`MailboxSettings.tsx` at `/mailboxes/` ("Postfächer", under Verarbeitung) manages mail-connector's
+mailboxes, which moved from `DMS_MAILBOXES` into a table in P88-S4a. It needs `admin.mail_config`
+(`domain-admin-mail`); the nav entry, the route guard and the server all check it.
+- **Table:** per mailbox:
+  - name and id, kind (central or department, with the group name), the connection (protocol,
+    host:port, TLS, username, "kein Passwort" if none is stored);
+  - the last retrieval (ok or error with the server's reply, time) and the message count;
+  - Bearbeiten, Deaktivieren/Aktivieren, and Löschen only without messages.
+- **Form:**
+  - id (immutable when editing), name, kind, and the responsible group (a select from
+    permission-service's groups, or a text field if they can't be listed);
+  - protocol, host, port (placeholder = the default for protocol and TLS), TLS, IMAP folder;
+  - username, password, and active.
+  - **The password field is write-only:** it stays empty when editing, shows "unverändert" and isn't
+    required when one is stored, and an empty field keeps the stored secret.
+  - **"Verbindung testen"** logs in with the form as it is (falling back to the stored password) and
+    shows "Anmeldung erfolgreich" or the server's reply.
+
+## Realm Roles (P88-S4b)
+
+`RealmRoleAssignments.tsx` is a section of the user management page ("Realm-Rollen
+(Anwendungszugang)"). It is the UI for auth-service's realm-role assignment endpoints (Phase 78):
+before, realm roles such as `dms-poststelle` could only be assigned in the Keycloak admin console.
+- **Role-first:** a role expands to its members (`GET …/assignments`). A member is added by username,
+  with the users who don't have the role yet suggested, and removed with the × on the chip.
+- **Filter:** above ten roles. The dev realm holds about 130 roles left behind by test suites, a
+  hygiene point for P91-S3.
+- **The hint explains the difference to the permission roles below:** application access versus
+  permissions on resources. A change applies from the person's next login.
+
 ## Object-Type Rules (P88-S3)
 
 `ObjectTypeRules.tsx`, inside `ObjectTypeEditor` after the attributes, edits the three rule kinds the

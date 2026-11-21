@@ -2,6 +2,48 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P88-S4b, the mailbox admin page and realm-role assignment. This completes P88-S4.
+
+**What changed:**
+- **admin-ui `MailboxSettings.tsx`** at `/mailboxes/` ("Postfächer", Verarbeitung, `admin.mail_config`):
+  - a table with kind/group, connection, "kein Passwort", the last retrieval (ok or error plus the
+    server's reply) and the message count;
+  - a create/edit form: immutable id, group select with a text fallback, default-port placeholder,
+    and a write-only password ("unverändert", empty keeps it);
+  - Verbindung testen, Deaktivieren/Aktivieren, and Löschen only without messages.
+  - API helpers: `listMailboxConfig`/`create…`/`update…`/`delete…`/`testMailboxConfig`.
+- **admin-ui `RealmRoleAssignments.tsx`** in user management: realm roles role-first, members by
+  username (users without the role suggested), remove by chip, and a filter above ten roles.
+  - API helpers: `listRealmRoles`, `listRealmRoleMembers`, `assignRealmRole`, `unassignRealmRole`.
+- **The fleet e2e flake, found and fixed:**
+  - **Cause:** `fleet-management.spec.ts` used a page-wide `locator("tr", {hasText})`. Since P88-S1
+    the groups table lists every installation as an `<option>`, so the selector matched two rows
+    whenever `fleet-orchestration.spec.ts` had a group at the same moment.
+  - **Fix:** scoped to the installations table, plus API cleanup in `finally`, because failed runs
+    had left 4 `E2E-Installation-*` rows (removed).
+- **Hygiene found:**
+  - The dev Keycloak realm holds about 130 test-made realm roles (`auditor-*`,
+    `config-import-realm-role-*`, `realm-role-test-*`); added to P91-S3. Not deleted here.
+  - A leftover `e2e-admin-ui-*` user from a rate-limited run was deleted.
+- **Docs:** admin-ui "Mailboxes"/"Realm Roles", mail-connector, the ADR 0244 consequences, the plan
+  (P88-S4b result, P91-S3 realm-role item).
+
+**Checks:**
+- admin-ui vitest 365 (+6 `mailbox-settings`, +4 `realm-role-assignments`; user-management mocks
+  completed), `tsc`/`eslint` clean.
+- e2e 14/14 in three consecutive runs after the fix, with the new `mailboxes-and-realm-roles.spec.ts`:
+  - **Mailbox:** created disabled against mailpit, the connection test passed, then the edit test
+    passed with the stored password, then delete.
+  - **Realm role:** a throwaway Keycloak user was assigned `dms-poststelle`, removed and deleted.
+  - Repeating the full suite eight times in a row runs into the gateway's rate limit ("Rate limit
+    überschritten"), a test-harness effect, not a product fault.
+- Screenshots of `/mailboxes/` at 1400/390 (no overflow) and the realm-role section.
+- The spec grants `domain-admin-mail` to `users-admin` and revokes it in `finally`; no grant is left.
+
+**Next session:** **P88-S5**, alerting on sensors (ADR 0245, scope first).
+
+---
+
 **Last completed:** P88-S4a, mail-connector mailboxes in a table with encrypted credentials
 ([ADR 0244](docs/adr/0244-mail-connector-mailboxes-in-a-table-with-encrypted-credentials.md)). P88-S4
 was split as the plan allowed: S4a backend, S4b admin page plus realm roles.
@@ -48,9 +90,7 @@ was split as the plan allowed: S4a backend, S4b admin page plus realm roles.
 - **Found live:** the rebuilt container crashed on `ModuleNotFoundError: cryptography` (the shared
   test venv had hidden it). Added to `pyproject.toml`; `uv lock` updated.
 
-**Next session:** **P88-S4b**, the admin-ui page for mailboxes (list, create/edit with write-only
-password, enable/disable, connection test, last poll result) and realm-role assignment in user
-management (the auth-service endpoints exist since Phase 78).
+**Next session:** P88-S4b (done, see above).
 
 ---
 
