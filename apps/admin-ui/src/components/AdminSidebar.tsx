@@ -54,6 +54,8 @@ export const GROUPS: NavGroup[] = [
         requiresCapability: "admin.object_config",
       },
       { href: "/registry/", labelKey: "nav.registry" },
+      // P88-S2: readable for every admin, editable with admin.monitoring.
+      { href: "/sensors/", labelKey: "nav.sensors" },
       {
         href: "/teamspaces/",
         labelKey: "nav.teamspacesAdmin",

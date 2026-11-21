@@ -1587,6 +1587,63 @@ export async function resetExpectedReplicas(token: string, serviceType: string):
   );
 }
 
+// Monitoring sensors (P88-S2, ADR 0243): the catalog every running service
+// declares, and the activation config. An override key is a sensor name,
+// `group:<group>` or `cost:<cheap|expensive>`; the most specific one wins,
+// then the global default. Writes need `admin.monitoring`.
+export type SensorCost = "cheap" | "expensive";
+export type SensorSource = "sensor" | "group" | "cost" | "global";
+
+export interface Sensor {
+  name: string;
+  group: string;
+  cost: SensorCost;
+  description: string;
+  service_types: string[];
+  active: boolean;
+  source: SensorSource;
+}
+
+export interface SensorConfig {
+  global_default: boolean;
+  overrides: Record<string, boolean>;
+}
+
+export async function listSensors(token: string): Promise<Sensor[]> {
+  const response = await request("monitoring-service", "sensors", {}, token);
+  return response.json();
+}
+
+export async function getSensorConfig(token: string): Promise<SensorConfig> {
+  const response = await request("monitoring-service", "sensor-config", {}, token);
+  return response.json();
+}
+
+export async function setSensorGlobalDefault(token: string, enabled: boolean): Promise<SensorConfig> {
+  const response = await request(
+    "monitoring-service",
+    "sensor-config/global",
+    { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled }) },
+    token
+  );
+  return response.json();
+}
+
+// `enabled: null` removes the override, so the next less specific setting applies.
+export async function setSensorOverride(
+  token: string,
+  key: string,
+  enabled: boolean | null
+): Promise<SensorConfig> {
+  const response = await request(
+    "monitoring-service",
+    `sensor-config/${encodeURIComponent(key)}`,
+    { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled }) },
+    token
+  );
+  return response.json();
+}
+
 export async function forgetServiceInstance(token: string, instanceId: string): Promise<void> {
   await request(
     "registry-service",

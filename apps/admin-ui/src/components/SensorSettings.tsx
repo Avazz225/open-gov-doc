@@ -1,0 +1,323 @@
+"use client";
+
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { useI18n } from "@/i18n";
+import {
+  ApiError,
+  type Sensor,
+  type SensorConfig,
+  type SensorCost,
+  getSensorConfig,
+  listSensors,
+  setSensorGlobalDefault,
+  setSensorOverride,
+} from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
+
+// Monitoring sensors (P88-S2, ADR 0243, concept 10.1): the global base
+// setting ("monitor everything"/"nothing"), switches per cost class and per
+// group, and per sensor. The most specific setting wins: sensor, then
+// group, then cost class, then the global default - the same rule the
+// services apply themselves (`dms_metrics_client.resolve_active`), so a
+// sensor shown as off really generates no data. Editing needs
+// `admin.monitoring`; every change is an audit event.
+
+type Choice = "inherit" | "on" | "off";
+
+const COSTS: SensorCost[] = ["cheap", "expensive"];
+
+function choiceOf(overrides: Record<string, boolean>, key: string): Choice {
+  if (!(key in overrides)) return "inherit";
+  return overrides[key] ? "on" : "off";
+}
+
+const fieldInput =
+  "box-border rounded-md border border-border bg-bg px-2 py-1 text-sm text-fg outline-none focus:border-accent focus:ring-2 focus:ring-accent-bg disabled:opacity-60";
+const card = "rounded-lg border border-border p-4 mb-6";
+
+export function SensorSettings() {
+  const { accessToken, permissions } = useAuth();
+  const { t } = useI18n();
+  const canManage = permissions.includes("admin.monitoring");
+  const [sensors, setSensors] = useState<Sensor[]>([]);
+  const [config, setConfig] = useState<SensorConfig | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [filter, setFilter] = useState("");
+
+  const reload = useCallback(async () => {
+    if (!accessToken) return;
+    setError(null);
+    try {
+      const [loadedSensors, loadedConfig] = await Promise.all([
+        listSensors(accessToken),
+        getSensorConfig(accessToken),
+      ]);
+      setSensors(loadedSensors);
+      setConfig(loadedConfig);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t("common.loadError"));
+    } finally {
+      setIsLoading(false);
+    }
+  }, [accessToken, t]);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  async function run(action: () => Promise<unknown>) {
+    if (!accessToken) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await action();
+      await reload();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t("common.actionError"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function setChoice(key: string, choice: Choice) {
+    const enabled = choice === "inherit" ? null : choice === "on";
+    run(() => setSensorOverride(accessToken ?? "", key, enabled));
+  }
+
+  const groups = useMemo(() => {
+    const byGroup = new Map<string, Sensor[]>();
+    for (const sensor of sensors) {
+      byGroup.set(sensor.group, [...(byGroup.get(sensor.group) ?? []), sensor]);
+    }
+    return [...byGroup.entries()].sort(([a], [b]) => a.localeCompare(b));
+  }, [sensors]);
+
+  // Overrides whose sensor or group no running service declares any more
+  // (a stopped service, a renamed sensor): kept by the server, listed here
+  // so they can be reset instead of lingering invisibly.
+  const orphaned = useMemo(() => {
+    if (!config) return [];
+    const names = new Set(sensors.map((s) => s.name));
+    const groupNames = new Set(sensors.map((s) => s.group));
+    return Object.keys(config.overrides)
+      .filter((key) => {
+        if (key.startsWith("cost:")) return false;
+        if (key.startsWith("group:")) return !groupNames.has(key.slice("group:".length));
+        return !names.has(key);
+      })
+      .sort();
+  }, [config, sensors]);
+
+  const groupLabel = (group: string) => {
+    const key = `sensors.groups.${group}`;
+    const label = t(key);
+    return label === key ? group : label;
+  };
+
+  if (isLoading) return <p>{t("common.loading")}</p>;
+  if (!config) return <ErrorLine error={error} />;
+
+  const overrides = config.overrides;
+  const activeCount = sensors.filter((s) => s.active).length;
+  const needle = filter.trim().toLowerCase();
+  const matches = (s: Sensor) =>
+    !needle ||
+    s.name.toLowerCase().includes(needle) ||
+    s.description.toLowerCase().includes(needle) ||
+    s.service_types.some((type) => type.toLowerCase().includes(needle));
+
+  const choiceSelect = (settingKey: string, label: string) => (
+      <select
+        aria-label={label}
+        value={choiceOf(overrides, settingKey)}
+        onChange={(e) => setChoice(settingKey, e.target.value as Choice)}
+        disabled={!canManage || busy}
+        className={fieldInput}
+      >
+        <option value="inherit">{t("sensors.choice.inherit")}</option>
+        <option value="on">{t("sensors.choice.on")}</option>
+        <option value="off">{t("sensors.choice.off")}</option>
+      </select>
+  );
+
+  return (
+    <>
+      <ErrorLine error={error} />
+      {!canManage && <p className="text-sm opacity-80">{t("sensors.readOnly")}</p>}
+
+      <section className={card} aria-labelledby="sensors-global-heading">
+        <h2 id="sensors-global-heading">{t("sensors.global.heading")}</h2>
+        <p className="text-sm opacity-80">{t("sensors.global.hint")}</p>
+        <div className="flex flex-wrap items-center gap-3" role="radiogroup" aria-label={t("sensors.global.heading")}>
+          {[true, false].map((value) => (
+            <label key={String(value)} className="flex items-center gap-1">
+              <input
+                type="radio"
+                name="sensor-global-default"
+                checked={config.global_default === value}
+                disabled={!canManage || busy}
+                onChange={() => run(() => setSensorGlobalDefault(accessToken ?? "", value))}
+              />
+              {value ? t("sensors.global.everything") : t("sensors.global.nothing")}
+            </label>
+          ))}
+          <span className="text-sm opacity-80">
+            {t("sensors.activeCount", { active: activeCount, total: sensors.length })}
+          </span>
+        </div>
+      </section>
+
+      <section className={card} aria-labelledby="sensors-cost-heading">
+        <h2 id="sensors-cost-heading">{t("sensors.cost.heading")}</h2>
+        <p className="text-sm opacity-80">{t("sensors.cost.hint")}</p>
+        <div className="flex flex-wrap gap-6">
+          {COSTS.map((cost) => {
+            const ofCost = sensors.filter((s) => s.cost === cost);
+            return (
+              <label key={cost} className="flex flex-col gap-1 text-sm">
+                <span>
+                  {t(`sensors.costs.${cost}`)}{" "}
+                  <span className="opacity-70">
+                    ({t("sensors.activeCount", {
+                      active: ofCost.filter((s) => s.active).length,
+                      total: ofCost.length,
+                    })})
+                  </span>
+                </span>
+                {choiceSelect(`cost:${cost}`, t(`sensors.costs.${cost}`))}
+              </label>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className={card} aria-labelledby="sensors-list-heading">
+        <h2 id="sensors-list-heading">{t("sensors.list.heading")}</h2>
+        <p className="text-sm opacity-80">{t("sensors.list.hint")}</p>
+        <label className="mb-3 flex flex-col gap-1 text-sm">
+          {t("sensors.list.filter")}
+          <input
+            type="search"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            className={`${fieldInput} max-w-sm`}
+          />
+        </label>
+        {sensors.length === 0 ? (
+          <p className="italic opacity-70">{t("sensors.list.empty")}</p>
+        ) : (
+          <div className="dms-scroll-x">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>{t("sensors.list.sensor")}</th>
+                  <th>{t("sensors.list.cost")}</th>
+                  <th>{t("sensors.list.services")}</th>
+                  <th>{t("sensors.list.state")}</th>
+                  <th>{t("sensors.list.setting")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {groups.map(([group, members]) => {
+                  const visible = members.filter(matches);
+                  if (visible.length === 0) return null;
+                  return (
+                    <Fragment key={group}>
+                      <tr className="bg-hover-bg">
+                        <th scope="rowgroup" colSpan={3} className="text-left">
+                          {groupLabel(group)}{" "}
+                          <span className="font-normal opacity-70">
+                            ({t("sensors.activeCount", {
+                              active: members.filter((s) => s.active).length,
+                              total: members.length,
+                            })})
+                          </span>
+                        </th>
+                        <td />
+                        <td>
+                          {choiceSelect(`group:${group}`, t("sensors.list.groupSetting", { group: groupLabel(group) }))}
+                        </td>
+                      </tr>
+                      {visible.map((sensor) => (
+                        <tr key={sensor.name}>
+                          <td>
+                            <code className="font-mono text-xs">{sensor.name}</code>
+                            <div className="text-sm opacity-80">{sensor.description}</div>
+                          </td>
+                          <td>
+                            <span className={sensor.cost === "expensive" ? "badge down" : "badge neutral"}>
+                              {t(`sensors.costs.${sensor.cost}`)}
+                            </span>
+                          </td>
+                          <td className="text-sm">
+                            {/* Shared sensors (the HTTP middleware's) come from
+                                every service: collapsed to a count. */}
+                            {sensor.service_types.length > 3 ? (
+                              <details>
+                                <summary className="cursor-pointer whitespace-nowrap">
+                                  {t("sensors.list.serviceCount", { count: sensor.service_types.length })}
+                                </summary>
+                                {sensor.service_types.join(", ")}
+                              </details>
+                            ) : (
+                              sensor.service_types.join(", ")
+                            )}
+                          </td>
+                          <td className="whitespace-nowrap">
+                            <span className={`badge ${sensor.active ? "ok" : "neutral"}`}>
+                              {sensor.active ? t("sensors.on") : t("sensors.off")}
+                            </span>
+                            <div className="text-xs opacity-70">{t(`sensors.source.${sensor.source}`)}</div>
+                          </td>
+                          <td>
+                            {choiceSelect(sensor.name, t("sensors.list.sensorSetting", { name: sensor.name }))}
+                          </td>
+                        </tr>
+                      ))}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {orphaned.length > 0 && (
+        <section className={card} aria-labelledby="sensors-orphaned-heading">
+          <h2 id="sensors-orphaned-heading">{t("sensors.orphaned.heading")}</h2>
+          <p className="text-sm opacity-80">{t("sensors.orphaned.hint")}</p>
+          <ul className="flex list-none flex-col gap-2 p-0">
+            {orphaned.map((key) => (
+              <li key={key} className="flex flex-wrap items-center gap-2">
+                <code className="font-mono text-xs">{key}</code>
+                <span className="text-sm">{overrides[key] ? t("sensors.on") : t("sensors.off")}</span>
+                {canManage && (
+                  <button
+                    type="button"
+                    className="rounded-md border border-border bg-hover-bg px-3 py-1 text-sm text-fg hover:bg-accent-bg disabled:opacity-50"
+                    disabled={busy}
+                    onClick={() => setChoice(key, "inherit")}
+                  >
+                    {t("sensors.orphaned.reset")}
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+    </>
+  );
+}
+
+function ErrorLine({ error }: { error: string | null }) {
+  if (!error) return null;
+  return (
+    <p className="text-danger" role="alert">
+      {error}
+    </p>
+  );
+}

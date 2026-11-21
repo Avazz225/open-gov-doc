@@ -8,6 +8,42 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+# Override keys besides a plain sensor name (P88-S2, ADR 0243): a whole
+# sensor group, or every sensor of one cost class (concept 10.1: "switch
+# off expensive sensors during continuous operation").
+GROUP_PREFIX = "group:"
+COST_PREFIX = "cost:"
+
+
+def override_key_for_group(group: str) -> str:
+    return f"{GROUP_PREFIX}{group}"
+
+
+def override_key_for_cost(cost: str) -> str:
+    return f"{COST_PREFIX}{cost}"
+
+
+def resolve_active(
+    global_default: bool,
+    overrides: dict[str, bool],
+    name: str,
+    *,
+    group: str | None = None,
+    cost: str | None = None,
+) -> tuple[bool, str]:
+    """The one resolution rule, shared by every service's sensors and by
+    monitoring-service's catalog: the most specific setting wins - the
+    sensor's own override, then its group's, then its cost class's, then
+    the global default. Returns the value and where it came from
+    (`sensor`/`group`/`cost`/`global`)."""
+    if name in overrides:
+        return overrides[name], "sensor"
+    if group is not None and override_key_for_group(group) in overrides:
+        return overrides[override_key_for_group(group)], "group"
+    if cost is not None and override_key_for_cost(cost) in overrides:
+        return overrides[override_key_for_cost(cost)], "cost"
+    return global_default, "global"
+
 
 class SensorConfigClient:
     """Polls the sensor activation configuration from `monitoring-service`
@@ -37,8 +73,10 @@ class SensorConfigClient:
         self._overrides: dict[str, bool] = {}
         self._task: asyncio.Task | None = None
 
-    def is_active(self, name: str) -> bool:
-        return self._overrides.get(name, self._global_default)
+    def is_active(self, name: str, *, group: str | None = None, cost: str | None = None) -> bool:
+        return resolve_active(self._global_default, self._overrides, name, group=group, cost=cost)[
+            0
+        ]
 
     async def _refresh_once(self) -> None:
         try:
@@ -96,7 +134,7 @@ class SensorConfigProxy:
     def unbind(self) -> None:
         self._client = None
 
-    def is_active(self, name: str) -> bool:
+    def is_active(self, name: str, *, group: str | None = None, cost: str | None = None) -> bool:
         if self._client is None:
             return True
-        return self._client.is_active(name)
+        return self._client.is_active(name, group=group, cost=cost)

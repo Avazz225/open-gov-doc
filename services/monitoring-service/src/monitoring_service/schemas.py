@@ -16,6 +16,9 @@ class SensorOut(BaseModel):
     description: str
     service_types: list[str]
     active: bool
+    # P88-S2 (ADR 0243): which setting decided `active` - the sensor's own
+    # override, its group's, its cost class's, or the global default.
+    source: Literal["sensor", "group", "cost", "global"] = "global"
 
 
 class SensorConfigOut(BaseModel):
@@ -28,6 +31,9 @@ class GlobalSensorConfigIn(BaseModel):
 
 
 class SensorOverrideIn(BaseModel):
+    """`{sensor_name}` in the path is a sensor name, `group:<group>` or
+    `cost:<cheap|expensive>` (P88-S2, ADR 0243)."""
+
     # `None` deletes an existing override again - the sensor then
     # falls back to the global base setting.
     enabled: bool | None

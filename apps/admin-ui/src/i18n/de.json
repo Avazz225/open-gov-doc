@@ -84,7 +84,8 @@
     "groupLicense": "Lizenz",
     "license": "Lizenzstatus",
     "openMenu": "Navigation öffnen",
-    "closeMenu": "Navigation schließen"
+    "closeMenu": "Navigation schließen",
+    "sensors": "Monitoring-Sensoren"
   },
   "home": {
     "title": "OG Doc Admin",
@@ -1106,6 +1107,64 @@
     "drainingBadge": "Im Drain",
     "forget": "Vergessen",
     "forgetConfirm": "Instanz {id} vergessen? Läuft sie doch noch, meldet sie sich beim nächsten Heartbeat neu an."
+  },
+  "sensors": {
+    "pageTitle": "Monitoring-Sensoren",
+    "readOnly": "Nur lesend: Änderungen brauchen die Rolle „Monitoring-/Sensor-Konfiguration“ (admin.monitoring).",
+    "global": {
+      "heading": "Grundeinstellung",
+      "hint": "Der Ausgangspunkt für jeden Sensor ohne eigene, Gruppen- oder Kosten-Einstellung. Ein abgeschalteter Sensor erzeugt im Dienst gar keine Daten. Jede Änderung wird auditiert.",
+      "everything": "Alles überwachen",
+      "nothing": "Nichts überwachen"
+    },
+    "activeCount": "{active} von {total} aktiv",
+    "cost": {
+      "heading": "Nach Kosten",
+      "hint": "Teure Sensoren (hohe Auflösung, viel CPU/IO oder viele Label-Werte) lassen sich gemeinsam schalten, etwa im Dauerbetrieb aus. Eine Gruppen- oder Sensor-Einstellung geht vor."
+    },
+    "costs": {
+      "cheap": "Günstig",
+      "expensive": "Teuer"
+    },
+    "list": {
+      "heading": "Gruppen und Sensoren",
+      "hint": "Es gilt die spezifischste Einstellung: Sensor vor Gruppe vor Kosten vor Grundeinstellung. Der Katalog kommt von den laufenden Diensten.",
+      "filter": "Filtern nach Name, Beschreibung oder Dienst",
+      "empty": "Kein laufender Dienst meldet Sensoren.",
+      "sensor": "Sensor",
+      "cost": "Kosten",
+      "services": "Dienste",
+      "state": "Zustand",
+      "setting": "Einstellung",
+      "groupSetting": "Einstellung für die Gruppe {group}",
+      "sensorSetting": "Einstellung für {name}",
+      "serviceCount": "{count} Dienste"
+    },
+    "groups": {
+      "performance": "Performance",
+      "capacity": "Kapazität",
+      "reliability": "Zuverlässigkeit",
+      "errors": "Fehler",
+      "security": "Sicherheit"
+    },
+    "choice": {
+      "inherit": "Übernehmen",
+      "on": "An",
+      "off": "Aus"
+    },
+    "on": "An",
+    "off": "Aus",
+    "source": {
+      "sensor": "eigene Einstellung",
+      "group": "über die Gruppe",
+      "cost": "über die Kosten",
+      "global": "über die Grundeinstellung"
+    },
+    "orphaned": {
+      "heading": "Einstellungen ohne laufenden Sensor",
+      "hint": "Diese Einstellungen gehören zu Sensoren oder Gruppen, die gerade kein Dienst meldet (gestoppt oder umbenannt). Sie greifen wieder, sobald der Sensor zurückkommt.",
+      "reset": "Zurücksetzen"
+    }
   },
   "license": {
     "pageTitle": "Lizenzstatus",

@@ -46,7 +46,9 @@ async def _is_active_superuser(x_dms_principal: str) -> bool:
     try:
         active, superuser_principal_id = await app.state.auth_client.get_active_superuser()
     except Exception:
-        logger.warning("superuser_status_check_failed - auth-service nicht erreichbar?", exc_info=True)
+        logger.warning(
+            "superuser_status_check_failed - auth-service nicht erreichbar?", exc_info=True
+        )
         return False
     return active and bool(x_dms_principal) and superuser_principal_id == x_dms_principal
 
@@ -216,6 +218,10 @@ async def set_sensor_override(
     session: AsyncSession = Depends(get_session),
 ) -> SensorConfigOut:
     await _require_monitoring_permission(x_dms_principal)
+    try:
+        repository.validate_override_key(sensor_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     result = await repository.set_sensor_override(session, sensor_name, payload.enabled)
     await session.commit()
     await publish_event(

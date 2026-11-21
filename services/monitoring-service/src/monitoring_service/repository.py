@@ -1,3 +1,4 @@
+from dms_metrics_client import resolve_active
 from monitoring_service.clients import RegistryInstance
 from monitoring_service.models import GLOBAL_DEFAULT_KEY, SensorConfigEntry
 from monitoring_service.schemas import SensorConfigOut, SensorOut
@@ -19,8 +20,32 @@ async def get_sensor_config(session: AsyncSession) -> SensorConfigOut:
     return SensorConfigOut(global_default=global_default, overrides=entries)
 
 
-def is_sensor_active(config: SensorConfigOut, name: str) -> bool:
-    return config.overrides.get(name, config.global_default)
+def is_sensor_active(
+    config: SensorConfigOut, name: str, *, group: str | None = None, cost: str | None = None
+) -> bool:
+    return resolve_active(config.global_default, config.overrides, name, group=group, cost=cost)[0]
+
+
+VALID_COSTS = frozenset({"cheap", "expensive"})
+
+
+def validate_override_key(key: str) -> None:
+    """P88-S2 (ADR 0243): a sensor name, `group:<group>` or `cost:<cheap|
+    expensive>`. Any other prefixed key is a typo that would silently
+    match nothing, so it is refused."""
+    if ":" not in key:
+        return
+    prefix, _, value = key.partition(":")
+    if not value:
+        raise ValueError(f"Leerer Wert in {key!r}")
+    if prefix == "group":
+        return
+    if prefix == "cost" and value in VALID_COSTS:
+        return
+    raise ValueError(
+        f"Unbekannter Schlüssel {key!r} - erlaubt: Sensorname, 'group:<Gruppe>', "
+        "'cost:cheap', 'cost:expensive'"
+    )
 
 
 async def set_global_default(session: AsyncSession, enabled: bool) -> SensorConfigOut:
@@ -62,14 +87,24 @@ async def list_sensors(session: AsyncSession, instances: list[RegistryInstance])
             name = sensor["name"]
             catalog[name] = sensor
             service_types.setdefault(name, set()).add(instance.service_type)
-    return [
-        SensorOut(
-            name=sensor["name"],
+    sensors = []
+    for name, sensor in catalog.items():
+        active, source = resolve_active(
+            config.global_default,
+            config.overrides,
+            name,
             group=sensor["group"],
             cost=sensor["cost"],
-            description=sensor["description"],
-            service_types=sorted(service_types[name]),
-            active=is_sensor_active(config, name),
         )
-        for name, sensor in catalog.items()
-    ]
+        sensors.append(
+            SensorOut(
+                name=sensor["name"],
+                group=sensor["group"],
+                cost=sensor["cost"],
+                description=sensor["description"],
+                service_types=sorted(service_types[name]),
+                active=active,
+                source=source,
+            )
+        )
+    return sorted(sensors, key=lambda s: (s.group, s.name))

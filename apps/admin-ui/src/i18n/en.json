@@ -84,7 +84,8 @@
     "groupLicense": "License",
     "license": "License status",
     "openMenu": "Open navigation",
-    "closeMenu": "Close navigation"
+    "closeMenu": "Close navigation",
+    "sensors": "Monitoring sensors"
   },
   "home": {
     "title": "OG Doc Admin",
@@ -1106,6 +1107,64 @@
     "drainingBadge": "Draining",
     "forget": "Forget",
     "forgetConfirm": "Forget instance {id}? If it is still running, it registers again on its next heartbeat."
+  },
+  "sensors": {
+    "pageTitle": "Monitoring sensors",
+    "readOnly": "Read-only: changes need the role \"Monitoring/sensor configuration\" (admin.monitoring).",
+    "global": {
+      "heading": "Base setting",
+      "hint": "The starting point for every sensor without its own, group or cost setting. A sensor that is off generates no data in its service at all. Every change is audited.",
+      "everything": "Monitor everything",
+      "nothing": "Monitor nothing"
+    },
+    "activeCount": "{active} of {total} active",
+    "cost": {
+      "heading": "By cost",
+      "hint": "Expensive sensors (high resolution, much CPU/IO or many label values) can be switched together, for example off in continuous operation. A group or sensor setting takes precedence."
+    },
+    "costs": {
+      "cheap": "Cheap",
+      "expensive": "Expensive"
+    },
+    "list": {
+      "heading": "Groups and sensors",
+      "hint": "The most specific setting applies: sensor before group before cost before the base setting. The catalog comes from the running services.",
+      "filter": "Filter by name, description or service",
+      "empty": "No running service reports sensors.",
+      "sensor": "Sensor",
+      "cost": "Cost",
+      "services": "Services",
+      "state": "State",
+      "setting": "Setting",
+      "groupSetting": "Setting for the group {group}",
+      "sensorSetting": "Setting for {name}",
+      "serviceCount": "{count} services"
+    },
+    "groups": {
+      "performance": "Performance",
+      "capacity": "Capacity",
+      "reliability": "Reliability",
+      "errors": "Errors",
+      "security": "Security"
+    },
+    "choice": {
+      "inherit": "Inherit",
+      "on": "On",
+      "off": "Off"
+    },
+    "on": "On",
+    "off": "Off",
+    "source": {
+      "sensor": "own setting",
+      "group": "through the group",
+      "cost": "through the cost",
+      "global": "through the base setting"
+    },
+    "orphaned": {
+      "heading": "Settings without a running sensor",
+      "hint": "These settings belong to sensors or groups no service reports right now (stopped or renamed). They apply again once the sensor is back.",
+      "reset": "Reset"
+    }
   },
   "license": {
     "pageTitle": "License status",

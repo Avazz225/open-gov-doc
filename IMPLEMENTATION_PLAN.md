@@ -3872,6 +3872,15 @@ installation's replica health.
       second operator's approval → completed. The e2e leaves the fleet tables empty.
 - **P88-S2 — Monitoring sensors page.** View and change the sensor configuration (`PUT /sensor-config/*`
   exists), including the cost flags, and the P91-S1 tracing sampling ratio once it exists.
+  - ✅ **Result** ([ADR 0243](docs/adr/0243-sensor-group-and-cost-overrides-and-admin-page.md)):
+    - **Overrides per group and cost class:** `group:<g>` and `cost:cheap|expensive`. The most specific
+      setting wins (sensor, group, cost, global). It is resolved in each service's sensors, so
+      generation stops, not just display.
+    - **admin-ui `/sensors/`:** the base setting, cost switches, a grouped catalog with source and
+      filter, and orphaned overrides. Read-only without `admin.monitoring`.
+    - **Live:** with the group "performance" off, license-service's HTTP counter stood still; with a
+      sensor override on, it counted again.
+    - The tracing ratio follows with P91-S1.
 - **P88-S3 — Object-type status transitions.** An editor for `status_transitions`, plus guided forms for
   `naming_constraints`/`conditions` (today passed through raw in `ObjectTypeEditor`).
 - **P88-S4 — Mailboxes and realm roles.**

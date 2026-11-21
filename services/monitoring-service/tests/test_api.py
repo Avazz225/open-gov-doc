@@ -107,3 +107,56 @@ def test_superuser_bypasses_gate(client):
         "/sensor-config/global", json={"enabled": False}, headers={"x-dms-principal": "root-user"}
     )
     assert response.status_code == 200
+
+
+# --- P88-S2 (ADR 0243): group and cost-class overrides ------------------------
+
+
+def _instance_with(*sensors: dict) -> RegistryInstance:
+    return RegistryInstance(
+        "svc-1", "storage-service", "http://storage-service:8000", list(sensors)
+    )
+
+
+def _sensor(name: str, group: str, cost: str) -> dict:
+    return {"name": name, "group": group, "cost": cost, "description": name}
+
+
+def _put(client, key: str, enabled):
+    return client.put(
+        f"/sensor-config/{key}", json={"enabled": enabled}, headers={"x-dms-principal": "alice"}
+    )
+
+
+def test_catalog_resolves_group_and_cost_overrides_and_names_the_source(client):
+    app.state.registry_client.list_active_instances.return_value = [
+        _instance_with(
+            _sensor("storage.backlog", "capacity", "cheap"),
+            _sensor("storage.scan", "capacity", "expensive"),
+            _sensor("doc.upload", "performance", "expensive"),
+            _sensor("doc.count", "performance", "cheap"),
+        )
+    ]
+    try:
+        assert _put(client, "cost:expensive", False).status_code == 200
+        assert _put(client, "group:capacity", True).status_code == 200
+        assert _put(client, "doc.count", False).status_code == 200
+
+        body = {s["name"]: (s["active"], s["source"]) for s in client.get("/sensors").json()}
+        assert body == {
+            "storage.backlog": (True, "group"),
+            "storage.scan": (True, "group"),  # group beats cost
+            "doc.upload": (False, "cost"),
+            "doc.count": (False, "sensor"),
+        }
+        # The catalog comes sorted by group, then name.
+        assert [s["name"] for s in client.get("/sensors").json()][0] == "storage.backlog"
+    finally:
+        for key in ("cost:expensive", "group:capacity", "doc.count"):
+            _put(client, key, None)
+
+
+def test_unknown_prefixed_keys_are_refused(client):
+    assert _put(client, "cost:medium", False).status_code == 422
+    assert _put(client, "grp:storage", False).status_code == 422
+    assert _put(client, "group:", False).status_code == 422

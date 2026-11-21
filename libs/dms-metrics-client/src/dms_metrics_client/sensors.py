@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
@@ -31,6 +32,17 @@ class SensorSpec:
 
 
 IsActiveFn = Callable[[str], bool]
+
+
+def _accepts_group_and_cost(fn: Callable[..., bool]) -> bool:
+    """`SensorConfigClient`/`SensorConfigProxy.is_active` take the sensor's
+    group and cost as keywords (P88-S2); a plain `lambda name: ...` (tests,
+    simple callers) doesn't, and keeps working."""
+    try:
+        parameters = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+    return "group" in parameters and "cost" in parameters
 
 
 class GuardedCounter:
@@ -111,7 +123,21 @@ class SensorRegistry:
         self.service_name = service_name
         self.collector_registry = CollectorRegistry()
         self._is_active = is_active
+        self._with_group_and_cost = _accepts_group_and_cost(is_active)
         self._specs: dict[str, SensorSpec] = {}
+
+    def _check_for(self, spec: SensorSpec) -> IsActiveFn:
+        """The activation check one `Guarded*` sensor calls on every use -
+        bound to its own group and cost, so a group or cost-class override
+        reaches it (ADR 0243)."""
+        if not self._with_group_and_cost:
+            return self._is_active
+        is_active = self._is_active
+
+        def check(name: str) -> bool:
+            return is_active(name, group=spec.group, cost=spec.cost)
+
+        return check
 
     def specs(self) -> list[SensorSpec]:
         return list(self._specs.values())
@@ -133,7 +159,7 @@ class SensorRegistry:
             labelnames=labelnames,
             registry=self.collector_registry,
         )
-        return GuardedCounter(spec.name, metric, self._is_active)
+        return GuardedCounter(spec.name, metric, self._check_for(spec))
 
     def gauge(self, spec: SensorSpec, *, labelnames: tuple[str, ...] = ()) -> GuardedGauge:
         self._register_spec(spec)
@@ -143,7 +169,7 @@ class SensorRegistry:
             labelnames=labelnames,
             registry=self.collector_registry,
         )
-        return GuardedGauge(spec.name, metric, self._is_active)
+        return GuardedGauge(spec.name, metric, self._check_for(spec))
 
     def histogram(
         self,
@@ -161,4 +187,4 @@ class SensorRegistry:
             registry=self.collector_registry,
             **kwargs,
         )
-        return GuardedHistogram(spec.name, metric, self._is_active)
+        return GuardedHistogram(spec.name, metric, self._check_for(spec))

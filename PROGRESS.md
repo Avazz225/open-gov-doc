@@ -2,6 +2,47 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P88-S2, the monitoring sensors page
+([ADR 0243](docs/adr/0243-sensor-group-and-cost-overrides-and-admin-page.md)).
+
+**What changed:**
+- **`dms-metrics-client`:** `resolve_active(global, overrides, name, group=, cost=)` returns the value
+  and its source.
+  - The most specific setting wins: sensor, then `group:<g>`, then `cost:<c>`, then global.
+  - `SensorConfigClient`/`SensorConfigProxy.is_active` take `group`/`cost`.
+  - `SensorRegistry` binds each `Guarded*` to its spec's group and cost (`_check_for`). A plain
+    `lambda name:` still works.
+- **monitoring-service:** `SensorOut.source`, a catalog sorted by group and name, and
+  `validate_override_key` (`422` for unknown prefixes or cost classes). config-service's export passes
+  the new keys through unchanged.
+- **admin-ui `SensorSettings.tsx` at `/sensors/`** (nav "Monitoring-Sensoren", under Verwaltung):
+  - the base setting radios;
+  - cost switches;
+  - a group/sensor table with per-group switches, cost badges, services (collapsed above three),
+    state plus source, per-sensor switches and a filter;
+  - orphaned overrides with a reset.
+  - Every switch is Übernehmen/An/Aus. Without `admin.monitoring` the page is read-only.
+- **Docs:** ADR 0243, monitoring-service (configuration, API row, closed limitation), admin-ui
+  "Monitoring Sensors".
+
+**Checks:**
+- dms-metrics-client 20 (+2), monitoring-service 21 (+2), plus federation-hub 91 and config 56 (both
+  use the lib).
+- admin-ui vitest 346 (+8 in `sensor-settings.test.tsx`), `tsc`/`eslint` clean; new
+  `e2e/sensors.spec.ts`.
+- All images were rebuilt, because the lib change only takes effect after a rebuild.
+- **Live:**
+  - `group:performance` off made license-service's `http_requests_total` stand still (15 → 15);
+  - an `http.requests` sensor override on counted again (15 → 20);
+  - the catalog showed the sources ("über die Kosten" …);
+  - no page overflow at 390px.
+- `users-admin` temporarily had `domain-admin-monitoring` (assignment 4738), now revoked. The config
+  ended with no overrides.
+
+**Next session:** **P88-S3**, object-type status transitions and the guided naming/conditions forms.
+
+---
+
 **Last completed:** P88-S1, fleet groups, update plans and rollouts in admin-ui
 ([ADR 0242](docs/adr/0242-admin-ui-fleet-orchestration-and-rollout-lifecycle.md)).
 
@@ -48,7 +89,7 @@
 - The seed data was removed afterwards: the fleet tables are empty, and the temporary operator row was
   deleted.
 
-**Next session:** **P88-S2**, the monitoring sensors page (`PUT /sensor-config/*`, the cost flags).
+**Next session:** P88-S2 (done, see above).
 
 ---
 

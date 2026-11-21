@@ -15,7 +15,12 @@
 ## Sensor registry (10.1)
 
 - **Catalog**: `GET /sensors` aggregates the self-declarations of all currently active instances (`instance.sensors`, see `registry-service`) by sensor name, incl. `service_types` list and resolved `active` status. In case of conflicting declarations (unlikely, since a sensor typically comes from the same service type), the most recently seen declaration wins — a documented simplification.
-- **Configuration**: `sensor_config` table with a special key `__global__` (baseline setting "monitor everything"/"nothing," default `true`) and any number of sensor-specific overrides. Resolution: an override present → its value, otherwise the global baseline setting.
+- **Configuration**: `sensor_config` table with a special key `__global__` (baseline setting "monitor everything"/"nothing," default `true`) and any number of overrides.
+  - **Since P88-S2** ([ADR 0243](../adr/0243-sensor-group-and-cost-overrides-and-admin-page.md)), an override key is a sensor name, `group:<group>` or `cost:cheap|expensive`.
+  - **Resolution:** sensor, then group, then cost class, then the global baseline (`dms_metrics_client.resolve_active`).
+  - **Applied in each service.** Each service's `Guarded*` sensors apply this resolution themselves, so a group or cost switch stops generation, not just display.
+  - **The catalog** reports each sensor's `source` (`sensor`/`group`/`cost`/`global`) and comes sorted by group and name.
+  - **Validation:** unknown prefixed keys are `422`.
 - **Connected to 7.3 (configuration export) since P12-S3**: `config-service` exports/imports `sensor_config` as a regular category (`GET /sensor-config` and `PUT /sensor-config/global`+`PUT /sensor-config/{sensor_name}`), see [`docs/services/config-service.md`](config-service.md). This resolves the finding deliberately deferred at P11-S0/P11-S1 — until then, the configuration was persisted and audited standalone, without a connection to an export/import mechanism.
 - **First gated write operation outside the previous registry domain**: `PUT /sensor-config/global`/`PUT /sensor-config/{sensor_name}` require `admin.monitoring` (new domain-admin role `domain-admin-monitoring`, `permission-service`) or the activated superuser — Concept 10.1 explicitly names disabling security-relevant sensors itself as a security-relevant operation.
 
@@ -27,7 +32,7 @@
 | `GET` | `/sensors` | Aggregated sensor catalog (name/group/cost/description/service types/activation status), ungated. |
 | `GET` | `/sensor-config` | Resolved activation configuration (`global_default`, `overrides`), ungated — poll target for `dms_metrics_client.SensorConfigClient`. |
 | `PUT` | `/sensor-config/global` | Set the global baseline setting (`admin.monitoring` or activated superuser), audited. |
-| `PUT` | `/sensor-config/{sensor_name}` | Set a sensor-specific override (`enabled: bool`) or clear it (`enabled: null`, falls back to the baseline setting), audited. |
+| `PUT` | `/sensor-config/{key}` | Set an override (`enabled: bool`) or clear it (`enabled: null`, the next less specific setting applies), audited. `key` is a sensor name, `group:<group>` or `cost:cheap|expensive` (since P88-S2; anything else with a prefix is `422`). |
 | `GET` | `/healthz` | Own health check |
 
 ## Events
@@ -71,7 +76,7 @@ Further services get their sensors only once actually needed, in later sessions 
 
 - **Static Prometheus target** (`infra/prometheus.yml`, one entry: `monitoring-service:8000`) instead of scrape configuration automatically derived from the registry (10.1 names this as an option, not a requirement) — with only one target, automation does not yet add value.
 - **TTL poll instead of NATS invalidation** for `SensorConfigClient` (default 15s) — deliberately simpler than the `ComponentLicenseCache` precedent (P9-S2), since this session already covers the sensor concept + new service + scrape proxy + two pilots.
-- **No Admin UI control** for toggling sensors on/off — backend API only, the same pattern as other sessions that deliver backend before frontend.
+- ~~**No Admin UI control** for toggling sensors on/off~~ — **closed in P88-S2**: admin-ui `/sensors/` ("Monitoring-Sensoren"), see `docs/services/admin-ui.md`.
 - **No CheckMK** — Concept 10.1 names it as a third integration target; the user explicitly decided against it at the P11-S2 plan approval (see `docs/operations/monitoring.md`).
 
 ## Grafana (P11-S2)

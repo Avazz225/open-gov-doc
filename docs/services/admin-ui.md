@@ -557,6 +557,21 @@ components no longer pass the user name into them. Super-user activation, approv
 **Fleet view:** below each installation's status it shows "Replikas im erwarteten Bereich" or the
 out-of-range types from the installation's replica summary.
 
+## Monitoring Sensors (P88-S2, [ADR 0243](../adr/0243-sensor-group-and-cost-overrides-and-admin-page.md))
+
+`SensorSettings.tsx` (`/sensors/`, under Verwaltung) shows monitoring-service's sensor catalog and its
+activation config:
+- **Grundeinstellung:** "Alles/Nichts überwachen" radios with the active count.
+- **Nach Kosten:** switches for Günstig and Teuer.
+- **Gruppen und Sensoren:** a table with a header row and switch per group. Each sensor shows its name,
+  description, cost badge, services (collapsed to "n Dienste" above three), state with its source
+  ("über die Gruppe" …) and its own switch. A filter matches name, description and service.
+- **Einstellungen ohne laufenden Sensor:** overrides that no running service matches, each with a reset.
+
+Every switch is Übernehmen/An/Aus: Übernehmen clears the override (`enabled: null`), so the next less
+specific level applies. Without `admin.monitoring` everything is disabled and a read-only hint is shown.
+At 390px the table scrolls inside its container.
+
 ## Names Instead of Principals (P86-S2)
 
 Since P85 (ADR 0240) recorded actors are principals: a Keycloak `sub`, or a technical account's integer
