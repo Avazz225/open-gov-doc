@@ -22,6 +22,7 @@ _OBJECT_TYPE_MUTABLE_FIELDS = (
     "naming_constraints",
     "conditions",
     "allowed_parent_types",
+    "status_transitions",
     "icon",
     "kennzeichen_format",
     "kennzeichen_display_override",

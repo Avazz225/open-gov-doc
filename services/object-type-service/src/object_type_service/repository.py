@@ -1,7 +1,7 @@
 import re
 from datetime import UTC, datetime
 
-from dms_constraint_engine import ROOT_PARENT_TYPE
+from dms_constraint_engine import REQUIRE_PREFIX, ROOT_PARENT_TYPE, parse_condition
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -112,6 +112,59 @@ def _validate_status_transitions(attributes: list[dict], status_transitions: lis
         if unknown:
             raise InvalidFieldError(
                 f"statusTransitions referenziert unbekannte Attribute: {sorted(unknown)}"
+            )
+
+
+_NAMING_KEYS = frozenset({"mustContain", "pattern"})
+
+
+def _validate_naming_constraints(naming_constraints: dict | None) -> None:
+    """P88-S3: `namingConstraints` is `{"mustContain": [str], "pattern":
+    str}` (both optional). Checked for shape on save - an unknown key (a
+    typo like "mustcontain") or a wrong type would otherwise be stored and
+    simply never apply. References to undeclared attributes stay allowed,
+    as before; admin-ui's guided form only offers declared ones."""
+    if not naming_constraints:
+        return
+    unknown = set(naming_constraints) - _NAMING_KEYS
+    if unknown:
+        raise InvalidFieldError(
+            f"namingConstraints kennt nur 'mustContain' und 'pattern', nicht: {sorted(unknown)}"
+        )
+    must_contain = naming_constraints.get("mustContain", [])
+    if not isinstance(must_contain, list) or not all(
+        isinstance(name, str) and name.strip() for name in must_contain
+    ):
+        raise InvalidFieldError("namingConstraints.mustContain muss eine Liste von Namen sein")
+    pattern = naming_constraints.get("pattern")
+    if pattern is not None and not isinstance(pattern, str):
+        raise InvalidFieldError("namingConstraints.pattern muss ein Text sein")
+
+
+def _validate_conditions(conditions: list[dict]) -> None:
+    """P88-S3: each condition is `{"if": "<attribute> <op> <value>", "then":
+    "require:<attribute>"}` - the only shape `dms_constraint_engine`
+    evaluates. A condition it can't parse used to be stored and then never
+    fire (or, without an `if`, crash `validate()`), so it is refused on
+    save."""
+    for condition in conditions:
+        if not isinstance(condition, dict) or set(condition) != {"if", "then"}:
+            raise InvalidFieldError(
+                f"conditions-Eintrag braucht genau 'if' und 'then': {condition!r}"
+            )
+        if not isinstance(condition["if"], str) or parse_condition(condition["if"]) is None:
+            raise InvalidFieldError(
+                f"conditions-Bedingung nicht auswertbar: {condition['if']!r} "
+                "(erwartet '<Attribut> <Operator> <Wert>')"
+            )
+        then = condition["then"]
+        if (
+            not isinstance(then, str)
+            or not then.startswith(REQUIRE_PREFIX)
+            or not then.removeprefix(REQUIRE_PREFIX).strip()
+        ):
+            raise InvalidFieldError(
+                f"conditions-Folge muss 'require:<Attribut>' sein, nicht: {then!r}"
             )
 
 
@@ -235,6 +288,8 @@ async def create_object_type(session: AsyncSession, payload: ObjectTypeCreate) -
     _validate_default_archive_after_days(payload.default_archive_after_days)
     _validate_classification_level(payload.applies_to, payload.classification_level)
     _validate_status_transitions(payload.attributes, payload.status_transitions)
+    _validate_naming_constraints(payload.naming_constraints)
+    _validate_conditions(payload.conditions)
     _validate_reference_targets(payload.attributes)
 
     now = datetime.now(UTC)
@@ -305,6 +360,8 @@ async def update_object_type(
     _validate_default_archive_after_days(payload.default_archive_after_days)
     _validate_classification_level(object_type.applies_to, payload.classification_level)
     _validate_status_transitions(payload.attributes, payload.status_transitions)
+    _validate_naming_constraints(payload.naming_constraints)
+    _validate_conditions(payload.conditions)
     _validate_reference_targets(payload.attributes)
     object_type.attributes = payload.attributes
     object_type.naming_constraints = payload.naming_constraints

@@ -750,3 +750,50 @@ def test_validate_and_next_kennzeichen_remain_ungated(client):
             f"/object-types/{object_type_id}/next-kennzeichen", json={}
         )
         assert next_kennzeichen_response.status_code == 200
+
+
+# --- P88-S3: shape checks for namingConstraints and conditions ---------------
+
+
+def _typed(name: str, **fields) -> dict:
+    return {
+        "name": name,
+        "applies_to": "document",
+        "attributes": [{"name": "Betrag", "type": "decimal"}, {"name": "Kostenstelle"}],
+        **fields,
+    }
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"naming_constraints": {"mustcontain": ["Betrag"]}},
+        {"naming_constraints": {"mustContain": "Betrag"}},
+        {"naming_constraints": {"pattern": 5}},
+        {"conditions": [{"if": "Betrag ist gross", "then": "require:Kostenstelle"}]},
+        {"conditions": [{"if": "Betrag > 10", "then": "Kostenstelle"}]},
+        {"conditions": [{"if": "Betrag > 10", "then": "require: "}]},
+        {"conditions": [{"op": "required"}]},
+    ],
+)
+def test_malformed_naming_or_conditions_are_refused(client, fields):
+    import uuid
+
+    response = client.post("/object-types", json=_typed(f"Kaputt-{uuid.uuid4().hex[:8]}", **fields))
+    assert response.status_code == 422, response.text
+
+
+def test_wellformed_naming_and_conditions_are_stored(client):
+    import uuid
+
+    naming = {"mustContain": ["Betrag"], "pattern": "RE-{Betrag}"}
+    conditions = [{"if": "Betrag >= 10000", "then": "require:Kostenstelle"}]
+    response = client.post(
+        "/object-types",
+        json=_typed(
+            f"Gut-{uuid.uuid4().hex[:8]}", naming_constraints=naming, conditions=conditions
+        ),
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["naming_constraints"] == naming
+    assert response.json()["conditions"] == conditions

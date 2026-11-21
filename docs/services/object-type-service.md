@@ -59,6 +59,19 @@ Known production callers of the now-gated endpoints and how they authenticate: `
 
 Supported attribute types: `string`, `decimal`, `integer`, `boolean`, `date`, `reference`.
 
+**Shape checks on save (since P88-S3).** Before, these were stored however they arrived. A typo such as
+`mustcontain` was kept and simply never applied, and a condition without `if` made
+`dms_constraint_engine.validate()` raise `KeyError`. Now:
+- **`naming_constraints`** may only hold `mustContain` (a list of names) and `pattern` (text). Anything
+  else is `422`.
+- **Each `conditions` entry** must be exactly `{"if", "then"}`. The `if` must be readable by the engine's
+  new public `parse_condition()` (`<attribute> <op> <value>`, with `op` one of
+  `> >= < <= == !=`). The `then` must be `require:<attribute>`.
+- **References to undeclared attributes stay allowed** here, as before (the test fixture's
+  `require:Kostenstelle` has no `Kostenstelle` attribute). admin-ui's guided form only offers declared
+  attributes and marks undeclared ones. `status_transitions` keep their stricter reference check
+  (ADR 0166).
+
 **`personal_data`** (boolean, optional, 5.2, Post-Roadmap Phase 41 Session 2, [ADR 0156](../adr/0156-attribute-pseudonymization-reversible-vault.md)): a free-form key inside the attribute definition, not a schema field this service itself validates or acts on (`dms_constraint_engine` ignores unrecognized keys) — marks an attribute as eligible for `document-service`'s attribute-level pseudonymization vault (`POST /documents/{id}/attributes/{name}/pseudonymize`). `admin-ui`'s `ObjectTypeEditor` exposes it as a per-attribute checkbox so it's reachable without raw API calls.
 
 ## Enforced Object Hierarchy & Icons (2.2a, since P5b-S1)
@@ -158,7 +171,7 @@ None yet — follows in Phase 11.
   (`document-service`/`folder-service`, the only two instance-holding callers), which is where it belongs
   — this engine stays DB/HTTP-free (ADR 0003).
 - ~~Status transitions (4.5 mentions "at creation, modification, and status transitions") are not yet evaluated~~ — **closed in Phase 45 Session 4**, see "Status-Transition Rules (4.5/7.1)" above and [ADR 0166](../adr/0166-status-transition-constraint-engine.md).
-- **No admin-UI editor for `status_transitions`** (Phase 45 Session 4) — configured API-only for now, same "backend-first, UI follows later if a real need appears" precedent as `allowed_parent_types`/`icon` before P5b-S3.
+- ~~**No admin-UI editor for `status_transitions`**~~ — **closed in P88-S3**, together with guided forms for `naming_constraints`/`conditions` (see `docs/services/admin-ui.md` "Object-Type Rules"). That session also found that `admin-ui`'s `updateObjectType` never sent `status_transitions`, so every save from the editor reset them to `[]`, and that `config-service`'s export/import dropped them. Both are fixed.
 - ~~No GUI editor for `allowed_parent_types`/`icon`/form layouts/reference number generator~~ — **closed at P5b-S3** (`allowed_parent_types`/`icon`/form layouts) and **P5e-S3** (reference number generator format/display override), both in `admin-ui`'s `ObjectTypeEditor`, see `docs/services/admin-ui.md`. Stale bullet, left un-struck when those sessions shipped.
 - No retroactive check and no cycle detection for `allowed_parent_types` (see ADR 0013); no retroactive check for saved layout overrides on later attribute changes (see ADR 0014). **Re-examined in Post-Roadmap Phase 38 Session 1** (alongside fixing a genuine, unrelated instance-level move-cycle bug in `folder-service`) and reconfirmed as a deliberate, still-correct design decision, not a bug: `allowed_parent_types` cycle checking is about a *type-graph* relationship (type A and type B configured to allow each other as a parent class), which ADR 0013 already reasoned fails safely at the first actual placement attempt with no silent failure state — unlike an unchecked `parent_id` *instance* chain, a type-graph cycle cannot loop indefinitely or leave real folders undeletable. No change made here.
 - ~~User UI consumption of the layouts (switching the metadata panel/search form/upload dialog to layout-driven rendering) follows only with P5b-S4.~~ — **closed at P5b-S4**: `user-ui`'s `LayoutFormFields.tsx` is a shared layout-driven renderer used by `MetadataPanel`, `SearchPane.tsx`, and `UploadForm.tsx`. Stale forward-reference, found and struck during Phase 65+'s gap-analysis round.

@@ -2,6 +2,50 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P88-S3, guided editors for object-type rules.
+
+**What changed:**
+- **admin-ui `ObjectTypeRules.tsx`** (inside `ObjectTypeEditor`):
+  - naming rule: `mustContain` checkboxes, a pattern with `{attribute}` buttons, and a sample-name
+    tester (`nameMatchesPattern` mirrors the engine);
+  - conditions as sentences ("Wenn … dann Pflichtfeld …"); unparseable stored ones are kept
+    read-only;
+  - status transitions: von/nach with the statuses `open`/`closed` suggested, plus required-attribute
+    checkboxes;
+  - undeclared references are marked, not dropped;
+  - `rulesError` client checks.
+  - `createObjectType`/`updateObjectType` send all three rule fields; `ObjectType.status_transitions`
+    and `StatusTransitionRule` were added to the API types.
+- **Bugs found and fixed:**
+  - `updateObjectType` never sent `status_transitions`. The update is a full replacement, so every
+    save from the editor reset them to `[]` (the editor test now proves they survive).
+  - config-service's `ObjectTypeExport` and `_OBJECT_TYPE_MUTABLE_FIELDS` lacked
+    `status_transitions`, so export/import dropped them (new roundtrip test).
+  - The layout designer's button row overflowed a 390px viewport by 2px; it now wraps.
+- **`dms-constraint-engine`:** a public `parse_condition`, `CONDITION_OPERATORS` and
+  `REQUIRE_PREFIX`.
+- **object-type-service:** `_validate_naming_constraints` (only `mustContain`/`pattern`, correct types)
+  and `_validate_conditions` (exactly `if`/`then`, a parseable `if`, `then` = `require:<name>`). A
+  condition without `if` used to make `validate()` raise. References to undeclared attributes stay
+  allowed.
+- **Docs:** object-type-service (shape checks, closed open point), config-service (the roundtrip fix),
+  admin-ui "Object-Type Rules".
+
+**Checks:**
+- constraint engine 26; object-type-service 117 (+8 parametrized shape cases, +1 well-formed); config
+  57 (+1 roundtrip).
+- admin-ui vitest 355 (+8 in `object-type-rules.test.tsx`, the editor tests updated to require
+  preservation), `tsc`/`eslint` clean.
+- e2e 12/12, with a new rules flow in `object-types.spec.ts`: create with rule, condition and
+  transition, then save twice, reread and delete. The existing spec needed `exact: true`, because the
+  new "Namensmuster" label contains "Name".
+- No page overflow at 390px after the layout-designer fix.
+
+**Next session:** **P88-S4**, mailboxes (env → config API/table, migration, admin page) and realm-role
+assignment.
+
+---
+
 **Last completed:** P88-S2c: the cost scale 1–5 (user request) and default-off sensors with package E
 (amendment to [ADR 0243](docs/adr/0243-sensor-group-and-cost-overrides-and-admin-page.md)).
 
@@ -58,7 +102,7 @@
 - `users-admin` temporarily had `domain-admin-monitoring` (assignment 4926), now revoked. The
   overrides were reset and the config is empty.
 
-**Next session:** **P88-S3**, object-type status transitions and the guided naming/conditions forms.
+**Next session:** P88-S3 (done, see above).
 
 ---
 

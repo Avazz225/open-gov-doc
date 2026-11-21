@@ -96,6 +96,12 @@ categories above.
 
 ## Upsert Semantics
 
+**Object types carry `status_transitions` since P88-S3.** `ObjectTypeExport` and
+`_OBJECT_TYPE_MUTABLE_FIELDS` lacked them, so a configuration export/import silently dropped every
+status-transition rule. This is the same class of bug P15-S1 found for the classification level, and
+`test_import_and_export_roundtrip_status_transitions` now covers it. An export from an older
+installation without the field imports as "no transitions".
+
 Import matches object types, roles, and (since P14-S5) business calendars by `name` (unique
 within their respective DB schema) — an already-existing name is updated rather than duplicated.
 `approval_config`/`sensor_config` use their owner services' already-existing upsert endpoints

@@ -557,6 +557,36 @@ components no longer pass the user name into them. Super-user activation, approv
 **Fleet view:** below each installation's status it shows "Replikas im erwarteten Bereich" or the
 out-of-range types from the installation's replica summary.
 
+## Object-Type Rules (P88-S3)
+
+`ObjectTypeRules.tsx`, inside `ObjectTypeEditor` after the attributes, edits the three rule kinds the
+constraint engine evaluates. Before, `naming_constraints`/`conditions` were passed through raw, and
+`status_transitions` were not sent at all: `updateObjectType` lacked the field, so every save reset them
+on the server. Both API helpers now send all three, and creating a type can set them too.
+- **Namensregel:**
+  - checkboxes for the attributes a name requires (`mustContain`);
+  - the pattern, with one button per attribute that inserts `{attribute}`;
+  - a sample-name tester. `nameMatchesPattern` mirrors `_validate_naming`: literal text, placeholders
+    match any non-empty text, the extension is ignored.
+  - Undeclared placeholders are named.
+- **Bedingte Pflichtfelder:**
+  - each condition reads as a sentence: "Wenn [Attribut] [Vergleich] [Wert] dann Pflichtfeld
+    [Attribut]", serialized as `{"if": "Betrag >= 10000", "then": "require:Kostenstelle"}`;
+  - only attributes whose name the engine's condition parser can read are offered;
+  - a stored condition the form can't represent stays unchanged and is shown read-only, with a remove
+    button.
+- **Statusübergänge:**
+  - von/nach with the statuses a service actually checks today (`open`, `closed`) suggested through a
+    datalist, free text allowed;
+  - checkboxes for the attributes the transition requires.
+- **Undeclared attributes:** a rule referencing an attribute that is no longer declared shows it as
+  "(nicht deklariert)" instead of dropping it silently.
+- **Client checks before saving** (`rulesError`): incomplete conditions, empty or equal von/nach, and a
+  transition requiring an undeclared attribute (which the server would refuse with `422`).
+
+The page also had a pre-existing 2px overflow at 390px: the layout designer's button row didn't wrap. It
+now wraps.
+
 ## Monitoring Sensors (P88-S2, [ADR 0243](../adr/0243-sensor-group-and-cost-overrides-and-admin-page.md))
 
 `SensorSettings.tsx` (`/sensors/`, under Verwaltung) shows monitoring-service's sensor catalog and its

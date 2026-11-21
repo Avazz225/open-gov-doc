@@ -397,7 +397,9 @@ export function LayoutDesigner() {
                 {t("layoutDesigner.addRow")}
               </button>
 
-              <div className="mt-4 flex gap-3 border-t border-border pt-4">
+              {/* Wraps at narrow widths (P88-S3: "Auf generiertes Layout
+                  zurücksetzen" ran 2px past a 390px viewport). */}
+              <div className="mt-4 flex flex-wrap gap-3 border-t border-border pt-4">
                 <button type="button" onClick={handleSave} className={primaryBtn}>
                   {t("layoutDesigner.save")}
                 </button>

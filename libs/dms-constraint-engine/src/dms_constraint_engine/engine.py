@@ -100,11 +100,24 @@ def _validate_naming(
         errors.append(f"Name {name!r} erfüllt nicht das Namensmuster {pattern!r}")
 
 
-def _evaluate_condition(expression: str, attributes: dict[str, Any]) -> bool:
+CONDITION_OPERATORS = (">=", "<=", "==", "!=", ">", "<")
+REQUIRE_PREFIX = "require:"
+
+
+def parse_condition(expression: str) -> tuple[str, str, str] | None:
+    """`"<attribute> <op> <literal>"` as `(attribute, op, literal)`, or None
+    when the expression can't be evaluated (P88-S3: object-type-service
+    rejects such a condition on save instead of it silently never firing;
+    admin-ui's guided form builds and reads the same shape)."""
     match = _CONDITION_RE.match(expression)
-    if match is None:
+    return match.groups() if match else None
+
+
+def _evaluate_condition(expression: str, attributes: dict[str, Any]) -> bool:
+    parsed = parse_condition(expression)
+    if parsed is None:
         return False
-    attr, op, literal = match.groups()
+    attr, op, literal = parsed
     value = attributes.get(attr)
     if value is None:
         return False
@@ -128,8 +141,8 @@ def _evaluate_condition(expression: str, attributes: dict[str, Any]) -> bool:
 
 
 def _apply_then(action: str, attributes: dict[str, Any], errors: list[str]) -> None:
-    if action.startswith("require:"):
-        required_attr = action.removeprefix("require:").strip()
+    if action.startswith(REQUIRE_PREFIX):
+        required_attr = action.removeprefix(REQUIRE_PREFIX).strip()
         if not attributes.get(required_attr):
             errors.append(f"Bedingte Pflichtangabe fehlt: '{required_attr}'")
 

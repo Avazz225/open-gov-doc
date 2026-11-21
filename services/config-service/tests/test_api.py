@@ -497,6 +497,46 @@ def test_import_object_type_roundtrips_classification_level(authorized_principal
     assert exported["classification_level"] is None
 
 
+def test_import_and_export_roundtrip_status_transitions(authorized_principal):
+    """P88-S3: `status_transitions` were missing from `ObjectTypeExport` and
+    `_OBJECT_TYPE_MUTABLE_FIELDS`, so distributing a configuration silently
+    dropped every status-transition rule - the same class of bug as the
+    classification level above."""
+    type_name = f"config-import-transitions-{uuid.uuid4().hex[:8]}"
+    transitions = [{"from": "open", "to": "closed", "requiredAttributes": ["Abschlussvermerk"]}]
+    payload = {
+        "schema_version": "1.0",
+        "exported_at": "2026-01-01T00:00:00Z",
+        "object_types": [
+            {
+                "name": type_name,
+                "applies_to": "folder",
+                "attributes": [{"name": "Abschlussvermerk", "type": "string"}],
+                "status_transitions": transitions,
+            }
+        ],
+    }
+    with _client() as client:
+        created = client.post(
+            "/config/import", json=payload, headers={"X-DMS-Principal": authorized_principal}
+        )
+        assert created.json()["result"]["results"]["object_types"]["created"] == 1
+        # A second import updates (the update path has its own field list).
+        payload["object_types"][0]["status_transitions"] = [
+            {**transitions[0], "requiredAttributes": []}
+        ]
+        updated = client.post(
+            "/config/import", json=payload, headers={"X-DMS-Principal": authorized_principal}
+        )
+        assert updated.json()["result"]["results"]["object_types"]["updated"] == 1
+        export = client.get("/config/export", params={"categories": "object_types"})
+
+    exported = next(t for t in export.json()["object_types"] if t["name"] == type_name)
+    assert exported["status_transitions"] == [
+        {"from": "open", "to": "closed", "requiredAttributes": []}
+    ]
+
+
 def _dmn_xml(decision_id: str) -> str:
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <definitions xmlns="https://www.omg.org/spec/DMN/20191111/MODEL/"

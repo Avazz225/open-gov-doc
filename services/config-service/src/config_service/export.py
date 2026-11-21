@@ -60,6 +60,7 @@ async def export_object_types(client: ObjectTypeServiceClient) -> list[ObjectTyp
                 naming_constraints=object_type["naming_constraints"],
                 conditions=object_type["conditions"],
                 allowed_parent_types=object_type["allowed_parent_types"],
+                status_transitions=object_type.get("status_transitions", []),
                 icon=object_type["icon"],
                 kennzeichen_format=object_type["kennzeichen_format"],
                 kennzeichen_display_override=object_type["kennzeichen_display_override"],

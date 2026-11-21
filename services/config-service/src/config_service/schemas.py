@@ -40,6 +40,9 @@ class ObjectTypeExport(BaseModel):
     naming_constraints: dict | None = None
     conditions: list[dict] = []
     allowed_parent_types: list[str] | None = None
+    # Status-transition rules (4.5/7.1, ADR 0166) - missing from the export
+    # until P88-S3, so an export/import round trip silently dropped them.
+    status_transitions: list[dict] = []
     icon: str | None = None
     kennzeichen_format: str | None = None
     kennzeichen_display_override: bool | None = None

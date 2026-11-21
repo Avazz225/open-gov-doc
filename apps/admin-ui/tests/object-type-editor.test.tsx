@@ -56,6 +56,7 @@ const RECHNUNG = {
   naming_constraints: { pattern: "{Betrag}" },
   conditions: [{ if: "Betrag > 10000", then: "require:Kostenstelle" }],
   allowed_parent_types: null,
+  status_transitions: [{ from: "open", to: "closed", requiredAttributes: ["Betrag"] }],
   icon: null,
   kennzeichen_format: null,
   kennzeichen_display_override: null,
@@ -117,6 +118,9 @@ describe("ObjectTypeEditor", () => {
         name: "Vertrag",
         appliesTo: "document",
         attributes: [{ name: "Partner", type: "string", required: true }],
+        namingConstraints: null,
+        conditions: [],
+        statusTransitions: [],
         allowedParentTypes: null,
         icon: null,
         kennzeichenFormat: null,
@@ -283,7 +287,9 @@ describe("ObjectTypeEditor", () => {
     expect(createObjectTypeMock).not.toHaveBeenCalled();
   });
 
-  it("loads an existing object type into the form for editing and preserves conditions on save", async () => {
+  // P88-S3: status transitions used to be missing from the update payload,
+  // so every save from this editor wiped them on the server.
+  it("loads an existing object type into the form for editing and preserves all rules on save", async () => {
     updateObjectTypeMock.mockResolvedValue({});
     renderObjectTypeEditor();
     await screen.findByText("Rechnung");
@@ -304,6 +310,7 @@ describe("ObjectTypeEditor", () => {
         attributes: [{ name: "Betrag", type: "decimal", required: true }],
         namingConstraints: { pattern: "{Betrag}" },
         conditions: [{ if: "Betrag > 10000", then: "require:Kostenstelle" }],
+        statusTransitions: [{ from: "open", to: "closed", requiredAttributes: ["Betrag"] }],
         allowedParentTypes: null,
         icon: null,
         kennzeichenFormat: null,

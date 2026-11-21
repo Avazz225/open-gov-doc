@@ -3935,6 +3935,13 @@ installation's replica health.
       series).
 - **P88-S3 — Object-type status transitions.** An editor for `status_transitions`, plus guided forms for
   `naming_constraints`/`conditions` (today passed through raw in `ObjectTypeEditor`).
+  - ✅ **Result:**
+    - `ObjectTypeRules` covers the naming rule (with placeholder buttons and a sample-name tester),
+      conditions as sentences, and status transitions with suggested statuses.
+    - **Two silent data-loss bugs fixed:** the editor's update never sent `status_transitions`, so
+      every save wiped them, and config-service's export/import dropped them.
+    - object-type-service now checks the shape of `naming_constraints`/`conditions` on save, through
+      the engine's new `parse_condition`.
 - **P88-S4 — Mailboxes and realm roles.**
   - mail-connector mailboxes move from env variables to a config API/table: the backend part with
     migration of the existing env config, then the admin page.

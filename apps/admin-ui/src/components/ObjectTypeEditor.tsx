@@ -17,6 +17,14 @@ import {
   type ObjectTypeAttribute,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import {
+  ObjectTypeRules,
+  emptyRules,
+  rulesError,
+  rulesFromObjectType,
+  rulesToPayload,
+  type RulesDraft,
+} from "@/components/ObjectTypeRules";
 
 const ATTRIBUTE_TYPES: AttributeType[] = [
   "string",
@@ -163,6 +171,8 @@ export function ObjectTypeEditor() {
   // `ClassificationLevel` value is an empty string, so it can be used as a
   // sentinel for the empty <select> selection).
   const [classificationLevel, setClassificationLevel] = useState<ClassificationLevel | "">("");
+  // Naming rule, conditions and status transitions (P88-S3).
+  const [rules, setRules] = useState<RulesDraft>(emptyRules());
 
   const reload = useCallback(async () => {
     if (!accessToken) return;
@@ -205,6 +215,7 @@ export function ObjectTypeEditor() {
     setDefaultArchiveAfterDays("");
     setArchiveEncryptionEnabled(false);
     setClassificationLevel("");
+    setRules(emptyRules());
   }
 
   function startEdit(ot: ObjectType) {
@@ -250,6 +261,7 @@ export function ObjectTypeEditor() {
     );
     setArchiveEncryptionEnabled(ot.archive_encryption_enabled);
     setClassificationLevel(ot.classification_level ?? "");
+    setRules(rulesFromObjectType(ot));
     setError(null);
   }
 
@@ -283,6 +295,15 @@ export function ObjectTypeEditor() {
       setError(t("objectTypes.invalidAttributeName"));
       return;
     }
+    const ruleProblem = rulesError(
+      rules,
+      attributes.map((a) => a.name.trim())
+    );
+    if (ruleProblem) {
+      setError(t(ruleProblem.key, ruleProblem.vars));
+      return;
+    }
+    const rulePayload = rulesToPayload(rules);
 
     const backendAttributes = attributes.map(toBackendAttribute);
     const allowedParentTypesArray = allowedParentTypes.size > 0 ? Array.from(allowedParentTypes) : null;
@@ -326,6 +347,7 @@ export function ObjectTypeEditor() {
           name,
           appliesTo,
           attributes: backendAttributes,
+          ...rulePayload,
           allowedParentTypes: allowedParentTypesArray,
           icon: iconValue,
           kennzeichenFormat: kennzeichenFormatValue,
@@ -357,11 +379,9 @@ export function ObjectTypeEditor() {
           }
         }
       } else {
-        const current = objectTypes.find((ot) => ot.id === editingId);
         await updateObjectType(accessToken, editingId, {
           attributes: backendAttributes,
-          namingConstraints: current?.naming_constraints ?? null,
-          conditions: current?.conditions ?? [],
+          ...rulePayload,
           allowedParentTypes: allowedParentTypesArray,
           icon: iconValue,
           kennzeichenFormat: kennzeichenFormatValue,
@@ -695,6 +715,15 @@ export function ObjectTypeEditor() {
           <button type="button" onClick={addAttribute} className={secondaryBtn}>
             {t("objectTypes.addAttribute")}
           </button>
+
+          <ObjectTypeRules
+            rules={rules}
+            onChange={setRules}
+            attributeNames={attributes.map((a) => a.name.trim()).filter(Boolean)}
+            fieldInput={fieldInput}
+            secondaryBtn={secondaryBtn}
+            checkbox={checkbox}
+          />
 
           <h3>{t("objectTypes.allowedParentTypesLabel")}</h3>
           <p className="text-sm opacity-80">{t("objectTypes.allowedParentTypesHint")}</p>

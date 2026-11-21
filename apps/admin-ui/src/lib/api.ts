@@ -818,6 +818,8 @@ export interface ObjectType {
   naming_constraints: Record<string, unknown> | null;
   conditions: Array<Record<string, unknown>>;
   allowed_parent_types: string[] | null;
+  // Status-transition rules (4.5/7.1, ADR 0166), edited since P88-S3.
+  status_transitions: StatusTransitionRule[];
   icon: string | null;
   // Reference number generator (2.2, since P5e-S1/S3) - both are only set
   // for applies_to="document". kennzeichen_display_override is a tri-state:
@@ -845,6 +847,12 @@ export interface ObjectType {
   classification_level: ClassificationLevel | null;
 }
 
+export interface StatusTransitionRule {
+  from: string;
+  to: string;
+  requiredAttributes?: string[];
+}
+
 // The four common German classified-information levels (14.2, P17-S2) -
 // taken verbatim from the concept text, see
 // object-type-service.schemas.ClassificationLevel.
@@ -861,6 +869,9 @@ export async function createObjectType(
     name: string;
     appliesTo: "document" | "folder";
     attributes: ObjectTypeAttribute[];
+    namingConstraints: Record<string, unknown> | null;
+    conditions: Array<Record<string, unknown>>;
+    statusTransitions: StatusTransitionRule[];
     allowedParentTypes: string[] | null;
     icon: string | null;
     kennzeichenFormat: string | null;
@@ -880,6 +891,9 @@ export async function createObjectType(
       name: params.name,
       applies_to: params.appliesTo,
       attributes: params.attributes,
+      naming_constraints: params.namingConstraints,
+      conditions: params.conditions,
+      status_transitions: params.statusTransitions,
       allowed_parent_types: params.allowedParentTypes,
       icon: params.icon,
       kennzeichen_format: params.kennzeichenFormat,
@@ -897,10 +911,11 @@ export async function createObjectType(
 }
 
 // Deliberately no `name`/`appliesTo` in the payload - both are immutable
-// server-side after creation (see object-type-service). `namingConstraints`/
-// `conditions` are passed through unchanged rather than being editable in
-// the guided UI (out of scope for P5b-S3) - without this, saving via this
-// editor would silently reset them to their default.
+// server-side after creation (see object-type-service). The update is a
+// full replacement: every rule field must be sent, or the server resets it
+// to its default. Since P88-S3 the rules are edited in the guided UI
+// (`ObjectTypeRules`); `statusTransitions` was missing here before, so
+// every save from this editor silently wiped them.
 export async function updateObjectType(
   token: string,
   objectTypeId: number,
@@ -908,6 +923,7 @@ export async function updateObjectType(
     attributes: ObjectTypeAttribute[];
     namingConstraints: Record<string, unknown> | null;
     conditions: Array<Record<string, unknown>>;
+    statusTransitions: StatusTransitionRule[];
     allowedParentTypes: string[] | null;
     icon: string | null;
     kennzeichenFormat: string | null;
@@ -930,6 +946,7 @@ export async function updateObjectType(
         attributes: params.attributes,
         naming_constraints: params.namingConstraints,
         conditions: params.conditions,
+        status_transitions: params.statusTransitions,
         allowed_parent_types: params.allowedParentTypes,
         icon: params.icon,
         kennzeichen_format: params.kennzeichenFormat,
