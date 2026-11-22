@@ -39,15 +39,30 @@ took).
 - **Note:** the session scratchpad had been emptied overnight, so files were recreated.
 
 **Planned (user requests 2026-11-22):**
-- **P93-S6:** licence limits visible in the admin UI (usage bars, what an extension would add,
+- **P91-S6:** licence limits visible in the admin UI (usage bars, what an extension would add,
   optional "mit Lizenzerweiterung verfügbar" hints).
-- **Phase 94, performance measurement and a Rust pilot:**
-  - P94-S1 load test with a per-service ranking (CPU and RAM per request, latency share);
-  - P94-S2 ADR 0257 scoping;
-  - P94-S3 pilot on the best candidate, with go/no-go criteria for further services.
-  - Order: 90 → 93 → 91 → 94 → 92.
+- **Phase 93, performance measurement and a Rust pilot:**
+  - P93-S1 load test with a per-service ranking (CPU and RAM per request, latency share);
+  - P93-S2 ADR 0257 scoping;
+  - P93-S3 pilot on the best candidate, with go/no-go criteria for further services.
+  - (Order later settled by renumbering: phases 90–94 now run in numerical order.)
 - **SurrealDB:** checked and deliberately not included (reasons in the plan's "Deliberately Not
   Included").
+
+**Phases renumbered (user request 2026-11-22)** so they run in numerical order:
+
+| Was | Now | Content |
+|---|---|---|
+| 90 | 90 | Collaboration (current) |
+| 93 | 91 | Filing structure & navigation, plus the licence display (P91-S6) |
+| 91 | 92 | Operations & hygiene (tracing, logs, hygiene, migration scoping) |
+| 94 | 93 | Performance measurement & Rust pilot |
+| 92 | 94 | AI admin skill; last, with `graphify update .` at P94-S3 |
+
+- ADR numbers stayed with their sessions (for example 0255 is now P91-S1, 0250 is P92-S1, 0257 is
+  P93-S2, 0253 is P94-S1).
+- Earlier entries in this file were updated to the new numbers, so "P92-S3" now means the hygiene bundle
+  wherever it appears.
 
 **Next session:** P90-S5, embedded-metadata extraction on upload.
 
@@ -96,16 +111,16 @@ took).
 - **Screenshots** of the settings page at 1400/390. The first one showed the role choice stretched by
   the dev stack's roughly 1,500 test role names; it is now capped.
 
-**Planned (user request during this session):** Phase 93, "Filing Structure & Navigation".
+**Planned (user request during this session):** Phase 91, "Filing Structure & Navigation".
 - Enforced filing structure from parent folder classes, with templates and "creation only from
   templates".
 - Upload by right-click. The existing tree view is fine (the user had overlooked it).
 - Folders and documents the caller can't read are hidden from listings. Folder children are not
   permission-filtered today, so this is also an information leak (names of, e.g., isolated teamspace
-  folders); P93-S4.
+  folders); P91-S4.
 - Length limits for admin-ui lists.
 
-It runs after Phase 90 and before 91/92 (order 90 → 93 → 91 → 92); see the plan.
+It runs right after Phase 90; see the plan.
 
 **Next session:** P90-S4, watch subscriptions.
 
@@ -225,7 +240,7 @@ It runs after Phase 90 and before 91/92 (order 90 → 93 → 91 → 92); see the
   - the `dms-db-base` README;
   - `docs/operations/rolling-updates.md` "Database connection budget";
   - ADR 0254;
-  - P91-S1 now carries the open per-request question.
+  - P92-S1 now carries the open per-request question.
 
 **Checks:**
 - permission-service 205 (+3: unregistered deny not cached, registration keeps entries, REST plus
@@ -245,7 +260,7 @@ It runs after Phase 90 and before 91/92 (order 90 → 93 → 91 → 92); see the
     0.93 → 0.5 cores; at most 17 connections checked out; 43 connections at rest (84 before).
   - **The one error:** a gateway 502 after 5 ms without an upstream log entry (keep-alive close).
   - **Remaining:** low-load latency is still about 2× August (`list_folder` 5 → 11 ms, `upload`
-    25 → 42 ms, `download` 10 → 17 ms). Not the cache; recorded for P91-S1 (tracing).
+    25 → 42 ms, `download` 10 → 17 ms). Not the cache; recorded for P92-S1 (tracing).
 - **Phase-close regression: 32/32 green, in three parts.**
   - **Part 1:** the first full run had 23 services green, then stalled in rendering-service. Its
     in-process tests bind the shared durable NATS consumer, which had 159,468 unprocessed messages
@@ -263,7 +278,7 @@ It runs after Phase 90 and before 91/92 (order 90 → 93 → 91 → 92); see the
 
 ---
 
-**Between sessions (2026-11-21): load test and Phase 92 planned.**
+**Between sessions (2026-11-21): load test and Phase 94 planned.**
 
 **Load test** (`loadtest/run.sh`, the same 20-minute profile up to 200 VUs as the baseline run
 `run-20260815T153206Z`; new run `run-20261121T175601Z`; notebook executed headless). Against the
@@ -306,7 +321,7 @@ invalidate on node creation, budget the DB pools against `max_connections`, reru
 
 **Next session (at the time):** P89-S4, then P90-S1; P89-S4 is done, see above.
 
-**Phase 92 planned** (user request): AI-assisted administration. The three sessions are scoping
+**Phase 94 planned** (user request): AI-assisted administration. The three sessions are scoping
 (ADR 0253), build (CLI gaps plus the `skills/og-doc-admin/` skill) and evaluation/customer docs.
 `graphify update .` moves to its end.
 
@@ -362,7 +377,7 @@ invalidate on node creation, budget the DB pools against `max_connections`, reru
 - **Phase-close regression** (`scripts/run-tests.sh`, unfiltered): 32/32 services green on the first
   run; ruff only the known 23 findings, plus the same 4 unformatted files (LibreOffice add-in, loadtest
   notebook, plugin-orchestration, reporting).
-- **Hygiene found (for P91-S3):** permission-service holds about 1,516 roles and about 40
+- **Hygiene found (for P92-S3):** permission-service holds about 1,516 roles and about 40
   `config.import.test.*` approval configs from earlier test runs, besides the Keycloak realm-role debris
   already listed.
 
@@ -555,7 +570,7 @@ closed.**
   examples** for the user to look at (mail goes to mailpit); delete them on the sensors page with
   `admin.monitoring`, or with `DELETE /alert-rules/{id}`.
 - No page overflow at 390px.
-- **Phase-close regression:** 32/32 services green on the first run (auth-service 167 in 18 min, document-service 428, workflow-service 244, permission-service 202, …). ruff shows only 23 known findings in untouched files (the LibreOffice add-in, the loadtest notebook, one line each in plugin-orchestration and reporting), two fewer than the 25 known, through formatting (→ P91-S3).
+- **Phase-close regression:** 32/32 services green on the first run (auth-service 167 in 18 min, document-service 428, workflow-service 244, permission-service 202, …). ruff shows only 23 known findings in untouched files (the LibreOffice add-in, the loadtest notebook, one line each in plugin-orchestration and reporting), two fewer than the 25 known, through formatting (→ P92-S3).
 - **Permissions for the user (at their request, after this session's checks):** their Keycloak account got all 31 `domain-admin-*` roles plus `breakglass-approver` on `root` (32 assignments, none pending four-eyes) and the realm roles `dms-admin`/`dms-poststelle`. Machine roles (`archival-service-callback`, `service-*-lookup`) and test debris were left out.
 - The stack was left running for the user.
 
@@ -638,10 +653,10 @@ new P88-S6, the same split as P88-S4.
     had left 4 `E2E-Installation-*` rows (removed).
 - **Hygiene found:**
   - The dev Keycloak realm holds about 130 test-made realm roles (`auditor-*`,
-    `config-import-realm-role-*`, `realm-role-test-*`); added to P91-S3. Not deleted here.
+    `config-import-realm-role-*`, `realm-role-test-*`); added to P92-S3. Not deleted here.
   - A leftover `e2e-admin-ui-*` user from a rate-limited run was deleted.
 - **Docs:** admin-ui "Mailboxes"/"Realm Roles", mail-connector, the ADR 0244 consequences, the plan
-  (P88-S4b result, P91-S3 realm-role item).
+  (P88-S4b result, P92-S3 realm-role item).
 
 **Checks:**
 - admin-ui vitest 365 (+6 `mailbox-settings`, +4 `realm-role-assignments`; user-management mocks
@@ -662,7 +677,7 @@ new P88-S6, the same split as P88-S4.
 **Last completed:** P88-S4a, mail-connector mailboxes in a table with encrypted credentials
 ([ADR 0244](docs/adr/0244-mail-connector-mailboxes-in-a-table-with-encrypted-credentials.md)). P88-S4
 was split as the plan allowed: S4a backend, S4b admin page plus realm roles.
-- ADR numbers moved again: alerting P88-S5 is now ADR 0245, and the reserved P90/P91 numbers are
+- ADR numbers moved again: alerting P88-S5 is now ADR 0245, and the reserved P90/P92 numbers are
   0246–0251.
 
 **What changed:**
@@ -1008,7 +1023,7 @@ with an external reference system (amendment to
 - **Phase-close regression:** 30/32 services green on the first run. rendering-service had 1 flaky
   test (an asyncio event bound to another loop) and teamspace-service had 1 (a transient 500 from the
   live permission-service during the run). Neither was touched this phase, and both passed
-  unchanged on rerun (103/103, 70/70), so 32/32. ruff shows only the 25 known findings (→ P91-S3).
+  unchanged on rerun (103/103, 70/70), so 32/32. ruff shows only the 25 known findings (→ P92-S3).
 
 The stack was stopped afterwards.
 
@@ -1158,7 +1173,7 @@ scale-down or a rolling restart where the replacements registered before the old
     one's own claim;
   - "Beantragt von" shows names;
   - admin forms before/after.
-- **Phase-close regression 32/32 services green.** ruff shows only the 25 known pre-existing findings (→ P91-S3).
+- **Phase-close regression 32/32 services green.** ruff shows only the 25 known pre-existing findings (→ P92-S3).
 
 The stack was stopped afterwards.
 
@@ -1228,7 +1243,7 @@ comes from the verified principal everywhere).
 - vitest 319/23/64/308; LibreOffice 44; `tsc`/`eslint` clean.
 - e2e 32/32.
 - **Phase-close regression 32/32 services green.**
-- ruff only shows pre-existing files (25, → P91-S3).
+- ruff only shows pre-existing files (25, → P92-S3).
 
 **Open (→ P86-S2):**
 - Recorded actors are principals (a user's `sub`), so the UIs need name display (locks, creators,
@@ -1403,7 +1418,7 @@ closed.**
 
   Both ran green twice afterwards.
 - fleet 42, admin-ui vitest 319, e2e admin-ui 8/8.
-- ruff only shows pre-existing files (→ P91-S3).
+- ruff only shows pre-existing files (→ P92-S3).
 
 **Open (carried over):** reviewer-ui principal names and the `<picture>` check (→ P86-S2). The stack was
 stopped afterwards.
@@ -10734,7 +10749,7 @@ Consolidated at the MVP milestone (P4-S3) — sorted by topic instead of chronol
 > every write route takes the acting identity from the gateway-verified principal. No route reads a
 > body actor field any more, and services acting for a user say so explicitly
 > (`X-DMS-On-Behalf-Of`, audited). Document force-unlock has a real permission check
-> (`admin.document_lock`). The bullets below are historical; P91-S3 rewrites this section.
+> (`admin.document_lock`). The bullets below are historical; P92-S3 rewrites this section.
 
 All previous "sensitive" endpoints share the same gap: the gateway (since P4-S1) only checks whether a valid bearer token is present (**authentication**), never whether the principal is authorized for the specific action (**authorization**). Closing this gap would require the respective backend service to evaluate the identity headers passed through by the gateway (`X-DMS-Principal`/`X-DMS-Username`/`X-DMS-Roles`) — until now **no** service evaluated them. **Broken for exactly one case since P5e-S2**: Document Service checks `X-DMS-Roles` against `dms-admin` before `attributes["Kennzeichen"]` may be changed (see "Reference-Number Generator" below) — deliberately pulled forward as a single case, since the user explicitly wanted immediate enforcement here. **Planning correction after P6-S4**: the original consolidation decision (after P5b-S6) assumed P6-S4 would "introduce a real role/permission check" — what was actually implemented was an **optional** four-eyes mechanism (4.3, see below) that involves a second person in the flow, but is **not** an `X-DMS-Roles` evaluation and by default remains ungated until an action type is explicitly activated. The actual "who is even allowed to initiate/approve" role check for force-unlock/scope locks remains open — only the four-eyes *addition* to it now exists. **A second, real pattern established since P6-S5**: for new checks, `X-DMS-Roles` is no longer evaluated, but a real `permission-service` call against system-native domain-admin roles separate from Keycloak (4.6) — so far for exactly one case (Auth-Service `/users` + Admin-UI, capability `admin.user_management`), see [ADR 0023](docs/adr/0023-superuser-breakglass-and-domain-admin-accounts.md). The two patterns (P5e-S2's `X-DMS-Roles` string comparison vs. P6-S5's `permission-service` check) deliberately coexist unharmonized. **Known gap of the P5e-S2 implementation**: `dms-admin` is only idempotently *created*, the *assignment* to specific users has no API/UI yet (see `docs/services/auth-service.md` "Open Points") — must for now be done via the Keycloak Admin Console.
 - **Document Service force-unlock** (4.3): still no role check; since P6-S4 an optional four-eyes intermediate step can be activated (`PUT /approval-config/document.force_unlock`, off by default), see [ADR 0022](docs/adr/0022-four-eyes-approval-via-events.md).

@@ -3418,7 +3418,7 @@ working in parallel, read-only:
   `approved_by`/`rejected_by` from the body and never compare them with the verified principal, so a
   user can approve their own request under a typed-in name. Force-unlock has no permission check at all.
 - **`PROGRESS.md`'s "Open Decisions" section.** About 38 of its roughly 40 bullets are stale. The section
-  is cleaned up in P91-S3.
+  is cleaned up in P92-S3.
 
 **User decisions taken in this round** (2026-11-20):
 - **Acting identity:** bound to the verified token **everywhere** (Phase 85), not only for four-eyes or
@@ -3443,9 +3443,9 @@ ADR 0239**.
 3. Then the three user-requested UI/fleet/admin initiatives.
 4. Then compliance completions, the new collaboration features, and operations/hygiene last.
 
-`graphify update .` runs once, at the end of this whole plan (end of Phase 92, moved from Phase 91 when
-Phase 92 was added on 2026-11-21). Phase 93, added the same day, runs between 90 and 91, so P92-S3 stays
-the last session. The full backend regression runs at each phase close.
+`graphify update .` runs once, at the end of this whole plan: P94-S3, the last session. Phases 91–94
+were added or reordered on 2026-11-21/22 and renumbered so they run in numerical order. The full backend
+regression runs at each phase close.
 
 ## Phase 84 — Security & Correctness Hardening (cheap, high value)
 
@@ -3544,7 +3544,7 @@ the last session. The full backend regression runs at each phase close.
       earlier tests. It now counts only its own handover's deliveries.
 
     Both services then ran green twice in a row. ruff is down to the pre-existing files only (26
-    errors/9 files, from 28/11; → P91-S3).
+    errors/9 files, from 28/11; → P92-S3).
 
 **Phase 84 result:**
 - The permission-cache race is closed (ADR 0239).
@@ -3712,7 +3712,7 @@ accepted that as a scaffold habit. The user decided to bind all of them to the g
     - LibreOffice add-in 44; `tsc`/`eslint` clean;
     - 16 images rebuilt; e2e 32/32.
   - **Phase-close regression:** **32/32 services green.** ruff only shows the pre-existing files (25
-    errors, from 28 at the start of the plan; → P91-S3).
+    errors, from 28 at the start of the plan; → P92-S3).
 
 **Phase 85 result:** across 54 write routes and about 150 client call sites, the acting identity is
 always the gateway-verified principal. Services acting for a user say so explicitly (`X-DMS-On-Behalf-Of`,
@@ -3872,7 +3872,7 @@ installation's replica health.
     - **Live:** a stuck rollout was cancelled and deleted; a two-step plan went bootstrap → proposal →
       second operator's approval → completed. The e2e leaves the fleet tables empty.
 - **P88-S2 — Monitoring sensors page.** View and change the sensor configuration (`PUT /sensor-config/*`
-  exists), including the cost flags, and the P91-S1 tracing sampling ratio once it exists.
+  exists), including the cost flags, and the P92-S1 tracing sampling ratio once it exists.
   - ✅ **Result** ([ADR 0243](docs/adr/0243-sensor-group-and-cost-overrides-and-admin-page.md)):
     - **Overrides per group and cost class:** `group:<g>` and `cost:cheap|expensive`. The most specific
       setting wins (sensor, group, cost, global). It is resolved in each service's sensors, so
@@ -3881,7 +3881,7 @@ installation's replica health.
       filter, and orphaned overrides. Read-only without `admin.monitoring`.
     - **Live:** with the group "performance" off, license-service's HTTP counter stood still; with a
       sensor override on, it counted again.
-    - The tracing ratio follows with P91-S1.
+    - The tracing ratio follows with P92-S1.
 - **P88-S2b — Sensor catalog extension A–D (user-approved, 2026-11-21).** New sensors after a comparison
   with an external reference system, adapted to the DMS services:
   - **A, licence and capacity:**
@@ -4146,7 +4146,7 @@ sessions found along the way:
       - goodput 80.2 % → 99.97 %;
       - p50 137 → 23.5 ms; p99 1,017 → 447 ms (August 2,012);
       - invalidations 23,464 → 0; hit rate 14 % → 75 %.
-    - **Remaining:** about 2× per-request latency at low load against August. Moved to P91-S1 (tracing).
+    - **Remaining:** about 2× per-request latency at low load against August. Moved to P92-S1 (tracing).
     - **Regression:** 32/32 green, in three parts because of the load-test backlog (see PROGRESS).
 
 **Phase 89 result:**
@@ -4242,11 +4242,11 @@ sessions found along the way:
 
   No code.
 
-## Phase 93 — Filing Structure & Navigation (user request 2026-11-21; runs after Phase 90, before 91)
+## Phase 91 — Filing Structure & Navigation (user request 2026-11-21)
 
-**Execution order:** 90 → **93** → 91 → 92. The number is new, but the phase runs before Operations and
-the AI skill. P92's skill should be able to set up and enforce a filing structure, so this has to exist
-first.
+**Order:** phases 90–94 were renumbered on 2026-11-22 so that they run in numerical order (this phase
+was "93" when added). It comes before Operations and the AI skill, because P94's skill should be able to
+set up and enforce a filing structure.
 
 The user's goals:
 - **Enforced structure:** admins can unify the filing structure organisation-wide and enforce it. The
@@ -4274,7 +4274,7 @@ The user's goals:
   WebDAV/CMIS version batch) through `POST /check/batch`.
 - **Upload** is a toolbar button plus a modal with drag and drop. There is no context-menu entry.
 
-- **P93-S1 — Scoping: enforced filing structure (ADR 0255). No code.**
+- **P91-S1 — Scoping: enforced filing structure (ADR 0255). No code.**
   - **Rule model:**
     - keep the child-side `allowed_parent_types` and add a parent-side view (allowed child folder
       classes, allowed document types per folder class);
@@ -4291,13 +4291,13 @@ The user's goals:
     - who may create them (admin, centrally) and where they are offered;
     - "creation only from templates" as a strictness level;
     - their relation to the eGov package (templates as a config category?).
-- **P93-S2 — Enforced structure, backend.**
+- **P91-S2 — Enforced structure, backend.**
   - The rule model and the strictness from S1 in object-type-service and folder-service, plus
     document-service's document-type check.
   - Every enforcement point S1 lists.
   - The conformity report.
   - Config-package support for the new fields and, if S1 decides so, templates.
-- **P93-S3 — Enforced structure, UI.**
+- **P91-S3 — Enforced structure, UI.**
   - **admin-ui object types:** child classes and document types per folder class, the strictness
     switch, central template management (choosing source folders with a tree picker, not raw ids), and
     the conformity report.
@@ -4306,7 +4306,7 @@ The user's goals:
     - "Struktur aus Vorlage anlegen" from the folder context menu;
     - upload offers only the allowed document types;
     - clear messages when something isn't allowed.
-- **P93-S4 — Hide what the caller can't read; upload by right-click.**
+- **P91-S4 — Hide what the caller can't read; upload by right-click.**
   - **folder-service:** child listings (`/folders/{id}/children`, the root listing, the breadcrumb where
     it applies) filter by `folder.read` per child with one `POST /check/batch`.
   - **document-service:** folder document listings filter by `document.read` the same way, where they
@@ -4321,7 +4321,7 @@ The user's goals:
   - **Upload by right-click:** "Hochladen …" in the folder context menu, into that folder, for list and
     tree. Dropping files onto a folder in the tree is optional.
   - Screenshots at 1400/768/390.
-- **P93-S5 — admin-ui long lists.**
+- **P91-S5 — admin-ui long lists.**
   - An audit of every admin-ui page for unbounded lists. Examples seen this round: approval settings
     with dozens of action types, realm roles, sensors, deletion register, archival transfers, alert
     rules.
@@ -4329,7 +4329,7 @@ The user's goals:
     collapsible groups, and pagination where the backend supports it.
   - Applied page by page, with screenshots at 1400/768/390.
 
-- **P93-S6 — Show licence limits in the admin UI (user request 2026-11-22).**
+- **P91-S6 — Show licence limits in the admin UI (user request 2026-11-22).**
   - **Goal:** an admin should see what the current licence doesn't cover and what an extension would
     add.
   - **What exists:** the licence page (`LicenseStatusView`) lists status, expiry, user model, the
@@ -4345,58 +4345,9 @@ The user's goals:
       upsell hints).
     - The texts live in the product, not in the licence token.
 
-## Phase 94 — Performance Measurement and a Rust Pilot (user request 2026-11-22)
+## Phase 92 — Operations & Hygiene
 
-**Execution order:** 90 → 93 → 91 → **94** → 92. It needs P91-S1's tracing for a per-hop breakdown, and
-P92's admin skill should describe the system as it ends up.
-
-The user's goal is a complete, relative ranking of where the services spend time and resources under
-load. The slowest services would then be migrated to Rust, starting with the slowest, to raise
-throughput per CPU and per GB RAM and lower operating cost.
-
-**The approach is measure, then a pilot, then decide.** Each further service is its own decision backed
-by the pilot's numbers, not a committed rewrite of all of them (see ADR 0257's criteria).
-
-- **P94-S1 — Load test with a per-service ranking.**
-  - Same k6 profile plus a variant that exercises the less-used paths (workflow, search, rendering,
-    OCR, case, mail).
-  - **Per service, from the existing sensors, cadvisor and P91-S1's traces:**
-    - CPU-seconds per 1,000 requests;
-    - RSS at rest and under load;
-    - server-side p50/p99 per route;
-    - share of the end-to-end latency (from the traces);
-    - DB time vs. own compute.
-  - **Output:** a ranking report (relative is enough), by cost per request and by latency share. These
-    are different lists: a service can be slow because it waits on the DB or another service, and a
-    rewrite doesn't fix waiting.
-  - The notebook gains the per-service section.
-- **P94-S2 — Scoping: migrating services to Rust (ADR 0257). No code.**
-  - **Selection:** from S1's ranking, only services where own compute or memory dominates. Not
-    I/O-bound ones, where tuning (queries, caching, batching, pools) is the cheaper fix.
-  - **What a Rust service needs:**
-    - equivalents of the shared Python libraries: db-base with the pool budget, eventbus with NATS
-      durables, metrics with the sensor catalogue and on-scrape samplers, permission client, registry
-      self-registration, settings and logging conventions, acting-identity headers;
-    - for the first service, decide whether to build these as shared crates or per service.
-  - **Contract:** identical HTTP API, events and DB schema. The service's existing pytest API suite
-    runs unchanged against the Rust container as the conformance test, so the migration can be
-    verified without rewriting tests.
-  - **Rollout:** per service behind the same registry/gateway name, Helm image switch, rollback by
-    image.
-  - **Decision criteria for continuing after the pilot:** measured CPU and RAM per 1,000 requests
-    (say ≥ 2× better, or a threshold the ADR sets), plus the cost of a second language in build, CI,
-    on-call and hiring.
-- **P94-S3 — Rust pilot.** The highest-ranked suitable service from S1/S2:
-  - likely candidates are the gateway (every request passes through it, thin logic) or
-    permission-service (CPU-bound recomputation, on every request path);
-  - rebuilt in Rust against its unchanged pytest suite;
-  - the S1 load test run again;
-  - before/after per CPU and GB; a go/no-go for further services in the ADR.
-- **Further sessions:** one per service, only if the pilot meets the criteria, in ranking order.
-
-## Phase 91 — Operations & Hygiene
-
-- **P91-S1 — Distributed tracing (Konzept §10.1).**
+- **P92-S1 — Distributed tracing (Konzept §10.1).**
   - Call `dms_common.otel.configure_tracing()` from every service's startup, with FastAPI and httpx
     instrumentation and trace propagation through NATS headers.
   - An OTLP collector plus Tempo (or Jaeger) in compose and the Helm chart, a Grafana datasource, and the
@@ -4406,9 +4357,9 @@ by the pilot's numbers, not a committed rewrite of all of them (see ADR 0257's c
     and download are still about 2× the August times (5 → 11 ms, 25 → 42 ms, 10 → 17 ms). Break one
     request of each down per hop (gateway, service, permission check, DB, storage) and name what grew
     since August.
-- **P91-S2 — Central log aggregation (§10.1).** Loki plus promtail (or Alloy) in compose and Helm, with
+- **P92-S2 — Central log aggregation (§10.1).** Loki plus promtail (or Alloy) in compose and Helm, with
   the JSON logs that already exist and a Grafana datasource. Trace-id ↔ log correlation with S1.
-- **P91-S3 — Hygiene bundle.**
+- **P92-S3 — Hygiene bundle.**
   - ruff fully green: run `ruff format`, wrap the 12 long lines in the LibreOffice add-in, exclude
     `loadtest/notebook/*.ipynb`.
   - SBOM generation: CycloneDX for Python and npm, as a script and CI step.
@@ -4425,13 +4376,62 @@ by the pilot's numbers, not a committed rewrite of all of them (see ADR 0257's c
     `config.import.test.*` approval configs (several with `requires_approval: true`) left by test runs.
     Same treatment: the tests clean up after themselves, and the existing debris is removed once
     (roles have no delete endpoint today, so this needs one or a direct cleanup).
-- **P91-S4 — Scoping: database schema migrations (ADR 0251).** Today schemas evolve through
+- **P92-S4 — Scoping: database schema migrations (ADR 0251).** Today schemas evolve through
   `create_all` plus ad-hoc `ALTER TABLE … IF NOT EXISTS` at startup. Options: Alembic per service,
   formalizing the current pattern, or accepting it, judged against fleet rolling updates and the
-  Helm upgrade path. No code. Phase-close regression for Phase 91. (`graphify update .` moved to the end
-  of Phase 92.)
+  Helm upgrade path. No code. Phase-close regression for Phase 92. (`graphify update .` moved to the end
+  of Phase 94.)
 
-## Phase 92 — AI-Assisted Administration (user request 2026-11-21)
+## Phase 93 — Performance Measurement and a Rust Pilot (user request 2026-11-22)
+
+**Order:** after Phase 92, since it needs P92-S1's tracing for a per-hop breakdown; before Phase 94,
+whose admin skill should describe the system as it ends up. (Added as "94", renumbered 2026-11-22.)
+
+The user's goal is a complete, relative ranking of where the services spend time and resources under
+load. The slowest services would then be migrated to Rust, starting with the slowest, to raise
+throughput per CPU and per GB RAM and lower operating cost.
+
+**The approach is measure, then a pilot, then decide.** Each further service is its own decision backed
+by the pilot's numbers, not a committed rewrite of all of them (see ADR 0257's criteria).
+
+- **P93-S1 — Load test with a per-service ranking.**
+  - Same k6 profile plus a variant that exercises the less-used paths (workflow, search, rendering,
+    OCR, case, mail).
+  - **Per service, from the existing sensors, cadvisor and P92-S1's traces:**
+    - CPU-seconds per 1,000 requests;
+    - RSS at rest and under load;
+    - server-side p50/p99 per route;
+    - share of the end-to-end latency (from the traces);
+    - DB time vs. own compute.
+  - **Output:** a ranking report (relative is enough), by cost per request and by latency share. These
+    are different lists: a service can be slow because it waits on the DB or another service, and a
+    rewrite doesn't fix waiting.
+  - The notebook gains the per-service section.
+- **P93-S2 — Scoping: migrating services to Rust (ADR 0257). No code.**
+  - **Selection:** from S1's ranking, only services where own compute or memory dominates. Not
+    I/O-bound ones, where tuning (queries, caching, batching, pools) is the cheaper fix.
+  - **What a Rust service needs:**
+    - equivalents of the shared Python libraries: db-base with the pool budget, eventbus with NATS
+      durables, metrics with the sensor catalogue and on-scrape samplers, permission client, registry
+      self-registration, settings and logging conventions, acting-identity headers;
+    - for the first service, decide whether to build these as shared crates or per service.
+  - **Contract:** identical HTTP API, events and DB schema. The service's existing pytest API suite
+    runs unchanged against the Rust container as the conformance test, so the migration can be
+    verified without rewriting tests.
+  - **Rollout:** per service behind the same registry/gateway name, Helm image switch, rollback by
+    image.
+  - **Decision criteria for continuing after the pilot:** measured CPU and RAM per 1,000 requests
+    (say ≥ 2× better, or a threshold the ADR sets), plus the cost of a second language in build, CI,
+    on-call and hiring.
+- **P93-S3 — Rust pilot.** The highest-ranked suitable service from S1/S2:
+  - likely candidates are the gateway (every request passes through it, thin logic) or
+    permission-service (CPU-bound recomputation, on every request path);
+  - rebuilt in Rust against its unchanged pytest suite;
+  - the S1 load test run again;
+  - before/after per CPU and GB; a go/no-go for further services in the ADR.
+- **Further sessions:** one per service, only if the pilot meets the criteria, in ranking order.
+
+## Phase 94 — AI-Assisted Administration (user request 2026-11-21)
 
 The user's goal: an AI skill that helps a customer configure and administer OG Doc by hiding
 complexity. Configuration is spread over many services, many categories, four-eyes rules and domain
@@ -4442,7 +4442,7 @@ reviewable change.
 Distinct from Phase 76's open "AI features" candidate, which is about end-user document features (still
 unchosen).
 
-- **P92-S1 — Scoping: the admin skill (ADR 0253). No code.**
+- **P94-S1 — Scoping: the admin skill (ADR 0253). No code.**
   - **Format:**
     - An Agent Skill (`SKILL.md` plus reference files and scripts), so it works with Claude Code and the
       Agent SDK.
@@ -4469,7 +4469,7 @@ unchosen).
     jobs, alarms, licence.
   - **Knowledge:** which docs the skill carries (condensed references, not the 90-phase history) and how
     it stays current with the code.
-- **P92-S2 — Build: CLI gaps and the skill package.**
+- **P94-S2 — Build: CLI gaps and the skill package.**
   - The missing CLI commands from S1's inventory (with tests).
   - `skills/og-doc-admin/`:
     - `SKILL.md` (when to use it, the safety rules, the workflow);
@@ -4478,7 +4478,7 @@ unchosen).
     - recipes for the task catalogue;
     - helper scripts where a step is mechanical (for example building a package fragment and running
       compare).
-- **P92-S3 — Evaluation and customer documentation.**
+- **P94-S3 — Evaluation and customer documentation.**
   - A scenario set (the task catalogue plus diagnosis cases and a few "should refuse or ask"
     cases), run with an agent against the dev stack, iterating the skill until the scenarios pass.
   - A customer-facing guide: setup (CLI login, the roles the skill's account needs), what it can and
@@ -4530,7 +4530,7 @@ unchosen).
 - **Environment-blocked:** real Office/LibreOffice hosts, real GUI WebDAV/CMIS clients, a real k8s
   cluster, a second installation for migration/federation, and ClamAV signature access.
 
-## Definition of Done for Phases 84–92 (unchanged, `CONTRIBUTING.md`)
+## Definition of Done for Phases 84–94 (unchanged, `CONTRIBUTING.md`)
 
 - Tests green.
 - `docs/services/*.md` current.
@@ -4540,7 +4540,7 @@ unchosen).
 - Real browser verification with screenshots for every UI-visible change (390/768/1400 for layout
   changes, as in Phase 83).
 - Full backend regression (`scripts/run-tests.sh`, with `~/.local/bin` on PATH) once per phase close.
-- `graphify update .` only at the end of the whole plan (P92-S3, moved from P91-S4).
+- `graphify update .` only at the end of the whole plan (P94-S3, moved from P92-S4).
 - Scoping sessions produce an ADR and no code diff; `PROGRESS.md` marks them "Scoping, kein Feature".
 
 ---
