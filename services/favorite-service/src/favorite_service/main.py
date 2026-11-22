@@ -14,12 +14,13 @@ from dms_metrics_client import (
     http_sensor_declarations,
     metrics_payload,
 )
+from dms_permission_client import PermissionServiceClient
 from dms_registry_client import maybe_start_registration
 from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from favorite_service import reminders, repository
+from favorite_service import reminders, repository, watch_consumer, watches
 from favorite_service.models import Base, Reminder
 from favorite_service.schemas import (
     FavoriteCreate,
@@ -28,6 +29,8 @@ from favorite_service.schemas import (
     ReminderOut,
     ReminderSnooze,
     ReminderUpdate,
+    WatchCreate,
+    WatchOut,
 )
 from favorite_service.settings import Settings
 
@@ -56,6 +59,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await event_bus.connect()
     app.state.event_bus = event_bus
 
+    # Watch subscriptions (P90-S4, ADR 0256).
+    app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
+    if settings.watch_consumer_enabled:
+        await watch_consumer.start_consuming(
+            event_bus,
+            settings.watch_subjects,
+            session_factory=app.state.session_factory,
+            can_read=watch_consumer.ReadChecker(app.state.permission_client),
+            publish_event=publish_event,
+        )
+
     registration = await maybe_start_registration(
         registry_service_base_url=settings.registry_service_base_url,
         self_address=settings.self_address,
@@ -81,6 +95,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if registration:
         await registration.stop()
     await event_bus.close()
+    await app.state.permission_client.close()
     await engine.dispose()
 
 
@@ -420,3 +435,86 @@ async def delete_reminder(
     await session.delete(reminder)
     await session.commit()
     await _publish_reminder("favorite.reminder.deleted", reminder)
+
+
+# --- Watch subscriptions (P90-S4, ADR 0256) ----------------------------------
+
+
+@app.post("/watches", response_model=WatchOut, status_code=status.HTTP_201_CREATED)
+async def create_watch(
+    payload: WatchCreate,
+    session: AsyncSession = Depends(get_session),
+    x_dms_username: str = Header(default=""),
+    x_dms_principal: str = Header(default=""),
+) -> WatchOut:
+    """Watching needs read access to the object (403 otherwise) - the same
+    check runs again before every notification."""
+    _require_own_user_id(payload.user_id, x_dms_username)
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="X-DMS-Principal fehlt")
+    allowed = await watch_consumer.ReadChecker(app.state.permission_client)(
+        x_dms_principal, payload.object_type, [payload.object_id]
+    )
+    if not allowed.get(payload.object_id, False):
+        raise HTTPException(status_code=403, detail="Kein Leserecht auf dieses Objekt")
+    try:
+        watch = await watches.create_watch(
+            session,
+            user_id=payload.user_id,
+            principal_id=x_dms_principal,
+            object_type=payload.object_type,
+            object_id=payload.object_id,
+            now=reminders.utcnow(),
+        )
+    except watches.DuplicateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await session.commit()
+    await publish_event(
+        "favorite.watch.added",
+        subject=watch.id,
+        payload={
+            "user_id": watch.user_id,
+            "object_type": watch.object_type,
+            "object_id": watch.object_id,
+        },
+        actor=watch.user_id,
+    )
+    return watch
+
+
+@app.get("/watches", response_model=list[WatchOut])
+async def list_watches(
+    user_id: str,
+    object_type: str | None = None,
+    object_id: str | None = None,
+    session: AsyncSession = Depends(get_session),
+    x_dms_username: str = Header(default=""),
+) -> list[WatchOut]:
+    _require_own_user_id(user_id, x_dms_username)
+    return await watches.list_watches(
+        session, user_id=user_id, object_type=object_type, object_id=object_id
+    )
+
+
+@app.delete("/watches", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_watch(
+    user_id: str,
+    object_type: str,
+    object_id: str,
+    session: AsyncSession = Depends(get_session),
+    x_dms_username: str = Header(default=""),
+) -> None:
+    _require_own_user_id(user_id, x_dms_username)
+    try:
+        await watches.delete_watch(
+            session, user_id=user_id, object_type=object_type, object_id=object_id
+        )
+    except watches.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await session.commit()
+    await publish_event(
+        "favorite.watch.removed",
+        subject=object_id,
+        payload={"user_id": user_id, "object_type": object_type, "object_id": object_id},
+        actor=user_id,
+    )

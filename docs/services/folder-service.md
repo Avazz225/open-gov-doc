@@ -157,6 +157,7 @@ Publishes (stream `folder`, `ensure_stream=True`) exactly the contract the Permi
 |---|---|
 | `folder.resource.created` | `{resource_id, parent_id, resource_type: "folder"}` |
 | `folder.resource.moved` | `{resource_id, new_parent_id}` (only if `parent_id` actually changes) |
+| `folder.updated` | `{name, changed_fields}` on a rename or attribute change (**since P90-S4**, [ADR 0256](../adr/0256-watch-subscriptions-in-favorite-service.md)). Before, such a change published nothing; watchers and the audit trail use it. A pure move publishes only `folder.resource.moved` |
 | `folder.resource.deleted` | `{resource_id}` — since **Phase 44 Session 2** ([ADR 0163](../adr/0163-teamspace-folder-delete-permission-and-orphan-resource-cleanup.md)), published from every real hard-delete path (the direct `DELETE /folders/{id}` fallback, manual purge, retention-poll-driven forced deletion/trash-expiry purge, restore-reconciliation) — previously only the first of these five |
 | `folder.trashed` | `{deleted_by}` (5.2, since P7-S1b) |
 | `folder.restored` | `{}` (5.2, since P7-S1b) |

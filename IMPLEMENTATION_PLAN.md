@@ -4212,7 +4212,20 @@ sessions found along the way:
     - **Live:** mail to a temporary approver via the default role.
 - **P90-S4 — Watch subscriptions.** Subscribe to a document or folder (and optionally a workflow
   instance), and get notified on new version, metadata change, move, or delete. Backend events are
-  already published. favorite-service's "watchlist" wording finally means watching. ADR 0247.
+  already published. favorite-service's "watchlist" wording finally means watching. ADR 0247 (became
+  ADR 0256: 0247 went to P90-S3).
+  - ✅ **Result:**
+    - **favorite-service:** `watch` table (with the subscriber's principal id for read checks).
+      `/watches` CRUD with a read check on subscribe.
+    - **Matching:** a document/folder event consumer (durable per stream, `deliver_new`) matches
+      changes, including new or moved-in documents in a watched folder. It skips the actor, re-checks
+      read access per watcher (deletions exempt) and publishes `favorite.watch.triggered`.
+    - **folder-service** publishes the missing `folder.updated`.
+    - **notification-service:** in-app plus mail with a link.
+    - **user-ui:** "beobachten" in the context menus and "Beobachtet" in the favorites view (rows now
+      wrap at 390).
+    - **Live:** two mails for an upload and a rename.
+
 - **P90-S5 — Embedded-metadata extraction on upload.** Copy PDF info/XMP and Office core properties into
   document attributes, configured per object type (source property → attribute, overwrite policy). An
   admin UI mapping in the object-type editor.
@@ -4316,6 +4329,71 @@ The user's goals:
     collapsible groups, and pagination where the backend supports it.
   - Applied page by page, with screenshots at 1400/768/390.
 
+- **P93-S6 — Show licence limits in the admin UI (user request 2026-11-22).**
+  - **Goal:** an admin should see what the current licence doesn't cover and what an extension would
+    add.
+  - **What exists:** the licence page (`LicenseStatusView`) lists status, expiry, user model, the
+    user/storage/document limits and `licensed_components`. The registry hides unlicensed components
+    (registry `licensing.py`).
+  - **New:**
+    - Usage against each limit as a bar with the remaining headroom (warning near the limit).
+    - A list of the components and features the installation could run but the licence doesn't cover
+      (from the registry's component catalogue minus `licensed_components`), each with a one-line
+      benefit.
+    - At the places where an unlicensed feature would appear (sidebar entries, buttons), a muted
+      "mit Lizenzerweiterung verfügbar" instead of nothing, configurable (some operators won't want
+      upsell hints).
+    - The texts live in the product, not in the licence token.
+
+## Phase 94 — Performance Measurement and a Rust Pilot (user request 2026-11-22)
+
+**Execution order:** 90 → 93 → 91 → **94** → 92. It needs P91-S1's tracing for a per-hop breakdown, and
+P92's admin skill should describe the system as it ends up.
+
+The user's goal is a complete, relative ranking of where the services spend time and resources under
+load. The slowest services would then be migrated to Rust, starting with the slowest, to raise
+throughput per CPU and per GB RAM and lower operating cost.
+
+**The approach is measure, then a pilot, then decide.** Each further service is its own decision backed
+by the pilot's numbers, not a committed rewrite of all of them (see ADR 0257's criteria).
+
+- **P94-S1 — Load test with a per-service ranking.**
+  - Same k6 profile plus a variant that exercises the less-used paths (workflow, search, rendering,
+    OCR, case, mail).
+  - **Per service, from the existing sensors, cadvisor and P91-S1's traces:**
+    - CPU-seconds per 1,000 requests;
+    - RSS at rest and under load;
+    - server-side p50/p99 per route;
+    - share of the end-to-end latency (from the traces);
+    - DB time vs. own compute.
+  - **Output:** a ranking report (relative is enough), by cost per request and by latency share. These
+    are different lists: a service can be slow because it waits on the DB or another service, and a
+    rewrite doesn't fix waiting.
+  - The notebook gains the per-service section.
+- **P94-S2 — Scoping: migrating services to Rust (ADR 0257). No code.**
+  - **Selection:** from S1's ranking, only services where own compute or memory dominates. Not
+    I/O-bound ones, where tuning (queries, caching, batching, pools) is the cheaper fix.
+  - **What a Rust service needs:**
+    - equivalents of the shared Python libraries: db-base with the pool budget, eventbus with NATS
+      durables, metrics with the sensor catalogue and on-scrape samplers, permission client, registry
+      self-registration, settings and logging conventions, acting-identity headers;
+    - for the first service, decide whether to build these as shared crates or per service.
+  - **Contract:** identical HTTP API, events and DB schema. The service's existing pytest API suite
+    runs unchanged against the Rust container as the conformance test, so the migration can be
+    verified without rewriting tests.
+  - **Rollout:** per service behind the same registry/gateway name, Helm image switch, rollback by
+    image.
+  - **Decision criteria for continuing after the pilot:** measured CPU and RAM per 1,000 requests
+    (say ≥ 2× better, or a threshold the ADR sets), plus the cost of a second language in build, CI,
+    on-call and hiring.
+- **P94-S3 — Rust pilot.** The highest-ranked suitable service from S1/S2:
+  - likely candidates are the gateway (every request passes through it, thin logic) or
+    permission-service (CPU-bound recomputation, on every request path);
+  - rebuilt in Rust against its unchanged pytest suite;
+  - the S1 load test run again;
+  - before/after per CPU and GB; a go/no-go for further services in the ADR.
+- **Further sessions:** one per service, only if the pilot meets the criteria, in ranking order.
+
 ## Phase 91 — Operations & Hygiene
 
 - **P91-S1 — Distributed tracing (Konzept §10.1).**
@@ -4408,6 +4486,23 @@ unchosen).
   - **This is the last session of the plan:** phase-close regression, then `graphify update .` once.
 
 ## Deliberately Not Included in This Plan
+
+- **SurrealDB as a second or replacement database (user question 2026-11-22, checked).**
+  - **The speed claim isn't established for this kind of workload:**
+    - SurrealDB's own 3.x benchmarks report about 1.3–1.8× Postgres on single-record creates, updates
+      and deletes, with Postgres ahead on reads and indexed filtering.
+    - Its own 4.0 comparison appears to show it about 12% slower than PostgreSQL 18 on mean CRUD.
+    - An independent user report via its PostgreSQL dialect found reads 7× to over 3,000× slower.
+  - **The DB isn't the bottleneck here:** at 200 VUs Postgres used about 0.26 cores. The problems found
+    were connection counts and permission-cache logic (ADR 0254).
+  - **A migration would touch every service's data layer:**
+    - SQLAlchemy/asyncpg, `ON CONFLICT`, advisory locks, JSON columns, the generation counter;
+    - the backup/PITR/WAL-archiving and restore reconciliation built around Postgres (10.4);
+    - Helm and external-DB operation.
+  - **Licence:** the Business Source License, which allows self-hosting but forbids offering it as a
+    database service without an agreement.
+  - **Verdict:** not a phase. Revisit only with a concrete workload where Postgres is measured to be the
+    limit, for example graph-heavy relation queries.
 
 - **Phase 76's three candidates (ERP connector, native mobile client, AI features).** Still unbuilt and
   still the user's open choice. This round's feature slots went to the comparison findings above.

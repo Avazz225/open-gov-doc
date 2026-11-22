@@ -584,6 +584,16 @@ It offers:
 - **e2e:** `e2e/reminders.spec.ts` sets a due reminder from a folder's context menu, sees the badge and
   the due row, then snoozes, completes and deletes it, with screenshots at 1400/768/390.
 
+## Watch subscriptions (P90-S4, [ADR 0256](../adr/0256-watch-subscriptions-in-favorite-service.md))
+
+- **Context menu:** documents and folders have ""…" beobachten"/"nicht mehr beobachten" (ExplorerPane
+  loads the caller's watches like its favorites).
+- **Favorites view:** a "Beobachtet" section with open and stop watching.
+- **Layout fix:** the favorites view's rows now wrap name and buttons. The shared `.entry-row` let them
+  overlap at 390 px, which was already the case for favorites before.
+- **Quotes:** the new context-menu labels (and P90-S2's reminder entry) use the same straight quotes as
+  the existing entries.
+
 ## Theming (Concept 8, since P4-S6)
 
 `src/lib/theme-context.tsx` (`ThemeProvider`/`useTheme()`): light/dark/high-contrast/automatic, toggled via the `ThemeSwitcher` in the header's account menu (the `IconRail`'s settings popover until P86-S1). Stored cross-device on the user account (`GET/PUT /api/auth-service/me/preferences`), see [ADR 0009](../adr/0009-cross-ui-theming-profile-persistence.md) for the reasoning (Keycloak attribute instead of a new persistence building block) and the pitfall found in the process (declarative user profile silently discards undeclared attributes). `localStorage` (`dms.theme`) serves as an immediately available cache, among other things so that the login page also has a theme without a session. `data-theme` on `<html>` controls the entire stylesheet via CSS variables (`--dms-bg`, `--dms-fg`, `--dms-border`, `--dms-accent`, ...) (`globals.css`).

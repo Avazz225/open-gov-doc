@@ -106,6 +106,9 @@ class Settings(BaseServiceSettings):
         # Approver notification (P90-S3, ADR 0247) - fourth subject on the
         # "permission" stream, own durable name.
         "permission.approval.requested",
+        # Watch subscriptions (P90-S4, ADR 0256) - second subject on the
+        # "favorite" stream, own durable name.
+        "favorite.watch.triggered",
     ]
 
     # Recipient of the optional security notification on break-glass

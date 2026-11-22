@@ -116,6 +116,11 @@ EMAIL_TEMPLATE_USE_CASES: list[dict[str, object]] = [
         "placeholders": ["document_id", "released_by", "reason", "link"],
     },
     {
+        "use_case": "favorite.watch.triggered",
+        "description": "Beobachtetes Dokument/beobachteter Ordner geändert (P90-S4)",
+        "placeholders": ["change", "object_type", "object_id", "title", "changed_by", "link"],
+    },
+    {
         "use_case": "permission.approval.requested",
         "description": "Neue Vier-Augen-Genehmigungsanfrage an die Freigabe-Berechtigten (P90-S3)",
         "placeholders": ["action_type", "initiated_by", "request_id", "link", "recipient_name"],

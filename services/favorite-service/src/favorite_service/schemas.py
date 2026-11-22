@@ -69,3 +69,24 @@ class ReminderOut(BaseModel):
     is_due: bool = False
 
     model_config = {"from_attributes": True}
+
+
+WatchObjectType = Literal["document", "folder"]
+
+
+class WatchCreate(BaseModel):
+    """P90-S4 (ADR 0256). `user_id` must be the caller's own user name."""
+
+    user_id: str
+    object_type: WatchObjectType
+    object_id: str
+
+
+class WatchOut(BaseModel):
+    id: str
+    user_id: str
+    object_type: WatchObjectType
+    object_id: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}

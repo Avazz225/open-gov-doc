@@ -2061,6 +2061,46 @@ export async function removeFavorite(
   await request("favorite-service", `favorites?${query.toString()}`, { method: "DELETE" }, token);
 }
 
+// Watch subscriptions (P90-S4, ADR 0256) - told when a watched document or
+// folder changes. favorite-service checks read access when subscribing (403
+// otherwise) and again before every notification.
+export type WatchObjectType = "document" | "folder";
+
+export interface Watch {
+  id: string;
+  user_id: string;
+  object_type: WatchObjectType;
+  object_id: string;
+  created_at: string;
+}
+
+export async function listWatches(token: string, userId: string): Promise<Watch[]> {
+  const query = new URLSearchParams({ user_id: userId });
+  const response = await request("favorite-service", `watches?${query.toString()}`, {}, token);
+  return response.json();
+}
+
+export async function addWatch(
+  token: string,
+  params: { user_id: string; object_type: WatchObjectType; object_id: string }
+): Promise<Watch> {
+  const response = await request(
+    "favorite-service",
+    "watches",
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(params) },
+    token
+  );
+  return response.json();
+}
+
+export async function removeWatch(
+  token: string,
+  params: { user_id: string; object_type: WatchObjectType; object_id: string }
+): Promise<void> {
+  const query = new URLSearchParams(params);
+  await request("favorite-service", `watches?${query.toString()}`, { method: "DELETE" }, token);
+}
+
 // Follow-up reminders (Wiedervorlagen, P90-S1/S2, ADR 0246) - personal, in
 // favorite-service, owner-checked by user name like favorites. `due_at` is
 // always sent with a time zone (ISO with "Z").

@@ -55,3 +55,22 @@ class Reminder(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class Watch(Base):
+    """Watch subscription (P90-S4, ADR 0256): a person is told when a watched
+    document or folder changes. Personal like a favorite (keyed by user name,
+    owner check), one per object. `principal_id` (the gateway-verified
+    `X-DMS-Principal` at subscription time) is what the read check before
+    every notification runs against - permissions are keyed by principal id,
+    not by user name."""
+
+    __tablename__ = "watch"
+    __table_args__ = (UniqueConstraint("user_id", "object_type", "object_id"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(String(255))
+    principal_id: Mapped[str] = mapped_column(String(128))
+    object_type: Mapped[str] = mapped_column(String(16))  # "document" | "folder"
+    object_id: Mapped[str] = mapped_column(String(128), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

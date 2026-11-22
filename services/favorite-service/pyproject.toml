@@ -11,11 +11,13 @@ dependencies = [
     "dms-eventbus-client",
     "dms-registry-client",
     "dms-metrics-client",
+    "dms-permission-client",
 ]
 
 [tool.uv.sources]
 dms-common = { workspace = true }
 dms-db-base = { workspace = true }
+dms-permission-client = { workspace = true }
 dms-eventbus-client = { workspace = true }
 dms-registry-client = { workspace = true }
 dms-metrics-client = { workspace = true }

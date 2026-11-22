@@ -808,6 +808,20 @@ async def update_folder(
             payload={"resource_id": folder.id, "new_parent_id": folder.parent_id},
             actor=x_dms_principal,
         )
+    # P90-S4 (ADR 0256): a rename or attribute change published nothing, so
+    # nobody watching the folder (and no audit consumer) could see it.
+    changed = [
+        field
+        for field, value in (("name", payload.name), ("attributes", payload.attributes))
+        if value is not None
+    ]
+    if changed:
+        await publish_event(
+            "folder.updated",
+            subject=folder.id,
+            payload={"name": folder.name, "changed_fields": changed},
+            actor=x_dms_principal,
+        )
     return folder
 
 

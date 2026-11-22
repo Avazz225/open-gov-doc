@@ -145,7 +145,10 @@
     "copyLink": "Link zu \"{name}\" kopieren",
     "linkCopied": "Link in die Zwischenablage kopiert.",
     "linkCopyError": "Link konnte nicht kopiert werden.",
-    "setReminder": "Wiedervorlage für „{name}“ …"
+    "setReminder": "Wiedervorlage für \"{name}\" …",
+    "watch": "\"{name}\" beobachten",
+    "unwatch": "\"{name}\" nicht mehr beobachten",
+    "watchError": "Beobachten konnte nicht geändert werden."
   },
   "metadata": {
     "paneLabel": "Metadaten",
@@ -320,7 +323,12 @@
     "unresolvedName": "(nicht mehr verfügbar)",
     "open": "Öffnen",
     "remove": "Entfernen",
-    "markerLabel": "Favorit"
+    "markerLabel": "Favorit",
+    "watchedHeading": "Beobachtet",
+    "watchedHint": "Bei Änderungen (neue Version, Metadaten, verschoben, gelöscht; bei Ordnern auch neue Dokumente) bekommen Sie eine Benachrichtigung, bei hinterlegter Adresse auch per Mail.",
+    "watchedEmpty": "Nichts beobachtet. „Beobachten“ gibt es im Kontextmenü von Dokumenten und Ordnern.",
+    "unwatch": "Nicht mehr beobachten",
+    "unwatchError": "Beobachtung konnte nicht beendet werden."
   },
   "teamspaces": {
     "paneLabel": "Team-Arbeitsbereiche",

@@ -16,6 +16,9 @@ os.environ["DMS_POSTGRES_DSN"] = DSN
 # P90-S1: the reminder poll must not race the tests that drive
 # `run_reminder_tick` themselves.
 os.environ["DMS_REMINDER_POLL_INITIAL_DELAY_SECONDS"] = "3600"
+# P90-S4: tests drive the watch matching directly; the durable consumers of a
+# running stack stay untouched.
+os.environ["DMS_WATCH_CONSUMER_ENABLED"] = "false"
 
 
 @pytest.fixture(autouse=True)
@@ -26,6 +29,7 @@ async def _clean_tables():
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text("TRUNCATE favorite.favorite CASCADE"))
         await conn.execute(text("TRUNCATE favorite.reminder"))
+        await conn.execute(text("TRUNCATE favorite.watch"))
     await eng.dispose()
     yield
 

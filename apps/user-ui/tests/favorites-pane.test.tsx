@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FavoritesPane } from "@/components/FavoritesPane";
@@ -9,6 +9,8 @@ const getDocumentMock = vi.fn();
 const getFolderMock = vi.fn();
 const getCaseMock = vi.fn();
 const removeFavoriteMock = vi.fn();
+const listWatchesMock = vi.fn();
+const removeWatchMock = vi.fn();
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
@@ -19,6 +21,8 @@ vi.mock("@/lib/api", async () => {
     getFolder: (...args: unknown[]) => getFolderMock(...args),
     getCase: (...args: unknown[]) => getCaseMock(...args),
     removeFavorite: (...args: unknown[]) => removeFavoriteMock(...args),
+    listWatches: (...args: unknown[]) => listWatchesMock(...args),
+    removeWatch: (...args: unknown[]) => removeWatchMock(...args),
   };
 });
 
@@ -43,6 +47,32 @@ describe("FavoritesPane", () => {
     getFolderMock.mockReset();
     getCaseMock.mockReset();
     removeFavoriteMock.mockReset();
+    listWatchesMock.mockReset().mockResolvedValue([]);
+    removeWatchMock.mockReset().mockResolvedValue(undefined);
+  });
+
+  it("lists watched objects and stops watching one (P90-S4)", async () => {
+    listFavoritesMock.mockResolvedValue([]);
+    listWatchesMock
+      .mockResolvedValueOnce([
+        { id: "w-1", user_id: "alice", object_type: "folder", object_id: "f-1", created_at: "2026-01-01T00:00:00Z" },
+      ])
+      .mockResolvedValue([]);
+    getFolderMock.mockResolvedValue({ id: "f-1", name: "Eingang", parent_id: "root" });
+
+    renderPane();
+
+    const section = (await screen.findByRole("heading", { name: "Beobachtet" })).closest("section") as HTMLElement;
+    expect(await within(section).findByText(/Eingang/)).toBeInTheDocument();
+    await userEvent.click(within(section).getByRole("button", { name: "Nicht mehr beobachten" }));
+    await waitFor(() =>
+      expect(removeWatchMock).toHaveBeenCalledWith("token-123", {
+        user_id: "alice",
+        object_type: "folder",
+        object_id: "f-1",
+      })
+    );
+    expect(await within(section).findByText(/Nichts beobachtet/)).toBeInTheDocument();
   });
 
   it("shows an empty-state message when there are no favorites", async () => {

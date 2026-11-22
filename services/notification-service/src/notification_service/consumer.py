@@ -38,6 +38,8 @@ _SHARED_STREAM_DURABLE_OVERRIDES: dict[str, str] = {
     "permission.approval.rejected": "notification-service-approval-rejected",
     # P90-S3 (ADR 0247): fourth subject on the "permission" stream.
     "permission.approval.requested": "notification-service-approval-requested",
+    # P90-S4 (ADR 0256): second subject on the "favorite" stream.
+    "favorite.watch.triggered": "notification-service-watch-triggered",
     # P71-S1: second subject on the new "storage" stream (first subject,
     # `storage.replication.failed_permanent`, needs no override).
     "storage.object_verify.mismatch": "notification-service-storage-verify-mismatch",
@@ -95,6 +97,11 @@ def make_handler(
             return
         if event.event_type == "permission.approval.requested":
             await _handle_approval_requested(
+                session_factory, settings, publish_event, rate_limiter, event
+            )
+            return
+        if event.event_type == "favorite.watch.triggered":
+            await _handle_watch_triggered(
                 session_factory, settings, publish_event, rate_limiter, event
             )
             return
@@ -511,6 +518,97 @@ async def _handle_folder_deletion_reminder(
 
 
 _OBJECT_LABELS = {"document": "Dokument", "folder": "Ordner", "case": "Umlaufmappe"}
+
+
+# What happened, in words (P90-S4). Keys are favorite-service's change codes.
+_WATCH_CHANGES = {
+    "new_version": "neue Version",
+    "metadata_updated": "Metadaten geändert",
+    "moved": "verschoben",
+    "trashed": "in den Papierkorb gelegt",
+    "restored": "wiederhergestellt",
+    "deleted": "endgültig gelöscht",
+    "folder_updated": "umbenannt oder geändert",
+    "document_added": "neues Dokument",
+    "document_moved_in": "Dokument hierher verschoben",
+}
+
+
+async def _handle_watch_triggered(
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    publish_event: Callable[[str, str, dict], Awaitable[None]],
+    rate_limiter: RecipientRateLimiter,
+    event: Event,
+) -> None:
+    """A watched document or folder changed (P90-S4, ADR 0256): in-app to the
+    watcher and a mail when the account has an address - the same delivery as
+    follow-up reminders. favorite-service already left out the person who
+    made the change and checked the watcher can still read the object. The
+    link opens what changed: the added document for "neues Dokument", the
+    watched object otherwise (nothing for a deleted one)."""
+    data = event.payload
+    user = data.get("user_id", "?")
+    object_type = data.get("object_type", "document")
+    change_code = data.get("change", "")
+    change = _WATCH_CHANGES.get(change_code, change_code)
+    label = _OBJECT_LABELS.get(object_type, object_type)
+    title = data.get("title") or ""
+    subject_type = data.get("subject_type") or object_type
+    subject_id = data.get("subject_id") or data.get("object_id", "?")
+    link = (
+        build_resource_link(settings.user_ui_public_base_url, subject_type, subject_id)
+        if change_code != "deleted" and subject_type in _OBJECT_LABELS
+        else None
+    ) or ""
+    what = f"{label} {title!r}" if title and subject_type == object_type else label
+    fallback_subject = f"Beobachtet: {what} – {change}"
+    fallback_body = f"Beobachtetes Objekt ({label}, id={data.get('object_id', '?')}): {change}."
+    if title and subject_type != object_type:
+        fallback_body += f"\nDokument: {title}"
+    if link:
+        fallback_body += f"\n\nÖffnen: {link}"
+    placeholders = {
+        "change": change,
+        "object_type": label,
+        "object_id": data.get("object_id", "?"),
+        "title": title,
+        "changed_by": data.get("changed_by") or "",
+        "link": link,
+    }
+
+    targets = [("in_app", user)]
+    auth_client = AuthServiceClient(settings.auth_service_base_url)
+    try:
+        email = await auth_client.email_for(user)
+    except Exception:  # noqa: BLE001 - in-app still goes out
+        logger.warning("watch_email_lookup_failed", extra={"user": user}, exc_info=True)
+        email = None
+    finally:
+        await auth_client.close()
+    if email:
+        targets.append(("email", email))
+    async with session_factory() as session:
+        for channel, recipient in targets:
+            subject, body = await _render_or_fallback(
+                session,
+                use_case="favorite.watch.triggered",
+                recipient=recipient,
+                fallback_subject=fallback_subject,
+                fallback_body=fallback_body,
+                **placeholders,
+            )
+            notification = await repository.create_and_send(
+                session,
+                settings,
+                channel=channel,
+                recipient=recipient,
+                subject=subject,
+                body=body,
+                rate_limiter=rate_limiter,
+            )
+            await session.commit()
+            await publish_notification_result(publish_event, notification)
 
 
 async def _handle_reminder_due(

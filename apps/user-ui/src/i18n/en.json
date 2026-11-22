@@ -145,7 +145,10 @@
     "copyLink": "Copy link to \"{name}\"",
     "linkCopied": "Link copied to clipboard.",
     "linkCopyError": "Link could not be copied.",
-    "setReminder": "Follow-up for “{name}” …"
+    "setReminder": "Follow-up for \"{name}\" …",
+    "watch": "Watch \"{name}\"",
+    "unwatch": "Stop watching \"{name}\"",
+    "watchError": "Watching could not be changed."
   },
   "metadata": {
     "paneLabel": "Metadata",
@@ -320,7 +323,12 @@
     "unresolvedName": "(no longer available)",
     "open": "Open",
     "remove": "Remove",
-    "markerLabel": "Favorite"
+    "markerLabel": "Favorite",
+    "watchedHeading": "Watched",
+    "watchedHint": "On changes (new version, metadata, moved, deleted; for folders also new documents) you get a notification, and an e-mail if your account has an address.",
+    "watchedEmpty": "Nothing watched. \"Watch\" is in the context menu of documents and folders.",
+    "unwatch": "Stop watching",
+    "unwatchError": "Watching could not be stopped."
   },
   "teamspaces": {
     "paneLabel": "Team workspaces",

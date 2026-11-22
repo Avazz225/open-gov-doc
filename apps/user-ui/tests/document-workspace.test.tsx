@@ -96,6 +96,13 @@ const purgeDocumentMock = vi.fn();
 const purgeFolderMock = vi.fn();
 
 type ApiFn = (...args: unknown[]) => Promise<unknown>;
+// Watch subscriptions (P90-S4): the explorer loads them for its context menu.
+const watchApi = vi.hoisted(() => ({
+  listWatches: vi.fn<(...args: unknown[]) => Promise<unknown>>(() => Promise.resolve([])),
+  addWatch: vi.fn<(...args: unknown[]) => Promise<unknown>>(() => Promise.resolve({})),
+  removeWatch: vi.fn<(...args: unknown[]) => Promise<unknown>>(() => Promise.resolve(undefined)),
+}));
+
 const caseApi = vi.hoisted(() => ({
   listCases: vi.fn<ApiFn>(() => Promise.resolve([])),
   // Never settles: the test only checks that the case is requested.
@@ -129,6 +136,9 @@ vi.mock("@/lib/api", () => ({
   approveApprovalRequest: (...args: unknown[]) => approveApprovalRequestMock(...args),
   rejectApprovalRequest: (...args: unknown[]) => rejectApprovalRequestMock(...args),
   listFavorites: (...args: unknown[]) => listFavoritesMock(...args),
+  listWatches: (...args: unknown[]) => watchApi.listWatches(...args),
+  addWatch: (...args: unknown[]) => watchApi.addWatch(...args),
+  removeWatch: (...args: unknown[]) => watchApi.removeWatch(...args),
   // Follow-up reminders (P90-S2): the icon rail's due badge.
   countDueReminders: () => Promise.resolve(0),
   // The case view, for the `?case=` deep link test (P90-S2).
@@ -1459,6 +1469,35 @@ describe("DocumentWorkspace", () => {
     });
   });
 
+  it("watches and unwatches a document from the context menu (P90-S4)", async () => {
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([document1]);
+    listFavoritesMock.mockResolvedValue([]);
+    watchApi.listWatches.mockReset();
+    watchApi.listWatches.mockResolvedValueOnce([]).mockResolvedValue([
+      { id: "w-1", user_id: "alice", object_type: "document", object_id: "d1", created_at: "2026-01-01T00:00:00Z" },
+    ]);
+    watchApi.addWatch.mockClear();
+    watchApi.removeWatch.mockClear();
+
+    const user = userEvent.setup();
+    renderWorkspace();
+    const documentButton = await screen.findByText(/Rechnung.pdf/);
+    fireEvent.contextMenu(documentButton.closest("li")!);
+    await user.click(await screen.findByText('"Rechnung.pdf" beobachten'));
+    await waitFor(() =>
+      expect(watchApi.addWatch).toHaveBeenCalledWith("token-123", {
+        user_id: "alice",
+        object_type: "document",
+        object_id: "d1",
+      })
+    );
+
+    fireEvent.contextMenu(screen.getByText(/Rechnung.pdf/).closest("li")!);
+    await user.click(await screen.findByText('"Rechnung.pdf" nicht mehr beobachten'));
+    await waitFor(() => expect(watchApi.removeWatch).toHaveBeenCalled());
+  });
+
   it("opens a favorited folder from the Favoriten view and rebuilds the breadcrumb (seit P7-S1d)", async () => {
     listChildFoldersMock.mockResolvedValue([]);
     listDocumentsInFolderMock.mockResolvedValue([]);
@@ -1489,7 +1528,8 @@ describe("DocumentWorkspace", () => {
     // "Baum" toggle always stays mounted (see above) - an unscoped
     // `/B/` would match it as well. Scope to the favorites pane.
     const favoritesPane = screen.getByLabelText("Favoriten");
-    await user.click(await within(favoritesPane).findByText(/B/));
+    // Exact entry text: since P90-S4 the pane also has a "Beobachtet" section.
+    await user.click(await within(favoritesPane).findByText("Ordner B"));
     await user.click(screen.getByText("Öffnen"));
 
     const breadcrumbs = await screen.findByLabelText("Ordnerpfad");

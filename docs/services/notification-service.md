@@ -148,6 +148,17 @@ the `"permission"` stream) carries the recipients permission-service resolved.
 - **Fallback text:** subject "Freigabe erbeten: <action type>", with a link to the reviewer-ui's
   `/approvals/`.
 
+## Watch consumer (P90-S4, [ADR 0256](../adr/0256-watch-subscriptions-in-favorite-service.md))
+
+`favorite.watch.triggered` (durable `notification-service-watch-triggered`, second subject on the
+`"favorite"` stream).
+- **Delivery:** in-app to the watcher and a mail when the account has an address, like follow-up
+  reminders.
+- **Template:** `favorite.watch.triggered` (placeholders `change`, `object_type`, `object_id`, `title`,
+  `changed_by`, `link`).
+- **Fallback subject:** "Beobachtet: <Objekt> – <Änderung>".
+- **Link:** the new document for "neues Dokument", the watched object otherwise, none for a deletion.
+
 ## Follow-up reminder consumer (P90-S1, [ADR 0246](../adr/0246-follow-up-reminders-in-favorite-service.md))
 
 `favorite.reminder.due` (the first subject of this service on the `"favorite"` stream, default durable)

@@ -7,6 +7,14 @@ class Settings(BaseServiceSettings):
     postgres_dsn: str = "postgresql+asyncpg://dms:dms_dev_only@localhost:5432/dms"
 
     monitoring_service_base_url: str = "http://localhost:8026"
+    # Watch subscriptions (P90-S4, ADR 0256): the read check when subscribing
+    # and before every notification.
+    permission_service_base_url: str = "http://localhost:8004"
+    # The streams whose changes are matched against watches.
+    watch_subjects: list[str] = ["document.>", "folder.>"]
+    # Tests drive the matching directly and must not bind the shared durable
+    # consumers of a running stack.
+    watch_consumer_enabled: bool = True
 
     # Follow-up reminders (P90-S1, ADR 0246): how often due reminders are
     # looked for. One minute is the resolution of a reminder's due time in

@@ -17,7 +17,7 @@ testWithIsolatedFolder("sets, finds, snoozes and completes a follow-up reminder"
   try {
     await loginViaUi(page);
     await page.getByText(isolatedFolder.name).click({ button: "right", timeout: NAVIGATE_TIMEOUT });
-    await page.getByRole("menuitem", { name: `Wiedervorlage für „${isolatedFolder.name}“ …` }).click();
+    await page.getByRole("menuitem", { name: `Wiedervorlage für "${isolatedFolder.name}" …` }).click();
 
     const dialog = page.getByRole("dialog", { name: `Wiedervorlage: ${isolatedFolder.name}` });
     // A minute ago, local time: due at once.

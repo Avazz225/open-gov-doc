@@ -217,6 +217,42 @@ def test_update_rename(client):
     assert response.json()["name"] == "Neu"
 
 
+def test_rename_publishes_folder_updated(client, monkeypatch):
+    """P90-S4 (ADR 0256): a rename is visible to watchers and the audit trail;
+    a pure move publishes only `folder.resource.moved`."""
+    published: list[Event] = []
+
+    async def fake_publish(subject: str, data: bytes) -> None:
+        published.append(Event.from_bytes(data))
+
+    created = client.post(
+        "/folders",
+        json={"name": "Alt", "created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    ).json()
+    target = client.post(
+        "/folders",
+        json={"name": "Ziel", "created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    ).json()
+    monkeypatch.setattr(app.state.event_bus, "publish", fake_publish)
+
+    client.patch(
+        f"/folders/{created['id']}", json={"name": "Neu"}, headers={"X-DMS-Principal": "alice"}
+    )
+    client.patch(
+        f"/folders/{created['id']}",
+        json={"parent_id": target["id"]},
+        headers={"X-DMS-Principal": "alice"},
+    )
+
+    updated = [e for e in published if e.event_type == "folder.updated"]
+    assert len(updated) == 1
+    assert updated[0].payload == {"name": "Neu", "changed_fields": ["name"]}
+    assert updated[0].actor == "alice"
+    assert [e.event_type for e in published].count("folder.resource.moved") == 1
+
+
 def test_move_to_self_returns_400(client):
     created = client.post(
         "/folders", json={"name": "X", "created_by": "alice"}, headers={"X-DMS-Principal": "alice"}

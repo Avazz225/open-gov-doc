@@ -1010,6 +1010,8 @@ services:
       DMS_NATS_URL: nats://nats:4222
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://favorite-service:8000
+      # Watch subscriptions (P90-S4, ADR 0256): read checks.
+      DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
     ports:
       - "127.0.0.1:${FAVORITE_SERVICE_PORT:-8019}:8000"
     depends_on:

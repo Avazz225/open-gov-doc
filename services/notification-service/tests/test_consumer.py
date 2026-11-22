@@ -1759,3 +1759,60 @@ async def test_approval_requested_without_recipients_sends_nothing(engine, setti
     )
     async with _session_factory(engine)() as session:
         assert await repository.list_notifications(session) == []
+
+
+async def test_watch_triggered_tells_the_watcher_with_a_link_to_what_changed(
+    engine, settings, rate_limiter, monkeypatch
+):
+    """P90-S4 (ADR 0256): in-app plus mail; a new document in a watched folder
+    links to the document, a deleted object links nowhere."""
+    from notification_service.auth_client import AuthServiceClient
+
+    async def email_for(self, username):
+        return "bob@dms.local" if username == "bob" else None
+
+    monkeypatch.setattr(AuthServiceClient, "email_for", email_for)
+    configured = settings.model_copy(update={"user_ui_public_base_url": "http://localhost:3000"})
+    handler = consumer.make_handler(
+        _session_factory(engine), configured, _noop_publish, rate_limiter
+    )
+    for payload in (
+        {
+            "user_id": "bob",
+            "object_type": "folder",
+            "object_id": "f-1",
+            "change": "document_added",
+            "subject_type": "document",
+            "subject_id": "d-9",
+            "title": "Bescheid.pdf",
+        },
+        {
+            "user_id": "dirk",
+            "object_type": "document",
+            "object_id": "d-1",
+            "change": "deleted",
+            "subject_type": "document",
+            "subject_id": "d-1",
+            "title": None,
+        },
+    ):
+        await handler(
+            Event(
+                event_type="favorite.watch.triggered",
+                service_name="favorite-service",
+                subject="w-1",
+                payload=payload,
+            ).to_bytes()
+        )
+
+    async with _session_factory(engine)() as session:
+        notifications = await repository.list_notifications(session)
+    by_target = {(n.channel, n.recipient): n for n in notifications}
+    assert set(by_target) == {("in_app", "bob"), ("email", "bob@dms.local"), ("in_app", "dirk")}
+    mail = by_target[("email", "bob@dms.local")]
+    assert mail.subject == "Beobachtet: Ordner – neues Dokument"
+    assert "Dokument: Bescheid.pdf" in mail.body
+    assert "http://localhost:3000/?document=d-9" in mail.body
+    deleted = by_target[("in_app", "dirk")]
+    assert deleted.subject == "Beobachtet: Dokument – endgültig gelöscht"
+    assert "localhost:3000" not in deleted.body

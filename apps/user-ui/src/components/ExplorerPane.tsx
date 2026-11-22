@@ -11,6 +11,8 @@ import {
 import { useI18n } from "@/i18n";
 import {
   addFavorite,
+  addWatch,
+  ApiError,
   downloadFolderExportContent,
   exportFolder,
   getApprovalConfig,
@@ -21,7 +23,9 @@ import {
   listDeletedFolders,
   listFavorites,
   listObjectTypes,
+  listWatches,
   removeFavorite,
+  removeWatch,
   restoreDocument,
   restoreFolder,
   type DocumentSummary,
@@ -144,6 +148,8 @@ export function ExplorerPane({
     null
   );
   const [favoriteKeys, setFavoriteKeys] = useState<Set<string>>(new Set());
+  // Watch subscriptions (P90-S4, ADR 0256), same "kind:id" keys.
+  const [watchKeys, setWatchKeys] = useState<Set<string>>(new Set());
   const [favoriteError, setFavoriteError] = useState<string | null>(null);
   const [shareLinkEnabled, setShareLinkEnabled] = useState(false);
   const [shareLinkModalDocument, setShareLinkModalDocument] = useState<DocumentSummary | null>(
@@ -336,6 +342,33 @@ export function ExplorerPane({
     reloadFavorites();
   }, [reloadFavorites]);
 
+  const reloadWatches = useCallback(() => {
+    if (!token || !favoritesUser) return;
+    listWatches(token, favoritesUser)
+      .then((list) => setWatchKeys(new Set(list.map((w) => `${w.object_type}:${w.object_id}`))))
+      .catch(() => {});
+  }, [token, favoritesUser]);
+
+  useEffect(() => {
+    reloadWatches();
+  }, [reloadWatches]);
+
+  async function toggleWatch(objectType: "document" | "folder", objectId: string) {
+    if (!token || !favoritesUser) return;
+    setFavoriteError(null);
+    const params = { user_id: favoritesUser, object_type: objectType, object_id: objectId };
+    try {
+      if (watchKeys.has(`${objectType}:${objectId}`)) {
+        await removeWatch(token, params);
+      } else {
+        await addWatch(token, params);
+      }
+      reloadWatches();
+    } catch (err) {
+      setFavoriteError(err instanceof ApiError ? err.message : t("explorer.watchError"));
+    }
+  }
+
   async function toggleFavorite(objectType: "document" | "folder", objectId: string) {
     if (!token || !favoritesUser) return;
     setFavoriteError(null);
@@ -492,6 +525,12 @@ export function ExplorerPane({
           onSelect: () => toggleFavorite("folder", folder.id),
         },
         {
+          label: watchKeys.has(`folder:${folder.id}`)
+            ? t("explorer.unwatch", { name: folder.name })
+            : t("explorer.watch", { name: folder.name }),
+          onSelect: () => toggleWatch("folder", folder.id),
+        },
+        {
           label: t("explorer.setReminder", { name: folder.name }),
           onSelect: () => setReminderTarget({ objectType: "folder", objectId: folder.id, name: folder.name }),
         },
@@ -524,6 +563,12 @@ export function ExplorerPane({
         {
           label: isFavorite ? t("explorer.removeFavorite", { name }) : t("explorer.addFavorite", { name }),
           onSelect: () => toggleFavorite("document", doc.id),
+        },
+        {
+          label: watchKeys.has(`document:${doc.id}`)
+            ? t("explorer.unwatch", { name })
+            : t("explorer.watch", { name }),
+          onSelect: () => toggleWatch("document", doc.id),
         },
         {
           label: t("explorer.setReminder", { name }),

@@ -659,6 +659,10 @@ services:
     podDisruptionBudget:
       enabled: false
       minAvailable: 1
+    # Watch subscriptions (P90-S4, ADR 0256): read checks against
+    # permission-service (DMS_PERMISSION_SERVICE_BASE_URL).
+    dependsOnServices:
+      - permission-service
     env: {}
 
   # DMS_GATEWAY_BASE_URL (settings.py default already "http://localhost:8009",

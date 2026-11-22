@@ -2,6 +2,57 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P90-S4, watch subscriptions
+([ADR 0256](docs/adr/0256-watch-subscriptions-in-favorite-service.md); the plan said 0247, which P90-S3
+took).
+
+**What changed:**
+- **favorite-service:**
+  - `watch` table (user, principal id, object; unique).
+  - `POST`/`GET`/`DELETE /watches`, with read access checked on subscribe.
+  - `watches.changes_for` (pure) and `watch_consumer.py`: durables `favorite-service-watch-document`/
+    `-folder`, `deliver_new` so the history isn't replayed.
+  - The consumer skips the actor and re-checks read access per watcher (deletions exempt; a failing
+    check skips that watcher), then publishes `favorite.watch.triggered`.
+  - New dependency on permission-service: compose env, Helm `dependsOnServices`, `dms-permission-client`
+    in `pyproject`, `uv lock`.
+- **folder-service:** `folder.updated` on a rename or attribute change (published nothing before).
+- **notification-service:** consumer plus template `favorite.watch.triggered`; in-app and mail, with a
+  link to what changed.
+- **user-ui:**
+  - "beobachten"/"nicht mehr beobachten" in the document and folder context menus.
+  - A "Beobachtet" section in the favorites view.
+  - Favorites rows wrap; they overlapped at 390, which predates this session.
+  - Context-menu quotes unified with the existing straight ones.
+- **Docs:** ADR 0256; favorite-, folder-, notification-service and user-ui docs; the plan.
+
+**Checks:**
+- favorite-service 30 (+5: API with owner, read and duplicate checks; the mapping; actor and permission
+  filtering; deletions and a failing check).
+- folder-service 179 (+1, `folder.updated`); notification-service 119 (+1).
+- user-ui vitest 323 (+2); the reminders e2e is still green after the label change.
+- ruff, tsc, eslint and the Helm lint clean.
+- **Live:** a temporary user watched a folder. An upload and a rename by `users-admin` produced the mails
+  "Beobachtet: Ordner – neues Dokument" (title plus document link) and "… – umbenannt oder geändert".
+  Cleaned up: watch, folder (trash) and user.
+- **Screenshots:** context menu and "Beobachtet" at 1400/768/390, the 390 one after the wrap fix.
+- **Note:** the session scratchpad had been emptied overnight, so files were recreated.
+
+**Planned (user requests 2026-11-22):**
+- **P93-S6:** licence limits visible in the admin UI (usage bars, what an extension would add,
+  optional "mit Lizenzerweiterung verfügbar" hints).
+- **Phase 94, performance measurement and a Rust pilot:**
+  - P94-S1 load test with a per-service ranking (CPU and RAM per request, latency share);
+  - P94-S2 ADR 0257 scoping;
+  - P94-S3 pilot on the best candidate, with go/no-go criteria for further services.
+  - Order: 90 → 93 → 91 → 94 → 92.
+- **SurrealDB:** checked and deliberately not included (reasons in the plan's "Deliberately Not
+  Included").
+
+**Next session:** P90-S5, embedded-metadata extraction on upload.
+
+---
+
 **Last completed:** P90-S3, approver notification and role-based recipients
 ([ADR 0247](docs/adr/0247-approver-notification-and-role-based-recipients.md)).
 

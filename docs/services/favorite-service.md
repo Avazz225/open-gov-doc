@@ -119,6 +119,45 @@ referential check, several reminders per object.
   with the note and the direct link.
 - Both reminders and the user were deleted afterwards.
 
+## Watch subscriptions (P90-S4, [ADR 0256](../adr/0256-watch-subscriptions-in-favorite-service.md))
+
+A person is told when a watched document or folder changes. One watch per user and object, owner-checked
+like favorites.
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/watches` | `{user_id, object_type: document\|folder, object_id}`. Needs read access (403 otherwise), checked as the caller's `X-DMS-Principal`, which is stored. `409` when already watched |
+| `GET` | `/watches?user_id=` | Own watches, optionally by `object_type`/`object_id` |
+| `DELETE` | `/watches?user_id=&object_type=&object_id=` | `204`, `404` when not watched |
+
+**Matching (`watches.changes_for`, pure):**
+- **Document:** new version, metadata, moved, trash, restored, deleted.
+- **Folder:** `folder.updated` (rename/attributes, published since this session), moved, trash,
+  restored, deleted.
+- **Inside a watched folder** (direct children): a new document, or one moved in.
+
+**The consumer (`watch_consumer.py`):**
+- one durable per stream (`favorite-service-watch-document`/`-folder`, `deliver_new`);
+- publishes `favorite.watch.triggered` per watcher (`change`, `subject_type`/`subject_id`, `title`,
+  `changed_by`), which notification-service delivers in-app and by mail.
+
+**Who is told:**
+- not the person who made the change;
+- only a watcher who can still read the object (read check before every notification; deletions
+  exempt);
+- a failing check skips that watcher.
+
+**Configuration:** `permission_service_base_url`, `watch_subjects`, and `watch_consumer_enabled`
+(false in tests).
+
+**Events:** `favorite.watch.added`/`.removed`/`.triggered`.
+
+**Live (P90-S4):**
+- A temporary user watched a folder.
+- `users-admin` uploaded a document into it and renamed it. Two mails arrived: "Beobachtet: Ordner –
+  neues Dokument" (with the document title and its link), and the rename (with the new name and the
+  folder link).
+
 ## Open Points
 
 - No referential check against document-/folder-/case-service (deliberate, see above) — a favorite on an object deleted in the meantime remains until the user manually removes it.

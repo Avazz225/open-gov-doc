@@ -7,11 +7,14 @@ import {
   getDocument,
   getFolder,
   listFavorites,
+  listWatches,
   removeFavorite,
+  removeWatch,
   type Case,
   type DocumentSummary,
   type Favorite,
   type Folder,
+  type Watch,
 } from "@/lib/api";
 
 interface ResolvedFavorite {
@@ -47,6 +50,10 @@ export function FavoritesPane({
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // Watch subscriptions (P90-S4, ADR 0256), listed below the favorites.
+  const [watched, setWatched] = useState<
+    { watch: Watch; document: DocumentSummary | null; folder: Folder | null }[]
+  >([]);
 
   const reload = useCallback(async () => {
     if (!token || !currentUsername) return;
@@ -69,6 +76,24 @@ export function FavoritesPane({
         })
       );
       setEntries(resolved);
+      const watchList = await listWatches(token, currentUsername).catch(() => []);
+      setWatched(
+        await Promise.all(
+          watchList.map(async (watch) =>
+            watch.object_type === "document"
+              ? {
+                  watch,
+                  document: await getDocument(token, watch.object_id).catch(() => null),
+                  folder: null,
+                }
+              : {
+                  watch,
+                  document: null,
+                  folder: await getFolder(token, watch.object_id).catch(() => null),
+                }
+          )
+        )
+      );
     } catch {
       setError(t("favorites.loadError"));
     } finally {
@@ -97,6 +122,27 @@ export function FavoritesPane({
     }
   }
 
+  async function handleUnwatch(watch: Watch) {
+    setBusyId(watch.id);
+    setError(null);
+    try {
+      await removeWatch(token, {
+        user_id: watch.user_id,
+        object_type: watch.object_type,
+        object_id: watch.object_id,
+      });
+      await reload();
+    } catch {
+      setError(t("favorites.unwatchError"));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  // Name and actions wrap instead of overlapping at narrow widths (found at
+  // 390 px in P90-S4; the shared `.entry-row` keeps them on one line).
+  const ROW =
+    "flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-border py-2";
   const secondaryBtn =
     "rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap";
 
@@ -130,11 +176,11 @@ export function FavoritesPane({
                   ? t("favorites.typeCase")
                   : t("favorites.typeFolder");
             return (
-              <li className="entry-row" key={favorite.id}>
-                <span className="entry-name">
+              <li className={ROW} key={favorite.id}>
+                <span className="min-w-0 break-words">
                   {typeLabel} {name}
                 </span>
-                <span className="flex gap-3">
+                <span className="flex flex-wrap gap-2">
                   {document && (
                     <button type="button" className={secondaryBtn} onClick={() => onOpenDocument(document)}>
                       {t("favorites.open")}
@@ -163,6 +209,55 @@ export function FavoritesPane({
             );
           })}
         </ul>
+      )}
+
+      {!isLoading && (
+        <section aria-labelledby="watched-heading" className="mt-6">
+          <h3 id="watched-heading" className="m-0 mb-1 text-sm">
+            {t("favorites.watchedHeading")}
+          </h3>
+          <p className="m-0 mb-2 text-sm opacity-80">{t("favorites.watchedHint")}</p>
+          {watched.length === 0 ? (
+            <p className="italic opacity-70">{t("favorites.watchedEmpty")}</p>
+          ) : (
+            <ul className="entry-list">
+              {watched.map(({ watch, document, folder }) => {
+                const name = document?.title ?? folder?.name ?? t("favorites.unresolvedName");
+                const typeLabel =
+                  watch.object_type === "document"
+                    ? t("favorites.typeDocument")
+                    : t("favorites.typeFolder");
+                return (
+                  <li className={ROW} key={watch.id}>
+                    <span className="min-w-0 break-words">
+                      {typeLabel} {name}
+                    </span>
+                    <span className="flex flex-wrap gap-2">
+                      {document && (
+                        <button type="button" className={secondaryBtn} onClick={() => onOpenDocument(document)}>
+                          {t("favorites.open")}
+                        </button>
+                      )}
+                      {folder && (
+                        <button type="button" className={secondaryBtn} onClick={() => onOpenFolder(folder)}>
+                          {t("favorites.open")}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className={secondaryBtn}
+                        onClick={() => handleUnwatch(watch)}
+                        disabled={busyId === watch.id}
+                      >
+                        {t("favorites.unwatch")}
+                      </button>
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
       )}
     </section>
   );
