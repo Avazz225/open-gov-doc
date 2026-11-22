@@ -55,7 +55,10 @@ def hub_status_text(
         return f"{who}\n{i18n.t('hub.templatePendingNotSaved')}"
     if linked is None:
         return f"{who}\n{i18n.t('hub.noDocumentLinked')}"
-    return f"{who}\n{i18n.t('hub.linked', documentId=linked.document_id, versionNumber=linked.version_number)}"
+    status = i18n.t(
+        "hub.linked", documentId=linked.document_id, versionNumber=linked.version_number
+    )
+    return f"{who}\n{status}"
 
 
 def attributes_from_field_values(schema_attribute_names, field_values: dict) -> dict:
@@ -268,7 +271,9 @@ def _hub_buttons(session, linked, has_pending_template: bool = False):
 def _handle_login():
     ctx = _ctx()
     smgr = _smgr(ctx)
-    model = dialogs.create_dialog_model(smgr, ctx, title=i18n.t("login.title"), width=200, height=110)
+    model = dialogs.create_dialog_model(
+        smgr, ctx, title=i18n.t("login.title"), width=200, height=110
+    )
     dialogs.add_label(model, "lblBaseUrl", x=10, y=8, width=180, label=i18n.t("login.baseUrl"))
     dialogs.add_edit(model, "edBaseUrl", x=10, y=18, width=180, text=_base_url())
     dialogs.add_label(model, "lblUsername", x=10, y=34, width=180, label=i18n.t("login.username"))
@@ -320,13 +325,19 @@ def _handle_open():
     token = _token()
     base_url = _base_url()
 
-    model = dialogs.create_dialog_model(smgr, ctx, title=i18n.t("open.title"), width=220, height=140)
+    model = dialogs.create_dialog_model(
+        smgr, ctx, title=i18n.t("open.title"), width=220, height=140
+    )
     dialogs.add_label(model, "lblQuery", x=10, y=8, width=200, label=i18n.t("open.query"))
     dialogs.add_edit(model, "edQuery", x=10, y=18, width=150)
-    dialogs.add_button(model, "btnSearch", x=162, y=18, width=48, height=12, label=i18n.t("open.search"))
+    dialogs.add_button(
+        model, "btnSearch", x=162, y=18, width=48, height=12, label=i18n.t("open.search")
+    )
     dialogs.add_list_box(model, "lstResults", x=10, y=34, width=200, height=80)
     dialogs.add_label(model, "lblError", x=10, y=116, width=200, label="")
-    dialogs.add_button(model, "btnOpenSelected", x=10, y=128, width=95, label=i18n.t("open.openButton"))
+    dialogs.add_button(
+        model, "btnOpenSelected", x=10, y=128, width=95, label=i18n.t("open.openButton")
+    )
     dialogs.add_button(model, "btnCancel", x=115, y=128, width=95, label=i18n.t("common.cancel"))
 
     dialog = dialogs.show_dialog(smgr, ctx, model)
@@ -379,9 +390,7 @@ def _open_document_by_id(smgr, ctx, document_id: str):
     )
     try:
         session_id = str(uuid.uuid4())
-        dms_client.acquire_lock(
-            base_url, token, document_id, session_id=session_id
-        )
+        dms_client.acquire_lock(base_url, token, document_id, session_id=session_id)
     except dms_client.ApiError:
         pass  # Sperre bereits von jemand anderem gehalten - schreibgeschützt weiter öffnen
     _STATE["working_doc"] = new_doc
@@ -395,7 +404,9 @@ def _handle_template():
     smgr = _smgr(ctx)
     token, base_url = _token(), _base_url()
 
-    model = dialogs.create_dialog_model(smgr, ctx, title=i18n.t("template.title"), width=220, height=120)
+    model = dialogs.create_dialog_model(
+        smgr, ctx, title=i18n.t("template.title"), width=220, height=120
+    )
     dialogs.add_list_box(model, "lstTemplates", x=10, y=8, width=200, height=80)
     dialogs.add_label(model, "lblError", x=10, y=94, width=200, label="")
     dialogs.add_button(model, "btnUse", x=10, y=104, width=95, label=i18n.t("template.use"))
@@ -476,7 +487,11 @@ def _handle_metadata():
         attribute_names = [a["name"] for a in object_type.get("attributes", [])]
 
     model = dialogs.create_dialog_model(
-        smgr, ctx, title=i18n.t("metadata.title"), width=220, height=40 + 14 * (len(attribute_names) + 1)
+        smgr,
+        ctx,
+        title=i18n.t("metadata.title"),
+        width=220,
+        height=40 + 14 * (len(attribute_names) + 1),
     )
     dialogs.add_label(model, "lblTitle", x=10, y=8, width=200, label=i18n.t("metadata.titleLabel"))
     dialogs.add_edit(model, "edTitle", x=10, y=18, width=200, text=detail["title"])
@@ -572,7 +587,9 @@ def _handle_save_new_from_template():
         width=220,
         height=40 + 14 * (len(attribute_names) + 1),
     )
-    dialogs.add_label(model, "lblTitle", x=10, y=8, width=200, label=i18n.t("saveNewFromTemplate.titleLabel"))
+    dialogs.add_label(
+        model, "lblTitle", x=10, y=8, width=200, label=i18n.t("saveNewFromTemplate.titleLabel")
+    )
     dialogs.add_edit(model, "edTitle", x=10, y=18, width=200)
     y = 34
     for name in attribute_names:
@@ -643,9 +660,7 @@ def _handle_unlink():
     linked = settings_store.get_linked_document(doc)
     if linked is not None:
         try:
-            dms_client.release_lock(
-                base_url, token, linked.document_id
-            )
+            dms_client.release_lock(base_url, token, linked.document_id)
         except dms_client.ApiError:
             pass  # Sperre ggf. bereits abgelaufen/nie erworben (Lesezugriff) - egal
         settings_store.clear_linked_document(doc)
@@ -673,7 +688,9 @@ def _handle_workflow():
 
     definitions = dms_client.list_process_definitions(base_url, token)
 
-    model = dialogs.create_dialog_model(smgr, ctx, title=i18n.t("workflow.title"), width=220, height=150)
+    model = dialogs.create_dialog_model(
+        smgr, ctx, title=i18n.t("workflow.title"), width=220, height=150
+    )
     dialogs.add_list_box(
         model,
         "lstTasks",
@@ -683,7 +700,9 @@ def _handle_workflow():
         height=50,
         items=[t["name"] for _iid, t in task_rows],
     )
-    dialogs.add_button(model, "btnComplete", x=10, y=60, width=200, label=i18n.t("workflow.complete"))
+    dialogs.add_button(
+        model, "btnComplete", x=10, y=60, width=200, label=i18n.t("workflow.complete")
+    )
     dialogs.add_list_box(
         model,
         "lstDefinitions",
@@ -708,11 +727,11 @@ def _handle_workflow():
             return
         instance_id, task = task_rows[index]
         try:
-            dms_client.complete_task(
-                base_url, token, instance_id, task["id"]
-            )
+            dms_client.complete_task(base_url, token, instance_id, task["id"])
         except dms_client.ApiError as exc:
-            dialogs.set_status(dialog, "lblError", i18n.t("workflow.completeError", detail=exc.message))
+            dialogs.set_status(
+                dialog, "lblError", i18n.t("workflow.completeError", detail=exc.message)
+            )
             return
         dialog.endExecute()
 
@@ -731,7 +750,9 @@ def _handle_workflow():
                 business_key=document_id,
             )
         except dms_client.ApiError as exc:
-            dialogs.set_status(dialog, "lblError", i18n.t("workflow.startError", detail=exc.message))
+            dialogs.set_status(
+                dialog, "lblError", i18n.t("workflow.startError", detail=exc.message)
+            )
             return
         dialog.endExecute()
 

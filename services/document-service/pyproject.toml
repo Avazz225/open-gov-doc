@@ -11,6 +11,8 @@ dependencies = [
     "python-magic>=0.4.27",
     "beautifulsoup4>=4.12",
     "cryptography>=42",
+    "pypdf>=4.3",
+    "defusedxml>=0.7",
     "dms-common",
     "dms-db-base",
     "dms-eventbus-client",

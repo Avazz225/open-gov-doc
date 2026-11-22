@@ -538,6 +538,39 @@ def test_import_and_export_roundtrip_status_transitions(authorized_principal):
     ]
 
 
+def test_import_and_export_roundtrip_metadata_mappings(authorized_principal):
+    """P90-S5 (ADR 0258): embedded-metadata mappings travel with the type, on
+    create and on update."""
+    type_name = f"config-import-mappings-{uuid.uuid4().hex[:8]}"
+    mapping = {"source": "title", "attribute": "Betreff", "overwrite": "if_empty"}
+    payload = {
+        "schema_version": "1.0",
+        "exported_at": "2026-01-01T00:00:00Z",
+        "object_types": [
+            {
+                "name": type_name,
+                "applies_to": "document",
+                "attributes": [{"name": "Betreff", "type": "string"}],
+                "metadata_mappings": [mapping],
+            }
+        ],
+    }
+    with _client() as client:
+        created = client.post(
+            "/config/import", json=payload, headers={"X-DMS-Principal": authorized_principal}
+        )
+        assert created.json()["result"]["results"]["object_types"]["created"] == 1
+        payload["object_types"][0]["metadata_mappings"] = [{**mapping, "overwrite": "always"}]
+        updated = client.post(
+            "/config/import", json=payload, headers={"X-DMS-Principal": authorized_principal}
+        )
+        assert updated.json()["result"]["results"]["object_types"]["updated"] == 1
+        export = client.get("/config/export", params={"categories": "object_types"})
+
+    exported = next(t for t in export.json()["object_types"] if t["name"] == type_name)
+    assert exported["metadata_mappings"] == [{**mapping, "overwrite": "always"}]
+
+
 def _dmn_xml(decision_id: str) -> str:
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <definitions xmlns="https://www.omg.org/spec/DMN/20191111/MODEL/"

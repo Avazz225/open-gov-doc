@@ -58,6 +58,8 @@ class ObjectTypeExport(BaseModel):
     # without this field, a configuration export/import would silently
     # drop the classification.
     classification_level: str | None = None
+    # Embedded-metadata mappings (P90-S5, ADR 0258): file property -> attribute.
+    metadata_mappings: list[dict] = []
     layouts: list[ObjectTypeLayoutExport] = []
 
 

@@ -411,6 +411,36 @@
       "transitionIncomplete": "Status transition {index} needs a from and a to status.",
       "transitionSame": "Status transition {index}: from and to are the same.",
       "transitionUnknownAttribute": "Status transition {index} requires the undeclared attribute \"{name}\"."
+    },
+    "mappings": {
+      "heading": "Take metadata from files",
+      "hint": "When a document of this type is uploaded, properties of the file (PDF document info, Word/Excel/PowerPoint and OpenDocument properties) fill attributes. \"Only if empty\" fills an attribute only when nothing was entered at upload. If a taken value breaks the type's rules, it is dropped; the upload never fails because of it. Applies to new documents only, not to new versions.",
+      "none": "No mappings.",
+      "rowLabel": "Mapping {index}",
+      "source": "File property",
+      "attribute": "Attribute",
+      "overwrite": "Take",
+      "ifEmpty": "Only if empty",
+      "always": "Always (overwrites input)",
+      "remove": "Remove mapping {index}",
+      "add": "Add mapping",
+      "incomplete": "Mapping {index}: please choose an attribute.",
+      "unknownAttribute": "Mapping {index} refers to the undeclared attribute \"{name}\".",
+      "typeMismatch": "Mapping {index}: \"{name}\" can't hold this property (date attributes only from Created/Modified, otherwise text attributes only).",
+      "duplicate": "Mapping {index}: \"{name}\" is already mapped from another property.",
+      "sources": {
+        "title": "Title",
+        "subject": "Subject",
+        "author": "Author",
+        "keywords": "Keywords",
+        "description": "Description",
+        "category": "Category",
+        "language": "Language",
+        "created": "Created",
+        "modified": "Modified",
+        "last_modified_by": "Last modified by",
+        "application": "Application"
+      }
     }
   },
   "layoutDesigner": {

@@ -105,6 +105,11 @@ status-transition rule. This is the same class of bug P15-S1 found for the class
 `test_import_and_export_roundtrip_status_transitions` now covers it. An export from an older
 installation without the field imports as "no transitions".
 
+**Object types carry `metadata_mappings` since P90-S5** ([ADR 0258](../adr/0258-embedded-metadata-mappings-on-upload.md)),
+on create and update (`test_import_and_export_roundtrip_metadata_mappings`). An export without the
+field imports as "no mappings" on create; on update the server keeps a type's existing mappings when
+the field is missing, but an export from this version always carries it.
+
 Import matches object types, roles, and (since P14-S5) business calendars by `name` (unique
 within their respective DB schema) — an already-existing name is updated rather than duplicated.
 `approval_config`/`sensor_config` use their owner services' already-existing upsert endpoints

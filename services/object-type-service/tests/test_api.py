@@ -797,3 +797,83 @@ def test_wellformed_naming_and_conditions_are_stored(client):
     assert response.status_code == 201, response.text
     assert response.json()["naming_constraints"] == naming
     assert response.json()["conditions"] == conditions
+
+
+# --- Embedded-metadata mapping (P90-S5, ADR 0258) ----------------------------
+
+_MAPPED = {
+    "name": "Eingangsrechnung",
+    "applies_to": "document",
+    "attributes": [
+        {"name": "Betreff", "type": "string"},
+        {"name": "Verfasser", "type": "string"},
+        {"name": "Erstellt", "type": "date"},
+        {"name": "Betrag", "type": "decimal"},
+    ],
+    "metadata_mappings": [
+        {"source": "title", "attribute": "Betreff", "overwrite": "if_empty"},
+        {"source": "author", "attribute": "Verfasser", "overwrite": "always"},
+        {"source": "created", "attribute": "Erstellt", "overwrite": "if_empty"},
+    ],
+}
+
+
+def test_metadata_mappings_are_stored_and_survive_an_update_without_them(client):
+    created = client.post("/object-types", json=_MAPPED)
+    assert created.status_code == 201, created.text
+    object_type_id = created.json()["id"]
+    assert created.json()["metadata_mappings"] == _MAPPED["metadata_mappings"]
+
+    # An update that doesn't mention the field (an older client) keeps them.
+    update = {
+        key: value
+        for key, value in _MAPPED.items()
+        if key not in ("name", "applies_to", "metadata_mappings")
+    }
+    assert client.put(f"/object-types/{object_type_id}", json=update).status_code == 200
+    assert (
+        client.get(f"/object-types/{object_type_id}").json()["metadata_mappings"]
+        == _MAPPED["metadata_mappings"]
+    )
+
+    # Removing a mapped attribute is refused instead of leaving an orphan.
+    without_author = {
+        **update,
+        "attributes": [a for a in _MAPPED["attributes"] if a["name"] != "Verfasser"],
+    }
+    assert client.put(f"/object-types/{object_type_id}", json=without_author).status_code == 422
+
+    # An explicit empty list clears them.
+    cleared = client.put(
+        f"/object-types/{object_type_id}", json={**update, "metadata_mappings": []}
+    )
+    assert cleared.json()["metadata_mappings"] == []
+
+
+@pytest.mark.parametrize(
+    "mapping",
+    [
+        {"source": "colour", "attribute": "Betreff"},  # unknown source
+        {"source": "title", "attribute": "Unbekannt"},  # unknown attribute
+        {"source": "title", "attribute": "Erstellt"},  # text into a date
+        {"source": "created", "attribute": "Betrag"},  # unsupported target type
+        {"source": "title", "attribute": "Betreff", "overwrite": "manchmal"},
+    ],
+)
+def test_invalid_metadata_mappings_are_rejected(client, mapping):
+    payload = {
+        **_MAPPED,
+        "name": f"Kaputt-{mapping['source']}-{mapping['attribute']}",
+        "metadata_mappings": [mapping],
+    }
+    assert client.post("/object-types", json=payload).status_code == 422
+
+
+def test_metadata_mappings_are_for_document_types_only(client):
+    folder = {
+        "name": "Ordner mit Mapping",
+        "applies_to": "folder",
+        "attributes": [{"name": "Betreff", "type": "string"}],
+        "metadata_mappings": [{"source": "title", "attribute": "Betreff"}],
+    }
+    assert client.post("/object-types", json=folder).status_code == 422

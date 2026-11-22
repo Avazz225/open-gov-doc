@@ -129,6 +129,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ADD COLUMN IF NOT EXISTS status_transitions JSON DEFAULT '[]'::json NOT NULL"
             )
         )
+        # Embedded-metadata mapping (P90-S5, ADR 0258), same pattern.
+        await conn.execute(
+            text(
+                "ALTER TABLE object_type.object_type "
+                "ADD COLUMN IF NOT EXISTS metadata_mappings JSON DEFAULT '[]'::json NOT NULL"
+            )
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 

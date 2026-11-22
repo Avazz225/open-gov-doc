@@ -13,6 +13,7 @@ import {
   type AttributeType,
   type ClassificationLevel,
   type LayoutRow,
+  type MetadataMapping,
   type ObjectType,
   type ObjectTypeAttribute,
 } from "@/lib/api";
@@ -25,6 +26,7 @@ import {
   rulesToPayload,
   type RulesDraft,
 } from "@/components/ObjectTypeRules";
+import { ObjectTypeMetadataMappings, mappingsError } from "@/components/ObjectTypeMetadataMappings";
 
 const ATTRIBUTE_TYPES: AttributeType[] = [
   "string",
@@ -173,6 +175,8 @@ export function ObjectTypeEditor() {
   const [classificationLevel, setClassificationLevel] = useState<ClassificationLevel | "">("");
   // Naming rule, conditions and status transitions (P88-S3).
   const [rules, setRules] = useState<RulesDraft>(emptyRules());
+  // Embedded-metadata mappings (P90-S5, ADR 0258) - document types only.
+  const [metadataMappings, setMetadataMappings] = useState<MetadataMapping[]>([]);
 
   const reload = useCallback(async () => {
     if (!accessToken) return;
@@ -216,6 +220,7 @@ export function ObjectTypeEditor() {
     setArchiveEncryptionEnabled(false);
     setClassificationLevel("");
     setRules(emptyRules());
+    setMetadataMappings([]);
   }
 
   function startEdit(ot: ObjectType) {
@@ -262,6 +267,7 @@ export function ObjectTypeEditor() {
     setArchiveEncryptionEnabled(ot.archive_encryption_enabled);
     setClassificationLevel(ot.classification_level ?? "");
     setRules(rulesFromObjectType(ot));
+    setMetadataMappings(ot.metadata_mappings ?? []);
     setError(null);
   }
 
@@ -304,6 +310,17 @@ export function ObjectTypeEditor() {
       return;
     }
     const rulePayload = rulesToPayload(rules);
+    // Folder types can't have mappings (the server rejects them), so a
+    // folder type always sends an empty list.
+    const mappingsValue = appliesTo === "document" ? metadataMappings : [];
+    const mappingProblem = mappingsError(
+      mappingsValue,
+      attributes.map((a) => ({ name: a.name.trim(), type: a.type }))
+    );
+    if (mappingProblem) {
+      setError(t(mappingProblem.key, mappingProblem.vars));
+      return;
+    }
 
     const backendAttributes = attributes.map(toBackendAttribute);
     const allowedParentTypesArray = allowedParentTypes.size > 0 ? Array.from(allowedParentTypes) : null;
@@ -358,6 +375,7 @@ export function ObjectTypeEditor() {
           defaultArchiveAfterDays: defaultArchiveAfterDaysValue,
           archiveEncryptionEnabled,
           classificationLevel: classificationLevelValue,
+          metadataMappings: mappingsValue,
         });
 
         // Display names live in the layout, not in the attribute schema
@@ -392,6 +410,7 @@ export function ObjectTypeEditor() {
           defaultArchiveAfterDays: defaultArchiveAfterDaysValue,
           archiveEncryptionEnabled,
           classificationLevel: classificationLevelValue,
+          metadataMappings: mappingsValue,
         });
       }
       resetForm();
@@ -724,6 +743,16 @@ export function ObjectTypeEditor() {
             secondaryBtn={secondaryBtn}
             checkbox={checkbox}
           />
+
+          {appliesTo === "document" && (
+            <ObjectTypeMetadataMappings
+              mappings={metadataMappings}
+              onChange={setMetadataMappings}
+              attributes={attributes.map((a) => ({ name: a.name.trim(), type: a.type }))}
+              fieldInput={fieldInput}
+              secondaryBtn={secondaryBtn}
+            />
+          )}
 
           <h3>{t("objectTypes.allowedParentTypesLabel")}</h3>
           <p className="text-sm opacity-80">{t("objectTypes.allowedParentTypesHint")}</p>

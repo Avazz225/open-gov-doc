@@ -652,6 +652,20 @@ on the server. Both API helpers now send all three, and creating a type can set 
 The page also had a pre-existing 2px overflow at 390px: the layout designer's button row didn't wrap. It
 now wraps.
 
+## Embedded-Metadata Mappings (P90-S5, [ADR 0258](../adr/0258-embedded-metadata-mappings-on-upload.md))
+
+`ObjectTypeMetadataMappings.tsx`, in `ObjectTypeEditor` after the rules and for document types only,
+edits "Metadaten aus Dateien übernehmen": one row per mapping, Dateieigenschaft → Attribut, Übernahme
+("Nur wenn leer" / "Immer (überschreibt Eingabe)").
+- The attribute select offers only attributes that can hold the chosen property: text attributes for
+  every property, date attributes for Erstellt/Geändert. A stored target that no longer fits stays
+  visible as "(nicht deklariert)".
+- **Client checks before saving** (`mappingsError`, mirroring the server's): no attribute chosen, an
+  undeclared attribute, a type mismatch, an attribute mapped twice.
+- `createObjectType`/`updateObjectType` send `metadataMappings`; a folder type always sends `[]`.
+  `updateObjectType` omits the field when it isn't given, and the server then keeps the stored
+  mappings.
+
 ## Monitoring Sensors (P88-S2, [ADR 0243](../adr/0243-sensor-group-and-cost-overrides-and-admin-page.md))
 
 `SensorSettings.tsx` (`/sensors/`, under Verwaltung) shows monitoring-service's sensor catalog and its

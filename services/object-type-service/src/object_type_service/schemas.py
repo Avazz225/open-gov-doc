@@ -39,6 +39,8 @@ class ObjectTypeCreate(BaseModel):
     default_archive_after_days: int | None = None
     archive_encryption_enabled: bool = False
     classification_level: ClassificationLevel | None = None
+    # P90-S5 (ADR 0258), document types only.
+    metadata_mappings: list[dict] = []
 
 
 class ObjectTypeUpdate(BaseModel):
@@ -56,6 +58,11 @@ class ObjectTypeUpdate(BaseModel):
     default_archive_after_days: int | None = None
     archive_encryption_enabled: bool = False
     classification_level: ClassificationLevel | None = None
+    # P90-S5 (ADR 0258). `None` = leave unchanged: this update replaces every
+    # other field, and a client that predates this one (or forgets it) must
+    # not silently clear the mappings - the way status transitions were lost
+    # until P88-S3.
+    metadata_mappings: list[dict] | None = None
 
 
 class ObjectTypeOut(BaseModel):
@@ -76,6 +83,7 @@ class ObjectTypeOut(BaseModel):
     default_archive_after_days: int | None
     archive_encryption_enabled: bool
     classification_level: str | None
+    metadata_mappings: list[dict] = []
     created_at: datetime
     updated_at: datetime
 

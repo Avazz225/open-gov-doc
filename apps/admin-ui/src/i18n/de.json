@@ -411,6 +411,36 @@
       "transitionIncomplete": "Statusübergang {index} braucht einen Von- und einen Nach-Status.",
       "transitionSame": "Statusübergang {index}: Von- und Nach-Status sind gleich.",
       "transitionUnknownAttribute": "Statusübergang {index} verlangt das nicht deklarierte Attribut „{name}“."
+    },
+    "mappings": {
+      "heading": "Metadaten aus Dateien übernehmen",
+      "hint": "Beim Hochladen eines Dokuments dieses Typs werden Eigenschaften der Datei (PDF-Dokumentinfo, Word/Excel/PowerPoint- und OpenDocument-Eigenschaften) in Attribute übernommen. „Nur wenn leer“ füllt ein Attribut nur, wenn beim Hochladen nichts eingetragen wurde. Verletzt ein übernommener Wert die Regeln des Typs, wird er verworfen; das Hochladen scheitert nie daran. Gilt nur für neue Dokumente, nicht für neue Versionen.",
+      "none": "Keine Zuordnungen.",
+      "rowLabel": "Zuordnung {index}",
+      "source": "Dateieigenschaft",
+      "attribute": "Attribut",
+      "overwrite": "Übernahme",
+      "ifEmpty": "Nur wenn leer",
+      "always": "Immer (überschreibt Eingabe)",
+      "remove": "Zuordnung {index} entfernen",
+      "add": "Zuordnung hinzufügen",
+      "incomplete": "Zuordnung {index}: bitte ein Attribut wählen.",
+      "unknownAttribute": "Zuordnung {index} verweist auf das nicht deklarierte Attribut „{name}“.",
+      "typeMismatch": "Zuordnung {index}: „{name}“ kann diese Eigenschaft nicht aufnehmen (Datumsattribute nur aus Erstellt/Geändert, sonst nur Textattribute).",
+      "duplicate": "Zuordnung {index}: „{name}“ ist schon einer anderen Eigenschaft zugeordnet.",
+      "sources": {
+        "title": "Titel",
+        "subject": "Thema",
+        "author": "Autor",
+        "keywords": "Stichwörter",
+        "description": "Beschreibung",
+        "category": "Kategorie",
+        "language": "Sprache",
+        "created": "Erstellt am",
+        "modified": "Geändert am",
+        "last_modified_by": "Zuletzt geändert von",
+        "application": "Anwendung"
+      }
     }
   },
   "layoutDesigner": {

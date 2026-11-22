@@ -983,6 +983,28 @@ export interface ObjectType {
   // P17-S2, 14.2) - only permitted for applies_to="document". null = not
   // classified.
   classification_level: ClassificationLevel | null;
+  // Embedded-metadata mappings (P90-S5, ADR 0258) - document types only.
+  metadata_mappings: MetadataMapping[];
+}
+
+export type MetadataSource =
+  | "title"
+  | "subject"
+  | "author"
+  | "keywords"
+  | "description"
+  | "category"
+  | "language"
+  | "created"
+  | "modified"
+  | "last_modified_by"
+  | "application";
+export type MetadataOverwritePolicy = "if_empty" | "always";
+
+export interface MetadataMapping {
+  source: MetadataSource;
+  attribute: string;
+  overwrite: MetadataOverwritePolicy;
 }
 
 export interface StatusTransitionRule {
@@ -1020,12 +1042,14 @@ export async function createObjectType(
     defaultArchiveAfterDays: number | null;
     archiveEncryptionEnabled: boolean;
     classificationLevel: ClassificationLevel | null;
+    metadataMappings?: MetadataMapping[];
   }
 ): Promise<ObjectType> {
   const response = await request(
     "object-type-service",
     "object-types",
     jsonInit({
+      metadata_mappings: params.metadataMappings ?? [],
       name: params.name,
       applies_to: params.appliesTo,
       attributes: params.attributes,
@@ -1072,6 +1096,9 @@ export async function updateObjectType(
     defaultArchiveAfterDays: number | null;
     archiveEncryptionEnabled: boolean;
     classificationLevel: ClassificationLevel | null;
+    // Unlike the fields above, omitting this keeps the stored mappings
+    // (the server treats a missing `metadata_mappings` as "unchanged").
+    metadataMappings?: MetadataMapping[];
   }
 ): Promise<ObjectType> {
   const response = await request(
@@ -1081,6 +1108,7 @@ export async function updateObjectType(
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        ...(params.metadataMappings !== undefined ? { metadata_mappings: params.metadataMappings } : {}),
         attributes: params.attributes,
         naming_constraints: params.namingConstraints,
         conditions: params.conditions,

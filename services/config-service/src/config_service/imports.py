@@ -32,6 +32,7 @@ _OBJECT_TYPE_MUTABLE_FIELDS = (
     "default_archive_after_days",
     "archive_encryption_enabled",
     "classification_level",
+    "metadata_mappings",
 )
 
 

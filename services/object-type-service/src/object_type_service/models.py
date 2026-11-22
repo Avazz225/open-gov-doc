@@ -34,6 +34,12 @@ class ObjectType(Base):
     # first (and, for now, only) real status-transition trigger anywhere in
     # this codebase, see docs/services/object-type-service.md.
     status_transitions: Mapped[list] = mapped_column(JSON, default=list)
+    # Embedded-metadata mapping (P90-S5, ADR 0258) - document types only.
+    # `[{"source": <key from EMBEDDED_METADATA_SOURCES>, "attribute": str,
+    # "overwrite": "if_empty" | "always"}]`: on upload, document-service copies
+    # the file's own properties (PDF info/XMP, Office/ODF core properties)
+    # into these attributes. Empty = no extraction.
+    metadata_mappings: Mapped[list] = mapped_column(JSON, default=list)
     # Only set for folder classes (applies_to == "folder") (2.2a) - display in
     # the user UI explorer before the name only follows with P5b-S4.
     icon: Mapped[str | None] = mapped_column(String(64), nullable=True)

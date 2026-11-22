@@ -177,6 +177,22 @@ attributes against placement rules only, nothing there could have newly gone sta
 `reference_target` declared is left entirely unchecked — the pre-existing, still-supported format-only
 behavior.
 
+## Embedded File Metadata on Upload (P90-S5, [ADR 0258](../adr/0258-embedded-metadata-mappings-on-upload.md))
+
+`POST /documents` with an `object_type_id` reads the file's own properties and fills attributes as the
+type's `metadata_mappings` say (see `docs/services/object-type-service.md`).
+- **Extraction** (`embedded_metadata.extract`, pure): PDF info dictionary (pypdf) with XMP as fallback;
+  Office Open XML `docProps/core.xml`/`app.xml`; OpenDocument `meta.xml`. The package layout decides
+  the format, because libmagic reports some Office files as `application/zip`. Dates become
+  `YYYY-MM-DD`.
+- **Untrusted input:** XML through defusedxml (no entities, no external references), zip members over
+  1 MiB skipped, values cut at 1,000 characters, any parsing error means "no metadata".
+- **Merge** (`embedded_metadata.apply_mappings`, in `_prepare_document_fields`): `if_empty` fills only
+  an attribute the uploader left empty, `always` overwrites. If the merged attributes fail the type's
+  validation, the uploader's own attributes are validated and used instead (logged): a file property
+  never makes an upload fail. The reference number is assigned afterwards.
+- **Not applied** to new versions or to the quarantine release path; see the ADR.
+
 ## Draft / Pre-Registration Lifecycle (Post-Roadmap Phase 31 Session 2, [ADR 0113](../adr/0113-draft-registration-lifecycle.md))
 
 `POST /documents` accepts an optional `draft` form field (`bool`, default `false`). When `true`, the

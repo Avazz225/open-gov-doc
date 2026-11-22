@@ -45,6 +45,8 @@ from document_service.audit_client import AuditServiceClient
 from document_service.auth_client import AuthServiceClient
 from document_service.consumer import start_consuming
 from document_service.content_type_sniffer import sniff_content_type
+from document_service.embedded_metadata import apply_mappings as apply_metadata_mappings
+from document_service.embedded_metadata import extract as extract_embedded_metadata
 from document_service.folder_client import FolderClient
 from document_service.html_preview_guard import rewrite_external_references
 from document_service.license_client import LicenseLimitClient
@@ -1479,6 +1481,7 @@ async def _prepare_document_fields(
     derived_from_version_number: int | None,
     x_dms_principal: str = "",
     draft: bool = False,
+    embedded_metadata: dict[str, str] | None = None,
 ) -> tuple[dict, datetime | None, datetime | None, str | None]:
     """Shared validation/derivation for every document creation path -
     identical for `POST /documents` and `POST /documents/
@@ -1518,13 +1521,38 @@ async def _prepare_document_fields(
     archive_after: datetime | None = None
     classification_level: str | None = None
     if object_type_id is not None:
-        errors = await app.state.object_type_client.validate(
-            object_type_id,
-            name=title,
-            attributes=parsed_attributes,
-            parent_object_type_id=parent_folder["object_type_id"] if parent_folder else None,
-            parent_is_root=folder_id is None or folder_id == "root",
-        )
+        object_type = await app.state.object_type_client.get(object_type_id)
+
+        async def _validate(candidate: dict) -> list:
+            return await app.state.object_type_client.validate(
+                object_type_id,
+                name=title,
+                attributes=candidate,
+                parent_object_type_id=parent_folder["object_type_id"] if parent_folder else None,
+                parent_is_root=folder_id is None or folder_id == "root",
+            )
+
+        # Embedded metadata (P90-S5, ADR 0258): the file's own properties fill
+        # attributes per the type's mappings. If the merged values break the
+        # type's rules (a pattern, a length, an allowed value), the upload goes
+        # ahead with what the uploader sent instead: a file property is a
+        # suggestion, never a reason to reject an upload.
+        mappings = (object_type or {}).get("metadata_mappings") or []
+        if embedded_metadata and mappings:
+            merged, applied = apply_metadata_mappings(
+                parsed_attributes, embedded_metadata, mappings
+            )
+            if applied:
+                merged.pop(KENNZEICHEN_ATTRIBUTE, None)
+                if not await _validate(merged):
+                    parsed_attributes = merged
+                else:
+                    logger.info(
+                        "embedded metadata for %s not applied: fails validation",
+                        ", ".join(applied),
+                    )
+
+        errors = await _validate(parsed_attributes)
         if errors:
             raise HTTPException(status_code=400, detail={"errors": errors})
 
@@ -1541,7 +1569,6 @@ async def _prepare_document_fields(
         # Retention (5.2, since P7-S1): type default translated once into a
         # concrete date, no manual entry needed at creation time (can be
         # overridden at any time afterwards via PUT .../retention).
-        object_type = await app.state.object_type_client.get(object_type_id)
         reference_errors = await _check_reference_attributes(
             session, object_type, parsed_attributes, x_dms_principal=x_dms_principal
         )
@@ -1797,6 +1824,16 @@ async def create_document(
     if await app.state.license_limit_client.is_exceeded("documents"):
         raise HTTPException(status_code=403, detail="Dokumentenlimit der Lizenz überschritten")
 
+    # Read before the field preparation so embedded properties can fill
+    # mapped attributes (P90-S5, ADR 0258). Extraction is pure and never
+    # raises; the format whitelist below still runs at its usual place.
+    data = await file.read()
+    embedded = (
+        extract_embedded_metadata(data, sniff_content_type(data))
+        if object_type_id is not None
+        else None
+    )
+
     (
         parsed_attributes,
         retention_until,
@@ -1812,10 +1849,10 @@ async def create_document(
         derived_from_version_number=derived_from_version_number,
         x_dms_principal=x_dms_principal,
         draft=draft,
+        embedded_metadata=embedded,
     )
     await _require_document_permission(x_dms_principal, folder_id or "root", access_type="write")
 
-    data = await file.read()
     content_type = await _resolve_content_type(session, data)
 
     try:

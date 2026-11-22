@@ -115,6 +115,70 @@ def _validate_status_transitions(attributes: list[dict], status_transitions: lis
             )
 
 
+# Embedded-metadata sources (P90-S5, ADR 0258) - one vocabulary for PDF
+# (info dictionary and XMP) and Office/ODF (core properties); document-
+# service's `embedded_metadata.py` fills exactly these keys.
+EMBEDDED_METADATA_SOURCES = frozenset(
+    {
+        "title",
+        "subject",
+        "author",
+        "keywords",
+        "description",
+        "category",
+        "language",
+        "created",
+        "modified",
+        "last_modified_by",
+        "application",
+    }
+)
+_DATE_SOURCES = frozenset({"created", "modified"})
+_MAPPING_TARGET_TYPES = frozenset({"string", "date"})
+_OVERWRITE_POLICIES = frozenset({"if_empty", "always"})
+
+
+def _validate_metadata_mappings(
+    applies_to: str, attributes: list[dict], mappings: list[dict]
+) -> None:
+    """P90-S5: `metadataMappings` entries name a known source, an attribute of
+    this type (string, or date for the two date sources) and an overwrite
+    policy; each attribute is filled from at most one source. Document types
+    only - folders have no file."""
+    if not mappings:
+        return
+    if applies_to != "document":
+        raise InvalidFieldError("metadataMappings gibt es nur für Dokumenttypen")
+    types = {attribute["name"]: attribute.get("type", "string") for attribute in attributes}
+    seen: set[str] = set()
+    for mapping in mappings:
+        source, attribute = mapping.get("source"), mapping.get("attribute")
+        overwrite = mapping.get("overwrite", "if_empty")
+        if source not in EMBEDDED_METADATA_SOURCES:
+            raise InvalidFieldError(
+                f"metadataMappings: unbekannte Quelle {source!r} "
+                f"(erlaubt: {sorted(EMBEDDED_METADATA_SOURCES)})"
+            )
+        if attribute not in types:
+            raise InvalidFieldError(f"metadataMappings: unbekanntes Attribut {attribute!r}")
+        target_type = types[attribute]
+        if target_type not in _MAPPING_TARGET_TYPES or (
+            target_type == "date" and source not in _DATE_SOURCES
+        ):
+            raise InvalidFieldError(
+                f"metadataMappings: {source!r} passt nicht zum Attributtyp {target_type!r} "
+                f"von {attribute!r}"
+            )
+        if overwrite not in _OVERWRITE_POLICIES:
+            raise InvalidFieldError(
+                "metadataMappings: overwrite muss 'if_empty' oder 'always' sein, "
+                f"nicht {overwrite!r}"
+            )
+        if attribute in seen:
+            raise InvalidFieldError(f"metadataMappings: {attribute!r} ist mehrfach Ziel")
+        seen.add(attribute)
+
+
 _NAMING_KEYS = frozenset({"mustContain", "pattern"})
 
 
@@ -291,6 +355,7 @@ async def create_object_type(session: AsyncSession, payload: ObjectTypeCreate) -
     _validate_naming_constraints(payload.naming_constraints)
     _validate_conditions(payload.conditions)
     _validate_reference_targets(payload.attributes)
+    _validate_metadata_mappings(payload.applies_to, payload.attributes, payload.metadata_mappings)
 
     now = datetime.now(UTC)
     object_type = ObjectType(
@@ -310,6 +375,7 @@ async def create_object_type(session: AsyncSession, payload: ObjectTypeCreate) -
         default_archive_after_days=payload.default_archive_after_days,
         archive_encryption_enabled=payload.archive_encryption_enabled,
         classification_level=payload.classification_level,
+        metadata_mappings=payload.metadata_mappings,
         created_at=now,
         updated_at=now,
     )
@@ -363,6 +429,16 @@ async def update_object_type(
     _validate_naming_constraints(payload.naming_constraints)
     _validate_conditions(payload.conditions)
     _validate_reference_targets(payload.attributes)
+    # `None` keeps the stored mappings; they are re-checked against the new
+    # attribute list either way (removing an attribute a mapping targets is
+    # an error, not a silent orphan).
+    mappings = (
+        payload.metadata_mappings
+        if payload.metadata_mappings is not None
+        else object_type.metadata_mappings or []
+    )
+    _validate_metadata_mappings(object_type.applies_to, payload.attributes, mappings)
+    object_type.metadata_mappings = mappings
     object_type.attributes = payload.attributes
     object_type.naming_constraints = payload.naming_constraints
     object_type.conditions = payload.conditions

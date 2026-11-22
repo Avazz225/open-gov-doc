@@ -2,6 +2,57 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P90-S5, embedded-metadata extraction on upload
+([ADR 0258](docs/adr/0258-embedded-metadata-mappings-on-upload.md)).
+
+**What changed:**
+- **object-type-service:**
+  - `metadata_mappings` column (ad-hoc migration): `[{source, attribute, overwrite}]`, document types
+    only.
+  - One source vocabulary for all formats (`title`, `subject`, `author`, `keywords`, `description`,
+    `category`, `language`, `created`, `modified`, `last_modified_by`, `application`).
+  - Validated, 422 otherwise: date attributes only from `created`/`modified`, other sources only into
+    text attributes, no duplicate targets, no folder types.
+  - `PUT` without the field keeps the stored mappings, so older clients can't wipe them.
+- **document-service:**
+  - `embedded_metadata.py`: PDF info dictionary via pypdf, with XMP as a fallback; OOXML `docProps`;
+    ODF `meta.xml`.
+  - Hardened for untrusted input: defusedxml, a 1 MiB member limit, values capped at 1,000 characters.
+    It never raises.
+  - The package layout decides the format, because libmagic sometimes says only `application/zip`.
+  - `POST /documents` merges per policy (`if_empty`/`always`). If the merged values break the type's
+    rules, the uploader's own attributes are used instead, so a file property never fails an upload.
+  - New dependencies `pypdf` and `defusedxml`; `uv lock`.
+- **config-service:** export/import of `metadata_mappings`, on create and update.
+- **admin-ui:**
+  - `ObjectTypeMetadataMappings` in the object-type editor (document types).
+  - It offers only attributes that fit the chosen property and names mistakes before saving.
+  - `updateObjectType` sends the field only when it is set.
+- **ruff 0.16:** `uv.lock` isn't versioned, and the newer formatter flagged 4 files committed earlier
+  (libreoffice add-in, load-test notebook, plugin-orchestration and reporting-service). They are now
+  formatted, with two long lines split and an explicit `zip(strict=False)`. No behaviour change.
+- **Docs:** ADR 0258; object-type-, document-, config-service and admin-ui docs; the plan.
+
+**Checks:**
+- object-type-service 124 (+7); document-service 439 (+10: 7 pure extraction/mapping tests, including
+  an entity refusal and an oversized member; 3 integration tests: fill, no properties, invalid value
+  dropped); config-service 70 (+1 round trip).
+- admin-ui vitest 381 (+3); tsc, eslint and ruff clean.
+- **e2e** `object-types.spec.ts`, 3/3, run live:
+  - mappings are created in the UI and stored on the server;
+  - then a real PDF is uploaded through the gateway: `if_empty` fills the subject, and `always` replaces
+    the typed date with 2024-01-31;
+  - cleaned up afterwards.
+- **Screenshots:** mapping editor at 1400/390, no horizontal overflow. At 390 the arrow is now hidden
+  because it dangled.
+- **Note:** a first document-service run hung at about 35 % (a permission-service connection in
+  CLOSE-WAIT) while I was rebuilding containers in parallel. The rerun was green in 116 s. Don't rebuild
+  containers during a run-tests run.
+
+**Next session:** P90-S6, scoping: validating externally signed incoming documents (ADR 0248).
+
+---
+
 **Last completed:** P90-S4, watch subscriptions
 ([ADR 0256](docs/adr/0256-watch-subscriptions-in-favorite-service.md); the plan said 0247, which P90-S3
 took).

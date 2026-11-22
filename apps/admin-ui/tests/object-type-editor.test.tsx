@@ -65,6 +65,7 @@ const RECHNUNG = {
   default_archive_after_days: null,
   archive_encryption_enabled: false,
   classification_level: null,
+  metadata_mappings: [],
 };
 
 const PROJEKTORDNER = {
@@ -131,6 +132,7 @@ describe("ObjectTypeEditor", () => {
         defaultArchiveAfterDays: null,
         archiveEncryptionEnabled: false,
         classificationLevel: null,
+        metadataMappings: [],
       })
     );
     // No differing display label provided -> no layout override needed.
@@ -321,6 +323,7 @@ describe("ObjectTypeEditor", () => {
         defaultArchiveAfterDays: null,
         archiveEncryptionEnabled: false,
         classificationLevel: null,
+        metadataMappings: [],
       })
     );
   });
@@ -536,5 +539,85 @@ describe("ObjectTypeEditor", () => {
     fireEvent.click(within(row).getByText("Bearbeiten"));
 
     expect(await screen.findByLabelText("Verschlusssachen-Einstufung")).toHaveValue("GEHEIM");
+  });
+  it("edits embedded-metadata mappings and keeps them on save (P90-S5, ADR 0258)", async () => {
+    updateObjectTypeMock.mockResolvedValue({});
+    listObjectTypesMock.mockResolvedValue([
+      {
+        ...RECHNUNG,
+        attributes: [
+          { name: "Betrag", type: "decimal", required: true },
+          { name: "Betreff", type: "string" },
+          { name: "Belegdatum", type: "date" },
+        ],
+        metadata_mappings: [{ source: "title", attribute: "Betreff", overwrite: "if_empty" }],
+      },
+      PROJEKTORDNER,
+    ]);
+    renderObjectTypeEditor();
+    await screen.findByText("Rechnung");
+    fireEvent.click(within(screen.getByText("Rechnung").closest("tr")!).getByText("Bearbeiten"));
+
+    const first = await screen.findByRole("listitem", { name: "Zuordnung 1" });
+    expect(within(first).getByLabelText("Dateieigenschaft")).toHaveValue("title");
+    expect(within(first).getByLabelText("Attribut")).toHaveValue("Betreff");
+
+    fireEvent.click(screen.getByRole("button", { name: "Zuordnung hinzufügen" }));
+    const second = screen.getByRole("listitem", { name: "Zuordnung 2" });
+    fireEvent.change(within(second).getByLabelText("Dateieigenschaft"), { target: { value: "created" } });
+    // A date property offers text and date attributes, never a number.
+    const targets = within(within(second).getByLabelText("Attribut"))
+      .getAllByRole("option")
+      .map((o) => o.textContent);
+    expect(targets).toEqual(["Bitte wählen", "Betreff", "Belegdatum"]);
+    fireEvent.change(within(second).getByLabelText("Attribut"), { target: { value: "Belegdatum" } });
+    fireEvent.change(within(second).getByLabelText("Übernahme"), { target: { value: "always" } });
+
+    fireEvent.submit(screen.getByRole("form", { name: "Objekttyp speichern" }));
+    await waitFor(() =>
+      expect(updateObjectTypeMock).toHaveBeenCalledWith(
+        "token-123",
+        1,
+        expect.objectContaining({
+          metadataMappings: [
+            { source: "title", attribute: "Betreff", overwrite: "if_empty" },
+            { source: "created", attribute: "Belegdatum", overwrite: "always" },
+          ],
+        })
+      )
+    );
+  });
+
+  it("names a duplicate or incomplete mapping instead of submitting", async () => {
+    renderObjectTypeEditor();
+    await waitFor(() => expect(listObjectTypesMock).toHaveBeenCalledTimes(1));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Bescheid" } });
+    fireEvent.click(screen.getByText("Attribut hinzufügen"));
+    fireEvent.change(screen.getByLabelText("Technischer Name"), { target: { value: "Betreff" } });
+    fireEvent.click(screen.getByRole("button", { name: "Zuordnung hinzufügen" }));
+
+    fireEvent.submit(screen.getByRole("form", { name: "Objekttyp anlegen" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Zuordnung 1: bitte ein Attribut wählen.");
+
+    const rowOne = screen.getByRole("listitem", { name: "Zuordnung 1" });
+    fireEvent.change(within(rowOne).getByLabelText("Attribut"), { target: { value: "Betreff" } });
+    fireEvent.click(screen.getByRole("button", { name: "Zuordnung hinzufügen" }));
+    const rowTwo = screen.getByRole("listitem", { name: "Zuordnung 2" });
+    fireEvent.change(within(rowTwo).getByLabelText("Dateieigenschaft"), { target: { value: "subject" } });
+    fireEvent.change(within(rowTwo).getByLabelText("Attribut"), { target: { value: "Betreff" } });
+
+    fireEvent.submit(screen.getByRole("form", { name: "Objekttyp anlegen" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Zuordnung 2: „Betreff“ ist schon einer anderen Eigenschaft zugeordnet."
+    );
+    expect(createObjectTypeMock).not.toHaveBeenCalled();
+  });
+
+  it("hides the mapping editor for folder types", async () => {
+    renderObjectTypeEditor();
+    await screen.findByText("Rechnung");
+    expect(screen.getByText("Metadaten aus Dateien übernehmen")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Gilt für"), { target: { value: "folder" } });
+    expect(screen.queryByText("Metadaten aus Dateien übernehmen")).not.toBeInTheDocument();
   });
 });

@@ -73,6 +73,7 @@ async def export_object_types(client: ObjectTypeServiceClient) -> list[ObjectTyp
                 default_archive_after_days=object_type["default_archive_after_days"],
                 archive_encryption_enabled=object_type["archive_encryption_enabled"],
                 classification_level=object_type["classification_level"],
+                metadata_mappings=object_type.get("metadata_mappings", []),
                 layouts=layouts,
             )
         )

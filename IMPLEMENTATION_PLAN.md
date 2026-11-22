@@ -4228,7 +4228,16 @@ sessions found along the way:
 
 - **P90-S5 — Embedded-metadata extraction on upload.** Copy PDF info/XMP and Office core properties into
   document attributes, configured per object type (source property → attribute, overwrite policy). An
-  admin UI mapping in the object-type editor.
+  admin UI mapping in the object-type editor. ADR 0258.
+  - ✅ **Result:**
+    - **object-type-service:** `metadata_mappings` (`{source, attribute, overwrite}`) on document types,
+      one source vocabulary for PDF/OOXML/ODF, validated (type fit, no duplicates, folder types 422).
+      `PUT` without the field keeps them.
+    - **document-service:** `embedded_metadata.py` (pypdf with XMP fallback, `docProps`, `meta.xml`;
+      defusedxml, size limits, never raises). On `POST /documents` the values merge per policy; if
+      they break the type's rules, the uploader's own attributes are used instead.
+    - **config-service** exports/imports the mappings; **admin-ui** has the mapping editor.
+    - **Scope:** new documents only, not versions or quarantine release; no upload-dialog preview.
 - **P90-S6 — Scoping: validating externally signed incoming documents (ADR 0248).** Validate PAdES (and
   detached CAdES?) on ingest (upload, mail-connector), with trust lists, a stored validation report per
   document, and a UI badge. Stay format-agnostic and keep QES creation, HSM and XAdES out (still
