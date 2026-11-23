@@ -33,6 +33,9 @@ class FolderOut(BaseModel):
     created_by: str
     created_at: datetime
     updated_at: datetime
+    # A placeholder on a breadcrumb for an ancestor the caller can't read
+    # (P91-S4, ADR 0259): only its id and position, no name or content.
+    restricted: bool = False
 
     model_config = {"from_attributes": True}
 

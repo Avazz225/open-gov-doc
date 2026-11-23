@@ -2,6 +2,61 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P91-S4, listings show only what the caller can read; upload by right-click
+([ADR 0259](docs/adr/0259-listings-show-only-what-the-caller-can-read.md)).
+
+**What changed:**
+- **folder-service:**
+  - `GET /folders/{id}/children` filtered by `folder.read` (one `check_batch`).
+  - `X-DMS-Hidden-Count` for service principals only.
+  - Breadcrumb: unreadable ancestors as placeholders (`restricted: true`, no name, content or timestamps
+    of their own). Decided over hiding them.
+- **document-service:** `GET /documents?folder_id=` filtered by `document.read`, the same header for
+  services.
+- **permission-service:** `/check/batch` reads cached entries in bulk
+  (`get_effective_permissions_batch`) and walks scope locks only when one is active. Root listing
+  (810 folders): 19 ms unfiltered → 1,038 ms filtered with the old batch → 48 ms. 538 documents: 25 →
+  710 → 37 ms.
+- **Connector SDK:** `list_children_complete`/`HiddenChildrenError`. **migration-service:** its copy step
+  fails instead of silently copying less.
+- **user-ui:** "Hochladen in "…" …" in the folder context menu (list and tree); the dialog names its
+  target. Tree drag and drop not built (optional).
+- **auth-service, found on the way:**
+  - A pool self-deadlock: the login's tracking opened a second session while holding one. With the
+    P89-S4 budget (2 + 3), five concurrent logins took 30 s, some failed.
+  - Fixed (`superuser.active_principal_id(session)`), and bcrypt moved to a worker thread.
+  - Eight parallel logins now finish in under 0.8 s.
+  - A P94-S3 item audits all services for nested sessions.
+- **document-service shutdown:** every lifespan shutdown step is bounded to 10 s and logged by name.
+  - The intermittent test hang (P90-S5, P91-S2b, and once more this session after 32 minutes) sits
+    there.
+  - **Correction:** P91-S2b's NATS debris was not its cause; NATS was clean this time.
+  - It couldn't be reproduced in seven runs afterwards, alone or in the hung run's order.
+  - The next occurrence names the step in the log instead of hanging.
+- **Tests:** `user-ui/e2e/structure.spec.ts` now uses mode `report` instead of `enforce`. The mode is
+  installation-wide and refused the folders of specs running in parallel.
+- **Docs:** ADR 0259; folder-, document-, permission-, auth-, migration-service and user-ui docs;
+  eventbus README corrected; the plan.
+
+**Checks:**
+- permission-service 211 (+1, batch equals single checks across cache states), folder-service 195 (+2),
+  document-service 449 (+4: listing filter, purge test made race-free, 2 shutdown tests),
+  migration-service 21, webdav-connector 19, cmis-connector 17.
+- connector SDK pure tests 4; ruff clean.
+- **auth-service suite skipped at the user's request** (about 20 minutes). Its change was checked live:
+  8 parallel logins, and the parallel e2e runs.
+- **e2e:** user-ui 8/8 (new `visibility-and-upload.spec.ts`: an isolated subfolder doesn't show,
+  right-click upload lands in the right folder), admin-ui 18/18, both in parallel mode.
+  - Back-to-back runs as one user hit the gateway's rate limit (600 per minute), which is expected
+    behaviour; one run per minute passes.
+- **Screenshots:** the context menu at 1400/768/390.
+- **Live:** `users-admin` now sees 728 of 810 root folders (82 hidden, mostly isolated test and
+  teamspace roots).
+
+**Next session:** P91-S5 (admin-ui long lists).
+
+---
+
 **Last completed:** P91-S3, enforced filing structure: UI
 ([ADR 0255](docs/adr/0255-enforced-filing-structure.md), implementation notes added).
 

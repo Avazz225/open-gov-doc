@@ -634,6 +634,13 @@ in a folder (its class, or the root): `undefined` while loading, `null` if the r
   admin-managed since P91-S2b); applying stays open to everyone.
 - **Errors:** `detail.errors` lists are shown as text (`extractErrorMessage`).
 
+## Upload by Right-Click and Filtered Listings (P91-S4, [ADR 0259](../adr/0259-listings-show-only-what-the-caller-can-read.md))
+
+- "Hochladen in "…" …" in the folder context menu (list and tree) opens the upload dialog for *that*
+  folder. The dialog's heading names the target ("Dokument hochladen in „…“").
+- Folders and documents the user can't read no longer appear, because the server filters the listings.
+  Nothing changed in the UI for that.
+
 ## Authenticated direct links (Post-Roadmap Phase 29, [ADR 0109](../adr/0109-direct-link-url-scheme.md))
 
 `DocumentWorkspace.tsx` reads `?document=<id>`/`?folder=<id>` (and since P90-S2 `?case=<id>`, which opens the case view as "Open" from the favorites does) from `window.location.search` once on mount (not `useSearchParams()`, same Suspense-avoidance reasoning as the share link's `/share/` page above) and resolves them via the already-existing `GET /documents/{id}`/`GET /folders/{id}` plus the already-existing `openDocumentTab`/`openFolderPath` navigation functions — no new backend endpoint. A `403`/`404` surfaces via the normal `error` state instead of a silent fallback to the root folder. Structurally opposite to the public share link (anonymous, single-document, token-bearing) — a direct link carries no secret, just a stable resource ID resolved through the normal session/permission-check path, see ADR 0109 for the full comparison.

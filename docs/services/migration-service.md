@@ -217,3 +217,10 @@ Category A gates already established). Before that, 10 tests since P54-S2 (+2:
 `test_step_endpoint_requires_workflow_service_caller`/`test_step_endpoint_with_wrong_principal_returns_403`,
 the new gate's regression proof — both call a step endpoint directly with a made-up `transfer_id`,
 since the gate runs before the transfer lookup).
+
+## Nothing Skipped Silently (P91-S4, [ADR 0259](../adr/0259-listings-show-only-what-the-caller-can-read.md))
+
+Listings show only what the caller may read. The copy step uses the connector SDK's
+`list_children_complete`, which raises `HiddenChildrenError` when folder- or document-service report
+hidden entries (`X-DMS-Hidden-Count`, sent to service principals only). The transfer then fails with
+the reason instead of copying less.

@@ -876,11 +876,20 @@ async def check_batch(
     recomputation despite the loop."""
     _validate_access_type(payload.permission, payload.access_type)
     results: dict[str, bool] = {}
-    for resource_id in set(payload.resource_ids):
-        entry = await repository.get_effective_permissions(
-            session, payload.principal_id, resource_id
+    resource_ids = list(dict.fromkeys(payload.resource_ids))
+    # P91-S4 (ADR 0259): cached entries in one query, and the per-resource
+    # scope-lock walk only when some lock is active at all (usually none).
+    entries = await repository.get_effective_permissions_batch(
+        session, payload.principal_id, resource_ids
+    )
+    any_lock_active = bool(await repository.list_active_scope_locks(session))
+    for resource_id in resource_ids:
+        entry = entries[resource_id]
+        active_locks = (
+            await repository.get_active_scope_locks_for_resource(session, resource_id)
+            if any_lock_active
+            else []
         )
-        active_locks = await repository.get_active_scope_locks_for_resource(session, resource_id)
         blocking_locks = [
             lock for lock in active_locks if payload.access_type == "write" or lock.blocks_read
         ]

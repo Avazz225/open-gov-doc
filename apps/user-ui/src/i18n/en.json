@@ -65,7 +65,8 @@
     "draftLabel": "Create as draft (file reference number assigned only on registration)",
     "draftHint": "The document does not receive a file reference number on creation - this can be done later via \"Register\".",
     "chooseObjectType": "Choose document type …",
-    "noDocumentsAllowed": "No documents may be filed in this folder."
+    "noDocumentsAllowed": "No documents may be filed in this folder.",
+    "formLabelInto": "Upload document into \"{name}\""
   },
   "iconRail": {
     "label": "Cross-cutting navigation",
@@ -156,7 +157,8 @@
     "templateOnlyHint": "Subfolders here are created from structure templates only.",
     "noSubfoldersAllowed": "No subfolders may be created here.",
     "newFolderChooseObjectType": "Choose folder class …",
-    "templateApplied": "{count} folders created from the template in \"{name}\"."
+    "templateApplied": "{count} folders created from the template in \"{name}\".",
+    "uploadInto": "Upload into \"{name}\" …"
   },
   "metadata": {
     "paneLabel": "Metadata",

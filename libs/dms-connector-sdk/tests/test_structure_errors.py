@@ -23,3 +23,11 @@ def test_422_with_a_plain_detail_still_carries_it():
 def test_other_statuses_pass():
     _raise_for_structure(httpx.Response(201, json={}))
     _raise_for_structure(httpx.Response(400, json={"detail": "x"}))
+
+
+def test_hidden_count_header_is_read_and_missing_means_zero():
+    from dms_connector_sdk.dms_tree_client import _hidden_count
+
+    assert _hidden_count(httpx.Response(200, headers={"X-DMS-Hidden-Count": "3"})) == 3
+    assert _hidden_count(httpx.Response(200)) == 0
+    assert _hidden_count(httpx.Response(200, headers={"X-DMS-Hidden-Count": "x"})) == 0

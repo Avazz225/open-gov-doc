@@ -6,11 +6,12 @@ import re
 import time
 import uuid
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 
 import httpx
 from dms_common import (
+    SERVICE_PRINCIPALS,
     ActingIdentity,
     configure_logging,
     require_acting_identity,
@@ -639,6 +640,22 @@ async def _folder_export_poll_loop(session_factory) -> None:
         await asyncio.sleep(settings.folder_export_poll_interval_seconds)
 
 
+_SHUTDOWN_STEP_TIMEOUT_SECONDS = 10.0
+
+
+async def _bounded_shutdown_step(name: str, awaitable) -> None:
+    """One shutdown step with a time limit (P91-S4): a timeout or an error
+    is logged with the step's name and doesn't stop the remaining steps."""
+    try:
+        await asyncio.wait_for(awaitable, timeout=_SHUTDOWN_STEP_TIMEOUT_SECONDS)
+    except asyncio.CancelledError:
+        pass  # a cancelled background task - the expected outcome
+    except TimeoutError:
+        logger.error("shutdown_step_timeout: %s after %ss", name, _SHUTDOWN_STEP_TIMEOUT_SECONDS)
+    except Exception:
+        logger.exception("shutdown_step_failed: %s", name)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     startup_start = time.time()
@@ -1029,35 +1046,39 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     yield
 
-    retention_poll_task.cancel()
-    with suppress(asyncio.CancelledError):
-        await retention_poll_task
-    folder_export_poll_task.cancel()
-    with suppress(asyncio.CancelledError):
-        await folder_export_poll_task
-    lock_reminder_poll_task.cancel()
-    with suppress(asyncio.CancelledError):
-        await lock_reminder_poll_task
-    sensor_sampler_task.cancel()
-    with suppress(asyncio.CancelledError):
-        await sensor_sampler_task
+    # Every shutdown step is bounded (P91-S4, ADR 0259): the test suite hung
+    # intermittently inside this shutdown (seen in P90-S5, P91-S2b, P91-S4,
+    # not reproducible on demand). A step that doesn't finish in time is
+    # logged by name and skipped, so a pod's shutdown - and a test client's
+    # teardown - can't hang on it, and the log names the culprit.
+    for task in (
+        retention_poll_task,
+        folder_export_poll_task,
+        lock_reminder_poll_task,
+        sensor_sampler_task,
+    ):
+        task.cancel()
+        await _bounded_shutdown_step(f"task {task.get_coro().__qualname__}", task)
     sensor_config_proxy.unbind()
-    await app.state.sensor_config_client.stop()
+    await _bounded_shutdown_step("sensor_config_client.stop", app.state.sensor_config_client.stop())
     if registration:
-        await registration.stop()
-    await consumer_bus.close()
-    await event_bus.close()
-    await app.state.storage.close()
-    await app.state.folder_client.close()
-    await app.state.object_type_client.close()
-    await app.state.virus_scan_client.close()
-    await app.state.approval_client.close()
-    await app.state.permission_client.close()
-    await app.state.auth_client.close()
-    await app.state.license_limit_client.close()
-    await app.state.rendering_client.close()
-    await app.state.audit_client.close()
-    await engine.dispose()
+        await _bounded_shutdown_step("registration.stop", registration.stop())
+    await _bounded_shutdown_step("consumer_bus.close", consumer_bus.close())
+    await _bounded_shutdown_step("event_bus.close", event_bus.close())
+    for name in (
+        "storage",
+        "folder_client",
+        "object_type_client",
+        "virus_scan_client",
+        "approval_client",
+        "permission_client",
+        "auth_client",
+        "license_limit_client",
+        "rendering_client",
+        "audit_client",
+    ):
+        await _bounded_shutdown_step(f"{name}.close", getattr(app.state, name).close())
+    await _bounded_shutdown_step("engine.dispose", engine.dispose())
 
 
 app = FastAPI(title=settings.service_name, lifespan=lifespan)
@@ -2137,6 +2158,7 @@ async def create_document_from_quarantine_release(
 @app.get("/documents", response_model=list[DocumentOut])
 async def list_documents(
     folder_id: str,
+    response: Response,
     registered: bool | None = None,
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
@@ -2168,7 +2190,23 @@ async def list_documents(
     if folder is None:
         return []
     await _require_document_permission(x_dms_principal, folder_id, access_type="read")
-    return await repository.list_documents_by_folder(session, folder_id, registered=registered)
+    documents = await repository.list_documents_by_folder(session, folder_id, registered=registered)
+    # Only what the caller may read (P91-S4, ADR 0259): every document has
+    # its own resource node since P39-S4, so one can be closed inside a
+    # readable folder. One batch check per listing; a service principal
+    # gets the hidden count (a migration must not skip silently).
+    if not documents:
+        return documents
+    allowed = await app.state.permission_client.check_batch(
+        principal_id=x_dms_principal,
+        resource_ids=[document.id for document in documents],
+        permission="document.read",
+        access_type="read",
+    )
+    visible = [document for document in documents if allowed.get(document.id, False)]
+    if x_dms_principal in SERVICE_PRINCIPALS:
+        response.headers["X-DMS-Hidden-Count"] = str(len(documents) - len(visible))
+    return visible
 
 
 @app.get("/documents/by-kennzeichen", response_model=list[DocumentOut])

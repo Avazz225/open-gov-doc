@@ -130,6 +130,9 @@ export function ExplorerPane({
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [showUpload, setShowUpload] = useState(false);
+  // Upload by right-click (P91-S4): into the folder the menu was opened on,
+  // which need not be the one being shown.
+  const [uploadTarget, setUploadTarget] = useState<{ id: string; name: string } | null>(null);
   const [viewMode, setViewMode] = useState<ExplorerViewMode>(loadViewMode);
   const [folderIconById, setFolderIconById] = useState<Record<number, string | null>>({});
   const [folderObjectTypes, setFolderObjectTypes] = useState<ObjectType[]>([]);
@@ -535,6 +538,10 @@ export function ExplorerPane({
       y: event.clientY,
       items: [
         {
+          label: t("explorer.uploadInto", { name: folder.name }),
+          onSelect: () => setUploadTarget({ id: folder.id, name: folder.name }),
+        },
+        {
           label: folderDeleteRequiresApproval
             ? t("explorer.requestDeleteFolder", { name: folder.name })
             : t("explorer.deleteFolder", { name: folder.name }),
@@ -747,6 +754,16 @@ export function ExplorerPane({
           folderId={currentFolderId}
           onUploaded={onUploaded}
           onClose={() => setShowUpload(false)}
+        />
+      )}
+
+      {uploadTarget && (
+        <UploadForm
+          token={token}
+          folderId={uploadTarget.id}
+          targetName={uploadTarget.name}
+          onUploaded={onUploaded}
+          onClose={() => setUploadTarget(null)}
         />
       )}
 

@@ -406,6 +406,16 @@ Registers itself with the registry on startup (`libs/dms-registry-client`: regis
 
 None yet — follows in Phase 11.
 
+
+## Batch Check as a Real Batch (P91-S4, [ADR 0259](../adr/0259-listings-show-only-what-the-caller-can-read.md))
+
+`POST /check/batch` reads every cached entry of the principal in one query
+(`get_effective_permissions_batch`) and computes only the misses individually. Active scope locks are
+loaded once, and the per-resource ancestor walk only runs when any lock is active.
+- **Before:** two cache queries plus two queries per ancestor level, per id. A root listing of 810
+  folders took about 1 s.
+- **Now:** 48 ms.
+
 ## Open Points
 
 - ~~Real, custom group membership continues to go unresolved~~ — **admin-defined groups with real membership resolution added in Post-Roadmap Phase 22 Session 2**, see "Admin-Creatable Groups" above. **Reworded during Phase 65+'s gap-analysis round** (the "planned as a standalone Phase 24 Session 2" framing was stale — that phase shipped long ago and was extended twice more, ADR 0153/ADR 0171): AD group → internal **role** mapping is real and live (since **P24-S2**, [ADR 0093](../adr/0093-ad-group-role-mapping-simple-1to1-scope-cut.md), extended by ADR 0153/0171), but it maps straight to roles, bypassing this service's own `Group`/`GroupMembership` model entirely — an AD group membership change does NOT automatically populate/sync an admin-defined `Group`'s membership here. That narrower gap remains genuinely open, no concrete trigger identified.

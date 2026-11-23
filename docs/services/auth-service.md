@@ -437,6 +437,16 @@ new role idempotently — a second call with the same name does not fail, same
 `PUT /user-tracking-config/{principal_id}` records the token's `sub` as `updated_by`; the body field is
 ignored, and a mismatch is logged. The four-eyes branch already used the `sub`.
 
+
+## Concurrent Logins (P91-S4, [ADR 0259](../adr/0259-listings-show-only-what-the-caller-can-read.md))
+
+- The login's session tracking reads the superuser state through the request's own session
+  (`superuser.active_principal_id`).
+- Before, it opened a second session while the first still held a connection. With the pool budget of
+  P89-S4 (2 + 3), five concurrent logins deadlocked until the 30 s pool timeout.
+- The bcrypt check for technical accounts runs in a worker thread (`asyncio.to_thread`).
+- Eight parallel logins now take under 0.8 s.
+
 ## Open Points
 
 - ~~**AD group → internal role mapping — partially solved since P24-S2**: simple 1:1 mapping

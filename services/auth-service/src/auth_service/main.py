@@ -504,7 +504,11 @@ async def _login_technical_account(account: TechnicalAccount, password: str) -> 
     invalid = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED, detail="Ungültige Anmeldedaten"
     )
-    if not local_token_issuer.verify_password(password, account.password_hash):
+    # bcrypt takes ~0.2 s of CPU: in a worker thread, so concurrent logins
+    # don't queue every other request to this service behind it (P91-S4).
+    if not await asyncio.to_thread(
+        local_token_issuer.verify_password, password, account.password_hash
+    ):
         raise invalid
     if not account.enabled:
         raise invalid
@@ -537,10 +541,9 @@ async def _maybe_track_session_event(
         principal_id = claims.get("sub", "")
         enabled = await tracking.is_tracking_enabled(session, principal_id)
         if not enabled:
-            superuser_active, _ = await superuser.get_status(app.state.session_factory)
-            enabled = superuser_active and principal_id == await superuser.get_principal_id(
-                app.state.session_factory
-            )
+            # The request's own session, never a second one (P91-S4): nested
+            # sessions deadlocked the small pool under concurrent logins.
+            enabled = principal_id == await superuser.active_principal_id(session)
         if not enabled:
             return
         await tracking.record_session_event(

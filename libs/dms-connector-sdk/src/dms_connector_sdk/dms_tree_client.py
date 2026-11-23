@@ -18,6 +18,27 @@ class LockNotHeldError(Exception):
     """Attempt to release a lock held by another session (403)."""
 
 
+class HiddenChildrenError(Exception):
+    """A listing left out folders or documents the calling service may not
+    read (P91-S4, ADR 0259: listings show only what the caller can read).
+    Raised by `list_children_complete`, for callers such as a migration
+    that must not skip anything silently."""
+
+    def __init__(self, folder_id: str, hidden: int) -> None:
+        self.folder_id = folder_id
+        self.hidden = hidden
+        super().__init__(
+            f"Ordner {folder_id!r}: {hidden} Einträge ohne Leserecht des Dienstes ausgeblendet"
+        )
+
+
+def _hidden_count(response: httpx.Response) -> int:
+    try:
+        return int(response.headers.get("X-DMS-Hidden-Count", "0"))
+    except ValueError:
+        return 0
+
+
 class StructureRuleError(Exception):
     """The filing structure doesn't allow this folder or document here
     (422 from folder-/document-service, P91-S2a, ADR 0255). `errors` are the
@@ -198,8 +219,16 @@ class DmsTreeClient:
         response.raise_for_status()
         return response.json()["versions"]
 
-    def list_children(
+    def list_children_complete(
         self, folder_id: str, *, x_dms_principal: str = ""
+    ) -> tuple[list[TreeFolder], list[TreeDocument]]:
+        """Like `list_children`, but raises `HiddenChildrenError` when the
+        services report entries the caller may not read - for a migration,
+        which must copy everything or fail visibly."""
+        return self.list_children(folder_id, x_dms_principal=x_dms_principal, complete=True)
+
+    def list_children(
+        self, folder_id: str, *, x_dms_principal: str = "", complete: bool = False
     ) -> tuple[list[TreeFolder], list[TreeDocument]]:
         folders_response = self._folders.get(
             f"/folders/{folder_id}/children", headers=self._principal_headers(x_dms_principal)
@@ -213,6 +242,10 @@ class DmsTreeClient:
             headers=self._principal_headers(x_dms_principal),
         )
         documents_response.raise_for_status()
+        if complete:
+            hidden = _hidden_count(folders_response) + _hidden_count(documents_response)
+            if hidden:
+                raise HiddenChildrenError(folder_id, hidden)
         folders = [_to_tree_folder(f) for f in folders_response.json() if f["deleted_at"] is None]
         # Phase 50 Session 4: previously one extra HTTP call PER document
         # (version metadata doesn't live on `DocumentOut`, see

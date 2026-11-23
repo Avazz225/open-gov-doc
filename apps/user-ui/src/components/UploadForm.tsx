@@ -35,11 +35,15 @@ function attributeInputType(attrType: string | undefined): string {
 export function UploadForm({
   token,
   folderId,
+  targetName,
   onUploaded,
   onClose,
 }: {
   token: string;
   folderId: string;
+  // Set when uploading into another folder than the one shown (right-click,
+  // P91-S4) - named in the heading so the target is never a surprise.
+  targetName?: string;
   onUploaded: () => void;
   onClose: () => void;
 }) {
@@ -79,6 +83,7 @@ export function UploadForm({
   }, [defaultTypeName, objectTypes]);
 
   const selectedObjectType = objectTypes.find((ot) => String(ot.id) === objectTypeId);
+  const heading = targetName ? t("upload.formLabelInto", { name: targetName }) : t("upload.formLabel");
 
   useEffect(() => {
     if (!token || !selectedObjectType) {
@@ -158,14 +163,14 @@ export function UploadForm({
         }`}
         role="dialog"
         aria-modal="true"
-        aria-label={t("upload.formLabel")}
+        aria-label={heading}
         onClick={(e) => e.stopPropagation()}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
         <div className="modal-header">
-          <h2 className="m-0 text-base">{t("upload.formLabel")}</h2>
+          <h2 className="m-0 text-base">{heading}</h2>
           <button type="button" className="modal-close" aria-label={t("upload.close")} onClick={onClose}>
             ×
           </button>

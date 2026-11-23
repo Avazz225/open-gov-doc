@@ -4,6 +4,8 @@ one resource via `inherit=False`, prove a directly-assigned grant is the
 only thing that restores access), applied to documents for the first
 time."""
 
+import time
+
 import httpx
 import pytest
 from document_service.main import app
@@ -142,5 +144,46 @@ def test_purging_a_document_removes_its_resource_node(client):
     purge_response = client.post(f"/documents/{document_id}/purge", headers=DELETION_ADMIN_HEADERS)
     assert purge_response.status_code == 204
 
-    resource = httpx.get(f"{PERMISSION_SERVICE_URL}/resources/{document_id}", timeout=10.0)
+    # The node is removed via `document.resource.deleted`, so asynchronously:
+    # wait a little instead of racing the consumer (flaky before P91-S4).
+    for _ in range(50):
+        resource = httpx.get(f"{PERMISSION_SERVICE_URL}/resources/{document_id}", timeout=10.0)
+        if resource.status_code == 404:
+            break
+        time.sleep(0.1)
     assert resource.status_code == 404
+
+
+def test_folder_listing_leaves_out_documents_the_caller_cannot_read(client, real_folder_id):
+    """P91-S4 (ADR 0259): a document isolated inside a readable folder no
+    longer appears in that folder's listing for someone who can't open it;
+    a service principal learns how many were left out."""
+
+    def upload_into_folder(title: str) -> str:
+        response = client.post(
+            "/documents",
+            data={"title": title, "folder_id": real_folder_id},
+            files={"file": (f"{title}.txt", b"Inhalt", "text/plain")},
+            headers={"X-DMS-Principal": "alice"},
+        )
+        response.raise_for_status()
+        return response.json()["id"]
+
+    visible_id = upload_into_folder("Sichtbar")
+    isolated_id = upload_into_folder("Verschlossen")
+    httpx.patch(
+        f"{PERMISSION_SERVICE_URL}/resources/{isolated_id}", json={"inherit": False}, timeout=10.0
+    ).raise_for_status()
+
+    outsider = {"X-DMS-Principal": "document-service-tests-listing-outsider"}
+    listing = client.get("/documents", params={"folder_id": real_folder_id}, headers=outsider)
+    assert listing.status_code == 200
+    assert [d["id"] for d in listing.json()] == [visible_id]
+    assert "x-dms-hidden-count" not in listing.headers
+
+    as_service = client.get(
+        "/documents",
+        params={"folder_id": real_folder_id},
+        headers={"X-DMS-Principal": "migration-service"},
+    )
+    assert as_service.headers["x-dms-hidden-count"] == "1"

@@ -65,7 +65,8 @@
     "draftLabel": "Als Entwurf anlegen (Kennzeichen erst bei Registrierung vergeben)",
     "draftHint": "Das Dokument erhält beim Anlegen noch kein Kennzeichen - es kann später über \"Registrieren\" nachgeholt werden.",
     "chooseObjectType": "Dokumenttyp wählen …",
-    "noDocumentsAllowed": "In diesem Ordner dürfen keine Dokumente abgelegt werden."
+    "noDocumentsAllowed": "In diesem Ordner dürfen keine Dokumente abgelegt werden.",
+    "formLabelInto": "Dokument hochladen in „{name}“"
   },
   "iconRail": {
     "label": "Cross-Cutting-Navigation",
@@ -151,12 +152,13 @@
     "watch": "\"{name}\" beobachten",
     "unwatch": "\"{name}\" nicht mehr beobachten",
     "watchError": "Beobachten konnte nicht geändert werden.",
-    "applyTemplate": "Struktur aus Vorlage in „{name}“ anlegen …",
+    "applyTemplate": "Struktur aus Vorlage in \"{name}\" anlegen …",
     "applyTemplateHere": "Struktur aus Vorlage anlegen",
     "templateOnlyHint": "Hier werden Unterordner nur aus Strukturvorlagen angelegt.",
     "noSubfoldersAllowed": "Hier dürfen keine Unterordner angelegt werden.",
     "newFolderChooseObjectType": "Ordnerklasse wählen …",
-    "templateApplied": "{count} Ordner aus der Vorlage in „{name}“ angelegt."
+    "templateApplied": "{count} Ordner aus der Vorlage in „{name}“ angelegt.",
+    "uploadInto": "Hochladen in \"{name}\" …"
   },
   "metadata": {
     "paneLabel": "Metadaten",

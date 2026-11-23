@@ -2296,3 +2296,74 @@ def test_metrics_count_cache_hits_and_misses(client):
     assert value(after, miss) >= value(before, miss) + 1
     assert value(after, hit) >= value(before, hit) + 1
     assert value(after, "permission_cache_rebuild_duration_seconds_count") >= 1
+
+
+def test_check_batch_matches_single_checks_across_cache_states(client, role_management_headers):
+    """P91-S4 (ADR 0259): the batch reads cached entries in bulk and computes
+    only misses. Its answers must equal `/check`'s for warm and cold entries,
+    and a permission change (new cache generation) must not be answered from
+    stale rows."""
+    for resource_id, parent in (
+        ("batch-a", ROOT_RESOURCE_ID),
+        ("batch-b", ROOT_RESOURCE_ID),
+        ("batch-c", "batch-b"),
+    ):
+        client.post(
+            "/resources",
+            json={"resource_id": resource_id, "parent_id": parent, "resource_type": "folder"},
+        )
+    client.patch("/resources/batch-b", json={"inherit": False})
+    role = client.post(
+        "/roles",
+        json={"name": "BatchCacheRole", "permissions": ["folder.read"]},
+        headers=role_management_headers,
+    ).json()["role"]
+    client.post(
+        "/role-assignments",
+        json={
+            "principal_type": "user",
+            "principal_id": "heidi",
+            "role_id": role["id"],
+            "resource_id": ROOT_RESOURCE_ID,
+        },
+    )
+
+    def single(resource_id: str) -> bool:
+        return client.get(
+            "/check",
+            params={
+                "principal_id": "heidi",
+                "resource_id": resource_id,
+                "permission": "folder.read",
+                "access_type": "read",
+            },
+        ).json()["allowed"]
+
+    def batch() -> dict[str, bool]:
+        return client.post(
+            "/check/batch",
+            json={
+                "principal_id": "heidi",
+                "permission": "folder.read",
+                "access_type": "read",
+                "resource_ids": ["batch-a", "batch-b", "batch-c", "batch-a"],
+            },
+        ).json()["results"]
+
+    single("batch-a")  # warm one entry, leave the others cold
+    expected = {r: single(r) for r in ("batch-a", "batch-b", "batch-c")}
+    assert expected == {"batch-a": True, "batch-b": False, "batch-c": False}
+    assert batch() == expected
+
+    # A grant on the isolated branch bumps the generation; the batch must
+    # not answer from the now stale rows.
+    client.post(
+        "/role-assignments",
+        json={
+            "principal_type": "user",
+            "principal_id": "heidi",
+            "role_id": role["id"],
+            "resource_id": "batch-b",
+        },
+    )
+    assert batch() == {"batch-a": True, "batch-b": True, "batch-c": True}

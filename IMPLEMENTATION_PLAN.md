@@ -4458,6 +4458,23 @@ The user's goals:
   - **Upload by right-click:** "Hochladen …" in the folder context menu, into that folder, for list and
     tree. Dropping files onto a folder in the tree is optional.
   - Screenshots at 1400/768/390.
+  - ✅ **Result** ([ADR 0259](docs/adr/0259-listings-show-only-what-the-caller-can-read.md)):
+    - **folder-service** filters children by `folder.read`, **document-service** the folder listing by
+      `document.read`, one batch check each. Users get no count; service principals get
+      `X-DMS-Hidden-Count`.
+    - **migration-service** uses the SDK's `list_children_complete`, so a transfer fails instead of
+      silently copying less.
+    - **Breadcrumb:** unreadable ancestors are placeholders (`restricted`), decided over hiding.
+    - **Cost:** the batch check looped per id (root listing 19 ms → 1 s). It now reads cached entries in
+      bulk and skips the scope-lock walk when no lock is active: 48 ms for 810 folders, 37 ms for 538
+      documents.
+    - **Upload by right-click:** "Hochladen in "…" …" in the folder context menu (list and tree).
+      Tree drag and drop not built (optional).
+    - **Found on the way:** an auth-service pool self-deadlock (nested session in the login with the
+      P89-S4 pool budget: five concurrent logins took 30 s). Fixed, and bcrypt moved to a thread.
+      Parallel e2e runs are reliable again. Back-to-back runs as one user hit the gateway's rate limit
+      (600 per minute), which is expected.
+
 - **P91-S5 — admin-ui long lists.**
   - An audit of every admin-ui page for unbounded lists. Examples seen this round: approval settings
     with dozens of action types, realm roles, sensors, deletion register, archival transfers, alert
@@ -4585,6 +4602,11 @@ explain lanes and route changes. Design and reasons: [ADR 0249](docs/adr/0249-ch
   - `PROGRESS.md`'s "Open Decisions" section rewritten: about 38 stale bullets removed and the section
     split from the MVP-era session log it runs into.
   - The `process-designer.md` "stale specs" sentence annotated as closed in P79-S3.
+  - **Nested sessions inside requests (found in P91-S4, ADR 0259):** auth-service's login opened a
+    second `session_factory()` session while its request session held a connection. With the pool
+    budget of P89-S4 (2 + 3) five concurrent logins deadlocked for 30 s. Audit every service for the
+    same pattern (a request-scoped session plus `session_factory()` in the same call path) and pass the
+    session down instead.
   - **Objects with deleted types (found in P91-S2b):** the conformity report shows 52 folders and 23
     documents on the dev stack whose object type was deleted by a test after use. Tests that delete
     their types should delete their folders and documents first. A one-off cleanup goes with the other

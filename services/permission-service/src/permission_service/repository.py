@@ -1165,6 +1165,45 @@ async def list_scope_locks(session: AsyncSession, resource_id: str | None) -> li
     return list(result.scalars().all())
 
 
+async def get_effective_permissions_batch(
+    session: AsyncSession, principal_id: str, resource_ids: list[str]
+) -> dict[str, EffectivePermissionCache]:
+    """The batch form of `get_effective_permissions` (P91-S4, ADR 0259):
+    one query for every cached row of `principal_id` among `resource_ids`,
+    individual computation only for the misses. Listings filter hundreds of
+    children per request; one lookup per child made a root listing of ~800
+    folders take a second."""
+    if not resource_ids:
+        return {}
+    generation = await current_cache_generation(session)
+    result = await session.execute(
+        select(EffectivePermissionCache)
+        .where(
+            EffectivePermissionCache.principal_id == principal_id,
+            EffectivePermissionCache.resource_id.in_(resource_ids),
+            EffectivePermissionCache.generation == generation,
+        )
+        .execution_options(populate_existing=True)
+    )
+    entries = {entry.resource_id: entry for entry in result.scalars().all()}
+    for _ in entries:
+        metrics.count_lookup(hit=True)
+    for resource_id in resource_ids:
+        if resource_id not in entries:
+            entries[resource_id] = await get_effective_permissions(
+                session, principal_id, resource_id
+            )
+    return entries
+
+
+async def list_active_scope_locks(session: AsyncSession) -> list[ScopeLock]:
+    """Every currently active scope lock in the installation - usually
+    none, which lets a batch check skip the per-resource ancestor walk."""
+    now = datetime.now(UTC)
+    result = await session.execute(select(ScopeLock).where(ScopeLock.released_at.is_(None)))
+    return [lock for lock in result.scalars().all() if _scope_lock_is_active(lock, now)]
+
+
 async def get_active_scope_locks_for_resource(
     session: AsyncSession, resource_id: str
 ) -> list[ScopeLock]:

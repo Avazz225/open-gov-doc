@@ -209,6 +209,12 @@ behavior.
   it, because the shared test venv hides a missing declaration.
 
 
+## Folder Listing Filtered per Document (P91-S4, [ADR 0259](../adr/0259-listings-show-only-what-the-caller-can-read.md))
+
+`GET /documents?folder_id=` returns only documents with `document.read` for the caller (every document
+has its own resource node since P39-S4), in one `check_batch`. A service principal gets
+`X-DMS-Hidden-Count`.
+
 ## Embedded File Metadata on Upload (P90-S5, [ADR 0258](../adr/0258-embedded-metadata-mappings-on-upload.md))
 
 `POST /documents` with an `object_type_id` reads the file's own properties and fills attributes as the

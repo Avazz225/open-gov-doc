@@ -102,6 +102,21 @@ async def get_principal_id(session_factory) -> str | None:
         return str(account.id) if account is not None else None
 
 
+async def active_principal_id(session) -> str | None:
+    """The superuser's principal id if the account is currently active,
+    read through the CALLER's session (P91-S4). The login's tracking check
+    used `get_status`/`get_principal_id`, which each open a second session
+    while the request's own still holds a connection; with the pool budget
+    of P89-S4 (2 + 3) five concurrent logins then waited 30 s for each
+    other's connections."""
+    account = await session.scalar(
+        select(TechnicalAccount).where(TechnicalAccount.username == SUPERUSER_USERNAME)
+    )
+    if account is None or not account.enabled:
+        return None
+    return str(account.id)
+
+
 async def deactivate_if_expired(session_factory) -> bool:
     """Called periodically by the poll loop (`main.py`) (ADR 0020 pattern) -
     returns True if it was actually deactivated (for the event publish in

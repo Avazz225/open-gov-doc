@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime, timedelta
 
 from dms_common import (
+    SERVICE_PRINCIPALS,
     ActingIdentity,
     configure_logging,
     require_acting_identity,
@@ -782,18 +783,47 @@ async def get_folder(
     return folder
 
 
+HIDDEN_COUNT_HEADER = "X-DMS-Hidden-Count"
+# Breadcrumb placeholders carry no real metadata, not even timestamps.
+_PLACEHOLDER_TIME = datetime(1970, 1, 1, tzinfo=UTC)
+
+
+async def _readable_ids(x_dms_principal: str, ids: list[str]) -> set[str]:
+    """The folders among `ids` the caller may read, in one batch check."""
+    if not ids:
+        return set()
+    allowed = await app.state.permission_client.check_batch(
+        principal_id=x_dms_principal,
+        resource_ids=ids,
+        permission="folder.read",
+        access_type="read",
+    )
+    return {folder_id for folder_id in ids if allowed.get(folder_id, False)}
+
+
 @app.get("/folders/{folder_id}/children", response_model=list[FolderOut])
 async def list_children(
     folder_id: str,
+    response: Response,
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> list[FolderOut]:
+    """Only the children the caller may read (P91-S4, ADR 0259): a folder
+    with its own permissions (a teamspace root, `inherit=False`) no longer
+    shows up - neither its name nor that it exists - for someone who can't
+    open it. One `check_batch` per listing. A service principal additionally
+    gets `X-DMS-Hidden-Count`, so a migration can refuse to skip silently;
+    users don't, since even a count tells them something exists."""
     try:
         children = await repository.list_children(session, folder_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     await _require_folder_permission(x_dms_principal, folder_id, access_type="read")
-    return children
+    readable = await _readable_ids(x_dms_principal, [child.id for child in children])
+    visible = [child for child in children if child.id in readable]
+    if x_dms_principal in SERVICE_PRINCIPALS:
+        response.headers[HIDDEN_COUNT_HEADER] = str(len(children) - len(visible))
+    return visible
 
 
 @app.get("/folders/{folder_id}/breadcrumb", response_model=list[FolderOut])
@@ -806,14 +836,43 @@ async def get_breadcrumb(
     Session 1) - closes ADR 0015's own long-standing "no endpoint for
     breadcrumb/full path" gap, see `repository.get_breadcrumb`. Gated like
     `GET /folders/{folder_id}` itself (`folder.read` on the target, same
-    reasoning as `list_children` above - a caller who can read the folder
-    can also see its ancestor chain)."""
+    reasoning as `list_children` above).
+
+    Since P91-S4 (ADR 0259): an ancestor the caller can't read (a folder
+    below a teamspace root, reached through a favorite or a link) comes
+    back as a placeholder - id and position only, `restricted: true`, no
+    name or content. Hiding it would make the path look shorter than it is,
+    and the readable folder's place already implies an ancestor exists."""
     try:
         chain = await repository.get_breadcrumb(session, folder_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     await _require_folder_permission(x_dms_principal, folder_id, access_type="read")
-    return chain
+    ancestors = [folder.id for folder in chain if folder.id != folder_id]
+    readable = await _readable_ids(x_dms_principal, ancestors) | {folder_id}
+    return [
+        FolderOut.model_validate(folder)
+        if folder.id in readable
+        else FolderOut(
+            id=folder.id,
+            name="",
+            parent_id=folder.parent_id,
+            object_type_id=None,
+            attributes={},
+            deleted_at=None,
+            deleted_by=None,
+            retention_until=None,
+            full_deletion=False,
+            retention_pseudonymize=False,
+            pending_deletion_reason=None,
+            reminder_notify_email=None,
+            created_by="",
+            created_at=_PLACEHOLDER_TIME,
+            updated_at=_PLACEHOLDER_TIME,
+            restricted=True,
+        )
+        for folder in chain
+    ]
 
 
 @app.patch("/folders/{folder_id}", response_model=FolderOut)

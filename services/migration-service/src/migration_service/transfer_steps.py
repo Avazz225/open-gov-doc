@@ -92,7 +92,9 @@ def _copy_folder_recursive(
             role_permissions=assignment.role_permissions,
         )
 
-    folders, documents = local.tree.list_children(source_folder_id)
+    # Listings show only what the caller may read (P91-S4, ADR 0259); a
+    # migration must copy everything or fail visibly, never skip silently.
+    folders, documents = local.tree.list_children_complete(source_folder_id)
     for document in documents:
         content = local.tree.read_document_content(document.id)
         pushed = peer.push_document(

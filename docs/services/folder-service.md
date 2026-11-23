@@ -292,6 +292,15 @@ evaluated in memory with the pure helpers in `dms_constraint_engine` (`placement
     on both sides. Where the root node may go is checked on apply.
 
 
+## Listings Show Only What the Caller Can Read (P91-S4, [ADR 0259](../adr/0259-listings-show-only-what-the-caller-can-read.md))
+
+- `GET /folders/{id}/children` returns only children with `folder.read` for the caller, in one
+  `check_batch`.
+- A service principal additionally gets `X-DMS-Hidden-Count`; users don't, since even a count reveals
+  something.
+- `GET /folders/{id}/breadcrumb` returns an unreadable ancestor as a placeholder (`restricted: true`;
+  empty name, no type, attributes or creator, fixed timestamp).
+
 ## Open Points
 
 - ~~**Untyped folders bypass the structure rules, and the root accepts anything.**~~ Rules and

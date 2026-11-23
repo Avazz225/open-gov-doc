@@ -69,7 +69,10 @@ test("a strict structure guides new folders, templates and uploads", async ({ pa
       object_type_id: abteilung.id,
     });
     rootFolderId = folder.id;
-    await api(headers, "PUT", "object-type-service/structure-config", { enforcement: "enforce" });
+    // "report", not "enforce": the forms already follow the rules in report
+    // mode, and the mode is installation-wide - "enforce" refused the
+    // folders other specs running in parallel create (seen in P91-S4).
+    await api(headers, "PUT", "object-type-service/structure-config", { enforcement: "report" });
 
     await loginViaUi(page);
     await page.getByText(`Bauamt ${suffix}`).click({ timeout: 30_000 });
