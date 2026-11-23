@@ -28,7 +28,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from folder_service import crypto, repository, retention_actions
+from folder_service import crypto, repository, retention_actions, structure_report
 from folder_service.approval_client import ApprovalClient
 from folder_service.consumer import start_consuming
 from folder_service.document_client import DocumentClient
@@ -43,11 +43,14 @@ from folder_service.schemas import (
     FolderDocumentReferenceOut,
     FolderDocumentReferenceRemove,
     FolderOut,
+    FolderRetypeRequest,
     FolderTemplateApplyRequest,
     FolderTemplateApplyResult,
     FolderTemplateCreate,
     FolderTemplateDetailOut,
     FolderTemplateOut,
+    FolderTemplateUpdate,
+    FolderTypesRequest,
     FolderUpdate,
     LegalHoldCreate,
     LegalHoldOut,
@@ -58,6 +61,8 @@ from folder_service.schemas import (
     RetentionConfigIn,
     RetentionConfigOut,
     RetentionUpdate,
+    RetypeFailure,
+    RetypeResult,
     RevealAttributeRequest,
     RevealedAttributeOut,
     TrashConfigIn,
@@ -324,6 +329,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             text(
                 "ALTER TABLE folder.folder "
                 "ADD COLUMN IF NOT EXISTS force_delete_approval_requested_at TIMESTAMPTZ"
+            )
+        )
+        # Filing structure (P91-S2b, ADR 0255): area roots outside it.
+        await conn.execute(
+            text(
+                "ALTER TABLE folder.folder "
+                "ADD COLUMN IF NOT EXISTS structure_exempt BOOLEAN NOT NULL DEFAULT false"
             )
         )
         # Personal trash (2.5, P15-S1) - same ad-hoc migration pattern.
@@ -623,6 +635,8 @@ async def create_folder(
         )
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if is_exempt_area_root:
+        folder.structure_exempt = True
 
     # Retention (5.2, since P7-S1): type default translated once into a
     # concrete date, identical pattern to document-service. Has already
@@ -1867,6 +1881,157 @@ async def put_audit_trace_config(
     return config
 
 
+# --- Filing structure: conformity, retyping, area roots (P91-S2b, ADR 0255) ---
+
+_REPORT_ITEM_LIMIT = 500
+
+
+async def _require_object_config_permission(x_dms_principal: str) -> None:
+    """The structure is object-type configuration (ADR 0255): its report,
+    bulk retyping and templates need the same capability as the types."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    if not await app.state.permission_client.has_permission(x_dms_principal, "admin.object_config"):
+        raise HTTPException(
+            status_code=403,
+            detail="Fehlende Domain-Admin-Rolle 'Objekttyp-/Workflow-Konfiguration'",
+        )
+
+
+async def _load_structure_rules() -> tuple[dict[int, dict], dict]:
+    types = await app.state.object_type_client.list_object_types()
+    config = await app.state.object_type_client.get_structure_config()
+    return {t["id"]: t for t in types}, config
+
+
+def _folder_row(folder) -> dict:
+    return {
+        "id": folder.id,
+        "name": folder.name,
+        "parent_id": folder.parent_id,
+        "object_type_id": folder.object_type_id,
+        "attributes": folder.attributes or {},
+        "structure_exempt": folder.structure_exempt,
+    }
+
+
+async def _validate_template_structure(structure: dict) -> None:
+    types_by_id, _ = await _load_structure_rules()
+    errors = structure_report.template_errors(structure, types_by_id)
+    if errors:
+        raise HTTPException(status_code=422, detail={"errors": errors})
+
+
+@app.get("/structure/conformity")
+async def get_structure_conformity(
+    x_dms_principal: str = Header(default=""),
+    limit: int = _REPORT_ITEM_LIMIT,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Every active folder measured against the current rules (P91-S2b),
+    independent of the enforcement mode - so a structure can be judged before
+    it is switched on. Teamspace roots are exempt at the root."""
+    await _require_object_config_permission(x_dms_principal)
+    types_by_id, config = await _load_structure_rules()
+    folders = [_folder_row(f) for f in await repository.list_active_folders(session)]
+    report = structure_report.folder_report(
+        folders, types_by_id, config, limit=max(1, min(limit, 5000))
+    )
+    return {"enforcement": config["enforcement"], **report}
+
+
+@app.post("/folders/retype", response_model=RetypeResult)
+async def retype_folders(
+    payload: FolderRetypeRequest,
+    x_dms_principal: str = Header(default=""),
+    identity: ActingIdentity = Depends(require_acting_identity),
+    session: AsyncSession = Depends(get_session),
+) -> RetypeResult:
+    """Bulk retype (P91-S2b, ADR 0255 Decision 4): each folder gets the type
+    if, with it, it fits its place on both sides - whatever the enforcement
+    mode, since this is the tool for reaching conformity. Required
+    attributes aren't demanded (the report lists them). Children are not
+    re-checked: they keep their place and show up in the report if the new
+    type's lists don't admit them."""
+    await _require_object_config_permission(x_dms_principal)
+    types_by_id, config = await _load_structure_rules()
+    new_type = types_by_id.get(payload.object_type_id) if payload.object_type_id else None
+    if payload.object_type_id is not None and (
+        new_type is None or new_type["applies_to"] != "folder"
+    ):
+        raise HTTPException(status_code=422, detail="object_type_id ist keine Ordnerklasse")
+    by_id = {f["id"]: f for f in map(_folder_row, await repository.list_active_folders(session))}
+    updated: list[str] = []
+    failed: list[RetypeFailure] = []
+    for folder_id in dict.fromkeys(payload.folder_ids):
+        row = by_id.get(folder_id)
+        if row is None or folder_id in PROTECTED_FOLDER_IDS:
+            failed.append(RetypeFailure(id=folder_id, errors=["Ordner unbekannt oder geschützt"]))
+            continue
+        problems = structure_report.evaluate_folder(
+            row, by_id, types_by_id, config, object_type_id=payload.object_type_id
+        )
+        placement = [m for p in problems if p["kind"] == "placement" for m in p["messages"]]
+        if placement:
+            failed.append(RetypeFailure(id=folder_id, errors=placement))
+            continue
+        try:
+            await _require_folder_permission(x_dms_principal, folder_id, access_type="write")
+        except HTTPException:
+            failed.append(RetypeFailure(id=folder_id, errors=["Keine Schreibrechte"]))
+            continue
+        folder = await repository.get_folder(session, folder_id)
+        folder.object_type_id = payload.object_type_id
+        row["object_type_id"] = payload.object_type_id
+        updated.append(folder_id)
+    await session.commit()
+    for folder_id in updated:
+        await publish_event(
+            "folder.updated",
+            subject=folder_id,
+            payload={"name": by_id[folder_id]["name"], "changed_fields": ["object_type_id"]},
+            actor=identity.actor,
+        )
+    return RetypeResult(updated=updated, failed=failed)
+
+
+@app.put("/folders/{folder_id}/structure-exempt", status_code=status.HTTP_204_NO_CONTENT)
+async def mark_structure_exempt(
+    folder_id: str,
+    identity: ActingIdentity = Depends(require_acting_identity),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    """teamspace-service confirms its root folders at startup (P91-S2b), so
+    teamspaces created before the flag existed are exempt too. Only area
+    owners may call it, and only for folders directly under the root."""
+    if identity.principal not in _STRUCTURE_EXEMPT_ROOT_CREATORS:
+        raise HTTPException(status_code=403, detail="Nur für Bereichsdienste (teamspace-service)")
+    try:
+        folder = await repository.get_folder(session, folder_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if folder.parent_id != ROOT_FOLDER_ID:
+        raise HTTPException(status_code=409, detail="Nur Ordner direkt unter der Wurzel")
+    folder.structure_exempt = True
+    await session.commit()
+
+
+@app.post("/folders/types")
+async def get_folder_types(
+    payload: FolderTypesRequest,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """`{id: object_type_id}` for many folders at once - document-service's
+    conformity report evaluates documents against their folder's class
+    (P91-S2b). Unknown or deleted ids are left out. Type ids only, no names
+    or content, so a principal is enough."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    rows = await repository.folder_types(session, payload.ids[:20000])
+    return {"types": rows}
+
+
 # --- Structure templates (2.5/7.3, since P15-S6) ---
 
 
@@ -1886,11 +2051,23 @@ async def create_folder_template(
     Session 4 - the captured structure (names/hierarchy) could otherwise
     leak a teamspace's internal organization to a non-member."""
     actor_created_by = identity.actor
-    try:
-        structure = await repository.build_template_structure(session, payload.source_folder_id)
-    except repository.NotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    await _require_folder_permission(x_dms_principal, payload.source_folder_id, access_type="read")
+    # Admin-managed since P91-S2b (ADR 0255, Decision 5).
+    await _require_object_config_permission(x_dms_principal)
+    if (payload.source_folder_id is None) == (payload.structure is None):
+        raise HTTPException(
+            status_code=422, detail="Genau eines von source_folder_id oder structure angeben"
+        )
+    if payload.source_folder_id is not None:
+        try:
+            structure = await repository.build_template_structure(session, payload.source_folder_id)
+        except repository.NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        await _require_folder_permission(
+            x_dms_principal, payload.source_folder_id, access_type="read"
+        )
+    else:
+        structure = payload.structure.model_dump()
+    await _validate_template_structure(structure)
     template = await repository.create_template(
         session,
         name=payload.name,
@@ -1919,10 +2096,39 @@ async def get_folder_template(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@app.put("/folder-templates/{template_id}", response_model=FolderTemplateDetailOut)
+async def update_folder_template(
+    template_id: str,
+    payload: FolderTemplateUpdate,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> FolderTemplateDetailOut:
+    """Template editing (P91-S2b): name, description and the structure tree.
+    A new structure is validated against the rules like a new template."""
+    await _require_object_config_permission(x_dms_principal)
+    try:
+        template = await repository.get_template(session, template_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if payload.structure is not None:
+        structure = payload.structure.model_dump()
+        await _validate_template_structure(structure)
+        template.structure = structure
+    if payload.name is not None:
+        template.name = payload.name
+    if "description" in payload.model_fields_set:
+        template.description = payload.description
+    await session.commit()
+    return template
+
+
 @app.delete("/folder-templates/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_folder_template(
-    template_id: str, session: AsyncSession = Depends(get_session)
+    template_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> None:
+    await _require_object_config_permission(x_dms_principal)
     try:
         await repository.delete_template(session, template_id)
     except repository.NotFoundError as exc:

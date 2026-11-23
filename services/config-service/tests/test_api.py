@@ -1284,3 +1284,60 @@ def test_import_structure_cycle_and_structure_config_roundtrip(authorized_princi
         for t in httpx.get(f"{OBJECT_TYPE_SERVICE_URL}/object-types").json():
             if t["name"] in (team, vorgang):
                 httpx.delete(f"{OBJECT_TYPE_SERVICE_URL}/object-types/{t['id']}", headers=admin)
+
+
+def test_folder_templates_roundtrip_by_type_name(authorized_principal):
+    """P91-S2b (ADR 0255): templates travel with their folder classes by
+    NAME, are matched by name on a second import, and a template naming an
+    unknown type is reported, not half-imported."""
+    suffix = uuid.uuid4().hex[:8]
+    team, vorgang = f"Team-{suffix}", f"Vorgang-{suffix}"
+    template_name = f"Teamgeruest-{suffix}"
+    structure = {
+        "name": "Team",
+        "object_type": team,
+        "children": [{"name": "Vorgang 1", "object_type": vorgang, "children": []}],
+    }
+    payload = {
+        "schema_version": "1.0",
+        "exported_at": "2026-01-01T00:00:00Z",
+        "object_types": [
+            {"name": team, "applies_to": "folder", "allowed_child_folder_types": [vorgang]},
+            {"name": vorgang, "applies_to": "folder", "allowed_parent_types": [team]},
+        ],
+        "folder_templates": [
+            {"name": template_name, "description": "Gerüst", "structure": structure},
+            {
+                "name": f"Kaputt-{suffix}",
+                "structure": {"name": "X", "object_type": "gibt-es-nicht", "children": []},
+            },
+        ],
+    }
+    admin = {"X-DMS-Principal": "config-service"}
+    principal = {"X-DMS-Principal": authorized_principal}
+    try:
+        with _client() as client:
+            first = client.post("/config/import", json=payload, headers=principal).json()
+            templates = first["result"]["results"]["folder_templates"]
+            assert templates["created"] == 1
+            assert "gibt-es-nicht" in templates["errors"][0]
+
+            payload["folder_templates"] = [
+                {"name": template_name, "description": "Neu", "structure": structure}
+            ]
+            second = client.post("/config/import", json=payload, headers=principal).json()
+            assert second["result"]["results"]["folder_templates"]["updated"] == 1
+
+            export = client.get(
+                "/config/export", params={"categories": ["folder_templates"]}
+            ).json()
+        exported = next(t for t in export["folder_templates"] if t["name"] == template_name)
+        assert exported["description"] == "Neu"
+        assert exported["structure"] == structure
+    finally:
+        for t in httpx.get(f"{FOLDER_SERVICE_URL}/folder-templates").json():
+            if t["name"].endswith(suffix):
+                httpx.delete(f"{FOLDER_SERVICE_URL}/folder-templates/{t['id']}", headers=admin)
+        for t in httpx.get(f"{OBJECT_TYPE_SERVICE_URL}/object-types").json():
+            if t["name"] in (team, vorgang):
+                httpx.delete(f"{OBJECT_TYPE_SERVICE_URL}/object-types/{t['id']}", headers=admin)

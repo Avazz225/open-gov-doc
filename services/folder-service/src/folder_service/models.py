@@ -40,6 +40,10 @@ class Folder(Base):
     deleted_via_folder_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     retention_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     full_deletion: Mapped[bool] = mapped_column(Boolean, default=False)
+    # An area root outside the filing structure (P91-S2b, ADR 0255): set for
+    # teamspace roots, on creation and confirmed by teamspace-service at its
+    # startup, so the conformity report doesn't list them under the root.
+    structure_exempt: Mapped[bool] = mapped_column(Boolean, default=False)
     # Automatic retention-expiry pseudonymization (5.2, Phase 58 Session 1) -
     # mirrors `document_service.Document.retention_pseudonymize` exactly,
     # see that model's docstring.

@@ -309,6 +309,29 @@ class RetentionConfigClient:
         response.raise_for_status()
         return response.json()
 
+    # `folder_templates` (P91-S2b, ADR 0255) - folder-service only. Writes
+    # need `admin.object_config`.
+
+    async def list_folder_templates(self) -> list[dict]:
+        response = await self._client.get("/folder-templates")
+        response.raise_for_status()
+        return response.json()
+
+    async def get_folder_template(self, template_id: str) -> dict:
+        response = await self._client.get(f"/folder-templates/{template_id}")
+        response.raise_for_status()
+        return response.json()
+
+    async def create_folder_template(self, payload: dict) -> dict:
+        response = await self._client.post("/folder-templates", json=payload)
+        response.raise_for_status()
+        return response.json()
+
+    async def update_folder_template(self, template_id: str, payload: dict) -> dict:
+        response = await self._client.put(f"/folder-templates/{template_id}", json=payload)
+        response.raise_for_status()
+        return response.json()
+
     # `export_config` (P89-S3) - document-service only; folder-service has no
     # export config. `PUT` needs `admin.document_config`.
 

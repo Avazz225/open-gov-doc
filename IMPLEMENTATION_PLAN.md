@@ -4372,6 +4372,24 @@ The user's goals:
   - **Connector SDK:** the `422` mapped to WebDAV `403` and CMIS `constraint`; mail-connector shows the
     refusal per attachment.
   - **config-service:** the new object-type fields and `structure_config`.
+  - ✅ **Result:**
+    - **object-type-service:** the five folder-class fields (validated: folder classes only, names of
+      the right kind, defaults admitted by their list; `PUT` changes only sent fields), the
+      `structure_config` singleton, `POST /structure/check` and `GET /structure/allowed-children`.
+      The engine's `validate_child`/`allowed_children` are pure.
+    - **folder-service:** create (defaults without required attributes, teamspace roots exempt), move,
+      and template apply (`via_template`, untyped nodes below a list refused) checked. `enforce` → 422,
+      `report` → warning; sensor `folder.structure.violations`.
+    - **document-service:** upload (default document type) and both move paths checked; restores,
+      quarantine release and redaction copies exempt; the `off` answer is cached for 15 s on the
+      upload path.
+    - **Connectors:** SDK `StructureRuleError`, WebDAV `403` with the reason, CMIS `constraint`;
+      mail-connector keeps filed attachments and names the refused one.
+    - **config-service:** new fields, the `structure_config` category, and **object-type import in two
+      passes** (the structure lists create cycles a single pass can't import).
+    - **Live:** WebDAV `MKCOL` at the root with `enforce` → 403 "Unter „Ablage (oberste Ebene)“ sind
+      nur Ordner dieser Klassen erlaubt …"; `report` → 201 plus warning and counter.
+
 - **P91-S2b — Conformity, retyping, templates as configuration.**
   - Conformity report: folder-service (placement, untyped below a list, missing required attributes)
     and document-service (documents against their folder's class), admin endpoints.
@@ -4380,6 +4398,26 @@ The user's goals:
   - Templates: create/edit/delete gated by `admin.object_config`, a template edit endpoint, nodes
     validated against the rules on save; the config-service category `folder_templates`.
   - The eGov package: parent-side lists and the "Aktenplan-Grundgerüst" template.
+  - ✅ **Result:**
+    - **Conformity report** in folder-service and document-service (`GET /structure/conformity`,
+      `admin.object_config`): placement on both sides, missing required attributes, deleted types;
+      mode-independent, evaluated in memory with new pure engine helpers. On the dev stack, 52 folders
+      and 23 documents point to deleted types (test debris).
+    - **Bulk retype** `POST /folders/retype` and `POST /documents/retype`: per-item check on both sides,
+      per-item write permission, failures listed. Documents could not change type at all before.
+    - **Teamspace roots** carry `structure_exempt`. teamspace-service confirms existing ones with
+      retries.
+    - **Templates:** admin-managed, `structure` or `source_folder_id`, `PUT` editing, validated on save;
+      config category `folder_templates` with folder classes by name. The eGov package 1.4.0 has lists
+      and the "Aktenplan-Grundgerüst" (live import: 9 types and the template, no errors).
+    - **Found on the way:**
+      - document-service didn't declare `dms-constraint-engine` (its container crashed; tests hide it).
+        A check now confirms every service declares the `dms_*` libraries it imports.
+      - 419 abandoned NATS test consumers (1.2 million pending), from random durable names in four event
+        tests. `subscribe(durable=None)` is now ephemeral and the tests use it; the debris was deleted.
+        This most probably caused the intermittent shutdown hang of document-service's suite (P90-S5 and
+        twice this session).
+
 - **P91-S3 — Enforced structure, UI.**
   - **admin-ui object types:** child classes and document types per folder class, the strictness
     switch, central template management (choosing source folders with a tree picker, not raw ids), and
@@ -4531,6 +4569,10 @@ explain lanes and route changes. Design and reasons: [ADR 0249](docs/adr/0249-ch
   - `PROGRESS.md`'s "Open Decisions" section rewritten: about 38 stale bullets removed and the section
     split from the MVP-era session log it runs into.
   - The `process-designer.md` "stale specs" sentence annotated as closed in P79-S3.
+  - **Objects with deleted types (found in P91-S2b):** the conformity report shows 52 folders and 23
+    documents on the dev stack whose object type was deleted by a test after use. Tests that delete
+    their types should delete their folders and documents first. A one-off cleanup goes with the other
+    debris.
   - **Realm-role debris (found in P88-S4b):** the dev Keycloak realm holds about 130 realm roles
     created by test suites and never removed (`auditor-*` from document-service,
     `config-import-realm-role-*` from config-service, `realm-role-test-*` from auth-service). Those

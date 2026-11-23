@@ -38,6 +38,13 @@ class FolderServiceClient:
         response.raise_for_status()
         return response.json()
 
+    async def mark_structure_exempt(self, folder_id: str) -> None:
+        """A teamspace root is an area outside the filing structure (P91-S2b,
+        ADR 0255) - folder-service marks new ones itself; this confirms the
+        ones created before the flag existed."""
+        response = await self._client.put(f"/folders/{folder_id}/structure-exempt")
+        response.raise_for_status()
+
     async def close(self) -> None:
         await self._client.aclose()
 

@@ -150,6 +150,25 @@ async def list_children(session: AsyncSession, folder_id: str) -> list[Folder]:
     return list(result.scalars().all())
 
 
+async def list_active_folders(session: AsyncSession) -> list[Folder]:
+    """Every folder not in the trash, root included (P91-S2b's conformity
+    report and bulk retype evaluate them against the structure in memory)."""
+    result = await session.execute(select(Folder).where(Folder.deleted_at.is_(None)))
+    return list(result.scalars().all())
+
+
+async def folder_types(session: AsyncSession, folder_ids: list[str]) -> dict[str, int | None]:
+    """`{id: object_type_id}` of the active folders among `folder_ids`."""
+    if not folder_ids:
+        return {}
+    result = await session.execute(
+        select(Folder.id, Folder.object_type_id).where(
+            Folder.id.in_(set(folder_ids)), Folder.deleted_at.is_(None)
+        )
+    )
+    return {folder_id: type_id for folder_id, type_id in result.all()}
+
+
 async def get_breadcrumb(session: AsyncSession, folder_id: str) -> list[Folder]:
     """Ancestor chain from `root` down to (and including) `folder_id`,
     root-first (Phase 79 Session 1, ADR 0015's own long-standing "Open

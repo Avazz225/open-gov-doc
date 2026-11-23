@@ -220,9 +220,43 @@ FolderTemplateNode.model_rebuild()
 
 
 class FolderTemplateCreate(BaseModel):
-    source_folder_id: str
+    """Either captured from `source_folder_id` (as before) or, since P91-S2b,
+    given as `structure` directly (the admin-ui editor, configuration
+    import). Exactly one of the two."""
+
+    source_folder_id: str | None = None
+    structure: "FolderTemplateNode | None" = None
     name: str
     description: str | None = None
+
+
+class FolderTemplateUpdate(BaseModel):
+    """Template editing (P91-S2b): every field optional, left out = unchanged."""
+
+    name: str | None = None
+    description: str | None = None
+    structure: "FolderTemplateNode | None" = None
+
+
+class FolderRetypeRequest(BaseModel):
+    """Bulk retype (P91-S2b, ADR 0255): `object_type_id=None` removes the type."""
+
+    folder_ids: list[str]
+    object_type_id: int | None
+
+
+class RetypeFailure(BaseModel):
+    id: str
+    errors: list[str]
+
+
+class RetypeResult(BaseModel):
+    updated: list[str]
+    failed: list[RetypeFailure]
+
+
+class FolderTypesRequest(BaseModel):
+    ids: list[str]
 
 
 class FolderTemplateOut(BaseModel):

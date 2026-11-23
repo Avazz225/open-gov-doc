@@ -45,3 +45,12 @@ Integration test against real NATS JetStream (uses `infra/docker-compose.yml`):
 cd infra && docker compose up -d nats && cd ..
 uv run pytest libs/dms-eventbus-client/tests
 ```
+
+## Ephemeral subscriptions (P91-S2b)
+
+`subscribe(..., durable=None)` creates an ephemeral consumer that the server removes when the
+subscription ends. Tests and other short-lived listeners use it. A durable consumer outlives its
+process by design and keeps collecting every new message: event tests with random durable names had
+left 419 consumers with 1.2 million pending messages on the dev stack, which slowed JetStream and
+plausibly caused intermittent shutdown hangs in document-service's test suite. Services keep their fixed
+durable names.

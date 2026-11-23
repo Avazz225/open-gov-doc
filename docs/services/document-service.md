@@ -194,6 +194,21 @@ behavior.
 - **Cost on the upload path:** while the mode is `off`, the client remembers it for 15 s and skips the
   call, so an installation without a structure pays no extra request per upload.
 
+## Conformity and Retyping (P91-S2b, [ADR 0255](../adr/0255-enforced-filing-structure.md))
+
+- **`GET /structure/conformity`** (`admin.object_config`): every document outside the trash against
+  its folder's class (folder types via folder-service's `POST /folders/types`), the same shape as
+  folder-service's report. `Kennzeichen` is never counted as a missing required attribute.
+- **`POST /documents/retype`** (`admin.object_config`, `{document_ids, object_type_id | null}`):
+  documents could not change type at all before.
+  - A document gets the type if it then fits its folder on both sides, whatever the mode.
+  - Retention, archival and classification defaults of the new type are not applied retroactively, and
+    no reference number is assigned.
+  - `document.write` per document; `document.metadata.updated` with `changed_fields`.
+- **Dependency:** `dms-constraint-engine` is now a declared dependency. The first build crashed without
+  it, because the shared test venv hides a missing declaration.
+
+
 ## Embedded File Metadata on Upload (P90-S5, [ADR 0258](../adr/0258-embedded-metadata-mappings-on-upload.md))
 
 `POST /documents` with an `object_type_id` reads the file's own properties and fills attributes as the

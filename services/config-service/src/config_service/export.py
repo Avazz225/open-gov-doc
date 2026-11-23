@@ -24,6 +24,8 @@ from config_service.schemas import (
     DmnDefinitionExport,
     ExportConfigExport,
     FederationConfigExport,
+    FolderTemplateExport,
+    FolderTemplateNodeExport,
     ObjectTypeExport,
     ObjectTypeLayoutExport,
     OrgUnitExport,
@@ -184,6 +186,33 @@ async def export_alert_downtime_windows(
     return result
 
 
+def _template_node_to_export(node: dict, type_names: dict[int, str]) -> FolderTemplateNodeExport:
+    type_id = node.get("object_type_id")
+    return FolderTemplateNodeExport(
+        name=node["name"],
+        # A type deleted since the template was saved exports as untyped.
+        object_type=type_names.get(type_id) if type_id is not None else None,
+        children=[_template_node_to_export(c, type_names) for c in node.get("children") or []],
+    )
+
+
+async def export_folder_templates(
+    folder_client: RetentionConfigClient, object_type_client: ObjectTypeServiceClient
+) -> list[FolderTemplateExport]:
+    type_names = {t["id"]: t["name"] for t in await object_type_client.list_object_types()}
+    result = []
+    for summary in await folder_client.list_folder_templates():
+        template = await folder_client.get_folder_template(summary["id"])
+        result.append(
+            FolderTemplateExport(
+                name=template["name"],
+                description=template.get("description"),
+                structure=_template_node_to_export(template["structure"], type_names),
+            )
+        )
+    return result
+
+
 async def export_structure_config(client: ObjectTypeServiceClient) -> StructureConfigExport:
     config = await client.get_structure_config()
     return StructureConfigExport(**{k: config[k] for k in StructureConfigExport.model_fields})
@@ -326,4 +355,6 @@ async def build_export(
         doc.export_config = await export_export_config(document_client)
     if "structure_config" in categories:
         doc.structure_config = await export_structure_config(object_type_client)
+    if "folder_templates" in categories:
+        doc.folder_templates = await export_folder_templates(folder_client, object_type_client)
     return doc

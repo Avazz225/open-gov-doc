@@ -337,7 +337,7 @@ def test_apply_folder_template_with_root_only_type_succeeds_at_root(client, top_
             "description": None,
             "created_by": "alice",
         },
-        headers={"X-DMS-Principal": "alice"},
+        headers={"X-DMS-Principal": "folder-service-test-object-config-admin"},
     ).json()
 
     response = client.post(
@@ -382,7 +382,7 @@ def test_apply_folder_template_rejects_invalid_nesting(
             "description": None,
             "created_by": "alice",
         },
-        headers={"X-DMS-Principal": "alice"},
+        headers={"X-DMS-Principal": "folder-service-test-object-config-admin"},
     ).json()
 
     response = client.post(

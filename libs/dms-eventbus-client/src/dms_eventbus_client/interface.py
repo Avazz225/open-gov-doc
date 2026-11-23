@@ -30,11 +30,15 @@ class EventBusClient(ABC):
         subject: str,
         handler: MessageHandler,
         *,
-        durable: str,
+        durable: str | None,
         deliver_new: bool = False,
         max_concurrency: int | Callable[[], Awaitable[int]] = 1,
     ) -> None:
-        """``deliver_new=True`` delivers only messages from now on, instead of the
+        """``durable=None`` (P91-S2b) creates an ephemeral consumer the server
+        removes when the subscription ends - for tests and short-lived
+        listeners; services keep a fixed durable name.
+
+        ``deliver_new=True`` delivers only messages from now on, instead of the
         complete history of the stream (default) - for consumers like the audit
         service, which should catch up gaplessly even after a restart, ``False``
         remains correct; short-lived/test subscriptions set ``deliver_new=True``.

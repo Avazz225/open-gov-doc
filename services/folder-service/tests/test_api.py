@@ -1058,7 +1058,7 @@ def test_create_and_list_folder_template(client):
             "description": "Standard-Struktur",
             "created_by": "alice",
         },
-        headers={"X-DMS-Principal": "alice"},
+        headers={"X-DMS-Principal": "folder-service-test-object-config-admin"},
     )
     assert response.status_code == 201
     template = response.json()
@@ -1077,7 +1077,7 @@ def test_create_folder_template_unknown_source_returns_404(client):
             "description": None,
             "created_by": "alice",
         },
-        headers={"X-DMS-Principal": "alice"},
+        headers={"X-DMS-Principal": "folder-service-test-object-config-admin"},
     )
     assert response.status_code == 404
 
@@ -1093,7 +1093,7 @@ def test_get_folder_template_returns_structure(client):
             "description": None,
             "created_by": "alice",
         },
-        headers={"X-DMS-Principal": "alice"},
+        headers={"X-DMS-Principal": "folder-service-test-object-config-admin"},
     ).json()
 
     response = client.get(f"/folder-templates/{template['id']}")
@@ -1120,17 +1120,23 @@ def test_delete_folder_template(client):
             "description": None,
             "created_by": "alice",
         },
-        headers={"X-DMS-Principal": "alice"},
+        headers={"X-DMS-Principal": "folder-service-test-object-config-admin"},
     ).json()
 
-    response = client.delete(f"/folder-templates/{template['id']}")
+    response = client.delete(
+        f"/folder-templates/{template['id']}",
+        headers={"X-DMS-Principal": "folder-service-test-object-config-admin"},
+    )
 
     assert response.status_code == 204
     assert client.get("/folder-templates").json() == []
 
 
 def test_delete_folder_template_returns_404_for_unknown_id(client):
-    response = client.delete("/folder-templates/does-not-exist")
+    response = client.delete(
+        "/folder-templates/does-not-exist",
+        headers={"X-DMS-Principal": "folder-service-test-object-config-admin"},
+    )
     assert response.status_code == 404
 
 
@@ -1145,7 +1151,7 @@ def test_apply_folder_template_creates_folders_under_target(client):
             "description": None,
             "created_by": "alice",
         },
-        headers={"X-DMS-Principal": "alice"},
+        headers={"X-DMS-Principal": "folder-service-test-object-config-admin"},
     ).json()
     target = _create_folder(client, name="Neues Projekt")
 
@@ -1216,7 +1222,7 @@ def test_apply_folder_template_unknown_target_returns_404(client):
             "description": None,
             "created_by": "alice",
         },
-        headers={"X-DMS-Principal": "alice"},
+        headers={"X-DMS-Principal": "folder-service-test-object-config-admin"},
     ).json()
 
     response = client.post(

@@ -2,6 +2,122 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P91-S2b, enforced filing structure: conformity, retyping, templates as
+configuration ([ADR 0255](docs/adr/0255-enforced-filing-structure.md), implementation notes added).
+
+**What changed:**
+- **dms-constraint-engine:** `placement_errors`, `missing_required_attributes`,
+  `parent_rules_from_type`, `root_rules_from_config` (pure, evaluate existing data in memory).
+- **folder-service:**
+  - `GET /structure/conformity` (`admin.object_config`, mode-independent: placement, missing required
+    attributes, deleted types; capped items, full counts).
+  - `POST /folders/retype` (both sides checked per folder, `folder.write` per folder, failures
+    listed).
+  - `structure_exempt` column; `PUT /folders/{id}/structure-exempt` (teamspace-service only, root
+    level).
+  - `POST /folders/types` (batch type lookup for document-service).
+  - **Templates:** create/edit/delete need `admin.object_config`; `POST` takes `structure` or
+    `source_folder_id`; `PUT` edits; the tree is validated on save.
+- **document-service:** `GET /structure/conformity` and `POST /documents/retype` (documents couldn't
+  change type at all before; type defaults not applied retroactively). `dms-constraint-engine` is now
+  declared (see below).
+- **teamspace-service:** confirms existing roots as exempt in a background task with retries. A one-off
+  call at startup failed when both services restarted together.
+- **config-service:** category `folder_templates` (by name; folder classes by name, since ids differ
+  between installations).
+- **eGov package 1.4.0:** Abteilung → Aktenplan/Handakte/Arbeitsvorrat, Aktenplan → the five Akte types
+  (default Akte), template "Aktenplan-Grundgerüst". The mode is deliberately not set.
+- **dms-eventbus-client:** `subscribe(durable=None)` = an ephemeral consumer.
+- **Docs:** ADR 0255; folder-, document-, config-, teamspace-service docs; eventbus README; eGov README
+  (Part 6); the plan.
+
+**Found and fixed on the way:**
+- **document-service didn't declare `dms-constraint-engine`:** the rebuilt container crashed on import.
+  The shared workspace venv hides that in tests. A check over all services now confirms every imported
+  `dms_*` library is declared, and nothing else was missing.
+- **419 abandoned NATS consumers with 1.2 million pending messages:**
+  - They came from event tests in document-, folder-, permission- and registry-service subscribing with
+    random durable names, which survive the test.
+  - The tests now use ephemeral consumers, and the debris was deleted (only `test-*`).
+  - This most probably caused the intermittent hang in the shutdown of document-service's test app (seen
+    in P90-S5 and twice this session; a thread dump showed `TestClient.__exit__` waiting on the
+    lifespan) and a flaky purge test.
+  - After the cleanup the suites ran without a hang, and no new `test-*` consumers appeared. If it comes
+    back, `scratchpad/diag/teardown_watchdog.py` dumps all asyncio tasks of a teardown that takes over
+    60 s.
+
+**Note on the dev stack:** for the live check I imported the eGov package 1.4.0 through the gateway as
+`config-admin`.
+- The structure lists and the template arrived without errors (9 types, 1 template).
+- The import also switched on the package's four-eyes defaults (12 action types, including
+  `config.import` and `permission.role_assignment.create`), which would block tests and admin work. I
+  set those 12 back to `requires_approval: false` and rejected the pending approval request of a second
+  import.
+- The package's types, workflows, roles, org units, deletion reasons and the template stay in the dev
+  stack; the structure mode is `off`.
+
+**Checks:**
+- object-type-service 141, folder-service 193 (+7), document-service 446 (+2), config-service 72 (+1),
+  teamspace-service 70, permission-service 210, registry-service 83, all green.
+- constraint-engine 35 (+2). ruff clean.
+- **Live:** both conformity reports over the real data (1,822 folders, 2,258 documents) answer at once.
+  They found 52 folders and 23 documents with deleted types (test debris, a candidate for P94-S3). The
+  teamspace root is marked exempt.
+
+**Next session:** P91-S3 (UI for the enforced structure).
+
+---
+
+**Last completed:** P91-S2a, enforced filing structure: rules and enforcement
+([ADR 0255](docs/adr/0255-enforced-filing-structure.md), implementation notes added).
+
+**What changed:**
+- **dms-constraint-engine:** pure `validate_child` (parent side; `null` open, a list only these typed
+  children, untyped refused, template-only) and `allowed_children` (both sides intersected).
+- **object-type-service:**
+  - Folder-class fields `allowed_child_folder_types`, `allowed_document_types`,
+    `default_child_folder_type`, `default_document_type`, `children_from_template_only` (ad-hoc
+    migration). Validated; `PUT` changes only the fields it sends, so the current admin-ui can't reset
+    them.
+  - `structure_config` singleton (`GET`/`PUT /structure-config`: root lists, `off|report|enforce`,
+    default `off`).
+  - `POST /structure/check` (mode, errors, default) and `GET /structure/allowed-children` (for P91-S3).
+- **folder-service:** create, move and template apply checked.
+  - An untyped folder takes the parent's default class without its required attributes.
+  - Teamspace roots are exempt.
+  - Template nodes are checked with `via_template`.
+  - Sensor `folder.structure.violations{mode}`.
+- **document-service:** upload (default document type, a missing reference number tolerated for a
+  defaulted document) and both move paths checked. Restores, quarantine release and redaction copies are
+  exempt. `off` is cached for 15 s on the upload path.
+- **Connector SDK:** `StructureRuleError`. **WebDAV:** `403` with the reason. **CMIS:** `constraint`.
+  **mail-connector:** keeps filed attachments and names the refused one; a retry sends only the rest.
+- **config-service:**
+  - the new fields and the `structure_config` category;
+  - object-type import in two passes (create without references, then the full definitions), so order
+    doesn't matter and Team ⇄ Vorgang cycles import.
+- **Docs:** ADR 0255 implementation notes; object-type-, folder-, document-, config-service, mail-,
+  WebDAV- and CMIS-connector docs; the plan.
+
+**Checks:**
+- object-type-service 141 (+17), folder-service 186 (+7), document-service 444 (+5),
+  config-service 71 (+1), mail-connector 89 (+1).
+- Unchanged and green: webdav 19, cmis 17, migration 21, teamspace 70, archival 159.
+- constraint-engine 33 (+7), connector SDK +3 (pure). ruff clean.
+- **Live (WebDAV):**
+  - `MKCOL` at the root with `enforce` → `403` "Unter „Ablage (oberste Ebene)“ sind nur Ordner dieser
+    Klassen erlaubt: … (ohne Objekttyp nicht zulässig)";
+  - `PUT` of a file at the root (documents still open) → `201`;
+  - `report` → `201` plus a `structure_violation` warning; the counter showed one `enforce` and one
+    `report`.
+  - The config was put back to `off`, and the test type, folder and file removed.
+- The test fixtures save and restore the installation's structure config, so the dev stack is never
+  left in `enforce`.
+
+**Next session:** P91-S2b (conformity report, bulk retype, templates as configuration).
+
+---
+
 **Last completed:** P91-S1, scoping: enforced filing structure
 ([ADR 0255](docs/adr/0255-enforced-filing-structure.md)). No code.
 

@@ -314,6 +314,48 @@ def _error_detail(exc: Exception) -> str:
     return str(exc)
 
 
+def _template_node_to_payload(node, type_ids: dict[str, int], path: str = "") -> dict:
+    here = f"{path}/{node.name}"
+    type_id = None
+    if node.object_type is not None:
+        type_id = type_ids.get(node.object_type)
+        if type_id is None:
+            raise ValueError(f"{here}: Objekttyp {node.object_type!r} unbekannt")
+    return {
+        "name": node.name,
+        "object_type_id": type_id,
+        "children": [_template_node_to_payload(c, type_ids, here) for c in node.children],
+    }
+
+
+async def apply_folder_templates(
+    folder_client: RetentionConfigClient, object_type_client: ObjectTypeServiceClient, entries
+) -> CategoryResult:
+    """Structure templates (P91-S2b), matched by name: an existing one is
+    updated, a new one created. Type names become this installation's ids;
+    folder-service validates the tree against the rules (its 422 reaches
+    `errors`). Applied after `object_types`."""
+    result = CategoryResult()
+    type_ids = {t["name"]: t["id"] for t in await object_type_client.list_object_types()}
+    existing = {t["name"]: t["id"] for t in await folder_client.list_folder_templates()}
+    for entry in entries:
+        try:
+            payload = {
+                "name": entry.name,
+                "description": entry.description,
+                "structure": _template_node_to_payload(entry.structure, type_ids),
+            }
+            if entry.name in existing:
+                await folder_client.update_folder_template(existing[entry.name], payload)
+                result.updated += 1
+            else:
+                await folder_client.create_folder_template(payload)
+                result.created += 1
+        except Exception as exc:  # noqa: BLE001 - one template must not block the rest
+            result.errors.append(f"{entry.name}: {_error_detail(exc)}")
+    return result
+
+
 async def apply_structure_config(client: ObjectTypeServiceClient, entry) -> CategoryResult:
     """Singleton (P91-S2a), a full replace. object-type-service's 422 (a
     name that isn't a type of the right kind) reaches `errors`."""
@@ -590,6 +632,10 @@ async def apply_import(
     if "structure_config" in categories and doc.structure_config is not None:
         results["structure_config"] = await apply_structure_config(
             object_type_client, doc.structure_config
+        )
+    if "folder_templates" in categories and doc.folder_templates is not None:
+        results["folder_templates"] = await apply_folder_templates(
+            folder_client, object_type_client, doc.folder_templates
         )
     # `alert_rules` BEFORE `alert_downtime_windows`: windows name their rules.
     if "alert_rules" in categories and doc.alert_rules is not None:

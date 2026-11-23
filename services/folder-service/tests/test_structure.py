@@ -171,10 +171,14 @@ def test_template_only_class_and_template_apply(client, structure):
     _folder(client, name="Unterlagen", parent_id=source["id"])
     untyped_source = _folder(client, name="Ohne Typ").json()
     template = client.post(
-        "/folder-templates", json={"source_folder_id": source["id"], "name": "Vorgangsakte"}
+        "/folder-templates",
+        json={"source_folder_id": source["id"], "name": "Vorgangsakte"},
+        headers={"X-DMS-Principal": "folder-service-test-object-config-admin"},
     ).json()
     untyped_template = client.post(
-        "/folder-templates", json={"source_folder_id": untyped_source["id"], "name": "Ohne Typ"}
+        "/folder-templates",
+        json={"source_folder_id": untyped_source["id"], "name": "Ohne Typ"},
+        headers={"X-DMS-Principal": "folder-service-test-object-config-admin"},
     ).json()
     structure["oc"].put("/structure-config", json={"enforcement": "enforce"}).raise_for_status()
 

@@ -339,3 +339,69 @@ def _placement_errors(schema: dict, parent_type_name: str | None) -> list[str]:
     errors: list[str] = []
     _validate_parent(schema, parent_type_name, errors)
     return errors
+
+
+# --- Evaluating existing data against the structure (P91-S2b, ADR 0255) ---
+#
+# The conformity report and bulk retyping evaluate many objects at once, so
+# they fetch all rules once (object-type-service's object types and
+# `structure_config`, as returned by its API) and use these pure helpers
+# instead of one `/structure/check` call per object.
+
+ROOT_LABEL = "Ablage (oberste Ebene)"
+
+
+def parent_rules_from_type(object_type: dict | None) -> dict | None:
+    """Parent-side rules of a folder class, from object-type-service's API
+    shape. ``None`` (open) for documents, missing types and untyped parents."""
+    if not object_type or object_type.get("applies_to") != "folder":
+        return None
+    return {
+        "label": object_type["name"],
+        "allowedChildFolderTypes": object_type.get("allowed_child_folder_types"),
+        "allowedDocumentTypes": object_type.get("allowed_document_types"),
+        "childrenFromTemplateOnly": bool(object_type.get("children_from_template_only")),
+    }
+
+
+def root_rules_from_config(structure_config: dict) -> dict:
+    return {
+        "label": ROOT_LABEL,
+        "allowedChildFolderTypes": structure_config.get("root_allowed_folder_types"),
+        "allowedDocumentTypes": structure_config.get("root_allowed_document_types"),
+        "childrenFromTemplateOnly": False,
+    }
+
+
+def placement_errors(
+    child_kind: str,
+    child_type: dict | None,
+    parent_rules: dict | None,
+    parent_type_name: str | None,
+) -> list[str]:
+    """Both sides for an object that already exists (or is being retyped):
+    the parent's lists and the child's own ``allowed_parent_types``. The
+    template-only flag concerns creating, not existing, so it is ignored."""
+    errors = validate_child(
+        parent_rules,
+        child_kind,
+        child_type["name"] if child_type else None,
+        via_template=True,
+    )
+    if child_type is not None:
+        _validate_parent(
+            {"allowedParentTypes": child_type.get("allowed_parent_types")},
+            parent_type_name,
+            errors,
+        )
+    return errors
+
+
+def missing_required_attributes(attribute_defs: list[dict], values: dict) -> list[str]:
+    """Names of required attributes without a value - what a defaulted or
+    template-created object still owes (ADR 0255, Decision 3)."""
+    return [
+        definition["name"]
+        for definition in attribute_defs or []
+        if definition.get("required") and values.get(definition["name"]) in (None, "")
+    ]

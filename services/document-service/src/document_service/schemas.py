@@ -603,3 +603,20 @@ class FolderExportJobOut(BaseModel):
     created_by: str
     created_at: datetime
     updated_at: datetime
+
+
+class DocumentRetypeRequest(BaseModel):
+    """Bulk retype (P91-S2b, ADR 0255): `object_type_id=None` removes the type."""
+
+    document_ids: list[str]
+    object_type_id: int | None
+
+
+class DocumentRetypeFailure(BaseModel):
+    id: str
+    errors: list[str]
+
+
+class DocumentRetypeResult(BaseModel):
+    updated: list[str]
+    failed: list[DocumentRetypeFailure]

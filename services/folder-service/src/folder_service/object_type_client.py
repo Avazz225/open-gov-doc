@@ -67,5 +67,16 @@ class ObjectTypeClient:
         response.raise_for_status()
         return response.json()
 
+    async def list_object_types(self) -> list[dict]:
+        """All types at once, for evaluating many folders locally (P91-S2b)."""
+        response = await self._client.get("/object-types")
+        response.raise_for_status()
+        return response.json()
+
+    async def get_structure_config(self) -> dict:
+        response = await self._client.get("/structure-config")
+        response.raise_for_status()
+        return response.json()
+
     async def close(self) -> None:
         await self._client.aclose()

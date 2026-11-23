@@ -65,3 +65,41 @@ def test_allowed_children_under_an_untyped_parent_uses_child_rules_only():
     result = allowed_children(None, None, candidates)
     assert result["folder_types"] == ["Notiz"]
     assert result["untyped_folders"] is True
+
+
+def test_placement_errors_checks_both_sides_and_ignores_template_only():
+    from dms_constraint_engine import parent_rules_from_type, placement_errors
+
+    team = {
+        "name": "Team",
+        "applies_to": "folder",
+        "allowed_child_folder_types": ["Vorgang"],
+        "allowed_document_types": None,
+        "children_from_template_only": True,
+    }
+    vorgang = {"name": "Vorgang", "applies_to": "folder", "allowed_parent_types": ["Team"]}
+    abteilung = {"name": "Abteilung", "applies_to": "folder", "allowed_parent_types": ["$ROOT"]}
+    rules = parent_rules_from_type(team)
+    assert placement_errors("folder", vorgang, rules, "Team") == []
+    errors = placement_errors("folder", abteilung, rules, "Team")
+    assert len(errors) == 2  # not listed, and its own rule wants the root
+    assert placement_errors("folder", None, rules, "Team")  # untyped below a list
+
+
+def test_root_rules_and_missing_required():
+    from dms_constraint_engine import (
+        missing_required_attributes,
+        placement_errors,
+        root_rules_from_config,
+    )
+
+    rules = root_rules_from_config(
+        {"root_allowed_folder_types": [], "root_allowed_document_types": None}
+    )
+    assert placement_errors("folder", None, rules, "$ROOT") == [
+        "Unter „Ablage (oberste Ebene)“ sind keine Ordner erlaubt"
+    ]
+    assert placement_errors("document", None, rules, "$ROOT") == []
+    defs = [{"name": "Aktenzeichen", "required": True}, {"name": "Notiz"}]
+    assert missing_required_attributes(defs, {"Aktenzeichen": ""}) == ["Aktenzeichen"]
+    assert missing_required_attributes(defs, {"Aktenzeichen": "AZ-1"}) == []

@@ -142,6 +142,14 @@ Deliberately no appointment/contact events — the membership events are the sec
 - **Real end-to-end browser verification** (ephemeral Playwright container, see `docs/services/user-ui.md` "Team workspaces" section for the network stumbling block found in the process): login → create teamspace → open detail → invite member by username (correctly resolves via `GET /users/lookup`) → create appointment/contact → open folder switches into the document explorer → logged in as an invited, non-management member, confirmed: delete/invite actions are invisible, "leave" works → deleting as a management member removes the teamspace. No console errors. Found and fixed a UI bug in the process (`user-ui`'s delete buttons for appointments/contacts showed "common.delete" instead of "Löschen" — missing i18n key).
 - **Live verification, P55-S1**: created a real teamspace via the API, confirmed two real `permission-service` role assignments existed for its creator on the root folder, then deleted that root folder directly via `folder-service`'s `DELETE /folders/{id}` (bypassing this service entirely — the exact bypass this session closes), and confirmed against the real, rebuilt container: `GET /teamspaces/{id}` now `404`s, both role assignments are gone, and the container's own log shows `teamspace_orphan_cleanup_completed` — where before this session, the teamspace row and both grants would have persisted forever.
 
+
+## Filing Structure (P91-S2b, [ADR 0255](../adr/0255-enforced-filing-structure.md))
+
+Teamspace roots are areas outside the enforced filing structure. folder-service marks new ones itself.
+At startup a background task confirms every existing root through folder-service's
+`PUT /folders/{id}/structure-exempt`, so they don't appear in the conformity report. It retries up to
+10 times every 30 s because folder-service may still be starting, and skips roots that are gone.
+
 ## Open Points
 
 - **No protection against the last management-capable member removing themselves** — a teamspace can thereby become unmanageable (nobody can invite/remove/delete anymore). Deliberately not handled (rare edge case).

@@ -193,3 +193,22 @@ with the request id, never silently counted as updated.
 
 Both were then put back to their previous values directly at permission-service/document-service. A
 re-import would itself have needed four-eyes approval, since `config.import` was now gated.
+
+## Filing Structure (Part 6, P91-S2b, version 1.4.0)
+
+The parent side of the hierarchy ([ADR 0255](../../docs/adr/0255-enforced-filing-structure.md)):
+
+| Folder class | Allowed child folders | Allowed documents | Default document type |
+|---|---|---|---|
+| `Abteilung` | `Aktenplan`, `Handakte`, `Arbeitsvorrat` | none | — |
+| `Aktenplan` | none | the five `Akte` types | `Akte` |
+
+Plus a structure template **"Aktenplan-Grundgerüst"**: Abteilung with Aktenplan, Handakte and
+Arbeitsvorrat, folder classes referenced by name.
+
+**The package deliberately doesn't set the enforcement mode or the root's lists** (`structure_config`).
+- Those belong to the installation: importing the package must not suddenly start refusing uploads
+  elsewhere.
+- An admin chooses `report` first, looks at the conformity report, then switches to `enforce`.
+- Importing this package also switches on the four-eyes defaults from Part 2/5, including for
+  `config.import` itself. Further imports then need an approval.

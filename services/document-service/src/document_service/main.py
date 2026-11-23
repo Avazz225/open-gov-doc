@@ -39,7 +39,7 @@ from fastapi import (
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from document_service import crypto, metrics, repository, retention_actions
+from document_service import crypto, metrics, repository, retention_actions, structure_report
 from document_service.approval_client import ApprovalClient
 from document_service.audit_client import AuditServiceClient
 from document_service.auth_client import AuthServiceClient
@@ -73,6 +73,9 @@ from document_service.schemas import (
     DocumentOut,
     DocumentPromoteRequest,
     DocumentRegisterRequest,
+    DocumentRetypeFailure,
+    DocumentRetypeRequest,
+    DocumentRetypeResult,
     DocumentUpdate,
     DocumentVersionOut,
     DocumentVersionsBatchRequest,
@@ -1499,6 +1502,106 @@ async def _check_document_structure(
         logger.warning("structure_violation (%s, %s mode): %s", context, mode, "; ".join(errors))
         return None
     return result.get("default_object_type_id")
+
+
+_REPORT_ITEM_LIMIT = 500
+
+
+async def _require_object_config_permission(x_dms_principal: str) -> None:
+    """The filing structure is object-type configuration (ADR 0255): its
+    report and bulk retyping need the capability that edits the types."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    if not await app.state.permission_client.has_permission(x_dms_principal, "admin.object_config"):
+        raise HTTPException(
+            status_code=403,
+            detail="Fehlende Domain-Admin-Rolle 'Objekttyp-/Workflow-Konfiguration'",
+        )
+
+
+async def _load_structure_inputs(documents: list[dict]) -> tuple[dict, dict, dict]:
+    types = await app.state.object_type_client.list_object_types()
+    config = await app.state.object_type_client.get_structure_config()
+    folder_ids = sorted({d["folder_id"] for d in documents if d["folder_id"] not in (None, "root")})
+    folder_types = await app.state.folder_client.folder_types(folder_ids)
+    return {t["id"]: t for t in types}, config, folder_types
+
+
+@app.get("/structure/conformity")
+async def get_structure_conformity(
+    x_dms_principal: str = Header(default=""),
+    limit: int = _REPORT_ITEM_LIMIT,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Every document outside the trash measured against its folder's class
+    (P91-S2b), independent of the enforcement mode. folder-service has the
+    folders' half."""
+    await _require_object_config_permission(x_dms_principal)
+    documents = await repository.list_active_documents_for_structure(session)
+    types_by_id, config, folder_types = await _load_structure_inputs(documents)
+    report = structure_report.document_report(
+        documents, folder_types, types_by_id, config, limit=max(1, min(limit, 5000))
+    )
+    return {"enforcement": config["enforcement"], **report}
+
+
+@app.post("/documents/retype", response_model=DocumentRetypeResult)
+async def retype_documents(
+    payload: DocumentRetypeRequest,
+    x_dms_principal: str = Header(default=""),
+    identity: ActingIdentity = Depends(require_acting_identity),
+    session: AsyncSession = Depends(get_session),
+) -> DocumentRetypeResult:
+    """Bulk retype (P91-S2b, ADR 0255 Decision 4) - documents could not change
+    type at all before. A document gets the type if, with it, it fits its
+    folder on both sides, whatever the enforcement mode. Required attributes
+    aren't demanded (the report lists them); retention, archival and
+    classification defaults of the new type are not applied retroactively,
+    and no reference number is assigned."""
+    await _require_object_config_permission(x_dms_principal)
+    ids = list(dict.fromkeys(payload.document_ids))
+    rows = {
+        d["id"]: d
+        for d in await repository.list_active_documents_for_structure(session)
+        if d["id"] in set(ids)
+    }
+    types_by_id, config, folder_types = await _load_structure_inputs(list(rows.values()))
+    new_type = types_by_id.get(payload.object_type_id) if payload.object_type_id else None
+    if payload.object_type_id is not None and (
+        new_type is None or new_type["applies_to"] != "document"
+    ):
+        raise HTTPException(status_code=422, detail="object_type_id ist kein Dokumenttyp")
+    updated: list[str] = []
+    failed: list[DocumentRetypeFailure] = []
+    for document_id in ids:
+        row = rows.get(document_id)
+        if row is None:
+            failed.append(DocumentRetypeFailure(id=document_id, errors=["Dokument unbekannt"]))
+            continue
+        problems = structure_report.evaluate_document(
+            row, folder_types, types_by_id, config, object_type_id=payload.object_type_id
+        )
+        placement = [m for p in problems if p["kind"] == "placement" for m in p["messages"]]
+        if placement:
+            failed.append(DocumentRetypeFailure(id=document_id, errors=placement))
+            continue
+        try:
+            await _require_document_permission(x_dms_principal, document_id, access_type="write")
+        except HTTPException:
+            failed.append(DocumentRetypeFailure(id=document_id, errors=["Keine Schreibrechte"]))
+            continue
+        document = await repository.get_document(session, document_id)
+        document.object_type_id = payload.object_type_id
+        updated.append(document_id)
+    await session.commit()
+    for document_id in updated:
+        await publish_event(
+            "document.metadata.updated",
+            subject=document_id,
+            payload={"title": rows[document_id]["title"], "changed_fields": ["object_type_id"]},
+            actor=identity.actor,
+        )
+    return DocumentRetypeResult(updated=updated, failed=failed)
 
 
 async def _prepare_document_fields(

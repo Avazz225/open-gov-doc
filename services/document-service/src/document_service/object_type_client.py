@@ -101,5 +101,16 @@ class ObjectTypeClient:
             self._structure_off_until = time.monotonic() + self.STRUCTURE_OFF_CACHE_SECONDS
         return result
 
+    async def list_object_types(self) -> list[dict]:
+        """All types at once, for evaluating many documents (P91-S2b)."""
+        response = await self._client.get("/object-types")
+        response.raise_for_status()
+        return response.json()
+
+    async def get_structure_config(self) -> dict:
+        response = await self._client.get("/structure-config")
+        response.raise_for_status()
+        return response.json()
+
     async def close(self) -> None:
         await self._client.aclose()

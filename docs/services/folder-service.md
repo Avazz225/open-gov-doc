@@ -262,6 +262,36 @@ Checked against object-type-service's `POST /structure/check`:
   log, and the folder is created. Both count the sensor `folder.structure.violations` (label `mode`,
   group reliability, cost 1).
 
+## Conformity, Retyping, Area Roots (P91-S2b, [ADR 0255](../adr/0255-enforced-filing-structure.md))
+
+The rules are loaded once (object-type-service's `GET /object-types` and `GET /structure-config`) and
+evaluated in memory with the pure helpers in `dms_constraint_engine` (`placement_errors`,
+`missing_required_attributes`); `structure_report.py` walks the folders.
+- **`GET /structure/conformity`** (`admin.object_config`):
+  - every active folder except the root and the special folders, independent of the enforcement mode;
+  - problems per folder: `placement` (both sides), `missing_required`, `unknown_type` (a deleted type);
+  - `{checked, nonconforming, counts, items (path, type, problems; capped by limit, default 500),
+    truncated}`.
+- **`POST /folders/retype`** (`admin.object_config`, `{folder_ids, object_type_id | null}`):
+  - each folder gets the type if it then fits its place on both sides, whatever the mode;
+  - required attributes aren't demanded (the report lists them); children aren't re-checked;
+  - `folder.write` per folder; failures are listed per id; `folder.updated` with
+    `changed_fields: ["object_type_id"]`.
+- **`structure_exempt`** (column): teamspace roots are areas outside the structure. It is set when
+  teamspace-service creates one; `PUT /folders/{id}/structure-exempt` (only `teamspace-service`, only
+  directly under the root) lets it confirm older ones at startup.
+- **`POST /folders/types`** (`{ids}` → `{types: {id: object_type_id}}`): for document-service's half of
+  the report.
+- **Templates are admin-managed:**
+  - `POST`/`PUT`/`DELETE /folder-templates` need `admin.object_config`; applying still needs
+    `folder.write` on the target.
+  - `POST` takes either `source_folder_id` (captured, as before) or `structure` (editor, configuration
+    import).
+  - `PUT /folder-templates/{id}` edits name, description and structure.
+  - A structure is validated on save: each node is a folder class, and each child fits its parent node
+    on both sides. Where the root node may go is checked on apply.
+
+
 ## Open Points
 
 - ~~**Untyped folders bypass the structure rules, and the root accepts anything.**~~ Rules and

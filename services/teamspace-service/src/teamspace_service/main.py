@@ -122,6 +122,34 @@ async def _ensure_teamspace_isolation_backfill(session_factory) -> None:
             logger.warning("teamspace_isolation_backfill_failed: root_folder_id=%s", root_folder_id)
 
 
+_STRUCTURE_EXEMPT_ATTEMPTS = 10
+_STRUCTURE_EXEMPT_RETRY_SECONDS = 30.0
+
+
+async def _confirm_structure_exempt_roots(session_factory) -> None:
+    """Filing structure (P91-S2b, ADR 0255): teamspace roots are areas
+    outside the structure. folder-service marks new ones itself; this
+    confirms those created before the flag existed. A background task with
+    retries, because folder-service may still be starting (compose starts
+    both together). Idempotent; a root folder that is gone (404) is skipped."""
+    async with session_factory() as session:
+        pending = set(await repository.list_all_root_folder_ids(session))
+    for _attempt in range(_STRUCTURE_EXEMPT_ATTEMPTS):
+        for root_folder_id in sorted(pending):
+            try:
+                await app.state.folder_client.mark_structure_exempt(root_folder_id)
+                pending.discard(root_folder_id)
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code in (404, 409):
+                    pending.discard(root_folder_id)
+            except httpx.HTTPError:
+                pass  # not reachable yet - next attempt
+        if not pending:
+            return
+        await asyncio.sleep(_STRUCTURE_EXEMPT_RETRY_SECONDS)
+    logger.warning("structure_exempt_backfill_incomplete: %s", ", ".join(sorted(pending)))
+
+
 async def _reconcile_ad_group_binding(
     session: AsyncSession, binding: TeamspaceAdGroupBinding
 ) -> None:
@@ -294,6 +322,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     ad_group_reconciliation_poll_task = asyncio.create_task(
         _ad_group_reconciliation_poll_loop(app.state.session_factory)
     )
+    structure_exempt_task = asyncio.create_task(
+        _confirm_structure_exempt_roots(app.state.session_factory)
+    )
 
     startup_end = time.time()
     millis = round((startup_end - startup_start) * 1000, 3)
@@ -302,8 +333,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
 
     ad_group_reconciliation_poll_task.cancel()
+    structure_exempt_task.cancel()
     with suppress(asyncio.CancelledError):
         await ad_group_reconciliation_poll_task
+    with suppress(asyncio.CancelledError):
+        await structure_exempt_task
     sensor_config_proxy.unbind()
     await app.state.sensor_config_client.stop()
     if registration:

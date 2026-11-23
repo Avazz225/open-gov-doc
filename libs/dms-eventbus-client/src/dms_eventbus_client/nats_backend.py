@@ -51,11 +51,16 @@ class NatsEventBusClient(EventBusClient):
         subject: str,
         handler: MessageHandler,
         *,
-        durable: str,
+        durable: str | None,
         deliver_new: bool = False,
         max_concurrency: int | Callable[[], Awaitable[int]] = 1,
     ) -> None:
         assert self._js is not None, "connect() muss vor subscribe() aufgerufen werden"
+        # `durable=None` (P91-S2b): an ephemeral consumer the server removes
+        # once the subscription is gone - for tests and other short-lived
+        # listeners. A durable one outlives its process by design and keeps
+        # collecting every new message; random test durables had piled up
+        # to 419 consumers with 1.2 million pending messages.
 
         in_flight = 0
         slot_free = asyncio.Condition()

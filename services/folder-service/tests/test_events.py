@@ -1,6 +1,5 @@
 import asyncio
 import os
-import uuid
 
 import pytest
 from dms_eventbus_client import Event, NatsEventBusClient
@@ -35,9 +34,7 @@ async def _collect_one(consumer, subject: str):
         received.append(Event.from_bytes(payload))
         got_message.set()
 
-    await consumer.subscribe(
-        subject, handler, durable=f"test-{uuid.uuid4().hex[:8]}", deliver_new=True
-    )
+    await consumer.subscribe(subject, handler, durable=None, deliver_new=True)
     return received, got_message
 
 

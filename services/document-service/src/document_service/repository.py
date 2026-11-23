@@ -1690,3 +1690,27 @@ async def reset_folder_export_for_retry(session: AsyncSession, job: FolderExport
     job.error_message = None
     job.updated_at = datetime.now(UTC)
     await session.flush()
+
+
+async def list_active_documents_for_structure(session: AsyncSession) -> list[dict]:
+    """Every document not in a trash, reduced to what the filing-structure
+    report needs (P91-S2b)."""
+    result = await session.execute(
+        select(
+            Document.id,
+            Document.title,
+            Document.folder_id,
+            Document.object_type_id,
+            Document.attributes,
+        ).where(Document.deleted_at.is_(None))
+    )
+    return [
+        {
+            "id": row.id,
+            "title": row.title,
+            "folder_id": row.folder_id,
+            "object_type_id": row.object_type_id,
+            "attributes": row.attributes or {},
+        }
+        for row in result.all()
+    ]

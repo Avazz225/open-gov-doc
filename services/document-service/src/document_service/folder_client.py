@@ -28,5 +28,18 @@ class FolderClient:
         response.raise_for_status()
         return response.json()
 
+    async def folder_types(self, folder_ids: list[str]) -> dict[str, int | None]:
+        """`{id: object_type_id}` for many folders at once (P91-S2b, the
+        conformity report and bulk retype)."""
+        if not folder_ids:
+            return {}
+        response = await self._client.post(
+            "/folders/types",
+            json={"ids": folder_ids},
+            headers={"X-DMS-Principal": "document-service"},
+        )
+        response.raise_for_status()
+        return response.json()["types"]
+
     async def close(self) -> None:
         await self._client.aclose()

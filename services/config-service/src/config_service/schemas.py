@@ -28,6 +28,7 @@ CATEGORIES = (
     "alert_downtime_windows",
     "export_config",
     "structure_config",
+    "folder_templates",
 )
 
 
@@ -154,6 +155,24 @@ class AlertDowntimeWindowExport(BaseModel):
     daily_end: str | None = None
     rule_names: list[str] | None = None
     enabled: bool = True
+
+
+class FolderTemplateNodeExport(BaseModel):
+    """A template node with its folder class by NAME - ids differ between
+    installations (P91-S2b)."""
+
+    name: str
+    object_type: str | None = None
+    children: list["FolderTemplateNodeExport"] = []
+
+
+class FolderTemplateExport(BaseModel):
+    """Structure template (ADR 0056), a configuration definition since
+    P91-S2b (ADR 0255, Decision 5). Matched by name on import."""
+
+    name: str
+    description: str | None = None
+    structure: FolderTemplateNodeExport
 
 
 class StructureConfigExport(BaseModel):
@@ -314,6 +333,7 @@ class ConfigDocument(BaseModel):
     alert_downtime_windows: list[AlertDowntimeWindowExport] | None = None
     export_config: ExportConfigExport | None = None
     structure_config: StructureConfigExport | None = None
+    folder_templates: list[FolderTemplateExport] | None = None
 
 
 class CategoryResult(BaseModel):

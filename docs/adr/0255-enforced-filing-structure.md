@@ -219,3 +219,18 @@ Every client goes through them, so clients need nothing beyond showing the error
 - **Connectors:** the SDK raises `StructureRuleError` on `422`. WebDAV answers `403` with the reason,
   CMIS a `constraint` exception, and mail-connector keeps what was filed and names the refused
   attachment.
+
+## Implementation notes (P91-S2b)
+
+- **Report and retype evaluate in memory.** The rules are loaded once and evaluated with pure engine
+  helpers (`placement_errors`, `missing_required_attributes`, `parent_rules_from_type`,
+  `root_rules_from_config`), so a report over thousands of folders costs two requests.
+  document-service gets its folders' types in one batch (`POST /folders/types`). On the dev stack
+  (1,822 folders, 2,258 documents) both answer at once; the first run found 52 folders and 23
+  documents whose type had been deleted.
+- **Retyping is mode-independent:** it is the tool for reaching conformity, so it never creates a
+  misplacement even while the mode is `off`.
+- **Teamspace roots** carry `structure_exempt`. teamspace-service confirms existing ones in a
+  background task with retries; a one-off call at startup failed when both services restarted together.
+- **Templates in configuration** reference folder classes by name.
+- **The eGov package** (1.4.0) ships the parent-side lists and a template, but not the mode.

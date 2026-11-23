@@ -39,7 +39,7 @@ async def test_register_publishes_event(client, consumer):
     await consumer.subscribe(
         "registry.instance.registered",
         handler,
-        durable=f"test-{uuid.uuid4().hex[:8]}",
+        durable=None,
         deliver_new=True,
     )
     await asyncio.sleep(0.2)
@@ -87,7 +87,7 @@ async def test_deregister_publishes_event(client, consumer):
     await consumer.subscribe(
         "registry.instance.deregistered",
         handler,
-        durable=f"test-{uuid.uuid4().hex[:8]}",
+        durable=None,
         deliver_new=True,
     )
     await asyncio.sleep(0.2)
@@ -126,9 +126,7 @@ async def _collect(consumer, subjects: list[str]) -> list[Event]:
         received.append(Event.from_bytes(payload))
 
     for subject in subjects:
-        await consumer.subscribe(
-            subject, handler, durable=f"test-{uuid.uuid4().hex[:8]}", deliver_new=True
-        )
+        await consumer.subscribe(subject, handler, durable=None, deliver_new=True)
     await asyncio.sleep(0.2)
     return received
 

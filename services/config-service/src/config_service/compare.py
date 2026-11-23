@@ -29,6 +29,7 @@ _LIST_IDENTITY_FIELD = {
     "org_unit_role_links": "org_unit_name",
     "alert_rules": "name",
     "alert_downtime_windows": "name",
+    "folder_templates": "name",
 }
 SINGLETON_CATEGORIES = (
     "sensor_config",

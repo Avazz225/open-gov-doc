@@ -122,6 +122,13 @@ the field is missing, but an export from this version always carries it.
 - Entry order no longer matters, and cycles import cleanly (Team lists Vorgang, Vorgang names Team as
   its parent). `test_import_structure_cycle_and_structure_config_roundtrip` covers it.
 
+**Structure templates since P91-S2b** ([ADR 0255](../adr/0255-enforced-filing-structure.md)):
+- new category `folder_templates`, owned by folder-service, applied after `object_types` and matched by
+  name (update or create);
+- nodes carry their folder class by **name** (`object_type`), since ids differ between installations;
+- an unknown name is an error for that template only;
+- folder-service validates the tree against the rules.
+
 Import matches object types, roles, and (since P14-S5) business calendars by `name` (unique
 within their respective DB schema) — an already-existing name is updated rather than duplicated.
 `approval_config`/`sensor_config` use their owner services' already-existing upsert endpoints
