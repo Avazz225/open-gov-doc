@@ -117,7 +117,7 @@ chooses them. Fetching them blindly lets any user make the cluster call internal
 - Fetching can be switched off entirely. The result is then `INDETERMINATE` where only the network
   could have decided.
 
-Today Helm has no NetworkPolicy at all. That gap is broader than this feature. It is noted for P93
+Today Helm has no NetworkPolicy at all. That gap is broader than this feature. It is noted for P94
 (operations) rather than solved here.
 
 ## Decision 5 — What a result is, and where it lives
@@ -198,7 +198,7 @@ in session 2, and a real QES sample (e.g. from a public validation demo) one in 
 - Long-term preservation of foreign signatures (archive timestamps, evidence records).
 - Blocking or routing on the result (for example "only accept validly signed documents" in a workflow).
   That is a follow-up once results exist.
-- A Helm NetworkPolicy for all services: noted for Phase 93.
+- A Helm NetworkPolicy for all services: noted for Phase 94.
 
 ## Consequences if built
 

@@ -60,7 +60,7 @@ Override keys live in the same `sensor_config` table:
 The catalog is readable for every admin. Changes need `admin.monitoring`; without it the page is
 read-only and says so.
 
-The tracing sampling ratio named in the plan doesn't exist yet. It joins the page with P93-S1.
+The tracing sampling ratio named in the plan doesn't exist yet. It joins the page with P94-S1.
 
 ## Consequences
 

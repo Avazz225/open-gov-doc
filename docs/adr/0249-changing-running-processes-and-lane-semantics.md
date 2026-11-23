@@ -1,6 +1,6 @@
 # 0249 — Changing running processes, and what a BPMN lane means (scoping)
 
-**Status:** proposed (scoping, no code)
+**Status:** accepted (scoping in P90-S7; built in Phase 93, scheduled 2026-11-23)
 **Context:** P90-S7 (Phase 90, user-selected from the comparison with an external reference system).
 
 Two related gaps in workflow-service:
@@ -140,7 +140,7 @@ can notify the lane's members instead of only `escalationEmail`. That is a small
 assignee (a principal or a group) directly, and the same eligibility check applies per entry. Lanes and
 routes use one membership check.
 
-## Proposed build (not scheduled)
+## Build (Phase 93, P93-S1 to S3)
 
 | Session | Content |
 |---|---|
