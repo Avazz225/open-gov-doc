@@ -4242,6 +4242,25 @@ sessions found along the way:
   detached CAdES?) on ingest (upload, mail-connector), with trust lists, a stored validation report per
   document, and a UI badge. Stay format-agnostic and keep QES creation, HSM and XAdES out (still
   declined). No code.
+  - ✅ **Result** ([ADR 0248](docs/adr/0248-validating-externally-signed-incoming-documents.md), proposed):
+    - **Where:** asynchronously in signature-service, as a consumer of `document.created`/
+      `document.version.created` (both get `content_type`/`filename`). Every ingest path (upload, mail,
+      migration, WebDAV) is covered at once, and a bad signature never rejects an upload.
+    - **Library:** pyHanko 0.36, already in use, covers AdES validation (EN 319 102-1), EU trusted
+      lists with qualification assessment, ETSI validation reports and detached CMS.
+    - **Formats:** PAdES first; CAdES detached (pairing in mail-connector) and enveloping `.p7m` as an
+      optional stage; a format-agnostic validator interface. XAdES stays out.
+    - **Trust:** EU LOTL (the only source of "qualifiziert"; offline import possible), installation
+      anchors, the internal CA. Revocation soft-fail by default.
+    - **Security:** the certificate URLs come from the uploader, so outbound fetching is fenced against
+      SSRF (address filter, no redirects, timeouts, optional proxy, switchable). Foreign PDFs are read
+      strictly against shadow attacks, unlike the lenient reading of our own. Work is bounded.
+    - **Result:** one row per signature and run, never overwritten; the ETSI report in storage;
+      `signature.incoming.validated` to audit; badge and panel in user-ui/reviewer-ui, a trust page in
+      admin-ui.
+    - **Build proposal:** 3 sessions plus an optional fourth for CAdES. **Not scheduled; the user
+      decides.**
+    - **Found on the way:** Helm has no NetworkPolicies at all, so this was added to P92-S3.
 - **P90-S7 — Scoping: changing running processes, and lane semantics (ADR 0249).**
   - Insert, remove or redirect a step in a running instance (circulation-folder routing by hand), against
     SpiffWorkflow's serialized state.
@@ -4369,8 +4388,14 @@ The user's goals:
 - **P92-S2 — Central log aggregation (§10.1).** Loki plus promtail (or Alloy) in compose and Helm, with
   the JSON logs that already exist and a Grafana datasource. Trace-id ↔ log correlation with S1.
 - **P92-S3 — Hygiene bundle.**
-  - ruff fully green: run `ruff format`, wrap the 12 long lines in the LibreOffice add-in, exclude
-    `loadtest/notebook/*.ipynb`.
+  - ~~ruff fully green: run `ruff format`, wrap the 12 long lines in the LibreOffice add-in, exclude
+    `loadtest/notebook/*.ipynb`.~~ Done in P90-S5 (ruff 0.16): formatted, lines wrapped, the notebook
+    fixed rather than excluded. Still open: pin ruff, since `uv.lock` isn't versioned and a new ruff
+    release turns the check red without any code change.
+  - **Helm NetworkPolicies (found in P90-S6, ADR 0248):** there are none, so every pod can reach every
+    other pod and the internet. Default-deny with explicit ingress from the gateway and between the
+    services that call each other, plus egress only where needed (signature-service's certificate and
+    trusted-list fetching once ADR 0248 is built, mail-connector's IMAP/SMTP, the OIDC issuer).
   - SBOM generation: CycloneDX for Python and npm, as a script and CI step.
   - The 9 stale `docs/services` entries.
   - `PROGRESS.md`'s "Open Decisions" section rewritten: about 38 stale bullets removed and the section
