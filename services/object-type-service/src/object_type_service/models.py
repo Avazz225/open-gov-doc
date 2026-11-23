@@ -94,6 +94,19 @@ class ObjectType(Base):
     # (identical schema-bound architecture pattern, see ADR 0051
     # "Rationale" - only the value space was extended).
     classification_level: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Enforced filing structure, parent side (P91-S2a, ADR 0255) - folder
+    # classes only. `None` = open (as before); a list = only these typed
+    # children, untyped ones refused. The child side (`allowed_parent_types`)
+    # must agree as well, so these lists only ever narrow.
+    allowed_child_folder_types: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    allowed_document_types: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # Applied when a client creates below this class without a type (WebDAV,
+    # CMIS, mail, a plain "Neuer Ordner"), so untyped clients work inside a
+    # strict structure.
+    default_child_folder_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    default_document_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # New child folders only by applying a structure template.
+    children_from_template_only: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
@@ -124,6 +137,23 @@ class KennzeichenConfig(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     show_before_filename: Mapped[bool] = mapped_column(Boolean, default=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class StructureConfig(Base):
+    """Installation-wide filing-structure settings (P91-S2a, ADR 0255) - a
+    singleton (`id=1`) like `KennzeichenConfig`. The root's lists are the
+    parent-side counterpart of `$ROOT` in `allowed_parent_types`.
+    `enforcement`: "off" (only the child-side rules, as before), "report"
+    (check and log, refuse nothing - for rolling a structure out) or
+    "enforce"."""
+
+    __tablename__ = "structure_config"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    root_allowed_folder_types: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    root_allowed_document_types: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    enforcement: Mapped[str] = mapped_column(String(16), default="off")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 

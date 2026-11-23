@@ -36,6 +36,7 @@ SINGLETON_CATEGORIES = (
     "branding_config",
     "deletion_reason_catalogs",
     "export_config",
+    "structure_config",
 )
 # `realm_roles` is a plain name list (`list[str]`, not a
 # `list[dict]` category like the others) - its own, simpler diff mode

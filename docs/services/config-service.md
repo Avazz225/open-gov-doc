@@ -110,6 +110,18 @@ on create and update (`test_import_and_export_roundtrip_metadata_mappings`). An 
 field imports as "no mappings" on create; on update the server keeps a type's existing mappings when
 the field is missing, but an export from this version always carries it.
 
+**Filing structure since P91-S2a** ([ADR 0255](../adr/0255-enforced-filing-structure.md)):
+- object types carry `allowed_child_folder_types`, `allowed_document_types`,
+  `default_child_folder_type`, `default_document_type` and `children_from_template_only`;
+- a new singleton category `structure_config` (root lists, enforcement mode), applied after
+  `object_types`.
+- **Object types import in two passes now:**
+  1. create missing types without the fields that name other types (`allowed_parent_types` and the
+     four above);
+  2. apply every entry's full definition.
+- Entry order no longer matters, and cycles import cleanly (Team lists Vorgang, Vorgang names Team as
+  its parent). `test_import_structure_cycle_and_structure_config_roundtrip` covers it.
+
 Import matches object types, roles, and (since P14-S5) business calendars by `name` (unique
 within their respective DB schema) — an already-existing name is updated rather than duplicated.
 `approval_config`/`sensor_config` use their owner services' already-existing upsert endpoints

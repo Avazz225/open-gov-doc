@@ -199,3 +199,23 @@ Every client goes through them, so clients need nothing beyond showing the error
 - **mail-connector:** shows refusals per attachment.
 - **The eGov package:** lists and a template.
 - **Sensors:** a violation counter, which is useful in `report` mode.
+
+## Implementation notes (P91-S2a)
+
+- **One check endpoint.** folder- and document-service ask object-type-service's `POST /structure/check`
+  once per create or move. It answers the mode, the errors and, for an untyped child, an admitted
+  default. The rules are evaluated only there, with the pure `dms_constraint_engine.validate_child`.
+- **Updates keep what isn't sent.** `PUT /object-types` changes the structure fields only when they are
+  in the request (`model_fields_set`), so the current admin-ui, which doesn't know them yet, can't reset
+  a structure.
+- **Exemptions by principal:** teamspace roots are recognised by the principal `teamspace-service`
+  creating under the root, and restores by `archival-service`. Quarantine release and redaction copies
+  never enable the check.
+- **Upload path:** document-service caches the `off` answer for 15 s, so an installation without a
+  structure pays no extra request per upload.
+- **Configuration import in two passes.** Missing types are created without the fields that name other
+  types, then every entry's full definition is applied. The structure lists create cycles (Team →
+  Vorgang → `allowed_parent_types: [Team]`) that no entry order could import in one pass.
+- **Connectors:** the SDK raises `StructureRuleError` on `422`. WebDAV answers `403` with the reason,
+  CMIS a `constraint` exception, and mail-connector keeps what was filed and names the refused
+  attachment.

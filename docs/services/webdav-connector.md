@@ -80,6 +80,13 @@ Mount in the dev stack e.g. via `net use`/"Map network drive" to `http://localho
 
 This session was tested via a real WebDAV **client** (`webdav4`, MIT, test dependency only) against the running instance — PROPFIND/GET/PUT/MKCOL/MOVE/LOCK/DELETE, no protocol mocking. Real Windows Explorer/macOS Finder compatibility could not be tested in this environment (no GUI client available) — `wsgidav` is the engine used and tested for this in practice; a human should mount it for real once before production use.
 
+## Filing Structure (P91-S2a, [ADR 0255](../adr/0255-enforced-filing-structure.md))
+
+A `MKCOL`, a `PUT` of a new file, or a `MOVE` that the folder's structure refuses becomes `403` with the
+reason as the body. The connector SDK raises `StructureRuleError` on the services' `422`. An untyped
+folder or file below a class with a default is created with that default, so WebDAV works inside a
+strict structure without knowing about types.
+
 ## Open Points
 
 - ~~No own `GET /metrics` (10.1) — as a pure protocol translator without its own business data, no own sensor is currently defined.~~ — **closed** (found stale in Phase 65+'s gap-analysis round): `main.py` now has a full generic HTTP sensor rollout (`SensorConfigClient`, `bootstrap_http_sensors`, `http_sensor_declarations`) and a real `GET /metrics` endpoint.

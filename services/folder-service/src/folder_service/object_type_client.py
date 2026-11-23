@@ -43,5 +43,29 @@ class ObjectTypeClient:
         response.raise_for_status()
         return response.json()
 
+    async def check_structure(
+        self,
+        *,
+        parent_object_type_id: int | None,
+        parent_is_root: bool,
+        child_kind: str,
+        child_object_type_id: int | None,
+        via_template: bool = False,
+    ) -> dict:
+        """Parent-side filing-structure check (P91-S2a, ADR 0255):
+        `{"enforcement", "errors", "default_object_type_id"}`."""
+        response = await self._client.post(
+            "/structure/check",
+            json={
+                "parent_object_type_id": parent_object_type_id,
+                "parent_is_root": parent_is_root,
+                "child_kind": child_kind,
+                "child_object_type_id": child_object_type_id,
+                "via_template": via_template,
+            },
+        )
+        response.raise_for_status()
+        return response.json()
+
     async def close(self) -> None:
         await self._client.aclose()

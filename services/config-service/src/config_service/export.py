@@ -30,6 +30,7 @@ from config_service.schemas import (
     OrgUnitRoleLinkExport,
     RoleExport,
     SensorConfigExport,
+    StructureConfigExport,
     WorkflowExport,
 )
 
@@ -74,6 +75,11 @@ async def export_object_types(client: ObjectTypeServiceClient) -> list[ObjectTyp
                 archive_encryption_enabled=object_type["archive_encryption_enabled"],
                 classification_level=object_type["classification_level"],
                 metadata_mappings=object_type.get("metadata_mappings", []),
+                allowed_child_folder_types=object_type.get("allowed_child_folder_types"),
+                allowed_document_types=object_type.get("allowed_document_types"),
+                default_child_folder_type=object_type.get("default_child_folder_type"),
+                default_document_type=object_type.get("default_document_type"),
+                children_from_template_only=object_type.get("children_from_template_only", False),
                 layouts=layouts,
             )
         )
@@ -176,6 +182,11 @@ async def export_alert_downtime_windows(
             )
         )
     return result
+
+
+async def export_structure_config(client: ObjectTypeServiceClient) -> StructureConfigExport:
+    config = await client.get_structure_config()
+    return StructureConfigExport(**{k: config[k] for k in StructureConfigExport.model_fields})
 
 
 async def export_export_config(client: RetentionConfigClient) -> ExportConfigExport:
@@ -313,4 +324,6 @@ async def build_export(
         doc.alert_downtime_windows = await export_alert_downtime_windows(monitoring_client)
     if "export_config" in categories:
         doc.export_config = await export_export_config(document_client)
+    if "structure_config" in categories:
+        doc.structure_config = await export_structure_config(object_type_client)
     return doc

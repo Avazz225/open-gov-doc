@@ -51,6 +51,17 @@ class ObjectTypeServiceClient:
         response.raise_for_status()
         return response.json()
 
+    # `structure_config` (P91-S2a, ADR 0255) - the filing-structure singleton.
+    async def get_structure_config(self) -> dict:
+        response = await self._client.get("/structure-config")
+        response.raise_for_status()
+        return response.json()
+
+    async def put_structure_config(self, payload: dict) -> dict:
+        response = await self._client.put("/structure-config", json=payload)
+        response.raise_for_status()
+        return response.json()
+
 
 class WorkflowServiceClient:
     _CONFIG_ADMIN_PRINCIPAL_ID = "config-service"

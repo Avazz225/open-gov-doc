@@ -3,6 +3,7 @@ JSON error body MUST carry `{"exception": ..., "message": ...}` at the root,
 not wrapped in FastAPI's standard `{"detail": ...}` envelope (hence a
 dedicated exception handler instead of `HTTPException.detail`)."""
 
+from dms_connector_sdk import StructureRuleError
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
@@ -32,4 +33,13 @@ def register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=exc.status_code,
             content={"exception": exc.exception, "message": exc.message},
+        )
+
+    # Filing structure (P91-S2a, ADR 0255): a refused create or move is a
+    # CMIS `constraint` violation, with the reason as the message.
+    @app.exception_handler(StructureRuleError)
+    async def _handle_structure_error(_request: Request, exc: StructureRuleError) -> JSONResponse:
+        return JSONResponse(
+            status_code=_STATUS_CODES["constraint"],
+            content={"exception": "constraint", "message": str(exc)},
         )

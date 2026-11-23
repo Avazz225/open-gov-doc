@@ -26,7 +26,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 from mail_connector import crypto, mailboxes, matching, repository
 from mail_connector.backends import RawIncomingMessage, build_backend
 from mail_connector.case_client import CaseClient
-from mail_connector.document_client import DocumentClient
+from mail_connector.document_client import DocumentClient, StructureRefusedError
 from mail_connector.models import Base
 from mail_connector.object_type_client import ObjectTypeClient
 from mail_connector.permission_client import PermissionServiceClient
@@ -918,14 +918,26 @@ async def _create_documents_for_message(
                 status_code=404,
                 detail=f"Zwischengelagerter Anhang {attachment.filename!r} nicht (mehr) vorhanden",
             ) from exc
-        document = await app.state.documents.create_document(
-            data=data,
-            filename=attachment.filename,
-            content_type=attachment.content_type,
-            title=title if index == 0 else attachment.filename,
-            created_by=created_by,
-            folder_id=folder_id,
-        )
+        try:
+            document = await app.state.documents.create_document(
+                data=data,
+                filename=attachment.filename,
+                content_type=attachment.content_type,
+                title=title if index == 0 else attachment.filename,
+                created_by=created_by,
+                folder_id=folder_id,
+            )
+        except StructureRefusedError as exc:
+            # Filing structure (P91-S2a, ADR 0255): keep what was already
+            # filed (a retry skips assigned attachments) and name the refused
+            # one, so the Poststelle can choose another folder for the rest.
+            await session.commit()
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "errors": [f"Anhang „{attachment.filename}“: {error}" for error in exc.errors]
+                },
+            ) from exc
         await app.state.storage.delete(attachment.storage_object_key)
         await repository.set_attachment_document(session, attachment.id, document_id=document["id"])
         if message.proposed_target_type == "case" and message.proposed_target_id is not None:

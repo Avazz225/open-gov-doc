@@ -1,3 +1,5 @@
+from collections.abc import Iterator
+from contextlib import contextmanager
 from io import BytesIO
 from typing import Literal
 
@@ -5,6 +7,7 @@ from dms_connector_sdk import (
     DmsTreeClient,
     LockConflictError,
     PathNotFoundError,
+    StructureRuleError,
     TreeDocument,
     TreeFolder,
 )
@@ -25,6 +28,17 @@ _DEFAULT_ACTOR = "webdav-connector"
 # over the entire editing duration, only during each individual write
 # operation).
 _SESSION_PREFIX = "webdav:"
+
+
+@contextmanager
+def _structure_as_dav_error() -> Iterator[None]:
+    """Filing structure (P91-S2a, ADR 0255): a refused MKCOL, PUT or MOVE is a
+    `403` whose body names what is allowed - the closest WebDAV has to "not
+    allowed here", and clients such as Windows Explorer show the text."""
+    try:
+        yield
+    except StructureRuleError as exc:
+        raise DAVError(HTTP_FORBIDDEN, str(exc)) from exc
 
 
 class _CapturingBuffer(BytesIO):
@@ -180,9 +194,10 @@ class DmsDavFolder(DAVCollection):
     def create_collection(self, name: str):
         self.provider.check_license("write")
         actor = _actor(self.environ)
-        created = self._tree.create_folder(
-            parent_id=self.folder.id, name=name, created_by=actor, x_dms_principal=actor
-        )
+        with _structure_as_dav_error():
+            created = self._tree.create_folder(
+                parent_id=self.folder.id, name=name, created_by=actor, x_dms_principal=actor
+            )
         return DmsDavFolder(join_uri(self.path, name), self.environ, created)
 
     def create_empty_resource(self, name: str):
@@ -221,9 +236,13 @@ class DmsDavFolder(DAVCollection):
             raise DAVError(HTTP_FORBIDDEN) from exc
         if not isinstance(target_parent, TreeFolder):
             raise DAVError(HTTP_FORBIDDEN)
-        self._tree.move_folder(
-            self.folder.id, new_parent_id=target_parent.id, new_name=new_name, x_dms_principal=actor
-        )
+        with _structure_as_dav_error():
+            self._tree.move_folder(
+                self.folder.id,
+                new_parent_id=target_parent.id,
+                new_name=new_name,
+                x_dms_principal=actor,
+            )
         return True
 
 
@@ -295,14 +314,15 @@ class DmsDavDocument(DAVNonCollection):
         # operation (4.2) - visible in the user UI while the WebDAV client
         # is currently writing.
         if self.document is None:
-            self.document = self._tree.write_document(
-                folder_id=self.folder_id,
-                filename=self.filename,
-                content=content,
-                content_type=self._write_content_type,
-                created_by=actor,
-                x_dms_principal=actor,
-            )
+            with _structure_as_dav_error():
+                self.document = self._tree.write_document(
+                    folder_id=self.folder_id,
+                    filename=self.filename,
+                    content=content,
+                    content_type=self._write_content_type,
+                    created_by=actor,
+                    x_dms_principal=actor,
+                )
             return
 
         try:
@@ -362,12 +382,13 @@ class DmsDavDocument(DAVNonCollection):
             raise DAVError(HTTP_FORBIDDEN) from exc
         if not isinstance(target_parent, TreeFolder):
             raise DAVError(HTTP_FORBIDDEN)
-        self._tree.move_document(
-            self.document.id,
-            new_folder_id=target_parent.id,
-            new_title=new_name,
-            x_dms_principal=actor,
-        )
+        with _structure_as_dav_error():
+            self._tree.move_document(
+                self.document.id,
+                new_folder_id=target_parent.id,
+                new_title=new_name,
+                x_dms_principal=actor,
+            )
         return True
 
 

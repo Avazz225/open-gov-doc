@@ -41,6 +41,13 @@ class ObjectTypeCreate(BaseModel):
     classification_level: ClassificationLevel | None = None
     # P90-S5 (ADR 0258), document types only.
     metadata_mappings: list[dict] = []
+    # Enforced filing structure, parent side (P91-S2a, ADR 0255) - folder
+    # classes only.
+    allowed_child_folder_types: list[str] | None = None
+    allowed_document_types: list[str] | None = None
+    default_child_folder_type: str | None = None
+    default_document_type: str | None = None
+    children_from_template_only: bool = False
 
 
 class ObjectTypeUpdate(BaseModel):
@@ -63,6 +70,15 @@ class ObjectTypeUpdate(BaseModel):
     # not silently clear the mappings - the way status transitions were lost
     # until P88-S3.
     metadata_mappings: list[dict] | None = None
+    # P91-S2a (ADR 0255). Like `metadata_mappings`, a field left out keeps
+    # its stored value (checked via `model_fields_set`, so an explicit `null`
+    # still opens a list again) - clients that predate these fields must not
+    # reset a structure.
+    allowed_child_folder_types: list[str] | None = None
+    allowed_document_types: list[str] | None = None
+    default_child_folder_type: str | None = None
+    default_document_type: str | None = None
+    children_from_template_only: bool | None = None
 
 
 class ObjectTypeOut(BaseModel):
@@ -84,6 +100,11 @@ class ObjectTypeOut(BaseModel):
     archive_encryption_enabled: bool
     classification_level: str | None
     metadata_mappings: list[dict] = []
+    allowed_child_folder_types: list[str] | None = None
+    allowed_document_types: list[str] | None = None
+    default_child_folder_type: str | None = None
+    default_document_type: str | None = None
+    children_from_template_only: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -130,6 +151,56 @@ class ValidateRequest(BaseModel):
     # behavior to before this field existed.
     from_status: str | None = None
     to_status: str | None = None
+
+
+StructureEnforcement = Literal["off", "report", "enforce"]
+
+
+class StructureConfigIn(BaseModel):
+    """Partial update: fields left out keep their value (P91-S2a)."""
+
+    root_allowed_folder_types: list[str] | None = None
+    root_allowed_document_types: list[str] | None = None
+    enforcement: StructureEnforcement | None = None
+
+
+class StructureConfigOut(BaseModel):
+    root_allowed_folder_types: list[str] | None
+    root_allowed_document_types: list[str] | None
+    enforcement: str
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class StructureCheckRequest(BaseModel):
+    """One new child below a parent (P91-S2a, ADR 0255): folder-service and
+    document-service ask this before creating or moving."""
+
+    parent_object_type_id: int | None = None
+    parent_is_root: bool = False
+    child_kind: Literal["folder", "document"]
+    child_object_type_id: int | None = None
+    via_template: bool = False
+
+
+class StructureCheckResult(BaseModel):
+    enforcement: str
+    errors: list[str]
+    # Set when the child has no type and the parent names a default that is
+    # itself allowed there; the caller creates the child with this type.
+    default_object_type_id: int | None = None
+
+
+class AllowedChildrenOut(BaseModel):
+    enforcement: str
+    folder_types: list[dict]
+    document_types: list[dict]
+    untyped_folders: bool
+    untyped_documents: bool
+    children_from_template_only: bool
+    default_child_folder_type: str | None = None
+    default_document_type: str | None = None
 
 
 class ValidateResult(BaseModel):

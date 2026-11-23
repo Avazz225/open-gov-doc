@@ -177,6 +177,23 @@ attributes against placement rules only, nothing there could have newly gone sta
 `reference_target` declared is left entirely unchecked — the pre-existing, still-supported format-only
 behavior.
 
+## Enforced Filing Structure (P91-S2a, [ADR 0255](../adr/0255-enforced-filing-structure.md))
+
+`POST /documents` checks the target folder's class (or the root) through object-type-service's
+`POST /structure/check`.
+- **Untyped upload:** below a class with `default_document_type`, the document gets that type, without
+  its required attributes and without a reference number if the format needs missing attributes. Both
+  follow once filled.
+- **Moves** (`PATCH` with `folder_id`, promotion with `target_folder_id`) are checked against the new
+  folder.
+- **Exempt:**
+  - restores by archival-service (its principal);
+  - quarantine release and redaction copies, which use the same field preparation without the check.
+- **Modes:** `enforce` → `422` with `detail.errors`; `report` → a `structure_violation` warning, and the
+  document is created.
+- **Cost on the upload path:** while the mode is `off`, the client remembers it for 15 s and skips the
+  call, so an installation without a structure pays no extra request per upload.
+
 ## Embedded File Metadata on Upload (P90-S5, [ADR 0258](../adr/0258-embedded-metadata-mappings-on-upload.md))
 
 `POST /documents` with an `object_type_id` reads the file's own properties and fills attributes as the

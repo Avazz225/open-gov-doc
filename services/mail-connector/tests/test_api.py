@@ -1174,3 +1174,50 @@ async def test_search_routing_log_without_filter_excludes_hops_between_inaccessi
     entries = client.get("/routing-log", headers=OTHER_DEPT_HEADERS).json()
 
     assert not any(e["message_id"] == message["id"] for e in entries)
+
+
+async def test_structure_refusal_keeps_filed_attachments_and_names_the_refused_one(
+    client, session, monkeypatch
+):
+    """P91-S2a (ADR 0255): document-service refuses the second part. The
+    body text stays filed, the refused attachment is named, and a retry
+    with another folder only files what is left."""
+    from mail_connector.document_client import StructureRefusedError
+
+    await _ingest(session, uid="uid-structure", subject="Mit Anhang", attachment=b"%PDF-1.4 Anlage")
+    [message] = [
+        m
+        for m in client.get("/inbound", headers=ADMIN_HEADERS).json()
+        if m["subject"] == "Mit Anhang"
+    ]
+    documents = client.app.state.documents
+    real_create = documents.create_document
+    calls: list[str | None] = []
+
+    async def create_or_refuse(**kwargs):
+        calls.append(kwargs["folder_id"])
+        if len(calls) == 2:
+            raise StructureRefusedError(["Unter „Team“ sind keine Dokumente erlaubt"])
+        return await real_create(**kwargs)
+
+    monkeypatch.setattr(documents, "create_document", create_or_refuse)
+    refused = client.post(
+        f"/inbound/{message['id']}/assign",
+        json={"title": "Eingang", "folder_id": "root"},
+        headers=ADMIN_HEADERS,
+    )
+    assert refused.status_code == 422
+    [error] = refused.json()["detail"]["errors"]
+    assert error.startswith("Anhang „") and "keine Dokumente erlaubt" in error
+
+    stored = client.get(f"/inbound/{message['id']}", headers=ADMIN_HEADERS).json()
+    filed = [a for a in stored["attachments"] if a["resulting_document_id"]]
+    assert len(filed) == 1  # the body text
+
+    retried = client.post(
+        f"/inbound/{message['id']}/assign",
+        json={"title": "Eingang", "folder_id": "root"},
+        headers=ADMIN_HEADERS,
+    )
+    assert retried.status_code == 200, retried.text
+    assert len(calls) == 3  # only the refused attachment was sent again

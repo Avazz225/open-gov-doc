@@ -216,6 +216,13 @@ A new protocol (e.g. Microsoft Graph for Exchange/O365) only implements `Mailbox
 
 On confirmation, for each clean, not-yet-assigned attachment, the staged content is read from the Storage Service and created as a new document via the regular `document-service` path (`POST /documents`) — **deliberately not** via the internal quarantine release path from P15-S2 (`POST /documents/from-quarantine-release`): the attachment has already been classified as "clean," a second scan would reproduce the same (positive) result, no structural blocker as with a quarantine release. After successful creation, the staged copy is deleted from the Storage Service. For a case-number match (or manual `case_id` specification), `case-service`'s already existing `POST /cases/{id}/documents` endpoint is additionally called (document reference, 2.3) — no new case-service extension needed. **Since P19-S5** (case-service RBAC, [ADR 0070](../adr/0070-case-service-rbac.md)), `CaseClient` sends a synthetic `X-DMS-Principal: system:mail-connector` header for this as well as for `lookup_by_vorgangsnummer`/`get` (case-service has since checked `case.read`/`case.write`; no human principal exists for this automated assignment path).
 
+**Filing structure (P91-S2a, [ADR 0255](../adr/0255-enforced-filing-structure.md)).** If document-service refuses an attachment because the target
+folder's structure doesn't allow it (`422`):
+- what was already filed is kept;
+- `assign`/`confirm-match` answers `422` with "Anhang „…“: <reason>";
+- a retry with another folder sends only the attachments still unfiled (filed ones have no staging key
+  any more).
+
 ## Outbox attachment (`related_document_id`, P24-S3)
 
 Since P24-S3, `POST /outbound` supports an optional file attachment when `related_document_id`

@@ -251,3 +251,91 @@ def validate(
     _validate_status_transition(schema, from_status, to_status, attributes, errors)
 
     return errors
+
+
+# --- Enforced filing structure, parent side (P91-S2a, ADR 0255) ---
+#
+# A folder class (or the root, via object-type-service's `structure_config`)
+# may list which typed children it accepts:
+#   {"label": str,
+#    "allowedChildFolderTypes": list[str] | None,
+#    "allowedDocumentTypes": list[str] | None,
+#    "childrenFromTemplateOnly": bool}
+# `None` means open (the behaviour before ADR 0255); a list means only these
+# typed children, so an untyped child is refused below it. The parent side
+# only ever narrows what the child side (`allowedParentTypes`) allows: a
+# placement passes when both agree.
+
+
+def validate_child(
+    parent_rules: dict | None,
+    child_kind: str,
+    child_type_name: str | None,
+    *,
+    via_template: bool = False,
+) -> list[str]:
+    """Parent-side check for one new child. ``parent_rules=None`` (an untyped
+    parent, or a type that no longer resolves) accepts everything."""
+    if parent_rules is None:
+        return []
+    label = parent_rules.get("label") or "Elternordner"
+    errors: list[str] = []
+    if child_kind == "folder":
+        if parent_rules.get("childrenFromTemplateOnly") and not via_template:
+            errors.append(
+                f"Unter „{label}“ können Ordner nur aus einer Strukturvorlage angelegt werden"
+            )
+        allowed = parent_rules.get("allowedChildFolderTypes")
+        noun = "Ordner"
+    elif child_kind == "document":
+        allowed = parent_rules.get("allowedDocumentTypes")
+        noun = "Dokumente"
+    else:
+        raise ValueError(f"unknown child kind {child_kind!r}")
+    if allowed is None:
+        return errors
+    if not allowed:
+        errors.append(f"Unter „{label}“ sind keine {noun} erlaubt")
+    elif child_type_name is None:
+        errors.append(
+            f"Unter „{label}“ sind nur {noun} dieser Klassen erlaubt: {', '.join(allowed)} "
+            "(ohne Objekttyp nicht zulässig)"
+        )
+    elif child_type_name not in allowed:
+        errors.append(
+            f"Unter „{label}“ sind nur {noun} dieser Klassen erlaubt: {', '.join(allowed)} "
+            f"(nicht „{child_type_name}“)"
+        )
+    return errors
+
+
+def allowed_children(
+    parent_rules: dict | None, parent_type_name: str | None, candidates: list[dict]
+) -> dict:
+    """What may be created under a parent, for "Neuer Ordner"/upload forms:
+    every candidate type (``{"name", "appliesTo", "allowedParentTypes"}``)
+    that passes both its own placement rule and the parent's lists, and
+    whether untyped folders/documents are still accepted there.
+    ``parent_type_name`` is the parent's class name, ``ROOT_PARENT_TYPE`` for
+    the root, or ``None`` for an untyped parent."""
+    result: dict = {"folder_types": [], "document_types": []}
+    for candidate in candidates:
+        kind = candidate.get("appliesTo")
+        if kind not in ("folder", "document"):
+            continue
+        if _placement_errors(candidate, parent_type_name):
+            continue
+        if validate_child(parent_rules, kind, candidate["name"], via_template=True):
+            continue
+        result["folder_types" if kind == "folder" else "document_types"].append(candidate["name"])
+    rules = parent_rules or {}
+    result["untyped_folders"] = rules.get("allowedChildFolderTypes") is None
+    result["untyped_documents"] = rules.get("allowedDocumentTypes") is None
+    result["children_from_template_only"] = bool(rules.get("childrenFromTemplateOnly"))
+    return result
+
+
+def _placement_errors(schema: dict, parent_type_name: str | None) -> list[str]:
+    errors: list[str] = []
+    _validate_parent(schema, parent_type_name, errors)
+    return errors

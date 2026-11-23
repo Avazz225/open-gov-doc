@@ -27,6 +27,7 @@ CATEGORIES = (
     "alert_rules",
     "alert_downtime_windows",
     "export_config",
+    "structure_config",
 )
 
 
@@ -60,6 +61,13 @@ class ObjectTypeExport(BaseModel):
     classification_level: str | None = None
     # Embedded-metadata mappings (P90-S5, ADR 0258): file property -> attribute.
     metadata_mappings: list[dict] = []
+    # Enforced filing structure, parent side (P91-S2a, ADR 0255). Names of
+    # other types, so the import applies them in a second pass.
+    allowed_child_folder_types: list[str] | None = None
+    allowed_document_types: list[str] | None = None
+    default_child_folder_type: str | None = None
+    default_document_type: str | None = None
+    children_from_template_only: bool = False
     layouts: list[ObjectTypeLayoutExport] = []
 
 
@@ -146,6 +154,15 @@ class AlertDowntimeWindowExport(BaseModel):
     daily_end: str | None = None
     rule_names: list[str] | None = None
     enabled: bool = True
+
+
+class StructureConfigExport(BaseModel):
+    """Filing-structure singleton (P91-S2a, ADR 0255): the root's lists and
+    the enforcement mode. Applied after `object_types`, whose names it uses."""
+
+    root_allowed_folder_types: list[str] | None = None
+    root_allowed_document_types: list[str] | None = None
+    enforcement: Literal["off", "report", "enforce"] = "off"
 
 
 class ExportConfigExport(BaseModel):
@@ -296,6 +313,7 @@ class ConfigDocument(BaseModel):
     alert_rules: list[AlertRuleExport] | None = None
     alert_downtime_windows: list[AlertDowntimeWindowExport] | None = None
     export_config: ExportConfigExport | None = None
+    structure_config: StructureConfigExport | None = None
 
 
 class CategoryResult(BaseModel):

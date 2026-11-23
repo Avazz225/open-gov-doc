@@ -160,6 +160,39 @@ document-service applies them on upload; this service only stores and validates 
 - **`PUT` without the field keeps the stored mappings** (unlike the other rule fields, which `PUT`
   replaces), so clients that predate the field can't wipe it.
 
+## Enforced Filing Structure, Parent Side (P91-S2a, [ADR 0255](../adr/0255-enforced-filing-structure.md))
+
+Folder classes can say what may be created below them. Every field is optional and `null` keeps
+today's behaviour.
+- **`allowed_child_folder_types`/`allowed_document_types`** (type names): `null` = open; a list = only
+  these typed children, **untyped ones refused**; `[]` = none. The child side (`allowed_parent_types`)
+  must agree too, so these lists only narrow.
+- **`default_child_folder_type`/`default_document_type`:** used when a client creates below this class
+  without a type (WebDAV, CMIS, mail, a plain "Neuer Ordner"). It must be admitted by its own list.
+- **`children_from_template_only`:** child folders only by applying a structure template.
+- **422** for these fields on a document type, an unknown name, a name of the wrong kind, or a default
+  its list doesn't admit. **`PUT` changes only the fields it sends** (checked through
+  `model_fields_set`; an explicit `null` opens a list again), so older clients can't reset a structure.
+
+**`structure_config`** (singleton, `GET`/`PUT /structure-config`, `PUT` gated by `admin.object_config`,
+partial update):
+- `root_allowed_folder_types`/`root_allowed_document_types`: the root's lists, the parent-side
+  counterpart of `$ROOT`;
+- `enforcement`: `off` (default; only the child-side rules, as before), `report` (check, log and count,
+  refuse nothing) or `enforce`.
+
+**`POST /structure/check`** (ungated, like `/validate`), called by folder- and document-service per
+create or move: `{parent_object_type_id | parent_is_root, child_kind, child_object_type_id,
+via_template}` → `{enforcement, errors, default_object_type_id}`.
+- Both sides are checked.
+- An untyped child below a class with an admitted default gets `default_object_type_id`.
+- With `off`, nothing is checked.
+
+**`GET /structure/allowed-children?parent=root|parent_object_type_id=`** returns the folder classes and
+document types allowed below a parent, whether untyped ones are, the template-only flag and the defaults.
+It is for the "Neuer Ordner"/upload forms (P91-S3). The rule logic is pure in `dms_constraint_engine`
+(`validate_child`, `allowed_children`).
+
 ## Events
 
 None — a pure reference-data service, queried synchronously over HTTP, not consumed/published via events.

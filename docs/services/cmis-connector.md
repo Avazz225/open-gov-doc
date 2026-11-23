@@ -213,3 +213,9 @@ passing again (was 16 passed/1 failed).
   (`search-service`) anyway, not via CMIS SQL.
 - **Contentless checkin not possible** — `document-service`'s versions endpoint requires
   a file for every version.
+
+## Filing Structure (P91-S2a, [ADR 0255](../adr/0255-enforced-filing-structure.md))
+
+`createFolder`, `createDocument` and moves that the structure refuses answer with a CMIS `constraint`
+exception (`409`, the reason as `message`), via one exception handler for the connector SDK's
+`StructureRuleError`. Defaults apply as for WebDAV.

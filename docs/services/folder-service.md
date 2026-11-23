@@ -245,10 +245,28 @@ Folder create, pseudonymize/reveal, document references (add/remove) and folder 
 record the request principal; the body fields were removed in P85-S5. teamspace-service creates
 teamspace root folders on behalf of the teamspace's creator.
 
+## Enforced Filing Structure (P91-S2a, [ADR 0255](../adr/0255-enforced-filing-structure.md))
+
+Checked against object-type-service's `POST /structure/check`:
+- **`POST /folders`:**
+  - An untyped folder below a class with a default is created with that class. Its required attributes
+    are not demanded then, like a template-applied folder (ADR 0056); they are filled in afterwards.
+  - Teamspace roots (principal `teamspace-service` creating under the root) are exempt.
+- **`PATCH` move:** the moved folder against its new parent; descendants aren't re-checked.
+- **Template apply:**
+  - every node is checked against its parent with `via_template` (which satisfies
+    `children_from_template_only`), before anything is created;
+  - an untyped node below a list is refused as "Vorlagenknoten ohne Objekttyp";
+  - the existing child-side nesting check stays (`400`).
+- **Modes:** `enforce` → `422` with `detail.errors`; `report` → a `structure_violation` warning in the
+  log, and the folder is created. Both count the sensor `folder.structure.violations` (label `mode`,
+  group reliability, cost 1).
+
 ## Open Points
 
-- **Untyped folders bypass the structure rules, and the root accepts anything.** There are no parent-side
-  rules. Decided in P91-S1 ([ADR 0255](../adr/0255-enforced-filing-structure.md)): parent-side lists that
+- ~~**Untyped folders bypass the structure rules, and the root accepts anything.**~~ Rules and
+  enforcement built in P91-S2a (see above); report, bulk retype and template management follow in
+  P91-S2b. Decided in P91-S1 ([ADR 0255](../adr/0255-enforced-filing-structure.md)): parent-side lists that
   only narrow, root lists, `off|report|enforce`, defaults for untyped clients, a conformity report, bulk
   retype, and admin-managed templates. Built in P91-S2a/S2b/S3.
 

@@ -2,6 +2,15 @@ import httpx
 from dms_common import on_behalf_headers
 
 
+class StructureRefusedError(Exception):
+    """document-service refused the document because the target folder's
+    filing structure doesn't allow it (422, P91-S2a, ADR 0255)."""
+
+    def __init__(self, errors: list[str]) -> None:
+        self.errors = errors
+        super().__init__("; ".join(errors))
+
+
 class DocumentClient:
     """Thin HTTP client against the public document-service API - deliberately
     calls the REGULAR `POST /documents` path (not the internal quarantine
@@ -43,6 +52,10 @@ class DocumentClient:
             # P85-S4 (ADR 0240): on behalf of the mailbox user.
             headers=on_behalf_headers("mail-connector", created_by),
         )
+        if response.status_code == 422:
+            detail = response.json().get("detail")
+            errors = detail.get("errors") if isinstance(detail, dict) else None
+            raise StructureRefusedError(errors or [str(detail)])
         response.raise_for_status()
         return response.json()
 

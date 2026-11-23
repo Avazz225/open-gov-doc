@@ -1470,6 +1470,37 @@ async def _check_reference_attributes(
     return errors
 
 
+# Restores put existing data back; a structure rule changed since must not
+# make that impossible (ADR 0255, Decision 3).
+_STRUCTURE_EXEMPT_PRINCIPALS = frozenset({"archival-service"})
+
+
+async def _check_document_structure(
+    *,
+    parent_folder: dict | None,
+    folder_id: str | None,
+    object_type_id: int | None,
+    context: str,
+) -> int | None:
+    """Parent-side filing-structure check for one new or moved document
+    (P91-S2a, ADR 0255): "enforce" refuses with 422, "report" logs and lets it
+    through. Returns the folder class's default document type when the
+    document is untyped and the default applies."""
+    result = await app.state.object_type_client.check_structure(
+        parent_object_type_id=parent_folder["object_type_id"] if parent_folder else None,
+        parent_is_root=folder_id is None or folder_id == "root",
+        child_object_type_id=object_type_id,
+    )
+    errors = result["errors"]
+    if errors:
+        mode = result["enforcement"]
+        if mode == "enforce":
+            raise HTTPException(status_code=422, detail={"errors": errors})
+        logger.warning("structure_violation (%s, %s mode): %s", context, mode, "; ".join(errors))
+        return None
+    return result.get("default_object_type_id")
+
+
 async def _prepare_document_fields(
     session: AsyncSession,
     *,
@@ -1482,7 +1513,8 @@ async def _prepare_document_fields(
     x_dms_principal: str = "",
     draft: bool = False,
     embedded_metadata: dict[str, str] | None = None,
-) -> tuple[dict, datetime | None, datetime | None, str | None]:
+    check_structure: bool = False,
+) -> tuple[dict, datetime | None, datetime | None, str | None, int | None]:
     """Shared validation/derivation for every document creation path -
     identical for `POST /documents` and `POST /documents/
     from-quarantine-release` (2.5, P15-S2), which differ only in the scan
@@ -1516,6 +1548,22 @@ async def _prepare_document_fields(
         )
         if parent_folder is None:
             raise HTTPException(status_code=400, detail=f"folder_id {folder_id!r} unbekannt")
+
+    # Filing structure (P91-S2a, ADR 0255): only `POST /documents` asks;
+    # quarantine release and redaction copies derive from existing documents
+    # and stay exempt. A defaulted document skips the attribute checks, like
+    # a template-applied folder: its required attributes come later.
+    defaulted = False
+    if check_structure:
+        default_type_id = await _check_document_structure(
+            parent_folder=parent_folder,
+            folder_id=folder_id,
+            object_type_id=object_type_id,
+            context=f"upload {title!r}",
+        )
+        if object_type_id is None and default_type_id is not None:
+            object_type_id = default_type_id
+            defaulted = True
 
     retention_until: datetime | None = None
     archive_after: datetime | None = None
@@ -1552,7 +1600,7 @@ async def _prepare_document_fields(
                         ", ".join(applied),
                     )
 
-        errors = await _validate(parsed_attributes)
+        errors = [] if defaulted else await _validate(parsed_attributes)
         if errors:
             raise HTTPException(status_code=400, detail={"errors": errors})
 
@@ -1562,7 +1610,11 @@ async def _prepare_document_fields(
                     object_type_id, parsed_attributes
                 )
             except MissingKennzeichenAttributeError as exc:
-                raise HTTPException(status_code=422, detail=str(exc)) from exc
+                if not defaulted:
+                    raise HTTPException(status_code=422, detail=str(exc)) from exc
+                # A defaulted document gets its number once the attributes the
+                # format needs are filled in (the existing registration path).
+                kennzeichen = None
             if kennzeichen is not None:
                 parsed_attributes[KENNZEICHEN_ATTRIBUTE] = kennzeichen
 
@@ -1591,7 +1643,7 @@ async def _prepare_document_fields(
         if object_type:
             classification_level = object_type.get("classification_level")
 
-    return parsed_attributes, retention_until, archive_after, classification_level
+    return parsed_attributes, retention_until, archive_after, classification_level, object_type_id
 
 
 async def _persist_new_document(
@@ -1839,6 +1891,7 @@ async def create_document(
         retention_until,
         archive_after,
         classification_level,
+        object_type_id,
     ) = await _prepare_document_fields(
         session,
         title=title,
@@ -1850,6 +1903,7 @@ async def create_document(
         x_dms_principal=x_dms_principal,
         draft=draft,
         embedded_metadata=embedded,
+        check_structure=identity.principal not in _STRUCTURE_EXEMPT_PRINCIPALS,
     )
     await _require_document_permission(x_dms_principal, folder_id or "root", access_type="write")
 
@@ -1941,6 +1995,7 @@ async def create_document_from_quarantine_release(
         retention_until,
         archive_after,
         classification_level,
+        _,
     ) = await _prepare_document_fields(
         session,
         title=title,
@@ -2368,6 +2423,14 @@ async def update_document(
         await _require_document_permission(
             x_dms_principal, payload.folder_id or "root", access_type="write"
         )
+        # Filing structure (P91-S2a): the moved document against its new
+        # folder. A move never applies a default type.
+        await _check_document_structure(
+            parent_folder=target_parent_folder,
+            folder_id=payload.folder_id,
+            object_type_id=document.object_type_id,
+            context=f"move {document_id}",
+        )
 
     if document.object_type_id is not None:
         placement_kwargs = (
@@ -2520,6 +2583,12 @@ async def promote_document(
             raise HTTPException(status_code=400, detail=f"folder_id {target_folder_id!r} unbekannt")
         await _require_document_permission(
             x_dms_principal, target_folder_id or "root", access_type="write"
+        )
+        await _check_document_structure(
+            parent_folder=target_parent_folder,
+            folder_id=target_folder_id,
+            object_type_id=document.object_type_id,
+            context=f"promote {document_id}",
         )
         if document.object_type_id is not None:
             errors = await app.state.object_type_client.validate(
@@ -3193,7 +3262,7 @@ async def redact_document(
         ) from exc
 
     title = f"{document.title} (geschwärzt)"
-    parsed_attributes, retention_until, archive_after, _ = await _prepare_document_fields(
+    parsed_attributes, retention_until, archive_after, _, _ = await _prepare_document_fields(
         session,
         title=title,
         folder_id=document.folder_id,

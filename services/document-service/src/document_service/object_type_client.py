@@ -1,3 +1,5 @@
+import time
+
 import httpx
 
 
@@ -12,8 +14,14 @@ class ObjectTypeClient:
     calls its `/validate` endpoint instead of embedding the
     constraint-engine library itself (no import of foreign service internals)."""
 
+    # While the filing structure is "off" (the default, ADR 0255), the check
+    # is skipped for this long, so an installation without a structure pays
+    # no extra call per upload. Switching the mode on takes effect within it.
+    STRUCTURE_OFF_CACHE_SECONDS = 15.0
+
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=10.0)
+        self._structure_off_until = 0.0
 
     async def validate(
         self,
@@ -66,6 +74,32 @@ class ObjectTypeClient:
             raise MissingKennzeichenAttributeError(response.json().get("detail", response.text))
         response.raise_for_status()
         return response.json()["kennzeichen"]
+
+    async def check_structure(
+        self,
+        *,
+        parent_object_type_id: int | None,
+        parent_is_root: bool,
+        child_object_type_id: int | None,
+    ) -> dict:
+        """Parent-side filing-structure check for a document (P91-S2a, ADR
+        0255): `{"enforcement", "errors", "default_object_type_id"}`."""
+        if time.monotonic() < self._structure_off_until:
+            return {"enforcement": "off", "errors": [], "default_object_type_id": None}
+        response = await self._client.post(
+            "/structure/check",
+            json={
+                "parent_object_type_id": parent_object_type_id,
+                "parent_is_root": parent_is_root,
+                "child_kind": "document",
+                "child_object_type_id": child_object_type_id,
+            },
+        )
+        response.raise_for_status()
+        result = response.json()
+        if result["enforcement"] == "off":
+            self._structure_off_until = time.monotonic() + self.STRUCTURE_OFF_CACHE_SECONDS
+        return result
 
     async def close(self) -> None:
         await self._client.aclose()

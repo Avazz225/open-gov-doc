@@ -17,6 +17,7 @@ from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
 from dms_metrics_client import (
     SensorConfigClient,
+    SensorSpec,
     bootstrap_http_sensors,
     http_sensor_declarations,
     metrics_payload,
@@ -404,7 +405,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         self_address=settings.self_address,
         service_type=settings.service_name,
         version="0.1.0",
-        sensors=http_sensor_declarations(),
+        sensors=[*http_sensor_declarations(), STRUCTURE_VIOLATIONS.as_dict()],
     )
 
     retention_poll_task = asyncio.create_task(_retention_poll_loop(app.state.session_factory))
@@ -440,6 +441,16 @@ app = FastAPI(title=settings.service_name, lifespan=lifespan)
 sensor_config_proxy, sensor_registry, _http_requests_sensor, _http_duration_sensor = (
     bootstrap_http_sensors(app, settings.service_name)
 )
+# Filing-structure violations (P91-S2a, ADR 0255): counted in "report" mode
+# (allowed through) and "enforce" mode (refused), so a rollout can be
+# watched before switching to "enforce".
+STRUCTURE_VIOLATIONS = SensorSpec(
+    name="folder.structure.violations",
+    group="reliability",
+    cost=1,
+    description="Verstöße gegen die Ablagestruktur (Ordner), nach Modus",
+)
+_structure_violations = sensor_registry.counter(STRUCTURE_VIOLATIONS, labelnames=("mode",))
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:
@@ -522,6 +533,42 @@ def get_metrics() -> Response:
     return Response(content=body, media_type=content_type)
 
 
+# Teamspace roots are areas, not filing structure (ADR 0255, Decision 2):
+# teamspace-service creates them directly under the root.
+_STRUCTURE_EXEMPT_ROOT_CREATORS = frozenset({"teamspace-service"})
+
+
+async def _check_structure(
+    *,
+    parent_object_type_id: int | None,
+    parent_is_root: bool,
+    child_object_type_id: int | None,
+    via_template: bool = False,
+    context: str,
+) -> int | None:
+    """Parent-side filing-structure check for one new or moved folder (P91-S2a,
+    ADR 0255). "enforce" refuses with 422, "report" logs and lets it through,
+    "off" checks nothing. Returns the parent's default folder class when the
+    folder is untyped and the default applies (the caller then creates it
+    typed)."""
+    result = await app.state.object_type_client.check_structure(
+        parent_object_type_id=parent_object_type_id,
+        parent_is_root=parent_is_root,
+        child_kind="folder",
+        child_object_type_id=child_object_type_id,
+        via_template=via_template,
+    )
+    errors = result["errors"]
+    mode = result["enforcement"]
+    if errors:
+        _structure_violations.inc(mode=mode)
+        if mode == "enforce":
+            raise HTTPException(status_code=422, detail={"errors": errors})
+        logger.warning("structure_violation (%s, %s mode): %s", context, mode, "; ".join(errors))
+        return None
+    return result.get("default_object_type_id")
+
+
 @app.post("/folders", response_model=FolderOut, status_code=status.HTTP_201_CREATED)
 async def create_folder(
     payload: FolderCreate,
@@ -536,15 +583,35 @@ async def create_folder(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     await _require_folder_permission(x_dms_principal, payload.parent_id, access_type="write")
 
-    await _validate_against_object_type(
-        payload.object_type_id,
-        session=session,
-        name=payload.name,
-        attributes=payload.attributes,
-        parent_object_type_id=parent_folder.object_type_id,
-        parent_is_root=payload.parent_id == ROOT_FOLDER_ID,
-        x_dms_principal=x_dms_principal,
+    # Filing structure (P91-S2a, ADR 0255). A defaulted folder skips the
+    # attribute checks below, like a template-applied one (ADR 0056): its
+    # required attributes are filled in afterwards.
+    defaulted = False
+    is_exempt_area_root = (
+        payload.parent_id == ROOT_FOLDER_ID
+        and identity.principal in _STRUCTURE_EXEMPT_ROOT_CREATORS
     )
+    if not is_exempt_area_root:
+        default_type_id = await _check_structure(
+            parent_object_type_id=parent_folder.object_type_id,
+            parent_is_root=payload.parent_id == ROOT_FOLDER_ID,
+            child_object_type_id=payload.object_type_id,
+            context=f"create {payload.name!r}",
+        )
+        if payload.object_type_id is None and default_type_id is not None:
+            payload.object_type_id = default_type_id
+            defaulted = True
+
+    if not defaulted:
+        await _validate_against_object_type(
+            payload.object_type_id,
+            session=session,
+            name=payload.name,
+            attributes=payload.attributes,
+            parent_object_type_id=parent_folder.object_type_id,
+            parent_is_root=payload.parent_id == ROOT_FOLDER_ID,
+            x_dms_principal=x_dms_principal,
+        )
     try:
         folder = await repository.create_folder(
             session,
@@ -768,6 +835,20 @@ async def update_folder(
     # parameters are only populated on a move, otherwise empty). Now
     # symmetric with documents: validates on every change, not just on move.
     is_move = payload.parent_id is not None and payload.parent_id != current.parent_id
+    if is_move:
+        # Filing structure (P91-S2a): the moved folder against its new
+        # parent. Its descendants keep their relation to it, so they aren't
+        # re-checked.
+        try:
+            target_parent = await repository.get_folder(session, payload.parent_id)
+        except repository.NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        await _check_structure(
+            parent_object_type_id=target_parent.object_type_id,
+            parent_is_root=payload.parent_id == ROOT_FOLDER_ID,
+            child_object_type_id=current.object_type_id,
+            context=f"move {folder_id}",
+        )
     if current.object_type_id is not None:
         placement_kwargs: dict = {}
         if is_move:
@@ -1855,6 +1936,7 @@ async def _validate_template_nesting(
     *,
     parent_object_type_id: int | None,
     parent_is_root: bool,
+    structure_errors: dict | None = None,
 ) -> list[str]:
     """Phase 79 Session 1 - the parent-child nesting half of ADR 0056's own
     documented "Structure templates check neither required attributes nor
@@ -1889,6 +1971,26 @@ async def _validate_template_nesting(
             )
             if node_errors:
                 errors.append(f"{node['name']!r}: " + "; ".join(node_errors))
+    if structure_errors is not None:
+        # Filing structure, parent side (P91-S2a): `via_template` satisfies a
+        # template-only parent. A template node never takes a default: the
+        # template says what it creates, so an untyped node below a list is
+        # a template problem.
+        result = await object_type_client.check_structure(
+            parent_object_type_id=parent_object_type_id,
+            parent_is_root=parent_is_root,
+            child_kind="folder",
+            child_object_type_id=object_type_id,
+            via_template=True,
+        )
+        node_structure_errors = list(result["errors"])
+        if object_type_id is None and result.get("default_object_type_id") is not None:
+            node_structure_errors.append("Vorlagenknoten ohne Objekttyp")
+        if node_structure_errors:
+            structure_errors["mode"] = result["enforcement"]
+            structure_errors["errors"].append(
+                f"{node['name']!r}: " + "; ".join(node_structure_errors)
+            )
     for child in node.get("children", []):
         errors.extend(
             await _validate_template_nesting(
@@ -1896,6 +1998,7 @@ async def _validate_template_nesting(
                 object_type_client,
                 parent_object_type_id=object_type_id,
                 parent_is_root=False,
+                structure_errors=structure_errors,
             )
         )
     return errors
@@ -1931,14 +2034,28 @@ async def apply_folder_template(
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     await _require_folder_permission(x_dms_principal, payload.target_parent_id, access_type="write")
+    structure_errors: dict = {"mode": "off", "errors": []}
     nesting_errors = await _validate_template_nesting(
         template.structure,
         app.state.object_type_client,
         parent_object_type_id=target_folder.object_type_id,
         parent_is_root=payload.target_parent_id == ROOT_FOLDER_ID,
+        structure_errors=structure_errors,
     )
     if nesting_errors:
         raise HTTPException(status_code=400, detail={"errors": nesting_errors})
+    if structure_errors["errors"]:
+        # Same modes as a single create (P91-S2a): the whole tree is checked
+        # before anything is created, so "enforce" leaves nothing behind.
+        _structure_violations.inc(mode=structure_errors["mode"])
+        if structure_errors["mode"] == "enforce":
+            raise HTTPException(status_code=422, detail={"errors": structure_errors["errors"]})
+        logger.warning(
+            "structure_violation (template %s, %s mode): %s",
+            template_id,
+            structure_errors["mode"],
+            "; ".join(structure_errors["errors"]),
+        )
     try:
         created = await repository.apply_template(
             session,

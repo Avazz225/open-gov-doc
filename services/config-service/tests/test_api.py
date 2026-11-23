@@ -1226,3 +1226,61 @@ def test_import_approval_config_carries_and_preserves_permission_and_recipient_r
         exported = client.get("/config/export", params={"categories": "approval_config"}).json()
     entry = next(c for c in exported["approval_config"] if c["action_type"] == action_type)
     assert entry == {**full, "requires_approval": False}
+
+
+def test_import_structure_cycle_and_structure_config_roundtrip(authorized_principal):
+    """P91-S2a (ADR 0255): a fresh import where Team lists Vorgang and
+    Vorgang names Team as its parent - a cycle no entry order could create in
+    one pass - plus the `structure_config` singleton. The installation's own
+    structure config is put back afterwards."""
+    suffix = uuid.uuid4().hex[:8]
+    team, vorgang = f"Team-{suffix}", f"Vorgang-{suffix}"
+    payload = {
+        "schema_version": "1.0",
+        "exported_at": "2026-01-01T00:00:00Z",
+        "object_types": [
+            {
+                "name": team,
+                "applies_to": "folder",
+                "allowed_child_folder_types": [vorgang],
+                "default_child_folder_type": vorgang,
+                "children_from_template_only": True,
+            },
+            {"name": vorgang, "applies_to": "folder", "allowed_parent_types": [team]},
+        ],
+        "structure_config": {
+            "root_allowed_folder_types": [team],
+            "root_allowed_document_types": None,
+            "enforcement": "report",
+        },
+    }
+    admin = {"X-DMS-Principal": "config-service"}
+    saved = httpx.get(f"{OBJECT_TYPE_SERVICE_URL}/structure-config").json()
+    try:
+        with _client() as client:
+            response = client.post(
+                "/config/import", json=payload, headers={"X-DMS-Principal": authorized_principal}
+            )
+            results = response.json()["result"]["results"]
+            assert results["object_types"]["created"] == 2
+            assert results["object_types"]["updated"] == 0
+            assert results["object_types"]["errors"] == []
+            assert results["structure_config"]["errors"] == []
+            export = client.get(
+                "/config/export", params={"categories": ["object_types", "structure_config"]}
+            ).json()
+        exported = {t["name"]: t for t in export["object_types"]}
+        assert exported[team]["allowed_child_folder_types"] == [vorgang]
+        assert exported[team]["default_child_folder_type"] == vorgang
+        assert exported[team]["children_from_template_only"] is True
+        assert exported[vorgang]["allowed_parent_types"] == [team]
+        assert export["structure_config"] == payload["structure_config"]
+    finally:
+        httpx.put(
+            f"{OBJECT_TYPE_SERVICE_URL}/structure-config",
+            json={k: saved[k] for k in payload["structure_config"]},
+            headers=admin,
+        )
+        for t in httpx.get(f"{OBJECT_TYPE_SERVICE_URL}/object-types").json():
+            if t["name"] in (team, vorgang):
+                httpx.delete(f"{OBJECT_TYPE_SERVICE_URL}/object-types/{t['id']}", headers=admin)

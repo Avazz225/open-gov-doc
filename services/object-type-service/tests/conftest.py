@@ -57,6 +57,8 @@ async def _clean_tables():
         # daher von der obigen CASCADE-Truncate nicht mit erfasst - eigene
         # Zeile nötig, sonst bleibt der Zustand zwischen Tests hängen.
         await conn.execute(text("TRUNCATE object_type.kennzeichen_config"))
+        # Same for the filing-structure singleton (P91-S2a).
+        await conn.execute(text("TRUNCATE object_type.structure_config"))
     await eng.dispose()
     yield
 

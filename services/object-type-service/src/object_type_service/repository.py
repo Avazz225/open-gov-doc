@@ -1,7 +1,14 @@
 import re
 from datetime import UTC, datetime
 
-from dms_constraint_engine import REQUIRE_PREFIX, ROOT_PARENT_TYPE, parse_condition
+from dms_constraint_engine import (
+    REQUIRE_PREFIX,
+    ROOT_PARENT_TYPE,
+    allowed_children,
+    parse_condition,
+    validate_child,
+    validate_parent,
+)
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,8 +18,15 @@ from object_type_service.models import (
     ObjectType,
     ObjectTypeLayout,
     ObjectTypeSequence,
+    StructureConfig,
 )
-from object_type_service.schemas import LayoutIn, ObjectTypeCreate, ObjectTypeUpdate
+from object_type_service.schemas import (
+    LayoutIn,
+    ObjectTypeCreate,
+    ObjectTypeUpdate,
+    StructureCheckRequest,
+    StructureConfigIn,
+)
 
 # Reference number generator placeholders (P5e-S1) - see PROGRESS.md
 # "Kennzeichengenerator". Date/counter placeholders are hard-wired; every
@@ -26,6 +40,15 @@ KENNZEICHEN_PLACEHOLDERS = {"YYYY", "YY", "MM", "DD", "Laufende_Nummer"}
 # necessary.
 _PLACEHOLDER_RE = re.compile(r"\{(\w+)\}")
 _KENNZEICHEN_CONFIG_ID = 1
+_STRUCTURE_CONFIG_ID = 1
+STRUCTURE_FIELDS = (
+    "allowed_child_folder_types",
+    "allowed_document_types",
+    "default_child_folder_type",
+    "default_document_type",
+    "children_from_template_only",
+)
+ROOT_LABEL = "Ablage (oberste Ebene)"
 
 
 class NotFoundError(Exception):
@@ -85,6 +108,57 @@ async def _validate_allowed_parent_types(
             "allowedParentTypes darf nur auf Ordnerklassen (applies_to='folder') verweisen, "
             f"nicht auf: {not_folder}"
         )
+
+
+async def _validate_type_names(
+    session: AsyncSession, field: str, names: list[str], applies_to: str
+) -> None:
+    """Structure lists and defaults (P91-S2a) may only name existing types
+    of the right kind - folder classes for child folders, document types for
+    documents."""
+    if not names:
+        return
+    result = await session.execute(
+        select(ObjectType.name, ObjectType.applies_to).where(ObjectType.name.in_(set(names)))
+    )
+    found = dict(result.all())
+    missing = sorted(set(names) - found.keys())
+    if missing:
+        raise InvalidFieldError(f"{field} referenziert unbekannte Objekttypen: {missing}")
+    wrong = sorted(name for name, kind in found.items() if kind != applies_to)
+    if wrong:
+        raise InvalidFieldError(
+            f"{field} darf nur Typen mit applies_to='{applies_to}' nennen: {wrong}"
+        )
+
+
+async def _validate_structure_fields(session: AsyncSession, applies_to: str, values: dict) -> None:
+    """Parent-side structure fields (P91-S2a, ADR 0255): folder classes only;
+    names must exist with the right kind; a default must be admitted by its
+    own list when one is set."""
+    if applies_to != "folder":
+        set_fields = [f for f in STRUCTURE_FIELDS if values.get(f) not in (None, False)]
+        if set_fields:
+            raise InvalidFieldError(f"{', '.join(set_fields)} gilt nur für Ordnerklassen")
+        return
+    for field, kind in (
+        ("allowed_child_folder_types", "folder"),
+        ("allowed_document_types", "document"),
+    ):
+        await _validate_type_names(session, field, values.get(field) or [], kind)
+    for default_field, list_field, kind in (
+        ("default_child_folder_type", "allowed_child_folder_types", "folder"),
+        ("default_document_type", "allowed_document_types", "document"),
+    ):
+        default = values.get(default_field)
+        if default is None:
+            continue
+        await _validate_type_names(session, default_field, [default], kind)
+        allowed = values.get(list_field)
+        if allowed is not None and default not in allowed:
+            raise InvalidFieldError(
+                f"{default_field} {default!r} ist in {list_field} nicht erlaubt"
+            )
 
 
 def _validate_status_transitions(attributes: list[dict], status_transitions: list[dict]) -> None:
@@ -356,6 +430,8 @@ async def create_object_type(session: AsyncSession, payload: ObjectTypeCreate) -
     _validate_conditions(payload.conditions)
     _validate_reference_targets(payload.attributes)
     _validate_metadata_mappings(payload.applies_to, payload.attributes, payload.metadata_mappings)
+    structure = {field: getattr(payload, field) for field in STRUCTURE_FIELDS}
+    await _validate_structure_fields(session, payload.applies_to, structure)
 
     now = datetime.now(UTC)
     object_type = ObjectType(
@@ -376,6 +452,7 @@ async def create_object_type(session: AsyncSession, payload: ObjectTypeCreate) -
         archive_encryption_enabled=payload.archive_encryption_enabled,
         classification_level=payload.classification_level,
         metadata_mappings=payload.metadata_mappings,
+        **structure,
         created_at=now,
         updated_at=now,
     )
@@ -438,6 +515,20 @@ async def update_object_type(
         else object_type.metadata_mappings or []
     )
     _validate_metadata_mappings(object_type.applies_to, payload.attributes, mappings)
+    # Structure fields (P91-S2a): only those actually sent change.
+    structure = {
+        field: (
+            getattr(payload, field)
+            if field in payload.model_fields_set
+            else getattr(object_type, field)
+        )
+        for field in STRUCTURE_FIELDS
+    }
+    if structure["children_from_template_only"] is None:
+        structure["children_from_template_only"] = False
+    await _validate_structure_fields(session, object_type.applies_to, structure)
+    for field, value in structure.items():
+        setattr(object_type, field, value)
     object_type.metadata_mappings = mappings
     object_type.attributes = payload.attributes
     object_type.naming_constraints = payload.naming_constraints
@@ -627,3 +718,156 @@ async def update_kennzeichen_config(
     config.updated_at = datetime.now(UTC)
     await session.flush()
     return config
+
+
+# --- Enforced filing structure (P91-S2a, ADR 0255) ---
+
+
+async def get_structure_config(session: AsyncSession) -> StructureConfig:
+    config = await session.get(StructureConfig, _STRUCTURE_CONFIG_ID)
+    if config is None:
+        await session.execute(
+            pg_insert(StructureConfig)
+            .values(id=_STRUCTURE_CONFIG_ID, enforcement="off", updated_at=datetime.now(UTC))
+            .on_conflict_do_nothing(index_elements=["id"])
+        )
+        config = await session.get(StructureConfig, _STRUCTURE_CONFIG_ID)
+    return config
+
+
+async def update_structure_config(
+    session: AsyncSession, payload: StructureConfigIn
+) -> StructureConfig:
+    config = await get_structure_config(session)
+    fields = payload.model_fields_set
+    if "root_allowed_folder_types" in fields:
+        await _validate_type_names(
+            session, "root_allowed_folder_types", payload.root_allowed_folder_types or [], "folder"
+        )
+        config.root_allowed_folder_types = payload.root_allowed_folder_types
+    if "root_allowed_document_types" in fields:
+        await _validate_type_names(
+            session,
+            "root_allowed_document_types",
+            payload.root_allowed_document_types or [],
+            "document",
+        )
+        config.root_allowed_document_types = payload.root_allowed_document_types
+    if "enforcement" in fields and payload.enforcement is not None:
+        config.enforcement = payload.enforcement
+    config.updated_at = datetime.now(UTC)
+    await session.flush()
+    return config
+
+
+def _parent_rules(parent: ObjectType | None) -> dict | None:
+    if parent is None or parent.applies_to != "folder":
+        return None
+    return {
+        "label": parent.name,
+        "allowedChildFolderTypes": parent.allowed_child_folder_types,
+        "allowedDocumentTypes": parent.allowed_document_types,
+        "childrenFromTemplateOnly": parent.children_from_template_only,
+    }
+
+
+def _root_rules(config: StructureConfig) -> dict:
+    return {
+        "label": ROOT_LABEL,
+        "allowedChildFolderTypes": config.root_allowed_folder_types,
+        "allowedDocumentTypes": config.root_allowed_document_types,
+        "childrenFromTemplateOnly": False,
+    }
+
+
+async def _resolve_parent(
+    session: AsyncSession, parent_object_type_id: int | None, parent_is_root: bool
+) -> tuple[dict | None, str | None, ObjectType | None]:
+    """Parent rules, the name the child-side rule compares against, and the
+    parent type itself (for its defaults)."""
+    if parent_is_root:
+        return _root_rules(await get_structure_config(session)), ROOT_PARENT_TYPE, None
+    if parent_object_type_id is None:
+        return None, None, None
+    parent = await session.get(ObjectType, parent_object_type_id)
+    if parent is None:
+        return None, None, None
+    return _parent_rules(parent), parent.name, parent
+
+
+def _child_side_schema(child: ObjectType) -> dict:
+    return {"allowedParentTypes": child.allowed_parent_types}
+
+
+async def check_structure(session: AsyncSession, payload: StructureCheckRequest) -> dict:
+    """Both sides for one new child. With enforcement "off" nothing is
+    checked here (the child-side rule still runs in `/validate`, as before).
+    An untyped child below a parent with a default takes the default when
+    the default is itself admitted; the caller then creates it typed."""
+    config = await get_structure_config(session)
+    result = {"enforcement": config.enforcement, "errors": [], "default_object_type_id": None}
+    if config.enforcement == "off":
+        return result
+    rules, parent_name, parent = await _resolve_parent(
+        session, payload.parent_object_type_id, payload.parent_is_root
+    )
+    child: ObjectType | None = None
+    if payload.child_object_type_id is not None:
+        child = await session.get(ObjectType, payload.child_object_type_id)
+    elif parent is not None:
+        default_name = (
+            parent.default_child_folder_type
+            if payload.child_kind == "folder"
+            else parent.default_document_type
+        )
+        if default_name:
+            found = await session.execute(select(ObjectType).where(ObjectType.name == default_name))
+            child = found.scalar_one_or_none()
+            if child is not None and child.applies_to == payload.child_kind:
+                result["default_object_type_id"] = child.id
+            else:
+                child = None
+    errors = validate_child(
+        rules,
+        payload.child_kind,
+        child.name if child is not None else None,
+        via_template=payload.via_template,
+    )
+    if child is not None:
+        errors += validate_parent(_child_side_schema(child), parent_name)
+    if errors and result["default_object_type_id"] is not None:
+        # A default that isn't itself admitted is no help: report the
+        # untyped child's own problem instead.
+        result["default_object_type_id"] = None
+        errors = validate_child(rules, payload.child_kind, None, via_template=payload.via_template)
+    result["errors"] = errors
+    return result
+
+
+async def list_allowed_children(
+    session: AsyncSession, parent_object_type_id: int | None, parent_is_root: bool
+) -> dict:
+    """For "Neuer Ordner"/upload forms (used by the UIs in P91-S3)."""
+    config = await get_structure_config(session)
+    rules, parent_name, parent = await _resolve_parent(
+        session, parent_object_type_id, parent_is_root
+    )
+    if config.enforcement == "off":
+        rules = None  # only the child-side rules apply
+    types = await list_object_types(session)
+    candidates = [
+        {"name": t.name, "appliesTo": t.applies_to, "allowedParentTypes": t.allowed_parent_types}
+        for t in types
+    ]
+    computed = allowed_children(rules, parent_name, candidates)
+    by_name = {t.name: t for t in types}
+    return {
+        "enforcement": config.enforcement,
+        "folder_types": [{"id": by_name[n].id, "name": n} for n in computed["folder_types"]],
+        "document_types": [{"id": by_name[n].id, "name": n} for n in computed["document_types"]],
+        "untyped_folders": computed["untyped_folders"],
+        "untyped_documents": computed["untyped_documents"],
+        "children_from_template_only": computed["children_from_template_only"],
+        "default_child_folder_type": parent.default_child_folder_type if parent else None,
+        "default_document_type": parent.default_document_type if parent else None,
+    }

@@ -18,6 +18,27 @@ class LockNotHeldError(Exception):
     """Attempt to release a lock held by another session (403)."""
 
 
+class StructureRuleError(Exception):
+    """The filing structure doesn't allow this folder or document here
+    (422 from folder-/document-service, P91-S2a, ADR 0255). `errors` are the
+    plain-German reasons, for the connector's own protocol error."""
+
+    def __init__(self, errors: list[str]) -> None:
+        self.errors = errors
+        super().__init__("; ".join(errors))
+
+
+def _raise_for_structure(response: httpx.Response) -> None:
+    if response.status_code != 422:
+        return
+    try:
+        detail = response.json().get("detail")
+    except ValueError:
+        detail = None
+    errors = detail.get("errors") if isinstance(detail, dict) else None
+    raise StructureRuleError(errors or [str(detail or "Ablagestruktur verletzt")])
+
+
 @dataclass(frozen=True)
 class TreeFolder:
     id: str
@@ -260,6 +281,7 @@ class DmsTreeClient:
         )
         if response.status_code == 404:
             raise PathNotFoundError(parent_id)
+        _raise_for_structure(response)
         response.raise_for_status()
         return _to_tree_folder(response.json())
 
@@ -347,6 +369,7 @@ class DmsTreeClient:
         )
         if response.status_code == 400:
             raise PathNotFoundError(folder_id)
+        _raise_for_structure(response)
         response.raise_for_status()
         return self._to_tree_document_enriched(response.json(), x_dms_principal=x_dms_principal)
 
@@ -387,6 +410,7 @@ class DmsTreeClient:
             json=payload,
             headers=self._principal_headers(x_dms_principal),
         )
+        _raise_for_structure(response)
         if response.status_code in (400, 404):
             raise PathNotFoundError(new_folder_id or document_id)
         response.raise_for_status()
@@ -410,6 +434,7 @@ class DmsTreeClient:
             json=payload,
             headers=self._principal_headers(x_dms_principal),
         )
+        _raise_for_structure(response)
         if response.status_code in (400, 404):
             raise PathNotFoundError(new_parent_id or folder_id)
         response.raise_for_status()

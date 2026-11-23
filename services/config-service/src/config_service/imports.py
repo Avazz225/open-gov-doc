@@ -33,25 +33,55 @@ _OBJECT_TYPE_MUTABLE_FIELDS = (
     "archive_encryption_enabled",
     "classification_level",
     "metadata_mappings",
+    "allowed_child_folder_types",
+    "allowed_document_types",
+    "default_child_folder_type",
+    "default_document_type",
+    "children_from_template_only",
+)
+# Fields that name other object types. Pass 1 creates missing types without
+# them; pass 2 applies the full definition, so the entries' order no longer
+# matters and cycles (Team lists Vorgang, Vorgang names Team as its parent)
+# import cleanly (P91-S2a, ADR 0255).
+_OBJECT_TYPE_REFERENCE_FIELDS = (
+    "allowed_parent_types",
+    "allowed_child_folder_types",
+    "allowed_document_types",
+    "default_child_folder_type",
+    "default_document_type",
 )
 
 
 async def apply_object_types(client: ObjectTypeServiceClient, entries: list) -> CategoryResult:
     result = CategoryResult()
-    existing = {t["name"]: t for t in await client.list_object_types()}
+    existing = {t["name"]: t["id"] for t in await client.list_object_types()}
+    created_names: set[str] = set()
+    # Pass 1: create what is missing, without references to other types.
     for entry in entries:
+        if entry.name in existing:
+            continue
+        try:
+            payload = entry.model_dump()
+            payload.pop("layouts")
+            for field in _OBJECT_TYPE_REFERENCE_FIELDS:
+                payload[field] = None
+            created = await client.create_object_type(payload)
+            existing[entry.name] = created["id"]
+            created_names.add(entry.name)
+            result.created += 1
+        except Exception as exc:  # noqa: BLE001 - a single entry must not block the rest
+            result.errors.append(f"{entry.name}: {exc}")
+    # Pass 2: the full definition, references included, then the layouts.
+    for entry in entries:
+        object_type_id = existing.get(entry.name)
+        if object_type_id is None:
+            continue  # its creation failed, already reported
         try:
             payload = entry.model_dump()
             layouts = payload.pop("layouts")
-            match = existing.get(entry.name)
-            if match is None:
-                created = await client.create_object_type(payload)
-                object_type_id = created["id"]
-                result.created += 1
-            else:
-                update_payload = {k: payload[k] for k in _OBJECT_TYPE_MUTABLE_FIELDS}
-                await client.update_object_type(match["id"], update_payload)
-                object_type_id = match["id"]
+            update_payload = {k: payload[k] for k in _OBJECT_TYPE_MUTABLE_FIELDS}
+            await client.update_object_type(object_type_id, update_payload)
+            if entry.name not in created_names:
                 result.updated += 1
             for layout in layouts:
                 await client.put_layout(
@@ -282,6 +312,18 @@ def _error_detail(exc: Exception) -> str:
         if detail:
             return f"{response.status_code}: {detail}"
     return str(exc)
+
+
+async def apply_structure_config(client: ObjectTypeServiceClient, entry) -> CategoryResult:
+    """Singleton (P91-S2a), a full replace. object-type-service's 422 (a
+    name that isn't a type of the right kind) reaches `errors`."""
+    result = CategoryResult()
+    try:
+        await client.put_structure_config(entry.model_dump())
+        result.updated += 1
+    except Exception as exc:  # noqa: BLE001
+        result.errors.append(_error_detail(exc))
+    return result
 
 
 async def apply_export_config(client: RetentionConfigClient, entry) -> CategoryResult:
@@ -544,6 +586,11 @@ async def apply_import(
         )
     if "export_config" in categories and doc.export_config is not None:
         results["export_config"] = await apply_export_config(document_client, doc.export_config)
+    # After `object_types`, whose names the root lists use.
+    if "structure_config" in categories and doc.structure_config is not None:
+        results["structure_config"] = await apply_structure_config(
+            object_type_client, doc.structure_config
+        )
     # `alert_rules` BEFORE `alert_downtime_windows`: windows name their rules.
     if "alert_rules" in categories and doc.alert_rules is not None:
         results["alert_rules"] = await apply_alert_rules(monitoring_client, doc.alert_rules)

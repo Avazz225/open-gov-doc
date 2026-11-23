@@ -23,6 +23,7 @@ from object_type_service import repository
 from object_type_service.layout import generate_smart_layout
 from object_type_service.models import Base, ObjectType
 from object_type_service.schemas import (
+    AllowedChildrenOut,
     KennzeichenConfigIn,
     KennzeichenConfigOut,
     KennzeichenOut,
@@ -33,6 +34,10 @@ from object_type_service.schemas import (
     ObjectTypeCreate,
     ObjectTypeOut,
     ObjectTypeUpdate,
+    StructureCheckRequest,
+    StructureCheckResult,
+    StructureConfigIn,
+    StructureConfigOut,
     ValidateRequest,
     ValidateResult,
 )
@@ -136,6 +141,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ADD COLUMN IF NOT EXISTS metadata_mappings JSON DEFAULT '[]'::json NOT NULL"
             )
         )
+        # Enforced filing structure, parent side (P91-S2a, ADR 0255).
+        for column in (
+            "allowed_child_folder_types JSON",
+            "allowed_document_types JSON",
+            "default_child_folder_type VARCHAR(128)",
+            "default_document_type VARCHAR(128)",
+            "children_from_template_only BOOLEAN NOT NULL DEFAULT false",
+        ):
+            await conn.execute(
+                text(f"ALTER TABLE object_type.object_type ADD COLUMN IF NOT EXISTS {column}")
+            )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 
@@ -370,6 +386,57 @@ async def put_kennzeichen_config(
     )
     await session.commit()
     return config
+
+
+@app.get("/structure-config", response_model=StructureConfigOut)
+async def get_structure_config(session: AsyncSession = Depends(get_session)) -> StructureConfigOut:
+    """Filing-structure settings (P91-S2a, ADR 0255): root lists and the
+    enforcement mode. Ungated like `GET /kennzeichen-config`."""
+    config = await repository.get_structure_config(session)
+    await session.commit()
+    return config
+
+
+@app.put("/structure-config", response_model=StructureConfigOut)
+async def put_structure_config(
+    body: StructureConfigIn,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> StructureConfigOut:
+    await _require_object_config_permission(x_dms_principal)
+    try:
+        config = await repository.update_structure_config(session, body)
+    except repository.InvalidFieldError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await session.commit()
+    return config
+
+
+@app.post("/structure/check", response_model=StructureCheckResult)
+async def check_structure(
+    body: StructureCheckRequest, session: AsyncSession = Depends(get_session)
+) -> StructureCheckResult:
+    """Called by folder-service and document-service before creating or
+    moving a child (P91-S2a). Ungated like `/validate`: a read of the rules,
+    not an administrative action."""
+    result = await repository.check_structure(session, body)
+    await session.commit()
+    return StructureCheckResult(**result)
+
+
+@app.get("/structure/allowed-children", response_model=AllowedChildrenOut)
+async def get_allowed_children(
+    parent_object_type_id: int | None = None,
+    parent: str | None = None,
+    session: AsyncSession = Depends(get_session),
+) -> AllowedChildrenOut:
+    """What may be created below a parent: `parent=root` for the top level,
+    `parent_object_type_id` for a typed folder, neither for an untyped one."""
+    result = await repository.list_allowed_children(
+        session, parent_object_type_id, parent_is_root=parent == "root"
+    )
+    await session.commit()
+    return AllowedChildrenOut(**result)
 
 
 @app.get("/object-types/{object_type_id}/layouts/{purpose}", response_model=LayoutOut)
