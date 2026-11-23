@@ -247,6 +247,11 @@ teamspace root folders on behalf of the teamspace's creator.
 
 ## Open Points
 
+- **Untyped folders bypass the structure rules, and the root accepts anything.** There are no parent-side
+  rules. Decided in P91-S1 ([ADR 0255](../adr/0255-enforced-filing-structure.md)): parent-side lists that
+  only narrow, root lists, `off|report|enforce`, defaults for untyped clients, a conformity report, bulk
+  retype, and admin-managed templates. Built in P91-S2a/S2b/S3.
+
 - ~~**`DELETE /folders/{id}` (raw hard-delete fallback) only ever checked for contained subfolders, never contained documents** — `repository.delete_folder()`'s not-empty check is a purely local `list_children` query; documents live in `document-service`, a different service, and were never consulted at all on this path (unlike the regular `POST .../trash` path, which cascades onto documents via a synchronous `document_client.cascade_trash` call). A real orphaning risk: a folder with active documents could be hard-deleted directly, leaving those documents referencing a nonexistent `folder_id`. First named at P4-S4, re-surfaced during the Phase 44+ gap-analysis round (see `docs/services/user-ui.md`'s "Open Points").~~ — **closed in Phase 51 Session 3**: `delete_folder` now also calls `document_client.count_active([folder_id])` (the same client method the forced-deletion path already used) and rejects with `409` if it returns non-zero, before proceeding to the local-only `repository.delete_folder()` check. Live-verified against the real running stack: a folder with one active document now returns `409` on `DELETE`; the same folder deletes cleanly (`204`) once its document is trashed (`count_active` returns `0`) or removed.
 - **No automatic cascading of forced deletion onto the contained subtree** (5.2a, since P7-S1b, see above) — a folder with still-active subfolders/documents remains untouched when forced deletion is due, until the subtree is emptied by other means (regularly or via trash expiry). A deliberate, conservative limitation of this foundation, not a known gap but an explicit design decision.
 - ~~No endpoint for breadcrumb/full path — only direct children can be retrieved, sufficient for current needs.~~ — **closed in Phase 79 Session 1**: `GET /folders/{id}/breadcrumb`, see the API table above.

@@ -2,6 +2,39 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P91-S1, scoping: enforced filing structure
+([ADR 0255](docs/adr/0255-enforced-filing-structure.md)). No code.
+
+**Findings:**
+- The child-side rule (`allowed_parent_types`, `$ROOT`) is already checked on folder and document
+  create and move, and on template apply (pre-checked for the whole tree). But an untyped folder or
+  document bypasses it, a type without the rule may go anywhere, and the root accepts anything.
+- WebDAV, CMIS and migration create through the connector SDK's `DmsTreeClient`, usually untyped.
+  Teamspace roots are created under root by teamspace-service.
+- Folders can't be retyped, and documents can't change type at all.
+- Structure templates are ungated, chosen by typed-in id, and not a config category.
+
+**Decisions:**
+- **Rule model:** parent-side lists on folder classes (child folder classes, document types; null =
+  open, a list = only these, untyped refused), with the child side kept. **Both must pass, so rules only
+  narrow.** Root lists live in a `structure_config` singleton. One computation in the constraint engine,
+  exposed as `GET /structure/allowed-children`.
+- **Strictness:** per class, plus `children_from_template_only`, plus installation-wide
+  `off|report|enforce` (default `off`; `report` for rollout). Exempt: teamspace roots, protected
+  folders, restores and derived copies.
+- **Untyped clients** (WebDAV, CMIS, mail) work inside a strict structure through per-class default
+  types; without a default they are refused, with the error mapped to the protocol.
+- **Existing data** is grandfathered. A conformity report and bulk retype for folders and documents
+  provide the way to conformity.
+- **Templates** become admin-managed, rule-checked, offered only where allowed, and a config category.
+  The eGov package gets lists and a template.
+- **Plan:** S2 split into **S2a** (rules and enforcement) and **S2b** (report, retype, templates as
+  configuration); S3 (UI) unchanged.
+
+**Next session:** P91-S2a.
+
+---
+
 **Last completed:** P90-S7, scoping: changing running processes, and lane semantics
 ([ADR 0249](docs/adr/0249-changing-running-processes-and-lane-semantics.md), proposed). No code. Last
 session of Phase 90.

@@ -4340,12 +4340,46 @@ The user's goals:
     - who may create them (admin, centrally) and where they are offered;
     - "creation only from templates" as a strictness level;
     - their relation to the eGov package (templates as a config category?).
-- **P91-S2 — Enforced structure, backend.**
-  - The rule model and the strictness from S1 in object-type-service and folder-service, plus
-    document-service's document-type check.
-  - Every enforcement point S1 lists.
-  - The conformity report.
-  - Config-package support for the new fields and, if S1 decides so, templates.
+  - ✅ **Result** ([ADR 0255](docs/adr/0255-enforced-filing-structure.md)):
+    - **Rule model:** child-side `allowed_parent_types` stays; folder classes get parent-side
+      `allowed_child_folder_types`/`allowed_document_types` (null = open, a list = only these typed
+      children, untyped refused). **Both must pass, so a rule only narrows.** The root gets the same
+      lists in a `structure_config` singleton. One pure computation in the constraint engine, exposed as
+      `GET /structure/allowed-children`; contradictions and orphans are shown, not forbidden.
+    - **Strictness:** per folder class (lists, `children_from_template_only`), plus installation-wide
+      `structure_enforcement: off|report|enforce` (`report` for rollout). Exempt: teamspace roots,
+      protected folders, restores and derived copies.
+    - **Enforcement:** folder create, move and template apply in folder-service; document create and
+      move in document-service. WebDAV/CMIS/migration/mail go through these. Per-class
+      `default_child_folder_type`/`default_document_type` let untyped clients work inside a strict
+      structure; otherwise the `422` is mapped to the protocol.
+    - **Existing data:** grandfathered (never blocked); a conformity report; bulk retype for folders
+      and documents (documents can't change type at all today).
+    - **Templates:** admin-managed (`admin.object_config`), edited in admin-ui with a tree picker,
+      validated against the rules, offered only where their root is allowed, and a config category
+      `folder_templates`. The eGov package gains lists and an "Aktenplan-Grundgerüst" template.
+    - **S2 was split** into S2a (rules and enforcement) and S2b (report, retype, templates).
+- **P91-S2a — Enforced structure, rules and enforcement** (split by S1, ADR 0255).
+  - **object-type-service:** folder-class fields `allowed_child_folder_types`,
+    `allowed_document_types`, `default_child_folder_type`, `default_document_type`,
+    `children_from_template_only`; the `structure_config` singleton (root lists, `structure_enforcement:
+    off|report|enforce`, default `off`); `GET /structure/allowed-children`; name/`applies_to` validation.
+  - **dms-constraint-engine:** pure `allowed_children`/`validate_child` ("only narrows").
+  - **folder-service:** create, move and template apply checked; defaults for untyped creation;
+    exemptions (teamspace roots, protected folders, restores); `report` mode logs and counts (sensor).
+  - **document-service:** create and move checked against `allowed_document_types`; the default
+    document type; exemptions (restore, quarantine release, redaction and conflict copies).
+  - **Connector SDK:** the `422` mapped to WebDAV `403` and CMIS `constraint`; mail-connector shows the
+    refusal per attachment.
+  - **config-service:** the new object-type fields and `structure_config`.
+- **P91-S2b — Conformity, retyping, templates as configuration.**
+  - Conformity report: folder-service (placement, untyped below a list, missing required attributes)
+    and document-service (documents against their folder's class), admin endpoints.
+  - Bulk retype: `POST /folders/retype` and `POST /documents/retype` (admin), checked like a create,
+    failures listed.
+  - Templates: create/edit/delete gated by `admin.object_config`, a template edit endpoint, nodes
+    validated against the rules on save; the config-service category `folder_templates`.
+  - The eGov package: parent-side lists and the "Aktenplan-Grundgerüst" template.
 - **P91-S3 — Enforced structure, UI.**
   - **admin-ui object types:** child classes and document types per folder class, the strictness
     switch, central template management (choosing source folders with a tree picker, not raw ids), and
