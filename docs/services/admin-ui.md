@@ -652,6 +652,34 @@ on the server. Both API helpers now send all three, and creating a type can set 
 The page also had a pre-existing 2px overflow at 390px: the layout designer's button row didn't wrap. It
 now wraps.
 
+## Filing Structure (P91-S3, [ADR 0255](../adr/0255-enforced-filing-structure.md))
+
+**Object types, folder classes** (`structure/ObjectTypeStructureFields.tsx`, in `ObjectTypeEditor`):
+- "Unterordner" and "Dokumente", each "Offen (wie bisher)" or "Nur ausgewählte" with checkboxes
+  (`StructureListEditor`); an empty selection means nothing is allowed;
+- the two defaults, offered from the selection;
+- "Unterordner nur aus Strukturvorlagen".
+- A default outside its list is named before saving (`structureFieldsError`). The fields are always
+  sent for folder classes, and as empty values for document types.
+
+**New page `/structure/` "Ablagestruktur"** (`admin.object_config`, under Verwaltung):
+- **Durchsetzung und oberste Ebene** (`StructureSettings`):
+  - mode Aus / Nur melden / Durchsetzen, each explained;
+  - the root's two lists;
+  - an overview tree from the root (`lib/structure.ts` `buildStructureTree`, both sides, repeats
+    stopped);
+  - warnings for listed children that refuse the parent, and for classes no level admits.
+- **Bericht** (`ConformityReportPanel`, folders and documents): the counts, a table (path or title,
+  type, deviations; capped by the server at 500, scrolls), selection and "Typ zuordnen" (bulk retype),
+  with the per-item result.
+- **Strukturvorlagen** (`TemplateManager`):
+  - the list;
+  - an editor (name, description, a node tree with name and folder class, add/remove subfolders);
+  - "Aus bestehendem Ordner übernehmen" with a folder picker that walks the tree, replacing the old
+    typed-in id;
+  - folder-service's refusal is shown with the offending node's path.
+- **Errors:** `detail.errors` lists are shown as text, not JSON (`extractErrorMessage`).
+
 ## Embedded-Metadata Mappings (P90-S5, [ADR 0258](../adr/0258-embedded-metadata-mappings-on-upload.md))
 
 `ObjectTypeMetadataMappings.tsx`, in `ObjectTypeEditor` after the rules and for document types only,

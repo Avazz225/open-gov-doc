@@ -28,6 +28,9 @@ async function extractErrorMessage(response: Response): Promise<string> {
   try {
     const body = await response.json();
     if (typeof body?.detail === "string") return body.detail;
+    // `{"errors": ["…", "…"]}` (constraint and filing-structure checks): the
+    // reasons are plain German sentences, so show them as text.
+    if (Array.isArray(body?.detail?.errors)) return body.detail.errors.join(" ");
     return JSON.stringify(body?.detail ?? body);
   } catch {
     return response.statusText || `HTTP ${response.status}`;
@@ -985,6 +988,33 @@ export interface ObjectType {
   classification_level: ClassificationLevel | null;
   // Embedded-metadata mappings (P90-S5, ADR 0258) - document types only.
   metadata_mappings: MetadataMapping[];
+  // Enforced filing structure, parent side (P91-S2a, ADR 0255) - folder
+  // classes only. `null` lists are open; a list admits only these typed
+  // children.
+  allowed_child_folder_types?: string[] | null;
+  allowed_document_types?: string[] | null;
+  default_child_folder_type?: string | null;
+  default_document_type?: string | null;
+  children_from_template_only?: boolean;
+}
+
+export interface StructureFields {
+  allowedChildFolderTypes: string[] | null;
+  allowedDocumentTypes: string[] | null;
+  defaultChildFolderType: string | null;
+  defaultDocumentType: string | null;
+  childrenFromTemplateOnly: boolean;
+}
+
+function structurePayload(fields: StructureFields | undefined): Record<string, unknown> {
+  if (!fields) return {};
+  return {
+    allowed_child_folder_types: fields.allowedChildFolderTypes,
+    allowed_document_types: fields.allowedDocumentTypes,
+    default_child_folder_type: fields.defaultChildFolderType,
+    default_document_type: fields.defaultDocumentType,
+    children_from_template_only: fields.childrenFromTemplateOnly,
+  };
 }
 
 export type MetadataSource =
@@ -1043,12 +1073,14 @@ export async function createObjectType(
     archiveEncryptionEnabled: boolean;
     classificationLevel: ClassificationLevel | null;
     metadataMappings?: MetadataMapping[];
+    structure?: StructureFields;
   }
 ): Promise<ObjectType> {
   const response = await request(
     "object-type-service",
     "object-types",
     jsonInit({
+      ...structurePayload(params.structure),
       metadata_mappings: params.metadataMappings ?? [],
       name: params.name,
       applies_to: params.appliesTo,
@@ -1099,6 +1131,8 @@ export async function updateObjectType(
     // Unlike the fields above, omitting this keeps the stored mappings
     // (the server treats a missing `metadata_mappings` as "unchanged").
     metadataMappings?: MetadataMapping[];
+    // Like the mappings, left out = unchanged on the server (P91-S2a).
+    structure?: StructureFields;
   }
 ): Promise<ObjectType> {
   const response = await request(
@@ -1108,6 +1142,7 @@ export async function updateObjectType(
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        ...structurePayload(params.structure),
         ...(params.metadataMappings !== undefined ? { metadata_mappings: params.metadataMappings } : {}),
         attributes: params.attributes,
         naming_constraints: params.namingConstraints,
@@ -3589,6 +3624,190 @@ export async function lookupUserByUsername(token: string, username: string): Pro
   const response = await request(
     "auth-service",
     `users/lookup?username=${encodeURIComponent(username)}`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+
+// --- Enforced filing structure (P91-S3, ADR 0255) ---
+
+export type StructureEnforcement = "off" | "report" | "enforce";
+
+export interface StructureConfig {
+  root_allowed_folder_types: string[] | null;
+  root_allowed_document_types: string[] | null;
+  enforcement: StructureEnforcement;
+  updated_at: string;
+}
+
+export async function getStructureConfig(token: string): Promise<StructureConfig> {
+  const response = await request("object-type-service", "structure-config", {}, token);
+  return response.json();
+}
+
+export async function putStructureConfig(
+  token: string,
+  params: Partial<Omit<StructureConfig, "updated_at">>
+): Promise<StructureConfig> {
+  const response = await request(
+    "object-type-service",
+    "structure-config",
+    { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(params) },
+    token
+  );
+  return response.json();
+}
+
+export type ConformityProblemKind = "placement" | "missing_required" | "unknown_type";
+
+export interface ConformityItem {
+  id: string;
+  // Folders carry a path, documents a title and their folder id.
+  name?: string;
+  path?: string;
+  title?: string;
+  folder_id?: string | null;
+  object_type: string | null;
+  problems: { kind: ConformityProblemKind; messages: string[] }[];
+}
+
+export interface ConformityReport {
+  enforcement: StructureEnforcement;
+  checked: number;
+  nonconforming: number;
+  counts: Record<ConformityProblemKind, number>;
+  items: ConformityItem[];
+  truncated: boolean;
+}
+
+export async function getConformityReport(
+  token: string,
+  kind: "folders" | "documents",
+  limit = 500
+): Promise<ConformityReport> {
+  const service = kind === "folders" ? "folder-service" : "document-service";
+  const response = await request(service, `structure/conformity?limit=${limit}`, {}, token);
+  return response.json();
+}
+
+export interface RetypeResult {
+  updated: string[];
+  failed: { id: string; errors: string[] }[];
+}
+
+export async function retypeObjects(
+  token: string,
+  kind: "folders" | "documents",
+  ids: string[],
+  objectTypeId: number | null
+): Promise<RetypeResult> {
+  const service = kind === "folders" ? "folder-service" : "document-service";
+  const body =
+    kind === "folders"
+      ? { folder_ids: ids, object_type_id: objectTypeId }
+      : { document_ids: ids, object_type_id: objectTypeId };
+  const response = await request(
+    service,
+    `${kind}/retype`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+    token
+  );
+  return response.json();
+}
+
+export interface FolderTemplateNode {
+  name: string;
+  object_type_id: number | null;
+  children: FolderTemplateNode[];
+}
+
+export interface FolderTemplateSummary {
+  id: string;
+  name: string;
+  description: string | null;
+  created_by: string;
+  created_at: string;
+}
+
+export interface FolderTemplate extends FolderTemplateSummary {
+  structure: FolderTemplateNode;
+}
+
+export async function listFolderTemplates(token: string): Promise<FolderTemplateSummary[]> {
+  const response = await request("folder-service", "folder-templates", {}, token);
+  return response.json();
+}
+
+export async function getFolderTemplate(token: string, id: string): Promise<FolderTemplate> {
+  const response = await request(
+    "folder-service",
+    `folder-templates/${encodeURIComponent(id)}`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function createFolderTemplate(
+  token: string,
+  params: {
+    name: string;
+    description?: string | null;
+    structure?: FolderTemplateNode;
+    sourceFolderId?: string;
+  }
+): Promise<FolderTemplateSummary> {
+  const response = await request(
+    "folder-service",
+    "folder-templates",
+    jsonInit({
+      name: params.name,
+      description: params.description ?? null,
+      ...(params.structure ? { structure: params.structure } : {}),
+      ...(params.sourceFolderId ? { source_folder_id: params.sourceFolderId } : {}),
+    }),
+    token
+  );
+  return response.json();
+}
+
+export async function updateFolderTemplate(
+  token: string,
+  id: string,
+  params: { name?: string; description?: string | null; structure?: FolderTemplateNode }
+): Promise<FolderTemplate> {
+  const response = await request(
+    "folder-service",
+    `folder-templates/${encodeURIComponent(id)}`,
+    { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(params) },
+    token
+  );
+  return response.json();
+}
+
+export async function deleteFolderTemplate(token: string, id: string): Promise<void> {
+  await request(
+    "folder-service",
+    `folder-templates/${encodeURIComponent(id)}`,
+    { method: "DELETE" },
+    token
+  );
+}
+
+export interface FolderEntry {
+  id: string;
+  name: string;
+  parent_id: string | null;
+  object_type_id: number | null;
+}
+
+// For the template source picker: one level at a time, like user-ui's tree.
+export async function listChildFolders(token: string, folderId: string): Promise<FolderEntry[]> {
+  const response = await request(
+    "folder-service",
+    `folders/${encodeURIComponent(folderId)}/children`,
     {},
     token
   );

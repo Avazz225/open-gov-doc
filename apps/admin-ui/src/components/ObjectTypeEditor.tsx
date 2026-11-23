@@ -16,7 +16,14 @@ import {
   type MetadataMapping,
   type ObjectType,
   type ObjectTypeAttribute,
+  type StructureFields,
 } from "@/lib/api";
+import { ObjectTypeStructureFields } from "@/components/structure/ObjectTypeStructureFields";
+import {
+  emptyStructureFields,
+  structureFieldsError,
+  structureFieldsFromObjectType,
+} from "@/lib/structure";
 import { useAuth } from "@/lib/auth-context";
 import {
   ObjectTypeRules,
@@ -177,6 +184,8 @@ export function ObjectTypeEditor() {
   const [rules, setRules] = useState<RulesDraft>(emptyRules());
   // Embedded-metadata mappings (P90-S5, ADR 0258) - document types only.
   const [metadataMappings, setMetadataMappings] = useState<MetadataMapping[]>([]);
+  // Filing structure, parent side (P91-S3, ADR 0255) - folder classes only.
+  const [structure, setStructure] = useState<StructureFields>(emptyStructureFields());
 
   const reload = useCallback(async () => {
     if (!accessToken) return;
@@ -221,6 +230,7 @@ export function ObjectTypeEditor() {
     setClassificationLevel("");
     setRules(emptyRules());
     setMetadataMappings([]);
+    setStructure(emptyStructureFields());
   }
 
   function startEdit(ot: ObjectType) {
@@ -268,6 +278,7 @@ export function ObjectTypeEditor() {
     setClassificationLevel(ot.classification_level ?? "");
     setRules(rulesFromObjectType(ot));
     setMetadataMappings(ot.metadata_mappings ?? []);
+    setStructure(structureFieldsFromObjectType(ot));
     setError(null);
   }
 
@@ -319,6 +330,13 @@ export function ObjectTypeEditor() {
     );
     if (mappingProblem) {
       setError(t(mappingProblem.key, mappingProblem.vars));
+      return;
+    }
+    // Document types can't carry structure fields (the server refuses them).
+    const structureValue = appliesTo === "folder" ? structure : emptyStructureFields();
+    const structureProblem = structureFieldsError(structureValue);
+    if (structureProblem) {
+      setError(t(structureProblem.key, structureProblem.vars));
       return;
     }
 
@@ -376,6 +394,7 @@ export function ObjectTypeEditor() {
           archiveEncryptionEnabled,
           classificationLevel: classificationLevelValue,
           metadataMappings: mappingsValue,
+          structure: structureValue,
         });
 
         // Display names live in the layout, not in the attribute schema
@@ -411,6 +430,7 @@ export function ObjectTypeEditor() {
           archiveEncryptionEnabled,
           classificationLevel: classificationLevelValue,
           metadataMappings: mappingsValue,
+          structure: structureValue,
         });
       }
       resetForm();
@@ -751,6 +771,21 @@ export function ObjectTypeEditor() {
               attributes={attributes.map((a) => ({ name: a.name.trim(), type: a.type }))}
               fieldInput={fieldInput}
               secondaryBtn={secondaryBtn}
+            />
+          )}
+
+          {appliesTo === "folder" && (
+            <ObjectTypeStructureFields
+              fields={structure}
+              onChange={setStructure}
+              folderClassNames={objectTypes
+                .filter((ot) => ot.applies_to === "folder")
+                .map((ot) => ot.name)}
+              documentTypeNames={objectTypes
+                .filter((ot) => ot.applies_to === "document")
+                .map((ot) => ot.name)}
+              fieldInput={fieldInput}
+              checkbox={checkbox}
             />
           )}
 

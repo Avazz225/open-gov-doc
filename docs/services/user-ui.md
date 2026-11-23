@@ -616,6 +616,24 @@ It offers:
 
 Own `src/i18n/en.json` — a full English translation of all 574 keys in `de.json` (established German→English terminology reused throughout: "Umlaufmappe" → "case binder", "Aussonderung" → "records disposal", "Handakte"/"Hand-Ordner" → "hand folder", "Kennzeichen" → "file reference number", "Postbuch" kept as its literal name, matching `mail-connector`'s own English docs). `I18nProvider`'s previously-static `locale` prop replaced by a new `LocaleProvider`/`useLocale()` (`lib/locale-context.tsx`) — the exact hydration-safe pattern proven in `process-designer` (P47-S1) and already propagated to `reviewer-ui`/`migration-console` (P47-S2): starts at `defaultLocale` (matching this static export's server-rendered markup, avoiding the React error #418 hydration mismatch found in P47-S1), applies a cached `localStorage` value only in a post-mount `useEffect`, syncs from `/me/preferences` once authenticated, write-through `setLocale` with fire-and-forget server persistence. A new `LocaleSwitcher.tsx` mirrors `ThemeSwitcher.tsx` and is wired into the same `IconRail` settings popover, right next to it.
 
+## Filing Structure (P91-S3, [ADR 0255](../adr/0255-enforced-filing-structure.md))
+
+`lib/structure.ts` `useAllowedChildren(token, folderId)` asks object-type-service what may be created
+in a folder (its class, or the root): `undefined` while loading, `null` if the rules can't be read
+(the forms then offer everything, and the server decides).
+- **"Neuer Ordner":**
+  - offers only the admitted folder classes, with the class's default preselected;
+  - "ohne Objekttyp" only where untyped folders are allowed;
+  - "Hier dürfen keine Unterordner angelegt werden" when nothing is;
+  - under a template-only class, a note with "Struktur aus Vorlage anlegen" instead of the form.
+- **Upload:** only the admitted document types, the default preselected; "ohne Objekttyp" only where
+  allowed; a note and a disabled button when the folder admits no documents.
+- **"Struktur aus Vorlage in „…“ anlegen …"** in the folder context menu (`TemplateApplyModal`): only
+  templates whose top folder fits. It waits for the rules, so it never briefly offers too much.
+- **"Vorlagen" pane:** creating and deleting only with `admin.object_config` (templates are
+  admin-managed since P91-S2b); applying stays open to everyone.
+- **Errors:** `detail.errors` lists are shown as text (`extractErrorMessage`).
+
 ## Authenticated direct links (Post-Roadmap Phase 29, [ADR 0109](../adr/0109-direct-link-url-scheme.md))
 
 `DocumentWorkspace.tsx` reads `?document=<id>`/`?folder=<id>` (and since P90-S2 `?case=<id>`, which opens the case view as "Open" from the favorites does) from `window.location.search` once on mount (not `useSearchParams()`, same Suspense-avoidance reasoning as the share link's `/share/` page above) and resolves them via the already-existing `GET /documents/{id}`/`GET /folders/{id}` plus the already-existing `openDocumentTab`/`openFolderPath` navigation functions — no new backend endpoint. A `403`/`404` surfaces via the normal `error` state instead of a silent fallback to the root folder. Structurally opposite to the public share link (anonymous, single-document, token-bearing) — a direct link carries no secret, just a stable resource ID resolved through the normal session/permission-check path, see ADR 0109 for the full comparison.

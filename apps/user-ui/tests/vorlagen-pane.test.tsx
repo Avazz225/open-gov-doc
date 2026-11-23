@@ -20,6 +20,14 @@ vi.mock("@/lib/api", async () => {
   };
 });
 
+// Templates are admin-managed since P91-S2b (ADR 0255): these tests run as
+// an admin unless they set `permissionsForTest` to [].
+let permissionsForTest: string[] = ["admin.object_config"];
+vi.mock("@/lib/auth-context", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/auth-context")>("@/lib/auth-context");
+  return { ...actual, useAuth: () => ({ permissions: permissionsForTest, accessToken: "token-123" }) };
+});
+
 function renderPane() {
   return render(
     <I18nProvider>
@@ -38,6 +46,7 @@ const template1 = {
 
 describe("VorlagenPane", () => {
   beforeEach(() => {
+    permissionsForTest = ["admin.object_config"];
     listFolderTemplatesMock.mockReset();
     createFolderTemplateMock.mockReset();
     deleteFolderTemplateMock.mockReset();
@@ -146,5 +155,15 @@ describe("VorlagenPane", () => {
     await user.click(screen.getByText("Löschen"));
 
     expect(deleteFolderTemplateMock).not.toHaveBeenCalled();
+  });
+
+  it("hides creating and deleting for users who don't manage templates", async () => {
+    permissionsForTest = [];
+    listFolderTemplatesMock.mockResolvedValue([template1]);
+    renderPane();
+    expect(await screen.findByText(/Aktenplan-Rohbau/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Vorlage erfassen" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Löschen" })).not.toBeInTheDocument();
+    expect(screen.getByText(/in der Administration gepflegt/)).toBeInTheDocument();
   });
 });

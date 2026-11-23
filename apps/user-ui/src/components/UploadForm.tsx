@@ -10,6 +10,7 @@ import {
   uploadDocument,
 } from "@/lib/api";
 import { ApiError } from "@/lib/auth-context";
+import { allowedSubset, useAllowedChildren } from "@/lib/structure";
 import { LayoutFormFields } from "./LayoutFormFields";
 
 function attributeInputType(attrType: string | undefined): string {
@@ -63,6 +64,19 @@ export function UploadForm({
       .then(setObjectTypes)
       .catch(() => setObjectTypes([]));
   }, [token]);
+
+  // Filing structure (P91-S3, ADR 0255): only the document types this
+  // folder admits, the folder class's default preselected, "ohne Objekttyp"
+  // only where untyped documents are allowed. The server checks either way.
+  const allowed = useAllowedChildren(token, folderId);
+  const offeredTypes = allowedSubset(objectTypes, allowed?.document_types);
+  const untypedAllowed = allowed?.untyped_documents ?? true;
+  const defaultTypeName = allowed?.default_document_type ?? null;
+  useEffect(() => {
+    if (!defaultTypeName) return;
+    const match = objectTypes.find((ot) => ot.name === defaultTypeName);
+    if (match) setObjectTypeId((current) => current || String(match.id));
+  }, [defaultTypeName, objectTypes]);
 
   const selectedObjectType = objectTypes.find((ot) => String(ot.id) === objectTypeId);
 
@@ -181,14 +195,23 @@ export function UploadForm({
               value={objectTypeId}
               onChange={(e) => handleObjectTypeChange(e.target.value)}
             >
-              <option value="">{t("upload.noObjectType")}</option>
-              {objectTypes.map((ot) => (
+              {(untypedAllowed || !objectTypeId) && (
+                <option value="" disabled={!untypedAllowed}>
+                  {untypedAllowed ? t("upload.noObjectType") : t("upload.chooseObjectType")}
+                </option>
+              )}
+              {offeredTypes.map((ot) => (
                 <option key={ot.id} value={ot.id}>
                   {ot.name}
                 </option>
               ))}
             </select>
           </label>
+          {allowed && !untypedAllowed && offeredTypes.length === 0 && (
+            <p className="text-sm" role="note">
+              {t("upload.noDocumentsAllowed")}
+            </p>
+          )}
 
           <label className="upload-draft-toggle">
             <input
@@ -228,7 +251,11 @@ export function UploadForm({
           )}
 
           <div className="flex gap-3">
-            <button type="submit" className={primaryBtn} disabled={!file || submitting}>
+            <button
+              type="submit"
+              className={primaryBtn}
+              disabled={!file || submitting || (!untypedAllowed && !objectTypeId)}
+            >
               {submitting ? t("upload.submitting") : t("upload.submit")}
             </button>
             <button type="button" className={secondaryBtn} onClick={onClose}>

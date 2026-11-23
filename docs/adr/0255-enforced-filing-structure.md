@@ -234,3 +234,14 @@ Every client goes through them, so clients need nothing beyond showing the error
   background task with retries; a one-off call at startup failed when both services restarted together.
 - **Templates in configuration** reference folder classes by name.
 - **The eGov package** (1.4.0) ships the parent-side lists and a template, but not the mode.
+
+## Implementation notes (P91-S3)
+
+- **One source for forms.** Both UIs use object-type-service's `GET /structure/allowed-children`. The
+  admin overview draws the same two-sided rule client-side, only for display.
+- **Loading is not "everything allowed".** user-ui's hook tells "loading" from "rules unreadable". The
+  template dialog briefly offered non-fitting templates until it waited for the rules (found in the e2e
+  screenshot).
+- **user-ui's "Vorlagen" pane keeps its typed-in folder ids** (capture for admins, apply for everyone).
+  The guided paths are the admin page's folder picker and the folder context menu; replacing the pane's
+  id fields is left for later.

@@ -38,6 +38,12 @@ export const GROUPS: NavGroup[] = [
         labelKey: "nav.objectTypes",
         requiresCapability: "admin.object_config",
       },
+      // P91-S3 (ADR 0255): structure mode, root lists, report, templates.
+      {
+        href: "/structure/",
+        labelKey: "nav.structure",
+        requiresCapability: "admin.object_config",
+      },
       {
         href: "/kennzeichen-settings/",
         labelKey: "nav.kennzeichenSettings",

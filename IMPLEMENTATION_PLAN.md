@@ -4427,6 +4427,22 @@ The user's goals:
     - "Struktur aus Vorlage anlegen" from the folder context menu;
     - upload offers only the allowed document types;
     - clear messages when something isn't allowed.
+  - ✅ **Result:**
+    - **admin-ui:**
+      - folder-class fields in the object-type editor (two "offen / nur ausgewählte" lists,
+        defaults, template-only);
+      - the new page "Ablagestruktur": mode with explanations, root lists, an overview tree with
+        warnings, folder and document conformity reports with bulk "Typ zuordnen", and template
+        management (tree editor, capture via a folder picker).
+    - **user-ui:** "Neuer Ordner" and the upload offer only what the folder admits, with defaults
+      preselected; a template-only class points to "Struktur aus Vorlage anlegen"; that dialog is also in
+      the folder context menu and offers only fitting templates; the "Vorlagen" pane shows create/delete
+      only to admins.
+    - **Both:** `detail.errors` shown as text.
+    - **e2e:** admin-ui `structure.spec.ts`; user-ui `structure.spec.ts` (strict structure via API:
+      template-only Abteilung, template dialog, upload offers only Akte; config restored). The
+      screenshots found a loading race in the template dialog, which is fixed.
+
 - **P91-S4 — Hide what the caller can't read; upload by right-click.**
   - **folder-service:** child listings (`/folders/{id}/children`, the root listing, the breadcrumb where
     it applies) filter by `folder.read` per child with one `POST /check/batch`.

@@ -133,6 +133,13 @@ describe("ObjectTypeEditor", () => {
         archiveEncryptionEnabled: false,
         classificationLevel: null,
         metadataMappings: [],
+        structure: {
+          allowedChildFolderTypes: null,
+          allowedDocumentTypes: null,
+          defaultChildFolderType: null,
+          defaultDocumentType: null,
+          childrenFromTemplateOnly: false,
+        },
       })
     );
     // No differing display label provided -> no layout override needed.
@@ -324,6 +331,13 @@ describe("ObjectTypeEditor", () => {
         archiveEncryptionEnabled: false,
         classificationLevel: null,
         metadataMappings: [],
+        structure: {
+          allowedChildFolderTypes: null,
+          allowedDocumentTypes: null,
+          defaultChildFolderType: null,
+          defaultDocumentType: null,
+          childrenFromTemplateOnly: false,
+        },
       })
     );
   });

@@ -43,7 +43,9 @@ import { FolderTree } from "./FolderTree";
 import { HandFolderReferencesModal } from "./HandFolderReferencesModal";
 import { ReminderModal } from "./ReminderModal";
 import { ShareLinkModal } from "./ShareLinkModal";
+import { TemplateApplyModal } from "./TemplateApplyModal";
 import { UploadForm } from "./UploadForm";
+import { allowedSubset, useAllowedChildren } from "@/lib/structure";
 
 export interface BreadcrumbEntry {
   id: string;
@@ -132,6 +134,10 @@ export function ExplorerPane({
   const [folderIconById, setFolderIconById] = useState<Record<number, string | null>>({});
   const [folderObjectTypes, setFolderObjectTypes] = useState<ObjectType[]>([]);
   const [newFolderObjectTypeId, setNewFolderObjectTypeId] = useState("");
+  // "Struktur aus Vorlage anlegen" (P91-S3, ADR 0255) - the folder it
+  // applies below.
+  const [templateTarget, setTemplateTarget] = useState<{ id: string; name: string } | null>(null);
+  const [templateMessage, setTemplateMessage] = useState<string | null>(null);
   const [documentTypeById, setDocumentTypeById] = useState<Record<number, ObjectType>>({});
   const [kennzeichenShowByDefault, setKennzeichenShowByDefault] = useState(true);
   const [showTrash, setShowTrash] = useState(false);
@@ -437,6 +443,22 @@ export function ExplorerPane({
     window.localStorage.setItem(VIEW_MODE_KEY, mode);
   }
 
+  // Filing structure (P91-S3, ADR 0255): "Neuer Ordner" offers only the
+  // classes this folder admits, preselects its default, and offers "ohne
+  // Objekttyp" only where untyped folders are allowed. Under a class with
+  // "nur aus Vorlagen" the form points to the templates instead.
+  const allowedHere = useAllowedChildren(token, currentFolderId);
+  const offeredFolderTypes = allowedSubset(folderObjectTypes, allowedHere?.folder_types);
+  const untypedFoldersAllowed = allowedHere?.untyped_folders ?? true;
+  const templateOnlyHere = allowedHere?.children_from_template_only ?? false;
+  const defaultFolderTypeName = allowedHere?.default_child_folder_type ?? null;
+  useEffect(() => {
+    if (!isCreatingFolder || !defaultFolderTypeName) return;
+    const match = folderObjectTypes.find((ot) => ot.name === defaultFolderTypeName);
+    if (match) setNewFolderObjectTypeId((current) => current || String(match.id));
+  }, [isCreatingFolder, defaultFolderTypeName, folderObjectTypes]);
+  const currentFolderName = trail[trail.length - 1]?.name ?? "";
+
   async function handleCreateSubmit(event: FormEvent) {
     event.preventDefault();
     if (!newFolderName.trim()) return;
@@ -533,6 +555,10 @@ export function ExplorerPane({
         {
           label: t("explorer.setReminder", { name: folder.name }),
           onSelect: () => setReminderTarget({ objectType: "folder", objectId: folder.id, name: folder.name }),
+        },
+        {
+          label: t("explorer.applyTemplate", { name: folder.name }),
+          onSelect: () => setTemplateTarget({ id: folder.id, name: folder.name }),
         },
         {
           label: t("explorer.exportFolder", { name: folder.name }),
@@ -650,7 +676,30 @@ export function ExplorerPane({
         </span>
       </div>
 
-      {isCreatingFolder && (
+      {isCreatingFolder && templateOnlyHere && (
+        <div className="inline-form" role="note">
+          <span className="text-sm">{t("explorer.templateOnlyHint")}</span>
+          <button
+            type="button"
+            className={primaryBtn}
+            onClick={() => setTemplateTarget({ id: currentFolderId, name: currentFolderName })}
+          >
+            {t("explorer.applyTemplateHere")}
+          </button>
+          <button type="button" className={secondaryBtn} onClick={() => setIsCreatingFolder(false)}>
+            {t("common.cancel")}
+          </button>
+        </div>
+      )}
+      {isCreatingFolder &&
+        !templateOnlyHere &&
+        !untypedFoldersAllowed &&
+        offeredFolderTypes.length === 0 && (
+          <p className="text-sm" role="note">
+            {t("explorer.noSubfoldersAllowed")}
+          </p>
+        )}
+      {isCreatingFolder && !templateOnlyHere && (untypedFoldersAllowed || offeredFolderTypes.length > 0) && (
         <form
           className="inline-form"
           aria-label={t("explorer.newFolderFormLabel")}
@@ -663,15 +712,20 @@ export function ExplorerPane({
             placeholder={t("explorer.newFolderPlaceholder")}
             autoFocus
           />
-          {folderObjectTypes.length > 0 && (
+          {offeredFolderTypes.length > 0 && (
             <select
               className={fieldInput}
               aria-label={t("explorer.newFolderObjectTypeLabel")}
               value={newFolderObjectTypeId}
               onChange={(e) => setNewFolderObjectTypeId(e.target.value)}
+              required={!untypedFoldersAllowed}
             >
-              <option value="">{t("explorer.newFolderNoObjectType")}</option>
-              {folderObjectTypes.map((ot) => (
+              <option value="" disabled={!untypedFoldersAllowed}>
+                {untypedFoldersAllowed
+                  ? t("explorer.newFolderNoObjectType")
+                  : t("explorer.newFolderChooseObjectType")}
+              </option>
+              {offeredFolderTypes.map((ot) => (
                 <option key={ot.id} value={ot.id}>
                   {ot.name}
                 </option>
@@ -703,6 +757,12 @@ export function ExplorerPane({
       )}
 
       {deleteMessage && <p className="text-sm opacity-80">{deleteMessage}</p>}
+
+      {templateMessage && (
+        <p className="text-sm opacity-80" role="status">
+          {templateMessage}
+        </p>
+      )}
 
       {linkCopyMessage && <p className="text-sm opacity-80">{linkCopyMessage}</p>}
 
@@ -928,6 +988,18 @@ export function ExplorerPane({
         <FolderRetentionModal
           folder={retentionModalFolder}
           onClose={() => setRetentionModalFolder(null)}
+        />
+      )}
+
+      {templateTarget && (
+        <TemplateApplyModal
+          target={templateTarget}
+          onApplied={(count) => {
+            setTemplateMessage(t("explorer.templateApplied", { count, name: templateTarget.name }));
+            setIsCreatingFolder(false);
+            onUploaded();
+          }}
+          onClose={() => setTemplateTarget(null)}
         />
       )}
 

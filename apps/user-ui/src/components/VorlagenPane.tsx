@@ -11,6 +11,7 @@ import {
   listFolderTemplates,
   type FolderTemplate,
 } from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
 
 // Structure templates (2.5/7.3, P15-S6) - a folder subtree as a named,
 // reusable template (e.g. a file-plan skeleton). As with
@@ -20,6 +21,11 @@ import {
 // ADR 0056.
 export function VorlagenPane({ token }: { token: string }) {
   const { t } = useI18n();
+  // Templates are admin-managed since P91-S2b (ADR 0255): creating and
+  // deleting need `admin.object_config`; everyone can apply them - here, or
+  // from a folder's context menu, which offers only the ones that fit.
+  const { permissions } = useAuth();
+  const canManage = permissions.includes("admin.object_config");
   const [templates, setTemplates] = useState<FolderTemplate[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -119,7 +125,9 @@ export function VorlagenPane({ token }: { token: string }) {
     <section className="vorlagen-pane" aria-label={t("vorlagen.paneLabel")}>
       <h2 className="m-0 mb-3 text-base">{t("vorlagen.heading")}</h2>
       <p className="text-sm opacity-80">{t("vorlagen.hint")}</p>
+      {!canManage && <p className="text-sm opacity-80">{t("vorlagen.adminManagedHint")}</p>}
 
+      {canManage && (
       <form onSubmit={handleCreate}>
         <label>
           {t("vorlagen.sourceFolderLabel")}
@@ -157,6 +165,7 @@ export function VorlagenPane({ token }: { token: string }) {
           {t("vorlagen.create")}
         </button>
       </form>
+      )}
 
       {error && (
         <p className="text-danger" role="alert">
@@ -188,14 +197,16 @@ export function VorlagenPane({ token }: { token: string }) {
                 >
                   {t("vorlagen.apply")}
                 </button>
-                <button
-                  type="button"
-                  className={secondaryBtn}
-                  onClick={() => handleDelete(template)}
-                  disabled={busyId === template.id}
-                >
-                  {t("vorlagen.delete")}
-                </button>
+                {canManage && (
+                  <button
+                    type="button"
+                    className={secondaryBtn}
+                    onClick={() => handleDelete(template)}
+                    disabled={busyId === template.id}
+                  >
+                    {t("vorlagen.delete")}
+                  </button>
+                )}
               </span>
               {applyingId === template.id && (
                 <div className="vorlagen-apply-form">

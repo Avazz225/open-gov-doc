@@ -13,6 +13,9 @@ async function extractErrorMessage(response: Response): Promise<string> {
   try {
     const body = await response.json();
     if (typeof body?.detail === "string") return body.detail;
+    // `{"errors": ["…"]}` (constraint and filing-structure checks): plain
+    // German sentences, shown as text instead of JSON.
+    if (Array.isArray(body?.detail?.errors)) return body.detail.errors.join(" ");
     return JSON.stringify(body?.detail ?? body);
   } catch {
     return response.statusText || `HTTP ${response.status}`;
@@ -3160,6 +3163,39 @@ export async function applyFolderTemplate(
         target_parent_id: params.targetParentId,
       }),
     },
+    token
+  );
+  return response.json();
+}
+
+
+// What may be created below a folder (P91-S3, ADR 0255): its class's
+// lists intersected with each type's own allowed parents.
+export interface AllowedChildren {
+  enforcement: "off" | "report" | "enforce";
+  folder_types: { id: number; name: string }[];
+  document_types: { id: number; name: string }[];
+  untyped_folders: boolean;
+  untyped_documents: boolean;
+  children_from_template_only: boolean;
+  default_child_folder_type: string | null;
+  default_document_type: string | null;
+}
+
+export async function getAllowedChildren(
+  token: string,
+  parent: { root: true } | { objectTypeId: number | null }
+): Promise<AllowedChildren> {
+  const query =
+    "root" in parent
+      ? "parent=root"
+      : parent.objectTypeId !== null
+        ? `parent_object_type_id=${parent.objectTypeId}`
+        : "";
+  const response = await request(
+    "object-type-service",
+    `structure/allowed-children${query ? `?${query}` : ""}`,
+    {},
     token
   );
   return response.json();

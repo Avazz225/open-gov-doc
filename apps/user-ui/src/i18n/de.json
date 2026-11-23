@@ -63,7 +63,9 @@
     "close": "Schließen",
     "dropHint": "Datei hierher ziehen oder über das Feld unten auswählen",
     "draftLabel": "Als Entwurf anlegen (Kennzeichen erst bei Registrierung vergeben)",
-    "draftHint": "Das Dokument erhält beim Anlegen noch kein Kennzeichen - es kann später über \"Registrieren\" nachgeholt werden."
+    "draftHint": "Das Dokument erhält beim Anlegen noch kein Kennzeichen - es kann später über \"Registrieren\" nachgeholt werden.",
+    "chooseObjectType": "Dokumenttyp wählen …",
+    "noDocumentsAllowed": "In diesem Ordner dürfen keine Dokumente abgelegt werden."
   },
   "iconRail": {
     "label": "Cross-Cutting-Navigation",
@@ -148,7 +150,13 @@
     "setReminder": "Wiedervorlage für \"{name}\" …",
     "watch": "\"{name}\" beobachten",
     "unwatch": "\"{name}\" nicht mehr beobachten",
-    "watchError": "Beobachten konnte nicht geändert werden."
+    "watchError": "Beobachten konnte nicht geändert werden.",
+    "applyTemplate": "Struktur aus Vorlage in „{name}“ anlegen …",
+    "applyTemplateHere": "Struktur aus Vorlage anlegen",
+    "templateOnlyHint": "Hier werden Unterordner nur aus Strukturvorlagen angelegt.",
+    "noSubfoldersAllowed": "Hier dürfen keine Unterordner angelegt werden.",
+    "newFolderChooseObjectType": "Ordnerklasse wählen …",
+    "templateApplied": "{count} Ordner aus der Vorlage in „{name}“ angelegt."
   },
   "metadata": {
     "paneLabel": "Metadaten",
@@ -598,7 +606,8 @@
     "deleteConfirm": "Vorlage \"{name}\" löschen?",
     "deleteError": "Löschen fehlgeschlagen",
     "empty": "Noch keine Vorlagen.",
-    "loadError": "Vorlagen konnten nicht geladen werden"
+    "loadError": "Vorlagen konnten nicht geladen werden",
+    "adminManagedHint": "Vorlagen werden in der Administration gepflegt. Anwenden geht hier oder im Kontextmenü eines Ordners."
   },
   "workspace": {
     "explorerPanelTitle": "Explorer",
@@ -737,5 +746,13 @@
     "loadError": "Wiedervorlagen konnten nicht geladen werden.",
     "saveError": "Wiedervorlage konnte nicht gesetzt werden.",
     "actionError": "Aktion fehlgeschlagen."
+  },
+  "templates": {
+    "applyHeading": "Struktur aus Vorlage in „{name}“",
+    "applyShort": "Anlegen",
+    "applyNamed": "Vorlage „{name}“ anlegen",
+    "noneFit": "Für diesen Ordner passt keine Strukturvorlage.",
+    "loadError": "Vorlagen konnten nicht geladen werden",
+    "applyError": "Anlegen aus der Vorlage fehlgeschlagen"
   }
 }
