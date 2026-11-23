@@ -618,7 +618,7 @@ before, realm roles such as `dms-poststelle` could only be assigned in the Keycl
 - **Role-first:** a role expands to its members (`GET …/assignments`). A member is added by username,
   with the users who don't have the role yet suggested, and removed with the × on the chip.
 - **Filter:** above ten roles. The dev realm holds about 130 roles left behind by test suites, a
-  hygiene point for P92-S3.
+  hygiene point for P93-S3.
 - **The hint explains the difference to the permission roles below:** application access versus
   permissions on resources. A change applies from the person's next login.
 

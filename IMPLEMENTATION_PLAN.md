@@ -3418,7 +3418,7 @@ working in parallel, read-only:
   `approved_by`/`rejected_by` from the body and never compare them with the verified principal, so a
   user can approve their own request under a typed-in name. Force-unlock has no permission check at all.
 - **`PROGRESS.md`'s "Open Decisions" section.** About 38 of its roughly 40 bullets are stale. The section
-  is cleaned up in P92-S3.
+  is cleaned up in P93-S3.
 
 **User decisions taken in this round** (2026-11-20):
 - **Acting identity:** bound to the verified token **everywhere** (Phase 85), not only for four-eyes or
@@ -3443,8 +3443,8 @@ ADR 0239**.
 3. Then the three user-requested UI/fleet/admin initiatives.
 4. Then compliance completions, the new collaboration features, and operations/hygiene last.
 
-`graphify update .` runs once, at the end of this whole plan: P94-S3, the last session. Phases 91–94
-were added or reordered on 2026-11-21/22 and renumbered so they run in numerical order. The full backend
+`graphify update .` runs once, at the end of this whole plan: P95-S3, the last session. Phases 91–95
+were added or reordered on 2026-11-21/22/23 and renumbered so they run in numerical order. The full backend
 regression runs at each phase close.
 
 ## Phase 84 — Security & Correctness Hardening (cheap, high value)
@@ -3544,7 +3544,7 @@ regression runs at each phase close.
       earlier tests. It now counts only its own handover's deliveries.
 
     Both services then ran green twice in a row. ruff is down to the pre-existing files only (26
-    errors/9 files, from 28/11; → P92-S3).
+    errors/9 files, from 28/11; → P93-S3).
 
 **Phase 84 result:**
 - The permission-cache race is closed (ADR 0239).
@@ -3712,7 +3712,7 @@ accepted that as a scaffold habit. The user decided to bind all of them to the g
     - LibreOffice add-in 44; `tsc`/`eslint` clean;
     - 16 images rebuilt; e2e 32/32.
   - **Phase-close regression:** **32/32 services green.** ruff only shows the pre-existing files (25
-    errors, from 28 at the start of the plan; → P92-S3).
+    errors, from 28 at the start of the plan; → P93-S3).
 
 **Phase 85 result:** across 54 write routes and about 150 client call sites, the acting identity is
 always the gateway-verified principal. Services acting for a user say so explicitly (`X-DMS-On-Behalf-Of`,
@@ -3872,7 +3872,7 @@ installation's replica health.
     - **Live:** a stuck rollout was cancelled and deleted; a two-step plan went bootstrap → proposal →
       second operator's approval → completed. The e2e leaves the fleet tables empty.
 - **P88-S2 — Monitoring sensors page.** View and change the sensor configuration (`PUT /sensor-config/*`
-  exists), including the cost flags, and the P92-S1 tracing sampling ratio once it exists.
+  exists), including the cost flags, and the P93-S1 tracing sampling ratio once it exists.
   - ✅ **Result** ([ADR 0243](docs/adr/0243-sensor-group-and-cost-overrides-and-admin-page.md)):
     - **Overrides per group and cost class:** `group:<g>` and `cost:cheap|expensive`. The most specific
       setting wins (sensor, group, cost, global). It is resolved in each service's sensors, so
@@ -3881,7 +3881,7 @@ installation's replica health.
       filter, and orphaned overrides. Read-only without `admin.monitoring`.
     - **Live:** with the group "performance" off, license-service's HTTP counter stood still; with a
       sensor override on, it counted again.
-    - The tracing ratio follows with P92-S1.
+    - The tracing ratio follows with P93-S1.
 - **P88-S2b — Sensor catalog extension A–D (user-approved, 2026-11-21).** New sensors after a comparison
   with an external reference system, adapted to the DMS services:
   - **A, licence and capacity:**
@@ -4146,7 +4146,7 @@ sessions found along the way:
       - goodput 80.2 % → 99.97 %;
       - p50 137 → 23.5 ms; p99 1,017 → 447 ms (August 2,012);
       - invalidations 23,464 → 0; hit rate 14 % → 75 %.
-    - **Remaining:** about 2× per-request latency at low load against August. Moved to P92-S1 (tracing).
+    - **Remaining:** about 2× per-request latency at low load against August. Moved to P93-S1 (tracing).
     - **Regression:** 32/32 green, in three parts because of the load-test backlog (see PROGRESS).
 
 **Phase 89 result:**
@@ -4258,9 +4258,9 @@ sessions found along the way:
     - **Result:** one row per signature and run, never overwritten; the ETSI report in storage;
       `signature.incoming.validated` to audit; badge and panel in user-ui/reviewer-ui, a trust page in
       admin-ui.
-    - **Build proposal:** 3 sessions plus an optional fourth for CAdES. **Not scheduled; the user
-      decides.**
-    - **Found on the way:** Helm has no NetworkPolicies at all, so this was added to P92-S3.
+    - **Build:** 3 sessions plus an optional fourth for CAdES, scheduled by the user on 2026-11-23 as
+      Phase 92 (the following phases moved up by one).
+    - **Found on the way:** Helm has no NetworkPolicies at all, so this was added to P93-S3.
 - **P90-S7 — Scoping: changing running processes, and lane semantics (ADR 0249).**
   - Insert, remove or redirect a step in a running instance (circulation-folder routing by hand), against
     SpiffWorkflow's serialized state.
@@ -4269,11 +4269,30 @@ sessions found along the way:
     role-based routing.
 
   No code.
+  - ✅ **Result** ([ADR 0249](docs/adr/0249-changing-running-processes-and-lane-semantics.md), proposed):
+    - **SpiffWorkflow 3.1.2** (checked in the package) can send an instance back
+      (`reset_from_task_id`) and migrate it to a changed spec (`SpecDiff`/`migrate_workflow`). It can't
+      inject a task without a changed spec.
+    - **Circulation folders: routes as data.** A shipped "Umlauf" template loops over a route list with
+      a cursor. Adding, removing or reordering future steps, and sending back, are data changes. Done
+      steps are fixed. Edited by the initiator, `case.write` holders and supervisors.
+    - **Other processes: three admin operations,** skip, send back, and migrate with a dry-run diff.
+      They need a new capability `workflow.instance_modify` and a reason, are never applied to
+      signature, federated or multi-instance/parallel tasks, and go to the audit ledger as
+      `workflow.instance.modified`.
+    - **Rejected:** free per-instance model surgery, and "jump forward" to any later step.
+    - **Lanes: an authorization boundary only when bound.** The binding to a group, org unit or role is
+      an extension in the BPMN, set in process-designer and checked at upload. It gates claim, complete
+      and reassign; unbound lanes are unchanged. `GET /tasks?eligible=me` gives reviewer-ui "Meine
+      Aufgaben"; escalations can go to lane members. Visibility is not restricted (a candidate).
+    - **Build proposal:** 3 sessions (lanes; engine operations; circulation template with a route
+      editor). **Not scheduled; the user decides.**
 
 ## Phase 91 — Filing Structure & Navigation (user request 2026-11-21)
 
-**Order:** phases 90–94 were renumbered on 2026-11-22 so that they run in numerical order (this phase
-was "93" when added). It comes before Operations and the AI skill, because P94's skill should be able to
+**Order:** phases 90–94 were renumbered on 2026-11-22 so that they run in numerical order, and 92–94
+moved up by one on 2026-11-23 for the new Phase 92 (this phase
+was "93" when added). It comes before Operations and the AI skill, because P95's skill should be able to
 set up and enforce a filing structure.
 
 The user's goals:
@@ -4373,9 +4392,48 @@ The user's goals:
       upsell hints).
     - The texts live in the product, not in the licence token.
 
-## Phase 92 — Operations & Hygiene
+## Phase 92 — Validating Incoming Signatures (user decision 2026-11-23, ADR 0248)
 
-- **P92-S1 — Distributed tracing (Konzept §10.1).**
+**Order:** right after Phase 91, as proposed in P90-S6. Before Operations (now Phase 93), whose
+NetworkPolicy item then knows signature-service's egress, and before the AI skill (Phase 95), which
+should cover the trust settings. Design and reasons: [ADR 0248](docs/adr/0248-validating-externally-signed-incoming-documents.md).
+
+- **P92-S1 — PAdES validation backend.**
+  - signature-service: a format-agnostic validator interface and the PAdES validator (pyHanko strict
+    reader, modification analysis, AdES per EN 319 102-1), bounded (size, at most 20 signatures, time
+    limit, path length, a worker with a bounded queue).
+  - Table `incoming_signature_validation` (one row per signature and run, never overwritten) and the
+    per-version summary.
+  - Consumer of `document.created`/`document.version.created` (durable, `deliver_new`);
+    document-service adds `content_type`/`filename` to both events.
+  - Trust: installation anchors (CRUD, admin capability) and the internal CA, revocation soft-fail by
+    default.
+  - **The fenced fetcher:** an own `aiohttp` session for pyHanko's fetchers; http/https only, no
+    redirects to other hosts, resolved addresses checked against private/loopback/link-local/cluster
+    ranges, timeouts, size cap, optional proxy, switchable.
+  - Tests with a generated test PKI: valid, changed after signing, revoked, unknown CA, a shadow-attack
+    style incremental update, an SSRF attempt (AIA URL to an internal address).
+- **P92-S2 — EU trusted lists, reports, audit.**
+  - LOTL and national lists: scheduled fetch (default daily), cache with sequence number and next
+    update, offline import; qualification (`qes`/`adesqc`/`ades`).
+  - The ETSI TS 119 102-2 report per run in storage-service, downloadable.
+  - `signature.incoming.validated` to the audit ledger; re-validation (`document.read`) and backfill
+    (admin, by folder or time range) endpoints.
+  - Dependencies: `pyhanko[etsi,async-http]`, `uv lock`. Manual check: a live LOTL fetch.
+- **P92-S3 — UI.**
+  - user-ui: a badge in the document list; "Eingegangene Signaturen" in `SignaturesPanel` (signer, time,
+    qualification, coverage, failure reason in plain German, report download, "erneut prüfen").
+  - reviewer-ui: the badge on task documents.
+  - admin-ui `/signature-config/`: trust sources, installation anchors, revocation mode, outbound
+    fetching, backfill.
+  - e2e with a signed PDF; manual check with a real QES sample; screenshots at 1400/768/390.
+- **P92-S4 — CAdES (optional, decide after S3).** Detached `.p7s` with pairing in mail-connector and an
+  upload-form field; enveloping `.p7m` with the extracted content as a derived document. Phase-close
+  regression for Phase 92 (if S4 is skipped, the regression runs at the end of S3).
+
+## Phase 93 — Operations & Hygiene
+
+- **P93-S1 — Distributed tracing (Konzept §10.1).**
   - Call `dms_common.otel.configure_tracing()` from every service's startup, with FastAPI and httpx
     instrumentation and trace propagation through NATS headers.
   - An OTLP collector plus Tempo (or Jaeger) in compose and the Helm chart, a Grafana datasource, and the
@@ -4385,9 +4443,9 @@ The user's goals:
     and download are still about 2× the August times (5 → 11 ms, 25 → 42 ms, 10 → 17 ms). Break one
     request of each down per hop (gateway, service, permission check, DB, storage) and name what grew
     since August.
-- **P92-S2 — Central log aggregation (§10.1).** Loki plus promtail (or Alloy) in compose and Helm, with
+- **P93-S2 — Central log aggregation (§10.1).** Loki plus promtail (or Alloy) in compose and Helm, with
   the JSON logs that already exist and a Grafana datasource. Trace-id ↔ log correlation with S1.
-- **P92-S3 — Hygiene bundle.**
+- **P93-S3 — Hygiene bundle.**
   - ~~ruff fully green: run `ruff format`, wrap the 12 long lines in the LibreOffice add-in, exclude
     `loadtest/notebook/*.ipynb`.~~ Done in P90-S5 (ruff 0.16): formatted, lines wrapped, the notebook
     fixed rather than excluded. Still open: pin ruff, since `uv.lock` isn't versioned and a new ruff
@@ -4410,15 +4468,15 @@ The user's goals:
     `config.import.test.*` approval configs (several with `requires_approval: true`) left by test runs.
     Same treatment: the tests clean up after themselves, and the existing debris is removed once
     (roles have no delete endpoint today, so this needs one or a direct cleanup).
-- **P92-S4 — Scoping: database schema migrations (ADR 0251).** Today schemas evolve through
+- **P93-S4 — Scoping: database schema migrations (ADR 0251).** Today schemas evolve through
   `create_all` plus ad-hoc `ALTER TABLE … IF NOT EXISTS` at startup. Options: Alembic per service,
   formalizing the current pattern, or accepting it, judged against fleet rolling updates and the
-  Helm upgrade path. No code. Phase-close regression for Phase 92. (`graphify update .` moved to the end
-  of Phase 94.)
+  Helm upgrade path. No code. Phase-close regression for Phase 93. (`graphify update .` moved to the end
+  of Phase 95.)
 
-## Phase 93 — Performance Measurement and a Rust Pilot (user request 2026-11-22)
+## Phase 94 — Performance Measurement and a Rust Pilot (user request 2026-11-22)
 
-**Order:** after Phase 92, since it needs P92-S1's tracing for a per-hop breakdown; before Phase 94,
+**Order:** after Phase 93, since it needs P93-S1's tracing for a per-hop breakdown; before Phase 95,
 whose admin skill should describe the system as it ends up. (Added as "94", renumbered 2026-11-22.)
 
 The user's goal is a complete, relative ranking of where the services spend time and resources under
@@ -4428,10 +4486,10 @@ throughput per CPU and per GB RAM and lower operating cost.
 **The approach is measure, then a pilot, then decide.** Each further service is its own decision backed
 by the pilot's numbers, not a committed rewrite of all of them (see ADR 0257's criteria).
 
-- **P93-S1 — Load test with a per-service ranking.**
+- **P94-S1 — Load test with a per-service ranking.**
   - Same k6 profile plus a variant that exercises the less-used paths (workflow, search, rendering,
     OCR, case, mail).
-  - **Per service, from the existing sensors, cadvisor and P92-S1's traces:**
+  - **Per service, from the existing sensors, cadvisor and P93-S1's traces:**
     - CPU-seconds per 1,000 requests;
     - RSS at rest and under load;
     - server-side p50/p99 per route;
@@ -4441,7 +4499,7 @@ by the pilot's numbers, not a committed rewrite of all of them (see ADR 0257's c
     are different lists: a service can be slow because it waits on the DB or another service, and a
     rewrite doesn't fix waiting.
   - The notebook gains the per-service section.
-- **P93-S2 — Scoping: migrating services to Rust (ADR 0257). No code.**
+- **P94-S2 — Scoping: migrating services to Rust (ADR 0257). No code.**
   - **Selection:** from S1's ranking, only services where own compute or memory dominates. Not
     I/O-bound ones, where tuning (queries, caching, batching, pools) is the cheaper fix.
   - **What a Rust service needs:**
@@ -4457,7 +4515,7 @@ by the pilot's numbers, not a committed rewrite of all of them (see ADR 0257's c
   - **Decision criteria for continuing after the pilot:** measured CPU and RAM per 1,000 requests
     (say ≥ 2× better, or a threshold the ADR sets), plus the cost of a second language in build, CI,
     on-call and hiring.
-- **P93-S3 — Rust pilot.** The highest-ranked suitable service from S1/S2:
+- **P94-S3 — Rust pilot.** The highest-ranked suitable service from S1/S2:
   - likely candidates are the gateway (every request passes through it, thin logic) or
     permission-service (CPU-bound recomputation, on every request path);
   - rebuilt in Rust against its unchanged pytest suite;
@@ -4465,7 +4523,7 @@ by the pilot's numbers, not a committed rewrite of all of them (see ADR 0257's c
   - before/after per CPU and GB; a go/no-go for further services in the ADR.
 - **Further sessions:** one per service, only if the pilot meets the criteria, in ranking order.
 
-## Phase 94 — AI-Assisted Administration (user request 2026-11-21)
+## Phase 95 — AI-Assisted Administration (user request 2026-11-21)
 
 The user's goal: an AI skill that helps a customer configure and administer OG Doc by hiding
 complexity. Configuration is spread over many services, many categories, four-eyes rules and domain
@@ -4476,7 +4534,7 @@ reviewable change.
 Distinct from Phase 76's open "AI features" candidate, which is about end-user document features (still
 unchosen).
 
-- **P94-S1 — Scoping: the admin skill (ADR 0253). No code.**
+- **P95-S1 — Scoping: the admin skill (ADR 0253). No code.**
   - **Format:**
     - An Agent Skill (`SKILL.md` plus reference files and scripts), so it works with Claude Code and the
       Agent SDK.
@@ -4503,7 +4561,7 @@ unchosen).
     jobs, alarms, licence.
   - **Knowledge:** which docs the skill carries (condensed references, not the 90-phase history) and how
     it stays current with the code.
-- **P94-S2 — Build: CLI gaps and the skill package.**
+- **P95-S2 — Build: CLI gaps and the skill package.**
   - The missing CLI commands from S1's inventory (with tests).
   - `skills/og-doc-admin/`:
     - `SKILL.md` (when to use it, the safety rules, the workflow);
@@ -4512,7 +4570,7 @@ unchosen).
     - recipes for the task catalogue;
     - helper scripts where a step is mechanical (for example building a package fragment and running
       compare).
-- **P94-S3 — Evaluation and customer documentation.**
+- **P95-S3 — Evaluation and customer documentation.**
   - A scenario set (the task catalogue plus diagnosis cases and a few "should refuse or ask"
     cases), run with an agent against the dev stack, iterating the skill until the scenarios pass.
   - A customer-facing guide: setup (CLI login, the roles the skill's account needs), what it can and
@@ -4574,7 +4632,7 @@ unchosen).
 - Real browser verification with screenshots for every UI-visible change (390/768/1400 for layout
   changes, as in Phase 83).
 - Full backend regression (`scripts/run-tests.sh`, with `~/.local/bin` on PATH) once per phase close.
-- `graphify update .` only at the end of the whole plan (P94-S3, moved from P92-S4).
+- `graphify update .` only at the end of the whole plan (P95-S3, moved from P93-S4).
 - Scoping sessions produce an ADR and no code diff; `PROGRESS.md` marks them "Scoping, kein Feature".
 
 ---

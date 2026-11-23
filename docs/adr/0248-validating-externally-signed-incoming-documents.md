@@ -1,6 +1,6 @@
 # 0248 — Validating externally signed incoming documents (scoping)
 
-**Status:** proposed (scoping, no code)
+**Status:** accepted (scoping in P90-S6; built in Phase 92, scheduled 2026-11-23)
 **Context:** P90-S6 (Phase 90, user-selected from the comparison with an external reference system).
 
 OG Doc signs documents itself (signature-service, PAdES-B-LTA with an internal CA, ADR 0025/0155). It
@@ -117,7 +117,7 @@ chooses them. Fetching them blindly lets any user make the cluster call internal
 - Fetching can be switched off entirely. The result is then `INDETERMINATE` where only the network
   could have decided.
 
-Today Helm has no NetworkPolicy at all. That gap is broader than this feature. It is noted for P92
+Today Helm has no NetworkPolicy at all. That gap is broader than this feature. It is noted for P93
 (operations) rather than solved here.
 
 ## Decision 5 — What a result is, and where it lives
@@ -178,7 +178,7 @@ proven qualification, and "nachträglich verändert" if any signature doesn't co
   - the backfill.
 - Search filters ("gültig signiert") are a later candidate in query-service.
 
-## Proposed build (not scheduled)
+## Build (Phase 92, P92-S1 to S4)
 
 | Session | Content |
 |---|---|
@@ -198,7 +198,7 @@ in session 2, and a real QES sample (e.g. from a public validation demo) one in 
 - Long-term preservation of foreign signatures (archive timestamps, evidence records).
 - Blocking or routing on the result (for example "only accept validly signed documents" in a workflow).
   That is a follow-up once results exist.
-- A Helm NetworkPolicy for all services: noted for Phase 92.
+- A Helm NetworkPolicy for all services: noted for Phase 93.
 
 ## Consequences if built
 

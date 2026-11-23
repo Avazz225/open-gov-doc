@@ -127,7 +127,7 @@ That is not the cache: it no longer invalidates and hits mostly.
 - HTTP sensors;
 - more checks per request.
 
-Telling them apart needs a per-hop breakdown. That is what distributed tracing (P92-S1) provides, so the
+Telling them apart needs a per-hop breakdown. That is what distributed tracing (P93-S1) provides, so the
 question is recorded there instead of being guessed at here.
 
 ## Consequences

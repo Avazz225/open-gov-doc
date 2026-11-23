@@ -2,6 +2,35 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P90-S7, scoping: changing running processes, and lane semantics
+([ADR 0249](docs/adr/0249-changing-running-processes-and-lane-semantics.md), proposed). No code. Last
+session of Phase 90.
+
+**Findings:**
+- SpiffWorkflow 3.1.2 (checked in the package) supports sending an instance back
+  (`reset_from_task_id`) and migrating it to a changed spec (`SpecDiff`/`migrate_workflow`), but not
+  injecting a task without a changed spec.
+- A case is started with a selectable `process_definition_id`, so a new circulation template is an
+  addition; existing definitions stay untouched.
+- permission-service already has groups with members and org units, so a lane binding has something to
+  bind to.
+
+**Decisions (proposed):**
+- **Circulation folders:** routes as data (a template looping over a route list with a cursor). Adding,
+  removing or reordering future steps and sending back are data changes; done steps are fixed.
+- **Other processes:** skip, send back, and migrate with a dry-run diff. They need the
+  `workflow.instance_modify` capability and a reason, never apply to signature, federated or
+  multi-instance/parallel tasks, and are audited as `workflow.instance.modified`.
+- **Rejected:** free per-instance model surgery, and "jump forward".
+- **Lanes:** a boundary only when bound (group, org unit or role, as a BPMN extension). The binding gates
+  claim, complete and reassign. `GET /tasks?eligible=me` gives reviewer-ui "Meine Aufgaben". Visibility
+  is not restricted.
+- **Build:** 3 sessions, **not scheduled**. Open decision for the user: whether and where.
+
+**Next session:** Phase 90 close (full regression, running), then P91-S1.
+
+---
+
 **Last completed:** P90-S6, scoping: validating externally signed incoming documents
 ([ADR 0248](docs/adr/0248-validating-externally-signed-incoming-documents.md), proposed). No code.
 
@@ -11,7 +40,7 @@
   detached CMS. Checked in the installed package, not from memory.
 - Every ingest path ends in `POST /documents` or `.../versions`. The events lack `content_type`, which is
   a small additive change.
-- Helm has no NetworkPolicies; added to P92-S3.
+- Helm has no NetworkPolicies; added to P93-S3.
 
 **Decisions (proposed):**
 - **Where:** asynchronously in signature-service via the document events, so a bad signature never
@@ -22,10 +51,20 @@
   against shadow attacks; bounded work.
 - **Results:** stored per signature and run, never overwritten, with the ETSI report in storage.
 - **UI:** a badge and panel in user-ui/reviewer-ui, a trust page in admin-ui.
-- **Build:** 3 sessions plus an optional CAdES session, **not scheduled**. Open decision for the user:
-  whether and where to schedule it.
+- **Build:** 3 sessions plus an optional CAdES session. **Scheduled by the user (2026-11-23) as Phase
+  92**, right after Phase 91. Phases renumbered again so they keep running in order:
 
-**Also:** P92-S3's "ruff fully green" item was marked done (it happened in P90-S5); pinning ruff remains
+  | Was | Now | Content |
+  |---|---|---|
+  | — | 92 | Validating incoming signatures (ADR 0248), S1–S3 plus optional S4 |
+  | 92 | 93 | Operations & hygiene |
+  | 93 | 94 | Performance measurement & Rust pilot |
+  | 94 | 95 | AI admin skill; last, with `graphify update .` at P95-S3 |
+
+  Earlier entries in this file now use the new numbers (P93-S3 = the hygiene bundle, P93-S1 = tracing),
+  except the historical renumbering table of 2026-11-22.
+
+**Also:** P93-S3's "ruff fully green" item was marked done (it happened in P90-S5); pinning ruff remains
 open.
 
 **Next session:** P90-S7, scoping: changing running processes and lane semantics (ADR 0249).
@@ -321,7 +360,7 @@ It runs right after Phase 90; see the plan.
   - the `dms-db-base` README;
   - `docs/operations/rolling-updates.md` "Database connection budget";
   - ADR 0254;
-  - P92-S1 now carries the open per-request question.
+  - P93-S1 now carries the open per-request question.
 
 **Checks:**
 - permission-service 205 (+3: unregistered deny not cached, registration keeps entries, REST plus
@@ -341,7 +380,7 @@ It runs right after Phase 90; see the plan.
     0.93 → 0.5 cores; at most 17 connections checked out; 43 connections at rest (84 before).
   - **The one error:** a gateway 502 after 5 ms without an upstream log entry (keep-alive close).
   - **Remaining:** low-load latency is still about 2× August (`list_folder` 5 → 11 ms, `upload`
-    25 → 42 ms, `download` 10 → 17 ms). Not the cache; recorded for P92-S1 (tracing).
+    25 → 42 ms, `download` 10 → 17 ms). Not the cache; recorded for P93-S1 (tracing).
 - **Phase-close regression: 32/32 green, in three parts.**
   - **Part 1:** the first full run had 23 services green, then stalled in rendering-service. Its
     in-process tests bind the shared durable NATS consumer, which had 159,468 unprocessed messages
@@ -359,7 +398,7 @@ It runs right after Phase 90; see the plan.
 
 ---
 
-**Between sessions (2026-11-21): load test and Phase 94 planned.**
+**Between sessions (2026-11-21): load test and Phase 95 planned.**
 
 **Load test** (`loadtest/run.sh`, the same 20-minute profile up to 200 VUs as the baseline run
 `run-20260815T153206Z`; new run `run-20261121T175601Z`; notebook executed headless). Against the
@@ -402,7 +441,7 @@ invalidate on node creation, budget the DB pools against `max_connections`, reru
 
 **Next session (at the time):** P89-S4, then P90-S1; P89-S4 is done, see above.
 
-**Phase 94 planned** (user request): AI-assisted administration. The three sessions are scoping
+**Phase 95 planned** (user request): AI-assisted administration. The three sessions are scoping
 (ADR 0253), build (CLI gaps plus the `skills/og-doc-admin/` skill) and evaluation/customer docs.
 `graphify update .` moves to its end.
 
@@ -458,7 +497,7 @@ invalidate on node creation, budget the DB pools against `max_connections`, reru
 - **Phase-close regression** (`scripts/run-tests.sh`, unfiltered): 32/32 services green on the first
   run; ruff only the known 23 findings, plus the same 4 unformatted files (LibreOffice add-in, loadtest
   notebook, plugin-orchestration, reporting).
-- **Hygiene found (for P92-S3):** permission-service holds about 1,516 roles and about 40
+- **Hygiene found (for P93-S3):** permission-service holds about 1,516 roles and about 40
   `config.import.test.*` approval configs from earlier test runs, besides the Keycloak realm-role debris
   already listed.
 
@@ -651,7 +690,7 @@ closed.**
   examples** for the user to look at (mail goes to mailpit); delete them on the sensors page with
   `admin.monitoring`, or with `DELETE /alert-rules/{id}`.
 - No page overflow at 390px.
-- **Phase-close regression:** 32/32 services green on the first run (auth-service 167 in 18 min, document-service 428, workflow-service 244, permission-service 202, …). ruff shows only 23 known findings in untouched files (the LibreOffice add-in, the loadtest notebook, one line each in plugin-orchestration and reporting), two fewer than the 25 known, through formatting (→ P92-S3).
+- **Phase-close regression:** 32/32 services green on the first run (auth-service 167 in 18 min, document-service 428, workflow-service 244, permission-service 202, …). ruff shows only 23 known findings in untouched files (the LibreOffice add-in, the loadtest notebook, one line each in plugin-orchestration and reporting), two fewer than the 25 known, through formatting (→ P93-S3).
 - **Permissions for the user (at their request, after this session's checks):** their Keycloak account got all 31 `domain-admin-*` roles plus `breakglass-approver` on `root` (32 assignments, none pending four-eyes) and the realm roles `dms-admin`/`dms-poststelle`. Machine roles (`archival-service-callback`, `service-*-lookup`) and test debris were left out.
 - The stack was left running for the user.
 
@@ -734,10 +773,10 @@ new P88-S6, the same split as P88-S4.
     had left 4 `E2E-Installation-*` rows (removed).
 - **Hygiene found:**
   - The dev Keycloak realm holds about 130 test-made realm roles (`auditor-*`,
-    `config-import-realm-role-*`, `realm-role-test-*`); added to P92-S3. Not deleted here.
+    `config-import-realm-role-*`, `realm-role-test-*`); added to P93-S3. Not deleted here.
   - A leftover `e2e-admin-ui-*` user from a rate-limited run was deleted.
 - **Docs:** admin-ui "Mailboxes"/"Realm Roles", mail-connector, the ADR 0244 consequences, the plan
-  (P88-S4b result, P92-S3 realm-role item).
+  (P88-S4b result, P93-S3 realm-role item).
 
 **Checks:**
 - admin-ui vitest 365 (+6 `mailbox-settings`, +4 `realm-role-assignments`; user-management mocks
@@ -1104,7 +1143,7 @@ with an external reference system (amendment to
 - **Phase-close regression:** 30/32 services green on the first run. rendering-service had 1 flaky
   test (an asyncio event bound to another loop) and teamspace-service had 1 (a transient 500 from the
   live permission-service during the run). Neither was touched this phase, and both passed
-  unchanged on rerun (103/103, 70/70), so 32/32. ruff shows only the 25 known findings (→ P92-S3).
+  unchanged on rerun (103/103, 70/70), so 32/32. ruff shows only the 25 known findings (→ P93-S3).
 
 The stack was stopped afterwards.
 
@@ -1254,7 +1293,7 @@ scale-down or a rolling restart where the replacements registered before the old
     one's own claim;
   - "Beantragt von" shows names;
   - admin forms before/after.
-- **Phase-close regression 32/32 services green.** ruff shows only the 25 known pre-existing findings (→ P92-S3).
+- **Phase-close regression 32/32 services green.** ruff shows only the 25 known pre-existing findings (→ P93-S3).
 
 The stack was stopped afterwards.
 
@@ -1324,7 +1363,7 @@ comes from the verified principal everywhere).
 - vitest 319/23/64/308; LibreOffice 44; `tsc`/`eslint` clean.
 - e2e 32/32.
 - **Phase-close regression 32/32 services green.**
-- ruff only shows pre-existing files (25, → P92-S3).
+- ruff only shows pre-existing files (25, → P93-S3).
 
 **Open (→ P86-S2):**
 - Recorded actors are principals (a user's `sub`), so the UIs need name display (locks, creators,
@@ -1499,7 +1538,7 @@ closed.**
 
   Both ran green twice afterwards.
 - fleet 42, admin-ui vitest 319, e2e admin-ui 8/8.
-- ruff only shows pre-existing files (→ P92-S3).
+- ruff only shows pre-existing files (→ P93-S3).
 
 **Open (carried over):** reviewer-ui principal names and the `<picture>` check (→ P86-S2). The stack was
 stopped afterwards.
@@ -10830,7 +10869,7 @@ Consolidated at the MVP milestone (P4-S3) — sorted by topic instead of chronol
 > every write route takes the acting identity from the gateway-verified principal. No route reads a
 > body actor field any more, and services acting for a user say so explicitly
 > (`X-DMS-On-Behalf-Of`, audited). Document force-unlock has a real permission check
-> (`admin.document_lock`). The bullets below are historical; P92-S3 rewrites this section.
+> (`admin.document_lock`). The bullets below are historical; P93-S3 rewrites this section.
 
 All previous "sensitive" endpoints share the same gap: the gateway (since P4-S1) only checks whether a valid bearer token is present (**authentication**), never whether the principal is authorized for the specific action (**authorization**). Closing this gap would require the respective backend service to evaluate the identity headers passed through by the gateway (`X-DMS-Principal`/`X-DMS-Username`/`X-DMS-Roles`) — until now **no** service evaluated them. **Broken for exactly one case since P5e-S2**: Document Service checks `X-DMS-Roles` against `dms-admin` before `attributes["Kennzeichen"]` may be changed (see "Reference-Number Generator" below) — deliberately pulled forward as a single case, since the user explicitly wanted immediate enforcement here. **Planning correction after P6-S4**: the original consolidation decision (after P5b-S6) assumed P6-S4 would "introduce a real role/permission check" — what was actually implemented was an **optional** four-eyes mechanism (4.3, see below) that involves a second person in the flow, but is **not** an `X-DMS-Roles` evaluation and by default remains ungated until an action type is explicitly activated. The actual "who is even allowed to initiate/approve" role check for force-unlock/scope locks remains open — only the four-eyes *addition* to it now exists. **A second, real pattern established since P6-S5**: for new checks, `X-DMS-Roles` is no longer evaluated, but a real `permission-service` call against system-native domain-admin roles separate from Keycloak (4.6) — so far for exactly one case (Auth-Service `/users` + Admin-UI, capability `admin.user_management`), see [ADR 0023](docs/adr/0023-superuser-breakglass-and-domain-admin-accounts.md). The two patterns (P5e-S2's `X-DMS-Roles` string comparison vs. P6-S5's `permission-service` check) deliberately coexist unharmonized. **Known gap of the P5e-S2 implementation**: `dms-admin` is only idempotently *created*, the *assignment* to specific users has no API/UI yet (see `docs/services/auth-service.md` "Open Points") — must for now be done via the Keycloak Admin Console.
 - **Document Service force-unlock** (4.3): still no role check; since P6-S4 an optional four-eyes intermediate step can be activated (`PUT /approval-config/document.force_unlock`, off by default), see [ADR 0022](docs/adr/0022-four-eyes-approval-via-events.md).
