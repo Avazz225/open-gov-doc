@@ -5,6 +5,11 @@ class ProcessDefinitionUnknownError(Exception):
     """`process_definition_id` does not exist according to workflow-service (404)."""
 
 
+class InstanceStartRejectedError(Exception):
+    """workflow-service refused the start (422), e.g. a circulation route
+    that is missing or names an unknown group (P93-S3). Carries its detail."""
+
+
 class WorkflowClient:
     """HTTP client against workflow-service (7.1, P6-S1) - case-service starts
     the process instance of a new circulation folder through it and deliberately
@@ -39,6 +44,14 @@ class WorkflowClient:
         if response.status_code == 404:
             raise ProcessDefinitionUnknownError(
                 f"process_definition_id {process_definition_id!r} unbekannt"
+            )
+        if response.status_code == 422:
+            try:
+                detail = response.json().get("detail")
+            except ValueError:
+                detail = None
+            raise InstanceStartRejectedError(
+                detail if isinstance(detail, str) else "Prozessstart abgelehnt"
             )
         response.raise_for_status()
         return response.json()

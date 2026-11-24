@@ -85,7 +85,14 @@
     "emptyMine": "Keine Aufgaben für Sie – in Ihren Bahnen, ungebundenen Bahnen oder von Ihnen übernommen.",
     "laneGroup": "Gruppe: {name}",
     "laneRole": "Rolle: {name}",
-    "notEligible": "nicht zuständig"
+    "notEligible": "nicht zuständig",
+    "circulationStep": "Umlauf {position}/{total}: {kind}",
+    "circulationKinds": {
+      "mitzeichnen": "Mitzeichnen",
+      "zeichnen": "Zeichnen",
+      "kenntnis": "Zur Kenntnis",
+      "bearbeiten": "Bearbeiten"
+    }
   },
   "teamTaskList": {
     "heading": "Team-Aufgaben",

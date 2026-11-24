@@ -10,6 +10,7 @@ from sqlalchemy.orm.exc import StaleDataError
 from workflow_service import spiff_adapter
 from workflow_service.models import (
     BusinessCalendar,
+    CirculationStep,
     DmnDefinition,
     FederationTask,
     ProcessDefinition,
@@ -164,7 +165,7 @@ async def create_process_definition(
 
     dmn_xmls = await list_latest_dmn_xml(session)
     try:
-        _, resolved_process_id = spiff_adapter.parse_bpmn(
+        spec, resolved_process_id = spiff_adapter.parse_bpmn(
             bpmn_xml, process_id, dmn_definitions=dmn_xmls
         )
         lane_bindings = spiff_adapter.parse_lane_bindings(bpmn_xml)
@@ -178,6 +179,7 @@ async def create_process_definition(
         bpmn_process_id=resolved_process_id,
         bpmn_xml=bpmn_xml,
         lane_bindings=lane_bindings,
+        is_circulation=spiff_adapter.has_circulation_task(spec),
         created_at=now,
         updated_at=now,
     )
@@ -508,8 +510,15 @@ async def start_instance(
     business_key: str | None,
     initial_data: dict,
     instance_id: str | None = None,
+    route: list[dict] | None = None,
 ) -> ProcessInstance:
+    """`route` (P93-S3): required for a circulation definition, at least one
+    entry (`validate_route_entry`); ignored otherwise."""
     definition = await get_process_definition(session, process_definition_id)
+    if definition.is_circulation and not route:
+        raise InvalidRouteError(
+            "Ein Umlauf braucht mindestens einen Schritt im Laufweg (dms_route)"
+        )
     dmn_xmls = await list_latest_dmn_xml(session)
     try:
         spec, _ = spiff_adapter.parse_bpmn(
@@ -535,6 +544,19 @@ async def start_instance(
     )
     session.add(instance)
     await session.flush()
+    if definition.is_circulation:
+        for index, entry in enumerate(route or []):
+            session.add(
+                _new_step(
+                    instance.id,
+                    index,
+                    entry,
+                    status="current" if index == 0 else "pending",
+                    added_by=created_by,
+                    now=now,
+                )
+            )
+        await session.flush()
 
     # `try`/`finally` instead of a simple sequential flow (P12-S2,
     # resumability, 7.2): if `run_ready_steps()` raises (e.g. a
@@ -609,6 +631,13 @@ async def complete_task(
         raise TaskNotReadyError(
             f"task_id {task_id!r} ist bei instance_id {instance_id!r} nicht bereit"
         )
+
+    # Circulation step (P93-S3): the route moves on, and the gateway learns
+    # whether another step follows.
+    extensions = getattr(task.task_spec, "extensions", None) or {}
+    if extensions.get("taskType") == spiff_adapter.CIRCULATION_TASK_TYPE:
+        more = await _advance_route(session, instance_id, completed_by)
+        data = {**data, "dms_route_more": more}
 
     # completed_by is deliberately not merged into the process variables
     # (could collide with a BPMN process's own variables) - only used as
@@ -819,6 +848,301 @@ async def migrate_instance(
         return f"{target.name} v{target.version}"
 
     return await _modify_instance(session, instance_id, expected_version, apply)
+
+
+# --- Circulation routes (P93-S3, ADR 0249 Part A b) ------------------------
+
+CIRCULATION_TEMPLATE_NAME = "Umlauf"
+ROUTE_KINDS = ("mitzeichnen", "zeichnen", "kenntnis", "bearbeiten")
+ASSIGNEE_TYPES = ("principal", "group")
+_OPEN_STATUSES = ("current", "pending")
+
+
+class InvalidRouteError(Exception):
+    """A route entry is malformed, or a circulation started without one."""
+
+
+class RouteChangeRefused(Exception):
+    """A route change that would touch a finished step, or has no target."""
+
+
+async def ensure_circulation_template(session: AsyncSession) -> ProcessDefinition:
+    """Seeds the shipped "Umlauf" template once (idempotent: an existing
+    family of that name, also an edited one, is left alone)."""
+    existing = await list_process_definitions(session, name=CIRCULATION_TEMPLATE_NAME)
+    if existing:
+        return existing[0]
+    return await create_process_definition(
+        session,
+        name=CIRCULATION_TEMPLATE_NAME,
+        bpmn_xml=spiff_adapter.circulation_template_xml(),
+        process_id=None,
+    )
+
+
+def validate_route_entry(entry: dict) -> dict:
+    """Normalises one route entry `{kind, assignee_type, assignee, note?}`."""
+    if not isinstance(entry, dict):
+        raise InvalidRouteError("Ein Schritt im Laufweg muss ein Objekt sein")
+    kind = entry.get("kind")
+    assignee_type = entry.get("assignee_type")
+    assignee = str(entry.get("assignee") or "").strip()
+    note = entry.get("note")
+    if kind not in ROUTE_KINDS:
+        allowed = ", ".join(ROUTE_KINDS)
+        raise InvalidRouteError(f"Unbekannte Schrittart {kind!r} (erlaubt: {allowed})")
+    if assignee_type not in ASSIGNEE_TYPES:
+        raise InvalidRouteError("assignee_type muss 'principal' oder 'group' sein")
+    if not assignee or len(assignee) > 256:
+        raise InvalidRouteError("Jeder Schritt braucht eine zuständige Person oder Gruppe")
+    if note is not None and (not isinstance(note, str) or len(note) > 2000):
+        raise InvalidRouteError("Die Notiz eines Schritts ist zu lang")
+    return {
+        "kind": kind,
+        "assignee_type": assignee_type,
+        "assignee": assignee,
+        "note": (note or "").strip() or None,
+    }
+
+
+def _new_step(
+    instance_id: str, position: int, entry: dict, *, status: str, added_by: str, now: datetime
+) -> CirculationStep:
+    entry = validate_route_entry(entry)
+    return CirculationStep(
+        id=str(uuid.uuid4()),
+        instance_id=instance_id,
+        position=position,
+        status=status,
+        added_by=added_by,
+        added_at=now,
+        **entry,
+    )
+
+
+async def get_route(session: AsyncSession, instance_id: str) -> list[CirculationStep]:
+    result = await session.execute(
+        select(CirculationStep)
+        .where(CirculationStep.instance_id == instance_id)
+        .order_by(CirculationStep.position, CirculationStep.added_at)
+    )
+    return list(result.scalars().all())
+
+
+async def current_step(session: AsyncSession, instance_id: str) -> CirculationStep | None:
+    return next((s for s in await get_route(session, instance_id) if s.status == "current"), None)
+
+
+async def _advance_route(session: AsyncSession, instance_id: str, completed_by: str) -> bool:
+    """The current step is done; the next pending one becomes current.
+    Returns whether there is one."""
+    steps = await get_route(session, instance_id)
+    now = datetime.now(UTC)
+    for step in steps:
+        if step.status == "current":
+            step.status = "done"
+            step.closed_by = completed_by
+            step.closed_at = now
+    following = next((s for s in steps if s.status == "pending"), None)
+    if following is not None:
+        following.status = "current"
+    await session.flush()
+    return following is not None
+
+
+@dataclass
+class RouteChange:
+    instance: ProcessInstance
+    description: str
+    inserted: list[CirculationStep] = field(default_factory=list)
+    released_claims: list[ReleasedClaim] = field(default_factory=list)
+
+
+async def _change_route(
+    session: AsyncSession,
+    instance_id: str,
+    expected_version: int | None,
+    mutate: Callable[[list[CirculationStep]], tuple[list[CirculationStep], RouteChange]],
+) -> RouteChange:
+    """Shared frame for route edits: the instance must be a running
+    circulation at `expected_version`; `mutate` returns the route in its new
+    order (finished steps untouched) and what changed. Positions are
+    renumbered, and the instance row is touched so its version moves on -
+    a concurrent edit or step completion then conflicts (ADR 0185)."""
+    instance = await get_instance(session, instance_id)
+    if instance.status != "running":
+        raise InstanceNotRunningError(f"instance_id {instance_id!r} ist nicht 'running'")
+    if expected_version is not None and instance.workflow_version != expected_version:
+        raise ConcurrentModificationError(
+            f"instance_id {instance_id!r} wurde inzwischen geändert - bitte neu laden"
+        )
+    steps = await get_route(session, instance_id)
+    if not steps:
+        raise RouteChangeRefused("Diese Instanz ist kein Umlauf")
+    ordered, change = mutate(steps)
+    for index, step in enumerate(ordered):
+        step.position = index
+    for step in change.inserted:
+        session.add(step)
+    instance.updated_at = datetime.now(UTC)
+    change.instance = instance
+    try:
+        await session.flush()
+    except StaleDataError as exc:
+        raise ConcurrentModificationError(
+            f"instance_id {instance_id!r} wurde gleichzeitig geändert - bitte neu laden"
+        ) from exc
+    return change
+
+
+def _pending(steps: list[CirculationStep]) -> list[CirculationStep]:
+    return [s for s in steps if s.status == "pending"]
+
+
+def _describe_step(step: CirculationStep) -> str:
+    return f"{step.kind} ({step.assignee})"
+
+
+async def add_route_step(
+    session: AsyncSession,
+    instance_id: str,
+    entry: dict,
+    *,
+    index: int | None,
+    actor: str,
+    expected_version: int | None,
+) -> RouteChange:
+    """Inserts a step among the open future ones: `index` 0 = right after the
+    current step, None = at the end."""
+
+    def mutate(steps):
+        step = _new_step(
+            instance_id, 0, entry, status="pending", added_by=actor, now=datetime.now(UTC)
+        )
+        pending = _pending(steps)
+        ordered = list(steps)
+        if index is None or index >= len(pending):
+            ordered.append(step)
+        else:
+            if index < 0:
+                raise RouteChangeRefused("Ungültige Position")
+            ordered.insert(ordered.index(pending[index]), step)
+        return ordered, RouteChange(
+            instance=None, description=f"Schritt ergänzt: {_describe_step(step)}", inserted=[step]
+        )
+
+    return await _change_route(session, instance_id, expected_version, mutate)
+
+
+async def remove_route_step(
+    session: AsyncSession,
+    instance_id: str,
+    step_id: str,
+    *,
+    actor: str,
+    reason: str,
+    expected_version: int | None,
+) -> RouteChange:
+    """Strikes a future step. A finished step can't be changed; the current
+    one is recalled instead."""
+
+    def mutate(steps):
+        step = next((s for s in steps if s.id == step_id), None)
+        if step is None:
+            raise NotFoundError(f"Schritt {step_id!r} gehört nicht zu diesem Umlauf")
+        if step.status != "pending":
+            raise RouteChangeRefused(
+                "Nur künftige Schritte können gestrichen werden - der aktuelle wird zurückgeholt"
+            )
+        step.status = "removed"
+        step.closed_by = actor
+        step.closed_at = datetime.now(UTC)
+        step.close_reason = reason
+        return steps, RouteChange(
+            instance=None, description=f"Schritt gestrichen: {_describe_step(step)}"
+        )
+
+    return await _change_route(session, instance_id, expected_version, mutate)
+
+
+async def reorder_route(
+    session: AsyncSession,
+    instance_id: str,
+    step_ids: list[str],
+    *,
+    expected_version: int | None,
+) -> RouteChange:
+    """New order of the future steps; `step_ids` must name exactly them."""
+
+    def mutate(steps):
+        pending = _pending(steps)
+        if sorted(step_ids) != sorted(s.id for s in pending) or len(set(step_ids)) != len(step_ids):
+            raise RouteChangeRefused(
+                "Die neue Reihenfolge muss genau die künftigen Schritte enthalten"
+            )
+        by_id = {s.id: s for s in pending}
+        queue = iter(by_id[i] for i in step_ids)
+        ordered = [next(queue) if s.status == "pending" else s for s in steps]
+        return ordered, RouteChange(instance=None, description="Reihenfolge geändert")
+
+    return await _change_route(session, instance_id, expected_version, mutate)
+
+
+async def recall_route_step(
+    session: AsyncSession,
+    instance_id: str,
+    redirect: dict,
+    *,
+    actor: str,
+    reason: str,
+    expected_version: int | None,
+) -> RouteChange:
+    """Takes the current step back and gives it to someone else (`redirect`,
+    a route entry - e.g. back to the author). The ready task stays the same
+    engine task; its claim is released. The remaining future steps follow
+    unchanged."""
+    ready = await get_ready_tasks(session, instance_id)
+    task = next(
+        (t for t in ready if t.extensions.get("taskType") == spiff_adapter.CIRCULATION_TASK_TYPE),
+        None,
+    )
+    claim = await get_task_claim(session, instance_id, task.id) if task else None
+
+    def mutate(steps):
+        current = next((s for s in steps if s.status == "current"), None)
+        if current is None or task is None:
+            raise RouteChangeRefused(
+                "Es gibt keinen laufenden Schritt, der zurückgeholt werden kann"
+            )
+        now = datetime.now(UTC)
+        current.status = "recalled"
+        current.closed_by = actor
+        current.closed_at = now
+        current.close_reason = reason
+        step = _new_step(instance_id, 0, redirect, status="current", added_by=actor, now=now)
+        ordered = list(steps)
+        ordered.insert(ordered.index(current) + 1, step)
+        change = RouteChange(
+            instance=None,
+            description=f"Zurückgeholt: {_describe_step(current)} -> {_describe_step(step)}",
+            inserted=[step],
+        )
+        if claim is not None:
+            change.released_claims.append(
+                ReleasedClaim(
+                    principal_id=claim.principal_id,
+                    task_id=claim.task_id,
+                    task_name=task.name,
+                    delegation_ids=list(claim.granted_delegation_ids or []),
+                )
+            )
+        return ordered, change
+
+    change = await _change_route(session, instance_id, expected_version, mutate)
+    if claim is not None:
+        await session.delete(claim)
+        await session.flush()
+    return change
 
 
 async def get_task_claim(session: AsyncSession, instance_id: str, task_id: str) -> TaskClaim | None:

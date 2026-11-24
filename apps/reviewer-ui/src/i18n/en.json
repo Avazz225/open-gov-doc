@@ -85,7 +85,14 @@
     "emptyMine": "No tasks for you – in your lanes, unbound lanes, or claimed by you.",
     "laneGroup": "Group: {name}",
     "laneRole": "Role: {name}",
-    "notEligible": "not responsible"
+    "notEligible": "not responsible",
+    "circulationStep": "Circulation {position}/{total}: {kind}",
+    "circulationKinds": {
+      "mitzeichnen": "Co-sign",
+      "zeichnen": "Sign",
+      "kenntnis": "For information",
+      "bearbeiten": "Revise"
+    }
   },
   "teamTaskList": {
     "heading": "Team tasks",

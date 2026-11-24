@@ -893,6 +893,18 @@ _INSTANCE_OPERATION_LABELS = {
     "skip": "übersprungen",
     "send_back": "zurückgesendet",
     "migrate": "auf eine neue Prozessversion migriert",
+    # Circulation route edits (P93-S3).
+    "route_add": "im Laufweg ergänzt",
+    "route_remove": "im Laufweg gekürzt",
+    "route_reorder": "im Laufweg umgestellt",
+    "route_recall": "zurückgeholt und umgeleitet",
+}
+
+_ROUTE_KIND_LABELS = {
+    "mitzeichnen": "Mitzeichnung",
+    "zeichnen": "Zeichnung",
+    "kenntnis": "Kenntnisnahme",
+    "bearbeiten": "Bearbeitung",
 }
 
 
@@ -909,6 +921,7 @@ async def _handle_instance_modified(
     (same shape as `_handle_task_claim_abandoned`); without affected
     claimants there is nobody to tell - the audit ledger keeps the record."""
     data = event.payload
+    await _notify_route_assignees(session_factory, settings, publish_event, rate_limiter, event)
     claimants = data.get("affected_claimants") or []
     if not claimants:
         return
@@ -943,6 +956,71 @@ async def _handle_instance_modified(
                 business_key=business_key,
                 operation=operation,
                 reason=reason,
+                link=link or "",
+            )
+            notification = await repository.create_and_send(
+                session,
+                settings,
+                channel="in_app",
+                recipient=principal_id,
+                subject=subject,
+                body=body,
+                rate_limiter=rate_limiter,
+            )
+            await session.commit()
+            await publish_notification_result(publish_event, notification)
+
+
+async def _notify_route_assignees(
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    publish_event: Callable[[str, str, dict], Awaitable[None]],
+    rate_limiter: RecipientRateLimiter,
+    event: Event,
+) -> None:
+    """Circulation route edits (P93-S3, ADR 0249): everyone a newly inserted
+    step reaches (`notify_principals`, groups already resolved to members by
+    workflow-service) learns that the folder will come to them - or, for a
+    redirect, that it is with them now."""
+    data = event.payload
+    recipients = data.get("notify_principals") or []
+    steps = data.get("inserted_steps") or []
+    if not recipients or not steps:
+        return
+    step = steps[0]
+    kind = _ROUTE_KIND_LABELS.get(step.get("kind"), step.get("kind", "?"))
+    note = step.get("note") or ""
+    business_key = data.get("business_key")
+    reason = data.get("reason", "")
+    if step.get("current"):
+        fallback_subject = f"Umlaufmappe liegt bei Ihnen: {kind}"
+        intro = "Eine Umlaufmappe wurde an Sie umgeleitet und wartet jetzt auf Sie"
+    else:
+        fallback_subject = f"Sie wurden in einen Umlauf aufgenommen: {kind}"
+        intro = "Sie wurden in den Laufweg einer Umlaufmappe aufgenommen"
+    fallback_body = f"{intro} ({kind}).\n\nBegründung: {reason}"
+    if note:
+        fallback_body += f"\nHinweis: {note}"
+    link = (
+        build_resource_link(settings.user_ui_public_base_url, "case", business_key)
+        if business_key
+        else build_resource_link(settings.reviewer_ui_public_base_url, "instance", event.subject)
+    )
+    if link:
+        fallback_body += f"\n\nUmlaufmappe öffnen: {link}"
+    for principal_id in recipients:
+        async with session_factory() as session:
+            subject, body = await _render_or_fallback(
+                session,
+                use_case="workflow.circulation.assigned",
+                recipient=principal_id,
+                fallback_subject=fallback_subject,
+                fallback_body=fallback_body,
+                kind=kind,
+                note=note,
+                reason=reason,
+                instance_id=event.subject,
+                business_key=business_key,
                 link=link or "",
             )
             notification = await repository.create_and_send(

@@ -13,6 +13,8 @@ class ProcessDefinitionOut(BaseModel):
     updated_at: datetime
     # P93-S1 (ADR 0249): lane name -> {"group": …} | {"role": …}.
     lane_bindings: dict[str, dict[str, str]] = {}
+    # P93-S3: instances of this definition run along a route.
+    is_circulation: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -49,6 +51,9 @@ class DmnDefinitionDetailOut(DmnDefinitionOut):
 
 class ProcessInstanceCreate(BaseModel):
     business_key: str | None = None
+    # For a circulation definition (P93-S3), `initial_data["dms_route"]` holds
+    # the route: `[{kind, assignee_type, assignee, note?}, …]`. It is stored
+    # as route steps, not as process data.
     initial_data: dict = {}
     # Optional: the caller determines its own instance ID instead of
     # accepting a server-generated one (P12-S2, same pattern as
@@ -95,6 +100,9 @@ class ReadyTaskOut(BaseModel):
     # claimed by someone else). `None` without a caller principal.
     lane_binding: dict[str, str] | None = None
     eligible: bool | None = None
+    # P93-S3: for a circulation task, the route step it stands for
+    # (`{id, kind, assignee_type, assignee, note, position, total}`).
+    circulation_step: dict | None = None
 
 
 class ReadyTaskWithInstanceOut(ReadyTaskOut):
@@ -274,3 +282,57 @@ class InstanceModificationOut(BaseModel):
     tasks_before: list[str]
     tasks_after: list[str]
     released_claims: list[str]
+
+
+# --- Circulation routes (P93-S3, ADR 0249 Part A b) ------------------------
+
+
+class RouteEntryIn(BaseModel):
+    kind: Literal["mitzeichnen", "zeichnen", "kenntnis", "bearbeiten"]
+    assignee_type: Literal["principal", "group"]
+    assignee: str = Field(min_length=1, max_length=256)
+    note: str | None = Field(default=None, max_length=2000)
+
+
+class RouteStepOut(BaseModel):
+    id: str
+    position: int
+    kind: str
+    assignee_type: str
+    assignee: str
+    note: str | None
+    status: str
+    added_by: str
+    added_at: datetime
+    closed_by: str | None
+    closed_at: datetime | None
+    close_reason: str | None
+
+    model_config = {"from_attributes": True}
+
+
+class RouteOut(BaseModel):
+    instance_id: str
+    instance_status: str
+    workflow_version: int | None
+    created_by: str
+    can_edit: bool
+    steps: list[RouteStepOut]
+
+
+class RouteAddRequest(_InstanceOperationBase):
+    step: RouteEntryIn
+    # 0 = right after the current step; omitted = at the end.
+    index: int | None = Field(default=None, ge=0)
+
+
+class RouteRemoveRequest(_InstanceOperationBase):
+    pass
+
+
+class RouteReorderRequest(_InstanceOperationBase):
+    step_ids: list[str]
+
+
+class RouteRecallRequest(_InstanceOperationBase):
+    redirect: RouteEntryIn

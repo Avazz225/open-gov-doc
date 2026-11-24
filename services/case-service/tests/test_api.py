@@ -209,6 +209,42 @@ def test_create_case_with_unknown_process_definition_returns_400(client, case_he
     assert response.status_code == 400
 
 
+def test_circulation_case_needs_a_route(client, case_headers):
+    """P93-S3: the seeded "Umlauf" template. A missing route is workflow-
+    service's 422, passed through - and no case is left behind; with a route
+    the circulation starts."""
+    [template] = httpx.get(
+        f"{WORKFLOW_SERVICE_URL}/process-definitions", params={"name": "Umlauf"}
+    ).json()
+    name = f"Umlauf-{uuid.uuid4().hex[:6]}"
+
+    refused = client.post(
+        "/cases",
+        json={"name": name, "process_definition_id": template["id"]},
+        headers=case_headers,
+    )
+    assert refused.status_code == 422
+    assert "Laufweg" in refused.json()["detail"]
+    assert all(c["name"] != name for c in client.get("/cases", headers=case_headers).json())
+
+    route = [{"kind": "mitzeichnen", "assignee_type": "principal", "assignee": "bob"}]
+    created = client.post(
+        "/cases",
+        json={
+            "name": name,
+            "process_definition_id": template["id"],
+            "initial_data": {"dms_route": route},
+        },
+        headers=case_headers,
+    )
+    assert created.status_code == 201, created.text
+    instance_id = created.json()["process_instance_id"]
+    steps = httpx.get(
+        f"{WORKFLOW_SERVICE_URL}/instances/{instance_id}/route", headers=case_headers
+    ).json()["steps"]
+    assert [(s["assignee"], s["status"]) for s in steps] == [("bob", "current")]
+
+
 def test_create_case_rejected_during_maintenance_mode(client):
     """Maintenance mode (4.8), Category A (Phase 56 Session 1, ADR 0152) -
     reads the gateway-forwarded `X-DMS-Maintenance-Active` header (no

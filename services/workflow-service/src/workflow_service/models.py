@@ -46,6 +46,8 @@ class ProcessDefinition(Base):
     # from the BPMN at upload; a bound lane restricts who may claim and
     # complete its tasks.
     lane_bindings: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Contains a circulation task (P93-S3): instances need a route.
+    is_circulation: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
@@ -307,3 +309,35 @@ class FederationTask(Base):
     status: Mapped[str] = mapped_column(String(32))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class CirculationStep(Base):
+    """One entry of a circulation route (P93-S3, ADR 0249 Part A b). The
+    shipped "Umlauf" template runs its single user task once per entry; the
+    route lives here, not in the BPMN, so adding, removing or reordering
+    future steps is a data change. ``status``: ``done`` | ``current`` (at most
+    one per instance, the step the ready task stands for) | ``pending`` |
+    ``removed`` (struck before it was reached) | ``recalled`` (was current,
+    taken back and redirected). Rows are never deleted - the route's history
+    stays visible."""
+
+    __tablename__ = "circulation_step"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    instance_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("workflow.process_instance.id"), index=True
+    )
+    position: Mapped[int] = mapped_column(Integer)
+    # mitzeichnen | zeichnen | kenntnis | bearbeiten
+    kind: Mapped[str] = mapped_column(String(32))
+    assignee_type: Mapped[str] = mapped_column(String(16))  # principal | group
+    # A principal id, or a group's name (names, like lane bindings).
+    assignee: Mapped[str] = mapped_column(String(256))
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(16))
+    added_by: Mapped[str] = mapped_column(String(128))
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # Who finished, struck or recalled the step, and when.
+    closed_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    close_reason: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -539,6 +539,22 @@ New `IconRail` entry "Umlaufmappen" (🗃️, `WorkspaceView` extended by `"case
 - **`lib/api.ts`**: new `Case`/`CaseDocumentReference` types, `listCases`/`getCase`/`listCaseDocuments` against `case-service`, `exportCaseXdomea`/`exportCaseXjustiz`/`importXdomeaIntoCase`/`importXjustizIntoCase` against `archival-service`. **Since Post-Roadmap Phase 42 Session 1**: new `ProcessDefinition` type and `listProcessDefinitions()`; `importXdomeaIntoCase`/`importXjustizIntoCase` signatures widened to accept either `caseId` or `processDefinitionId` (sending whichever is set); `XdomeaImportResult` gained `skipped_document_count`/`skipped_schriftstueck_count` (mirroring the backend response fields, see `docs/services/archival-service.md`).
 - **Since Post-Roadmap Phase 36 Session 2**: each document reference row additionally shows a quarantine indicator when `has_active_quarantine` is set (ADR 0116) — see "Records Quarantine" below.
 
+### Circulation folders with an editable route (P93-S3, [ADR 0249](../adr/0249-changing-running-processes-and-lane-semantics.md))
+
+`components/CirculationRoute.tsx`:
+- **"Neue Umlaufmappe"** on the case list (for everyone, `case.write` is checked server-side): title,
+  procedure (the "Umlauf" template preselected, any other definition selectable) and, for a circulation
+  definition, the first route - steps of kind Mitzeichnen / Zeichnen / Zur Kenntnis / Bearbeiten, for a
+  person (typed as a username, resolved with `lookupUserByUsername`) or a group (by name), with a note.
+  "Umlaufmappe starten" needs at least one step.
+- **"Laufweg"** in a case's detail (only when the case's instance is a circulation): every step with
+  its state - done by whom and when, "liegt gerade hier", pending, struck or recalled with the reason.
+  With `can_edit`: one mandatory "Begründung der Änderung", then move a pending step earlier/later,
+  strike it, add a step "als nächster Schritt" or "am Ende", and "Zurückholen …" the current step to the
+  author, an earlier participant or anyone else. Each change sends `expected_version`; a `409` reloads.
+- **Tests:** `circulation-route.test.tsx` (7); e2e `circulation.spec.ts` (start a folder, add a
+  co-signer, strike a step, send back to the author; no overflow at 1400/768/390).
+
 ## Hand-folder/work-tray overview (14.2, Post-Roadmap Phase 35 Session 4, [ADR 0146](../adr/0146-hand-folder-cross-index-and-work-tray-browsing.md))
 
 New `IconRail` entry "Hand-Ordner/Arbeitsvorrat" (🗂️, `WorkspaceView` extended by `"handFolders"`, ungated like "Umlaufmappen" — row-level permission filtering already happens server-side). Closes ADR 0118's own named gap: hand folders/work trays previously had NO installation-wide browsing surface, only per-folder (`HandFolderReferencesModal.tsx`).

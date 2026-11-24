@@ -3077,6 +3077,8 @@ export interface ProcessDefinition {
   id: number;
   name: string;
   version: number;
+  // P93-S3: instances run along an editable route (the "Umlauf" template).
+  is_circulation?: boolean;
 }
 
 export async function listProcessDefinitions(token: string): Promise<ProcessDefinition[]> {
@@ -3309,4 +3311,145 @@ export async function downloadIncomingSignatureReport(token: string, runId: stri
     token
   );
   return response.blob();
+}
+
+// Circulation folders with an editable route (P93-S3, ADR 0249 Part A b).
+// The route lives in workflow-service; a case created from a circulation
+// definition passes its first route as `initial_data.dms_route`.
+export type RouteKind = "mitzeichnen" | "zeichnen" | "kenntnis" | "bearbeiten";
+export type AssigneeType = "principal" | "group";
+
+export interface RouteEntry {
+  kind: RouteKind;
+  assignee_type: AssigneeType;
+  assignee: string;
+  note: string | null;
+}
+
+export interface RouteStep extends RouteEntry {
+  id: string;
+  position: number;
+  status: "done" | "current" | "pending" | "removed" | "recalled";
+  added_by: string;
+  added_at: string;
+  closed_by: string | null;
+  closed_at: string | null;
+  close_reason: string | null;
+}
+
+export interface CirculationRoute {
+  instance_id: string;
+  instance_status: string;
+  workflow_version: number | null;
+  created_by: string;
+  can_edit: boolean;
+  steps: RouteStep[];
+}
+
+export async function createCase(
+  token: string,
+  params: { name: string; processDefinitionId: number; route?: RouteEntry[] }
+): Promise<Case> {
+  const response = await request(
+    "case-service",
+    "cases",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: params.name,
+        process_definition_id: params.processDefinitionId,
+        initial_data: params.route ? { dms_route: params.route } : {},
+      }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export async function getCirculationRoute(
+  token: string,
+  instanceId: string
+): Promise<CirculationRoute> {
+  const response = await request(
+    "workflow-service",
+    `instances/${encodeURIComponent(instanceId)}/route`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+function routeChange(method: string, body: unknown): RequestInit {
+  return { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+}
+
+export async function addRouteStep(
+  token: string,
+  instanceId: string,
+  params: { step: RouteEntry; index: number | null; reason: string; expectedVersion: number | null }
+): Promise<CirculationRoute> {
+  const response = await request(
+    "workflow-service",
+    `instances/${encodeURIComponent(instanceId)}/route/steps`,
+    routeChange("POST", {
+      step: params.step,
+      index: params.index,
+      reason: params.reason,
+      expected_version: params.expectedVersion,
+    }),
+    token
+  );
+  return response.json();
+}
+
+export async function removeRouteStep(
+  token: string,
+  instanceId: string,
+  stepId: string,
+  params: { reason: string; expectedVersion: number | null }
+): Promise<CirculationRoute> {
+  const response = await request(
+    "workflow-service",
+    `instances/${encodeURIComponent(instanceId)}/route/steps/${encodeURIComponent(stepId)}/remove`,
+    routeChange("POST", { reason: params.reason, expected_version: params.expectedVersion }),
+    token
+  );
+  return response.json();
+}
+
+export async function reorderRoute(
+  token: string,
+  instanceId: string,
+  params: { stepIds: string[]; reason: string; expectedVersion: number | null }
+): Promise<CirculationRoute> {
+  const response = await request(
+    "workflow-service",
+    `instances/${encodeURIComponent(instanceId)}/route/order`,
+    routeChange("PUT", {
+      step_ids: params.stepIds,
+      reason: params.reason,
+      expected_version: params.expectedVersion,
+    }),
+    token
+  );
+  return response.json();
+}
+
+export async function recallRouteStep(
+  token: string,
+  instanceId: string,
+  params: { redirect: RouteEntry; reason: string; expectedVersion: number | null }
+): Promise<CirculationRoute> {
+  const response = await request(
+    "workflow-service",
+    `instances/${encodeURIComponent(instanceId)}/route/recall`,
+    routeChange("POST", {
+      redirect: params.redirect,
+      reason: params.reason,
+      expected_version: params.expectedVersion,
+    }),
+    token
+  );
+  return response.json();
 }

@@ -1,6 +1,6 @@
 # 0249 — Changing running processes, and what a BPMN lane means (scoping)
 
-**Status:** accepted (scoping in P90-S7; built in Phase 93, scheduled 2026-11-23; lanes in P93-S1, engine operations in P93-S2)
+**Status:** accepted (scoping in P90-S7; built in Phase 93, scheduled 2026-11-23; lanes in P93-S1, engine operations in P93-S2, circulation routes in P93-S3)
 **Context:** P90-S7 (Phase 90, user-selected from the comparison with an external reference system).
 
 Two related gaps in workflow-service:
@@ -198,3 +198,23 @@ routes use one membership check.
 - **Target versions:** only a newer version of the same family. The process-definition overview lists
   only the newest version per family, so admin-ui reads the family's history by name.
 - **Notices** go to the claimants whose claim was released, not to the administrator acting.
+
+## Implementation notes (P93-S3)
+
+- **The route lives in a table, not in the process data** (`circulation_step`). The engine only sees one
+  user task and `dms_route_more`, set when a step is completed. That keeps the history queryable
+  (done, struck, recalled, by whom, why) and lets edits use the instance's version column for
+  concurrency without deserializing the workflow.
+- **No script task for the cursor,** unlike the sketch above: workflow-service advances the route while
+  completing the step, in the same transaction.
+- **Recall doesn't touch the engine:** the ready task stays; the current step is marked `recalled` and a
+  new current step is inserted after it. Its claim is released. The remaining future steps follow
+  unchanged, so "zurück an Verfasser" is: recall, the author revises, then the route continues.
+- **A fourth kind, `bearbeiten`,** for a step sent back to the author to revise - none of mitzeichnen,
+  zeichnen or kenntnis describes that.
+- **`zeichnen` is a label;** it doesn't require an electronic signature. A circulation needing one uses a
+  modelled signature task instead.
+- **`case.write` is broad by default** ("everyone" at root, ADR 0070), so by default every user may edit an
+  open circulation's route. Narrowing a case's role assignments narrows who may edit it.
+- **The admin operations of P93-S2 refuse circulation tasks;** the route editor is the way to change a
+  circulation.

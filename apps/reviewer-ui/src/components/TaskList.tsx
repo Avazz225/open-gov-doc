@@ -248,6 +248,17 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
                     <tr>
                       <td className={td} data-stack="title">
                         {task.name}
+                        {task.circulation_step && (
+                          // Circulation folder (P93-S3): the step and its note.
+                          <span className="block text-xs opacity-70">
+                            {t("taskList.circulationStep", {
+                              position: task.circulation_step.position,
+                              total: task.circulation_step.total,
+                              kind: t(`taskList.circulationKinds.${task.circulation_step.kind}`),
+                            })}
+                            {task.circulation_step.note ? ` – ${task.circulation_step.note}` : ""}
+                          </span>
+                        )}
                         {isSignature && (
                           <>
                             {" "}

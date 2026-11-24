@@ -198,6 +198,15 @@ export interface ReadyTaskWithInstance {
   // binding, and whether the caller may work on the task now.
   lane_binding?: { group?: string; role?: string } | null;
   eligible?: boolean | null;
+  // Circulation folder step (P93-S3): which route entry this task stands for.
+  circulation_step?: {
+    kind: string;
+    assignee_type: string;
+    assignee: string;
+    note: string | null;
+    position: number;
+    total: number;
+  } | null;
 }
 
 export async function listReadyTasks(

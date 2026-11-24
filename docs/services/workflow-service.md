@@ -367,6 +367,45 @@ instance that isn't `running` (`409`). A guard that refuses is `422` with the re
   a claim released and the event, signature and parallel guards, stale version, maintenance, send back,
   preview and migration possible and refused, wrong target family.
 
+## Circulation Template with an Editable Route (P93-S3, [ADR 0249](../adr/0249-changing-running-processes-and-lane-semantics.md))
+
+- **The template:** `templates/umlauf.bpmn`, seeded at startup as definition family "Umlauf"
+  (`repository.ensure_circulation_template`, idempotent - an existing family of that name is left alone).
+  One user task with `taskType=circulation`, then the gateway "Weitere Schritte?" on `dms_route_more`.
+  `ProcessDefinitionOut.is_circulation` marks every definition with such a task.
+- **The route is data,** table `circulation_step` (`kind`: mitzeichnen | zeichnen | kenntnis | bearbeiten;
+  `assignee_type` principal | group, a group by name; `note`; `status` done | current | pending |
+  removed | recalled; who closed it, when, why). Rows are never deleted.
+- **Start:** `initial_data.dms_route` (at least one entry, groups must exist; `422` otherwise) becomes the
+  steps, the first one current. It is not stored as process data.
+- **Running:** the circulation task's assignee is the current step - claim, complete and reassign accept
+  only that person or a member of that group (the lane check, `_require_lane_eligibility`, extended);
+  `GET /tasks?eligible=me` and the `circulation_step` field (`{kind, assignee…, note, position, total}`)
+  on every task follow it. Completing marks the step done and makes the next pending one current; the
+  engine loops back to the same user task (a new task id per step).
+- **Endpoints** (each with mandatory `reason`, optional `expected_version`, `503` in maintenance):
+
+  | Endpoint | Effect |
+  |---|---|
+  | `GET /instances/{id}/route` | Steps with history, `can_edit` for the caller; `404` if not a circulation |
+  | `POST /instances/{id}/route/steps` `{step, index?}` | Add a future step (`index` 0 = next, omitted = end) |
+  | `POST /instances/{id}/route/steps/{step_id}/remove` | Strike a pending step |
+  | `PUT /instances/{id}/route/order` `{step_ids}` | New order of exactly the pending steps |
+  | `POST /instances/{id}/route/recall` `{redirect}` | The current step becomes `recalled`, a new current step (e.g. back to the author) is inserted after it; its claim is released and its grants revoked |
+
+  Done steps can't be changed (`422`); the instance must be running (`409`); a stale version or a
+  concurrent completion is `409` (the instance row is touched on every route change).
+- **Who may edit:** the initiator (`created_by`), whoever holds `case.write` on the case (the business
+  key), the initiator's supervisors, an active superuser - else `403`. `case.write` is granted to
+  "everyone" at root by default (ADR 0070), so by default every user may edit an open circulation's route
+  until an admin narrows the case.
+- **Event:** `workflow.instance.modified` with `operation` `route_add` | `route_remove` |
+  `route_reorder` | `route_recall`, plus `inserted_steps` and `notify_principals` (the inserted person,
+  or the group's members, without the actor) - notification-service tells them.
+- **Not for the admin operations:** skip and send back refuse a circulation task (`422`, the route is
+  edited instead).
+- **Tests:** `test_circulation.py` (10).
+
 ## Events
 
 **Published** (stream `workflow`, `ensure_stream=True`):

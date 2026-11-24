@@ -724,6 +724,53 @@ async def test_instance_modified_notifies_each_affected_claimant(engine, setting
     assert len(published) == 2
 
 
+async def test_route_edit_notifies_inserted_assignees(engine, settings, rate_limiter):
+    """P93-S3: a co-signer added to a circulation route hears about it; the
+    link points at the case in user-ui."""
+    configured = settings.model_copy(update={"user_ui_public_base_url": "http://localhost:3000"})
+    published = []
+
+    async def fake_publish(event_type, subject, payload, actor=None):
+        published.append(event_type)
+
+    handler = consumer.make_handler(
+        _session_factory(engine), configured, fake_publish, rate_limiter
+    )
+    event = Event(
+        event_type="workflow.instance.modified",
+        service_name="workflow-service",
+        subject="instance-95",
+        payload={
+            "operation": "route_add",
+            "reason": "Haushaltsmittel betroffen",
+            "business_key": "case-95",
+            "affected_claimants": [],
+            "inserted_steps": [
+                {
+                    "kind": "mitzeichnen",
+                    "assignee_type": "group",
+                    "assignee": "Kasse",
+                    "note": "Haushalt",
+                    "current": False,
+                }
+            ],
+            "notify_principals": ["dora", "emil"],
+        },
+    )
+
+    await handler(event.to_bytes())
+
+    session_factory = _session_factory(engine)
+    async with session_factory() as session:
+        notifications = await repository.list_notifications(session)
+    assert sorted(n.recipient for n in notifications) == ["dora", "emil"]
+    assert all(
+        n.subject.startswith("Sie wurden in einen Umlauf aufgenommen") for n in notifications
+    )
+    assert all("http://localhost:3000/?case=case-95" in n.body for n in notifications)
+    assert all("Haushalt" in n.body for n in notifications)
+
+
 async def test_instance_modified_without_claimants_sends_nothing(engine, settings, rate_limiter):
     async def fake_publish(event_type, subject, payload, actor=None):
         pass

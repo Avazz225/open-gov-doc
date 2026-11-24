@@ -52,7 +52,11 @@ from case_service.schemas import (
     RevealedAttributeOut,
 )
 from case_service.settings import Settings
-from case_service.workflow_client import ProcessDefinitionUnknownError, WorkflowClient
+from case_service.workflow_client import (
+    InstanceStartRejectedError,
+    ProcessDefinitionUnknownError,
+    WorkflowClient,
+)
 
 settings = Settings()
 configure_logging(settings)
@@ -440,6 +444,11 @@ async def create_case(
         await repository.delete_unstarted_case(session, case_id)
         await session.commit()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except InstanceStartRejectedError as exc:
+        # P93-S3: e.g. a circulation without a valid route - nothing persisted.
+        await repository.delete_unstarted_case(session, case_id)
+        await session.commit()
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     case.process_instance_id = instance["id"]
     await session.commit()

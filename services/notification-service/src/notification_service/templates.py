@@ -106,6 +106,11 @@ EMAIL_TEMPLATE_USE_CASES: list[dict[str, object]] = [
         "placeholders": ["task_name", "instance_id", "business_key", "principal_id", "link"],
     },
     {
+        "use_case": "workflow.circulation.assigned",
+        "description": "In den Laufweg einer Umlaufmappe aufgenommen (seit P93-S3)",
+        "placeholders": ["kind", "note", "reason", "instance_id", "business_key", "link"],
+    },
+    {
         "use_case": "workflow.instance.modified",
         "description": "Vorgang administrativ geändert, Beanspruchung aufgehoben (seit P93-S2)",
         "placeholders": ["task_name", "instance_id", "business_key", "operation", "reason", "link"],

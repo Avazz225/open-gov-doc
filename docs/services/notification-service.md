@@ -210,6 +210,14 @@ gets one in-app notice with the operation, the task and the reason (template use
 `workflow.instance.modified`). Without affected claimants nothing is sent. Tests:
 `test_instance_modified_notifies_each_affected_claimant`, `.._without_claimants_sends_nothing`.
 
+## Circulation Route Assignees (P93-S3)
+
+The same `workflow.instance.modified` subscription: for a route edit, everyone in `notify_principals`
+(a step's person or its group's members, resolved by workflow-service) gets an in-app notice - "Sie wurden
+in einen Umlauf aufgenommen" for a new future step, "Umlaufmappe liegt bei Ihnen" for a redirect - with
+the kind, the note, the reason and a link to the case in user-ui (`?case=`). Template use case
+`workflow.circulation.assigned`. Test: `test_route_edit_notifies_inserted_assignees`.
+
 ## Tests
 
 `uv run pytest services/notification-service/tests` (**100 tests since Phase 61 Session 1**, +4:

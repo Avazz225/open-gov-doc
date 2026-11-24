@@ -4685,6 +4685,22 @@ explain lanes and route changes. Design and reasons: [ADR 0249](docs/adr/0249-ch
   - user-ui "Umlaufmappen": a route editor; case creation offers the template.
   - Notices to inserted assignees; e2e: add a co-signer mid-circulation, remove one, send back to the
     author; screenshots at 1400/768/390. Phase-close regression for Phase 93.
+  - **Result:**
+    - workflow-service: the "Umlauf" template (`templates/umlauf.bpmn`, seeded), `is_circulation` on
+      definitions; the route as table `circulation_step` (not process data), `initial_data.dms_route` at
+      start; the step's person or group is checked on claim/complete/reassign and in
+      `GET /tasks?eligible=me`; `GET /instances/{id}/route` and add/remove/reorder/recall with reason,
+      `expected_version` and `workflow.instance.modified` (`route_*`, `notify_principals`). Editors: the
+      initiator, `case.write` on the case, supervisors, superuser. A fourth kind `bearbeiten` for the
+      author. The P93-S2 skip/send back refuse circulation tasks.
+    - case-service: a refused start (`422`) is passed through and leaves no case behind.
+    - notification-service: in-app notice to inserted assignees.
+    - user-ui: "Neue Umlaufmappe" with the first route; "Laufweg" in the case detail with the editor.
+      reviewer-ui: "Umlauf 2/3: Mitzeichnen" on a circulation task.
+    - **Tests:** workflow-service 270 (+10, `test_circulation.py`), case-service 97 (+1),
+      notification-service 123 (+1), user-ui vitest 346 (+7) + e2e `circulation.spec.ts`, reviewer-ui 72
+      (+1). **Phase 93 closed:** full regression green (32 services, ruff); e2e user-ui 11/11, reviewer-ui
+      8/8, admin-ui 24/24.
 
 ## Phase 94 — Operations & Hygiene
 
@@ -4725,6 +4741,11 @@ explain lanes and route changes. Design and reasons: [ADR 0249](docs/adr/0249-ch
     the real leftovers, which made two federation tests fail (`401` from the hub) in the Phase 91
     regression; the revocation was undone. Distinguish such a persistent test identity from per-run
     leftovers (for example a recognisable display name) before any further cleanup.
+  - **e2e suites and the gateway rate limit (found in P93-S3):** user-ui, reviewer-ui and admin-ui all
+    run as `users-admin`; back to back they exceed 600 requests/min, specs fail at random and their
+    cleanup calls are refused (`429`), leaving test data behind (a role assignment, a trust anchor, a
+    folder in P93-S3). Give each suite its own principal, or exempt the test accounts in the dev stack,
+    and make cleanup retry on `429`.
   - **Bounded shutdown for every service (found in P91-S6):** the lifespan-shutdown hang first seen in
     document-service also hit mail-connector (42 min) and workflow-service in the Phase 91 regression:
     `TestClient.__exit__` waits, the event loop is idle, no thread busy, the step not identifiable

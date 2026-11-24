@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Shipped circulation template (P93-S3, ADR 0249 Part A b). One user task
+     runs once per route entry; workflow-service keeps the route itself
+     (table circulation_step) and sets `dms_route_more` when a step is
+     completed, which the gateway reads. The model never changes when the
+     route does. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:camunda="http://camunda.org/schema/1.0/bpmn" id="Definitions_Umlauf" targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:process id="Process_Umlauf" name="Umlauf" isExecutable="true">
+    <bpmn:startEvent id="StartEvent_1" name="Umlauf gestartet">
+      <bpmn:outgoing>Flow_Start</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:sequenceFlow id="Flow_Start" sourceRef="StartEvent_1" targetRef="Task_Umlaufschritt" />
+    <bpmn:userTask id="Task_Umlaufschritt" name="Umlaufschritt">
+      <bpmn:extensionElements>
+        <camunda:properties>
+          <camunda:property name="taskType" value="circulation" />
+        </camunda:properties>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Start</bpmn:incoming>
+      <bpmn:incoming>Flow_Weiter</bpmn:incoming>
+      <bpmn:outgoing>Flow_Pruefen</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:sequenceFlow id="Flow_Pruefen" sourceRef="Task_Umlaufschritt" targetRef="Gateway_Weiter" />
+    <bpmn:exclusiveGateway id="Gateway_Weiter" name="Weitere Schritte?" default="Flow_Ende">
+      <bpmn:incoming>Flow_Pruefen</bpmn:incoming>
+      <bpmn:outgoing>Flow_Weiter</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Ende</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:sequenceFlow id="Flow_Weiter" name="ja" sourceRef="Gateway_Weiter" targetRef="Task_Umlaufschritt">
+      <bpmn:conditionExpression>dms_route_more</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_Ende" name="nein" sourceRef="Gateway_Weiter" targetRef="EndEvent_1" />
+    <bpmn:endEvent id="EndEvent_1" name="Umlauf beendet">
+      <bpmn:incoming>Flow_Ende</bpmn:incoming>
+    </bpmn:endEvent>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_Umlauf">
+    <bpmndi:BPMNPlane id="BPMNPlane_Umlauf" bpmnElement="Process_Umlauf">
+      <bpmndi:BPMNShape id="StartEvent_1_di" bpmnElement="StartEvent_1">
+        <dc:Bounds x="152" y="162" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Umlaufschritt_di" bpmnElement="Task_Umlaufschritt">
+        <dc:Bounds x="250" y="140" width="120" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_Weiter_di" bpmnElement="Gateway_Weiter" isMarkerVisible="true">
+        <dc:Bounds x="435" y="155" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="EndEvent_1_di" bpmnElement="EndEvent_1">
+        <dc:Bounds x="552" y="162" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_Start_di" bpmnElement="Flow_Start">
+        <di:waypoint x="188" y="180" />
+        <di:waypoint x="250" y="180" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Pruefen_di" bpmnElement="Flow_Pruefen">
+        <di:waypoint x="370" y="180" />
+        <di:waypoint x="435" y="180" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Weiter_di" bpmnElement="Flow_Weiter">
+        <di:waypoint x="460" y="155" />
+        <di:waypoint x="460" y="90" />
+        <di:waypoint x="310" y="90" />
+        <di:waypoint x="310" y="140" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Ende_di" bpmnElement="Flow_Ende">
+        <di:waypoint x="485" y="180" />
+        <di:waypoint x="552" y="180" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

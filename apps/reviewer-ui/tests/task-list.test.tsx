@@ -126,6 +126,27 @@ describe("TaskList", () => {
     expect(screen.queryByRole("button", { name: /Beanspruchen/ })).not.toBeInTheDocument();
   });
 
+  it("names a circulation folder's step, its position and note (P93-S3)", async () => {
+    listReadyTasksMock.mockResolvedValue([
+      {
+        ...MANUAL_TASK,
+        name: "Umlaufschritt",
+        extensions: { taskType: "circulation" },
+        circulation_step: {
+          kind: "mitzeichnen",
+          assignee_type: "principal",
+          assignee: "u1",
+          note: "Haushalt",
+          position: 2,
+          total: 3,
+        },
+      },
+    ]);
+    renderList();
+
+    expect(await screen.findByText("Umlauf 2/3: Mitzeichnen – Haushalt")).toBeInTheDocument();
+  });
+
   it("lists ready tasks with their process/business-key context", async () => {
     listReadyTasksMock.mockResolvedValue([MANUAL_TASK]);
     renderList();

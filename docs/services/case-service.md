@@ -214,6 +214,13 @@ request principal (`created_by`, `registered_by`, `added_by`, `removed_by`, `pse
 case as `mail-connector` on behalf of the mailbox's user (before: the non-service principal
 `system:mail-connector`, plus `added_by` in the body).
 
+## Circulation Folders (P93-S3, [ADR 0249](../adr/0249-changing-running-processes-and-lane-semantics.md))
+
+A case created from a circulation definition (workflow-service's seeded "Umlauf" template) passes its route
+as `initial_data.dms_route`. When workflow-service refuses the start with `422` (no route, an unknown
+group), `POST /cases` now answers `422` with that detail and removes the just-created row - before, the
+`422` surfaced as a `500` and left an unstarted case behind. Test: `test_circulation_case_needs_a_route`.
+
 ## Open Points
 
 - ~~**No destruction for cases**~~ (ADR 0235, never listed here before) — **built in P89-S1/S2**:

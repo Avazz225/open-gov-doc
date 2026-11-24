@@ -25,6 +25,7 @@ import { useAuth } from "@/lib/auth-context";
 import { AlarmClock, Star } from "lucide-react";
 import { ReminderModal } from "./ReminderModal";
 import { UiIcon } from "@/lib/ui-icons";
+import { CirculationRouteSection, NewCirculationSection } from "./CirculationRoute";
 
 // Minimal case-browsing UI (14.2, post-roadmap phase 34 session 3, ADR
 // 0141) - the first place in `user-ui` a `case-service` Case can be browsed
@@ -224,6 +225,14 @@ export function CasesPane({
           ))}
         </ul>
       )}
+
+      <NewCirculationSection
+        token={token}
+        onCaseCreated={(caseId) => {
+          reload();
+          setSelectedCaseId(caseId);
+        }}
+      />
 
       {canArchive && (
         <NewCaseImportSection
@@ -747,6 +756,10 @@ function CaseDetail({
             </li>
           ))}
         </ul>
+      )}
+
+      {activeCase.process_instance_id && (
+        <CirculationRouteSection token={token} instanceId={activeCase.process_instance_id} />
       )}
 
       {canArchive && (

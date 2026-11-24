@@ -74,6 +74,12 @@ from workflow_service.schemas import (
     ProcessInstanceOut,
     ReadyTaskOut,
     ReadyTaskWithInstanceOut,
+    RouteAddRequest,
+    RouteOut,
+    RouteRecallRequest,
+    RouteRemoveRequest,
+    RouteReorderRequest,
+    RouteStepOut,
     SendBackRequest,
     SkipTaskRequest,
     TaskClaimCreate,
@@ -433,6 +439,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1"
             )
         )
+        # Circulation templates (P93-S3, ADR 0249).
+        await conn.execute(
+            text(
+                "ALTER TABLE workflow.process_definition "
+                "ADD COLUMN IF NOT EXISTS is_circulation BOOLEAN NOT NULL DEFAULT false"
+            )
+        )
         # Lane bindings (P93-S1, ADR 0249).
         await conn.execute(
             text(
@@ -525,6 +538,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # already-running timer doesn't hit an empty cache.
     async with app.state.session_factory() as session:
         await repository.refresh_business_calendar_cache(session)
+        # The shipped circulation template (P93-S3, ADR 0249).
+        await repository.ensure_circulation_template(session)
+        await session.commit()
     app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
     app.state.auth_client = AuthServiceClient(settings.auth_service_base_url)
     app.state.signature_client = SignatureServiceClient(settings.signature_service_base_url)
@@ -1392,18 +1408,22 @@ async def start_instance(
     # its original, P32-S2 purpose (delegation scope resolution at task-
     # completion time, by which point the referenced case/document
     # genuinely does exist).
+    initial_data = dict(payload.initial_data)
+    route = await _validated_route(initial_data.pop("dms_route", None))
     try:
         instance = await repository.start_instance(
             session,
             process_definition_id,
             created_by=actor_created_by,
             business_key=payload.business_key,
-            initial_data=payload.initial_data,
+            initial_data=initial_data,
             instance_id=payload.instance_id,
+            route=route,
         )
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except repository.InvalidBpmnError as exc:
+    except (repository.InvalidBpmnError, repository.InvalidRouteError) as exc:
+        await session.rollback()
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception:
         # An automatic step (e.g. `connector_call`, P12-S2) can fail AFTER
@@ -1518,14 +1538,23 @@ async def list_ready_tasks(
                 continue
             claim = claims_by_task_id.get(task.id)
             binding = await _lane_binding_for(session, instance, task.lane, binding_cache)
+            step = (
+                await _circulation_step_info(session, instance.id)
+                if _is_circulation_task(task)
+                else None
+            )
+            responsible = _step_binding(step) if step else binding
             may_work = None
             if caller_memberships is not None:
                 # "Meine Aufgaben" (P93-S1, ADR 0249): claimed by me, or
-                # unclaimed and in an unbound lane or one of mine.
+                # unclaimed and in an unbound lane or one of mine - for a
+                # circulation step (P93-S3): assigned to me or my group.
                 if claim is not None:
                     may_work = claim.principal_id == x_dms_principal
                 else:
-                    may_work = binding is None or _matches_binding(caller_memberships, binding)
+                    may_work = responsible is None or _matches_binding(
+                        caller_memberships, responsible, x_dms_principal
+                    )
             if eligible == "me" and not may_work:
                 continue
             tasks.append(
@@ -1539,6 +1568,7 @@ async def list_ready_tasks(
                     grant_kind=claim.grant_kind if claim else None,
                     lane_binding=binding,
                     eligible=may_work,
+                    circulation_step=step,
                     instance_id=instance.id,
                     process_definition_id=instance.process_definition_id,
                     business_key=instance.business_key,
@@ -1564,6 +1594,7 @@ async def get_ready_tasks(
         claim.task_id: claim
         for claim in await repository.get_task_claims_for_instance(session, instance_id)
     }
+    step = await _circulation_step_info(session, instance_id) if tasks else None
     return [
         ReadyTaskOut(
             id=t.id,
@@ -1573,6 +1604,7 @@ async def get_ready_tasks(
             extensions=t.extensions,
             claimed_by=claims_by_task_id[t.id].principal_id if t.id in claims_by_task_id else None,
             grant_kind=claims_by_task_id[t.id].grant_kind if t.id in claims_by_task_id else None,
+            circulation_step=step if _is_circulation_task(t) else None,
         )
         for t in tasks
     ]
@@ -1806,14 +1838,44 @@ async def _memberships(principal_id: str, cache: dict | None = None) -> dict:
     return result
 
 
-def _matches_binding(memberships: dict, binding: dict[str, str]) -> bool:
+def _matches_binding(memberships: dict, binding: dict[str, str], principal_id: str) -> bool:
+    if "principal" in binding:
+        return binding["principal"] == principal_id
     if "group" in binding:
         return any(g["name"] == binding["group"] for g in memberships["groups"])
     return binding["role"] in memberships["roles"]
 
 
 def _describe_binding(binding: dict[str, str]) -> str:
+    if "principal" in binding:
+        return f"Person {binding['principal']!r}"
     return f"Gruppe {binding['group']!r}" if "group" in binding else f"Rolle {binding['role']!r}"
+
+
+def _is_circulation_task(task) -> bool:
+    return task.extensions.get("taskType") == spiff_adapter.CIRCULATION_TASK_TYPE
+
+
+def _step_binding(step: dict) -> dict[str, str]:
+    """Who may work on a circulation step: the person, or the group's members."""
+    return {step["assignee_type"]: step["assignee"]}
+
+
+async def _circulation_step_info(session: AsyncSession, instance_id: str) -> dict | None:
+    steps = await repository.get_route(session, instance_id)
+    open_steps = [s for s in steps if s.status in ("done", "current", "pending")]
+    current = next((s for s in open_steps if s.status == "current"), None)
+    if current is None:
+        return None
+    return {
+        "id": current.id,
+        "kind": current.kind,
+        "assignee_type": current.assignee_type,
+        "assignee": current.assignee,
+        "note": current.note,
+        "position": open_steps.index(current) + 1,
+        "total": len(open_steps),
+    }
 
 
 async def _require_lane_eligibility(
@@ -1836,10 +1898,25 @@ async def _require_lane_eligibility(
     task = next((t for t in tasks if t.id == task_id), None)
     if task is None:
         return
+    if _is_circulation_task(task):
+        # Circulation step (P93-S3): the route names who is responsible.
+        step = await _circulation_step_info(session, instance_id)
+        if step is None:
+            return
+        binding = _step_binding(step)
+        if _matches_binding(await _memberships(principal_id), binding, principal_id):
+            return
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"Dieser Umlaufschritt ist {_describe_binding(binding)} zugewiesen - "
+                f"{who} {'sind' if who == 'Sie' else 'ist'} nicht zuständig"
+            ),
+        )
     binding = await _lane_binding_for(session, instance, task.lane)
     if binding is None:
         return
-    if _matches_binding(await _memberships(principal_id), binding):
+    if _matches_binding(await _memberships(principal_id), binding, principal_id):
         return
     raise HTTPException(
         status_code=403,
@@ -2418,6 +2495,309 @@ async def migrate_instance(
             expected_version=payload.expected_version,
         ),
         extra={"target_definition_id": payload.target_definition_id},
+    )
+
+
+# --- Circulation routes (P93-S3, ADR 0249 Part A b) ------------------------
+
+
+async def _validated_route(raw) -> list[dict] | None:
+    """`initial_data["dms_route"]` checked and normalised; groups must exist
+    (by name, like lane bindings)."""
+    if raw is None:
+        return None
+    if not isinstance(raw, list):
+        raise HTTPException(status_code=422, detail="dms_route muss eine Liste sein")
+    try:
+        route = [repository.validate_route_entry(entry) for entry in raw]
+    except repository.InvalidRouteError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    for entry in route:
+        await _require_known_assignee(entry)
+    return route
+
+
+async def _require_known_assignee(entry: dict) -> None:
+    if entry["assignee_type"] != "group":
+        return
+    if not await app.state.permission_client.binding_exists({"group": entry["assignee"]}):
+        raise HTTPException(status_code=422, detail=f"Gruppe {entry['assignee']!r} gibt es nicht")
+
+
+async def _may_edit_route(instance, principal_id: str) -> bool:
+    """The initiator, holders of `case.write` on the case (the instance's
+    business key), the initiator's supervisors, and an active superuser."""
+    if not principal_id:
+        return False
+    if principal_id == instance.created_by:
+        return True
+    if await _is_active_superuser(principal_id):
+        return True
+    if instance.business_key:
+        try:
+            if await app.state.permission_client.check(
+                principal_id=principal_id,
+                resource_id=instance.business_key,
+                permission="case.write",
+                access_type="write",
+            ):
+                return True
+        except Exception:
+            logger.warning("route_case_permission_check_failed", exc_info=True)
+    try:
+        return await app.state.permission_client.is_supervisor_of(
+            principal_id, of_principal_id=instance.created_by
+        )
+    except Exception:
+        logger.warning("route_supervisor_check_failed", exc_info=True)
+        return False
+
+
+async def _route_principals(entry_steps) -> list[str]:
+    """Everyone a newly inserted step reaches: the person, or the group's
+    members (at most 200, like lane escalation)."""
+    principals: list[str] = []
+    for step in entry_steps:
+        if step.assignee_type == "principal":
+            principals.append(step.assignee)
+            continue
+        try:
+            principals.extend(
+                await app.state.permission_client.lane_members({"group": step.assignee})
+            )
+        except Exception:
+            logger.warning("route_group_members_failed", exc_info=True)
+    return list(dict.fromkeys(principals))
+
+
+@app.get(
+    "/instances/{instance_id}/route",
+    response_model=RouteOut,
+    dependencies=[Depends(_license_gate("read"))],
+)
+async def get_route(
+    instance_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> RouteOut:
+    """The circulation route with its history; `404` if the instance isn't a
+    circulation. `can_edit` tells the caller whether they may change it."""
+    try:
+        instance = await repository.get_instance(session, instance_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    steps = await repository.get_route(session, instance_id)
+    if not steps:
+        raise HTTPException(status_code=404, detail="Diese Instanz ist kein Umlauf")
+    return RouteOut(
+        instance_id=instance.id,
+        instance_status=instance.status,
+        workflow_version=instance.workflow_version,
+        created_by=instance.created_by,
+        can_edit=instance.status == "running" and await _may_edit_route(instance, x_dms_principal),
+        steps=[RouteStepOut.model_validate(step) for step in steps],
+    )
+
+
+async def _run_route_change(
+    session: AsyncSession,
+    instance_id: str,
+    operation: str,
+    reason: str,
+    actor: str,
+    x_dms_maintenance_active: str,
+    call,
+) -> RouteOut:
+    """Shared gate, error mapping, grant cleanup and events for route edits."""
+    await _reject_during_maintenance(x_dms_maintenance_active)
+    if not actor:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    try:
+        instance = await repository.get_instance(session, instance_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if not await _may_edit_route(instance, actor):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Den Laufweg ändern dürfen die Person, die den Umlauf gestartet hat, ihre "
+                "Vorgesetzten und wer die Umlaufmappe bearbeiten darf"
+            ),
+        )
+    try:
+        change: repository.RouteChange = await call()
+    except repository.NotFoundError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (repository.InstanceNotRunningError, repository.ConcurrentModificationError) as exc:
+        await session.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (repository.RouteChangeRefused, repository.InvalidRouteError) as exc:
+        await session.rollback()
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await session.commit()
+    for released in change.released_claims:
+        await _revoke_claim_grants(released.delegation_ids)
+    instance = change.instance
+    await publish_event(
+        "workflow.instance.modified",
+        subject=instance_id,
+        payload={
+            "operation": operation,
+            "reason": reason,
+            "target": change.description,
+            "business_key": instance.business_key,
+            "affected_claimants": [
+                {"principal_id": c.principal_id, "task_id": c.task_id, "task_name": c.task_name}
+                for c in change.released_claims
+                if c.principal_id != actor
+            ],
+            # Newly inserted assignees are told they are on the route now.
+            "inserted_steps": [
+                {
+                    "kind": step.kind,
+                    "assignee_type": step.assignee_type,
+                    "assignee": step.assignee,
+                    "note": step.note,
+                    "current": step.status == "current",
+                }
+                for step in change.inserted
+            ],
+            "notify_principals": [
+                p for p in await _route_principals(change.inserted) if p != actor
+            ],
+        },
+        actor=actor,
+    )
+    return await get_route(instance_id, actor, session)
+
+
+@app.post(
+    "/instances/{instance_id}/route/steps",
+    response_model=RouteOut,
+    dependencies=[Depends(_license_gate("write"))],
+)
+async def add_route_step(
+    instance_id: str,
+    payload: RouteAddRequest,
+    x_dms_maintenance_active: str = Header(default="false"),
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> RouteOut:
+    """Adds a future step (e.g. another co-signer); `index` 0 is right after
+    the current step."""
+    entry = payload.step.model_dump()
+    await _require_known_assignee(entry)
+    return await _run_route_change(
+        session,
+        instance_id,
+        "route_add",
+        payload.reason,
+        x_dms_principal,
+        x_dms_maintenance_active,
+        lambda: repository.add_route_step(
+            session,
+            instance_id,
+            entry,
+            index=payload.index,
+            actor=x_dms_principal,
+            expected_version=payload.expected_version,
+        ),
+    )
+
+
+@app.post(
+    "/instances/{instance_id}/route/steps/{step_id}/remove",
+    response_model=RouteOut,
+    dependencies=[Depends(_license_gate("write"))],
+)
+async def remove_route_step(
+    instance_id: str,
+    step_id: str,
+    payload: RouteRemoveRequest,
+    x_dms_maintenance_active: str = Header(default="false"),
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> RouteOut:
+    """Strikes a future step; it stays in the history as removed."""
+    return await _run_route_change(
+        session,
+        instance_id,
+        "route_remove",
+        payload.reason,
+        x_dms_principal,
+        x_dms_maintenance_active,
+        lambda: repository.remove_route_step(
+            session,
+            instance_id,
+            step_id,
+            actor=x_dms_principal,
+            reason=payload.reason,
+            expected_version=payload.expected_version,
+        ),
+    )
+
+
+@app.put(
+    "/instances/{instance_id}/route/order",
+    response_model=RouteOut,
+    dependencies=[Depends(_license_gate("write"))],
+)
+async def reorder_route(
+    instance_id: str,
+    payload: RouteReorderRequest,
+    x_dms_maintenance_active: str = Header(default="false"),
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> RouteOut:
+    """New order of the future steps."""
+    return await _run_route_change(
+        session,
+        instance_id,
+        "route_reorder",
+        payload.reason,
+        x_dms_principal,
+        x_dms_maintenance_active,
+        lambda: repository.reorder_route(
+            session,
+            instance_id,
+            payload.step_ids,
+            expected_version=payload.expected_version,
+        ),
+    )
+
+
+@app.post(
+    "/instances/{instance_id}/route/recall",
+    response_model=RouteOut,
+    dependencies=[Depends(_license_gate("write"))],
+)
+async def recall_route_step(
+    instance_id: str,
+    payload: RouteRecallRequest,
+    x_dms_maintenance_active: str = Header(default="false"),
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> RouteOut:
+    """Takes the current step back and redirects it - e.g. back to the
+    author. The future steps follow unchanged."""
+    entry = payload.redirect.model_dump()
+    await _require_known_assignee(entry)
+    return await _run_route_change(
+        session,
+        instance_id,
+        "route_recall",
+        payload.reason,
+        x_dms_principal,
+        x_dms_maintenance_active,
+        lambda: repository.recall_route_step(
+            session,
+            instance_id,
+            entry,
+            actor=x_dms_principal,
+            reason=payload.reason,
+            expected_version=payload.expected_version,
+        ),
     )
 
 

@@ -598,6 +598,9 @@ def parse_lane_bindings(bpmn_xml: str) -> dict[str, dict[str, str]]:
 # task). Each raises `InstanceOperationRefused` with a reason in plain German.
 
 FEDERATED_TASK_TYPES = ("federated", "federated_return")
+# The user task of a circulation template (P93-S3): its assignee comes from
+# the route (table `circulation_step`), not from the model.
+CIRCULATION_TASK_TYPE = "circulation"
 
 
 class InstanceOperationRefused(Exception):
@@ -610,6 +613,28 @@ class CompletedTaskInfo:
     name: str
     lane: str | None
     completed_at: datetime | None
+
+
+_CIRCULATION_REFUSAL = (
+    "Ein Umlaufschritt wird über den Laufweg der Umlaufmappe geändert (Schritt streichen, "
+    "zurückholen), nicht über einen Eingriff in die Instanz"
+)
+
+
+def has_circulation_task(spec: Any) -> bool:
+    """Whether a parsed process contains a circulation user task - its
+    instances then need a route."""
+    return any(
+        (getattr(t, "extensions", None) or {}).get("taskType") == CIRCULATION_TASK_TYPE
+        for t in spec.task_specs.values()
+    )
+
+
+def circulation_template_xml() -> str:
+    """The shipped "Umlauf" template (templates/umlauf.bpmn)."""
+    from importlib.resources import files
+
+    return (files("workflow_service") / "templates" / "umlauf.bpmn").read_text(encoding="utf-8")
 
 
 def _task_name(task: Task) -> str:
@@ -675,6 +700,8 @@ def skip_task(wf: BpmnWorkflow, task_id: str, marker: dict[str, Any]) -> str:
         raise InstanceOperationRefused(
             "Eine Signaturaufgabe kann nicht übersprungen werden - die Signatur ist Pflicht"
         )
+    if extensions.get("taskType") == CIRCULATION_TASK_TYPE:
+        raise InstanceOperationRefused(_CIRCULATION_REFUSAL)
     _refuse_federated([task])
     _refuse_parallel(wf, task)
     task.set_data(dms_skipped=marker)
@@ -718,6 +745,10 @@ def send_back(wf: BpmnWorkflow, target_task_id: str) -> tuple[str, list[str]]:
     )
     if target is None:
         raise InstanceOperationRefused("Ziel ist keine abgeschlossene Aufgabe dieser Instanz")
+    if (getattr(target.task_spec, "extensions", None) or {}).get(
+        "taskType"
+    ) == CIRCULATION_TASK_TYPE:
+        raise InstanceOperationRefused(_CIRCULATION_REFUSAL)
     active = _active_manual_tasks(wf)
     _refuse_federated(active + list(wf.get_tasks(state=TaskState.WAITING)))
     _refuse_parallel(wf, target)
