@@ -306,5 +306,5 @@ or an empty state (the default view has its own empty text).
 ## Open Points
 
 - **No server push/no notifications** — a pure pull interface, must be actively reloaded (see ADR 0041 "Consequences").
-- **No lane-/role-based pre-selection of the task list** ("only my tasks") — `workflow-service` does not yet enforce BPMN lanes anywhere (an already-documented limitation, `docs/services/workflow-service.md` "Open Points"), every logged-in principal sees the same complete list.
+- ~~**No lane-/role-based pre-selection of the task list** ("only my tasks") — `workflow-service` does not yet enforce BPMN lanes anywhere (an already-documented limitation, `docs/services/workflow-service.md` "Open Points"), every logged-in principal sees the same complete list.~~ — **closed in P93-S1**: `TaskList.tsx` defaults to "Meine Aufgaben" (`listReadyTasks(..., { mine: true })`), and `workflow-service` filters by claim and bound lane, see `docs/services/workflow-service.md` "Lanes as an Authorization Boundary" and [ADR 0249](../adr/0249-changing-running-processes-and-lane-semantics.md).
 - ~~No own rejection dialog form — `window.prompt` for the optional justification~~ — **fixed in Post-Roadmap Phase 22 Session 4**: an inline form directly in the table row replaces the native dialog, see "Approval Inbox" above.

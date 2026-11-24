@@ -6,13 +6,14 @@ import logging
 import socket
 import time
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from urllib.parse import urlparse
 
 import httpx
 from dms_common import configure_logging
 from dms_common.otel import setup_observability
+from dms_common.shutdown import bounded_shutdown_step
 from dms_db_base import build_engine, make_session_factory
 from dms_metrics_client import (
     SensorConfigClient,
@@ -235,20 +236,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
 
     sensor_sampler_task.cancel()
-    with suppress(asyncio.CancelledError):
-        await sensor_sampler_task
+    await bounded_shutdown_step("task sensor_sampler_task", sensor_sampler_task)
     sensor_config_proxy.unbind()
-    await app.state.sensor_config_client.stop()
+    await bounded_shutdown_step(
+        "app.state.sensor_config_client.stop", app.state.sensor_config_client.stop()
+    )
     retry_poll_task.cancel()
-    with suppress(asyncio.CancelledError):
-        await retry_poll_task
+    await bounded_shutdown_step("task retry_poll_task", retry_poll_task)
     cleanup_poll_task.cancel()
-    with suppress(asyncio.CancelledError):
-        await cleanup_poll_task
+    await bounded_shutdown_step("task cleanup_poll_task", cleanup_poll_task)
     if app.state.permission_client is not None:
-        await app.state.permission_client.close()
-    await app.state.http_client.aclose()
-    await engine.dispose()
+        await bounded_shutdown_step(
+            "app.state.permission_client.close", app.state.permission_client.close()
+        )
+    await bounded_shutdown_step("app.state.http_client.aclose", app.state.http_client.aclose())
+    await bounded_shutdown_step("engine.dispose", engine.dispose())
 
 
 app = FastAPI(title=settings.service_name, lifespan=lifespan)

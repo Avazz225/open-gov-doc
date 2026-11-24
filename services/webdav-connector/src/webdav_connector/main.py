@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from asgiref.wsgi import WsgiToAsgi
 from dms_common import configure_logging
 from dms_common.otel import setup_observability
+from dms_common.shutdown import bounded_shutdown_step
 from dms_connector_sdk import ConnectorDescriptor, DmsTreeClient
 from dms_metrics_client import (
     SensorConfigClient,
@@ -110,10 +111,12 @@ async def lifespan(app: FastAPI):
     yield
 
     sensor_config_proxy.unbind()
-    await app.state.sensor_config_client.stop()
+    await bounded_shutdown_step(
+        "app.state.sensor_config_client.stop", app.state.sensor_config_client.stop()
+    )
 
     if registration:
-        await registration.stop()
+        await bounded_shutdown_step("registration.stop", registration.stop())
     _tree.close()
     _license_client.close()
 

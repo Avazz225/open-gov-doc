@@ -308,3 +308,10 @@ None yet — to follow in Phase 11.
   same stance as Postgres/NATS/MinIO in this stack) — a real installation
   would need to provide its own credentials/network segmentation for the
   `redis` service, which is not modeled here.
+
+## Rate-limit exemption (P94-S3, [ADR 0261](../adr/0261-hygiene-trusted-service-reads-network-policies-test-debris.md))
+
+`DMS_RATE_LIMIT_EXEMPT_PRINCIPALS`: verified token `sub`s (comma-separated) the per-principal limit doesn't
+count. Empty by default; only a principal set after the token check can match, client headers are
+stripped. The dev compose stack exempts `2` (the e2e account `users-admin`), whose three UI suites back to
+back had exceeded 600/min. Test: `test_rate_limit_exempt_principal_is_not_limited`.

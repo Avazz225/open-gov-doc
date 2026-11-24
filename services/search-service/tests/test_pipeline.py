@@ -217,3 +217,30 @@ async def test_reindex_document_denormalizes_records_quarantine_active():
     _release_records_quarantine(quarantine_id)
     after = await _run_reindex(document_id)
     assert after.records_quarantine_active is False
+
+
+class _RefusingDocumentClient:
+    def __init__(self, status: int) -> None:
+        self.status = status
+
+    async def get(self, document_id: str):
+        request = httpx.Request("GET", f"http://document-service/documents/{document_id}")
+        raise httpx.HTTPStatusError(
+            "refused", request=request, response=httpx.Response(self.status, request=request)
+        )
+
+
+async def test_a_refusal_is_acknowledged_not_redelivered_forever():
+    """P94-S3: a `403` won't change on redelivery - it is logged and counted,
+    and the event acknowledged. Other errors still raise for redelivery."""
+    import pytest
+
+    kwargs = dict(
+        session_factory=None,
+        folder_client=None,
+        ocr_client=FakeTextClient(),
+        rendering_client=FakeTextClient(),
+    )
+    await reindex_document("doc-403", document_client=_RefusingDocumentClient(403), **kwargs)
+    with pytest.raises(httpx.HTTPStatusError):
+        await reindex_document("doc-503", document_client=_RefusingDocumentClient(503), **kwargs)

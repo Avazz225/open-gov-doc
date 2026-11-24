@@ -181,9 +181,54 @@ def test_folder_listing_leaves_out_documents_the_caller_cannot_read(client, real
     assert [d["id"] for d in listing.json()] == [visible_id]
     assert "x-dms-hidden-count" not in listing.headers
 
+    # P94-S3: a service reading as itself is trusted and sees both; acting
+    # for the outsider it gets the outsider's view and the hidden count.
     as_service = client.get(
         "/documents",
         params={"folder_id": real_folder_id},
         headers={"X-DMS-Principal": "migration-service"},
     )
-    assert as_service.headers["x-dms-hidden-count"] == "1"
+    assert sorted(d["id"] for d in as_service.json()) == sorted([visible_id, isolated_id])
+    assert as_service.headers["x-dms-hidden-count"] == "0"
+    for_outsider = client.get(
+        "/documents",
+        params={"folder_id": real_folder_id},
+        headers={
+            "X-DMS-Principal": "migration-service",
+            "X-DMS-On-Behalf-Of": "document-service-tests-listing-outsider",
+        },
+    )
+    assert for_outsider.headers["x-dms-hidden-count"] == "1"
+
+
+def test_a_service_reading_as_itself_is_trusted_but_not_for_writes_or_on_behalf(client):
+    """P94-S3 (user decision): an indexer must not be lockable out of a
+    document - a narrowed resource (e.g. in a teamspace) had sent
+    search-service into an endless redelivery loop. Reads as the service
+    itself pass; reads for a user and every write are checked as before."""
+    document_id = _upload(client, title="Indexer-Lesen")
+    httpx.patch(
+        f"{PERMISSION_SERVICE_URL}/resources/{document_id}", json={"inherit": False}, timeout=10.0
+    ).raise_for_status()
+
+    as_indexer = {"X-DMS-Principal": "search-service"}
+    assert client.get(f"/documents/{document_id}", headers=as_indexer).status_code == 200
+    assert client.get(f"/documents/{document_id}/content", headers=as_indexer).status_code == 200
+    batch = client.post(
+        "/documents/versions/current/batch",
+        json={"document_ids": [document_id]},
+        headers=as_indexer,
+    )
+    assert document_id in batch.json()["versions"]
+
+    outsider = "document-service-tests-trust-outsider"
+    assert (
+        client.get(f"/documents/{document_id}", headers={"X-DMS-Principal": outsider}).status_code
+        == 403
+    )
+    for_outsider = {"X-DMS-Principal": "search-service", "X-DMS-On-Behalf-Of": outsider}
+    assert client.get(f"/documents/{document_id}", headers=for_outsider).status_code == 403
+    write = client.patch(
+        f"/documents/{document_id}", json={"title": "umbenannt"}, headers=as_indexer
+    )
+    assert write.status_code == 403

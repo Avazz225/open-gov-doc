@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager
 
 from dms_common import configure_logging
 from dms_common.otel import setup_observability
+from dms_common.shutdown import bounded_shutdown_step
 from dms_connector_sdk import (
     ConnectorDescriptor,
     DmsTreeClient,
@@ -467,9 +468,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
 
     sensor_config_proxy.unbind()
-    await app.state.sensor_config_client.stop()
+    await bounded_shutdown_step(
+        "app.state.sensor_config_client.stop", app.state.sensor_config_client.stop()
+    )
     if registration:
-        await registration.stop()
+        await bounded_shutdown_step("registration.stop", registration.stop())
     _tree.close()
     _license_client.close()
     _auth_client.close()

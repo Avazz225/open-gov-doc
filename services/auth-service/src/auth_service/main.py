@@ -3,7 +3,7 @@ import logging
 import time
 import uuid
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from urllib.parse import urlparse
 
@@ -15,6 +15,7 @@ from dms_auth_client import (
 )
 from dms_common import configure_logging
 from dms_common.otel import setup_observability
+from dms_common.shutdown import bounded_shutdown_step
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
 from dms_metrics_client import (
@@ -372,23 +373,31 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
 
     sensor_config_proxy.unbind()
-    await app.state.sensor_config_client.stop()
+    await bounded_shutdown_step(
+        "app.state.sensor_config_client.stop", app.state.sensor_config_client.stop()
+    )
     superuser_poll_task.cancel()
-    with suppress(asyncio.CancelledError):
-        await superuser_poll_task
+    await bounded_shutdown_step("task superuser_poll_task", superuser_poll_task)
     tracking_retention_poll_task.cancel()
-    with suppress(asyncio.CancelledError):
-        await tracking_retention_poll_task
+    await bounded_shutdown_step("task tracking_retention_poll_task", tracking_retention_poll_task)
     if registration:
-        await registration.stop()
-    await consumer_bus.close()
-    await event_bus.close()
-    await app.state.permission_client.close()
-    await app.state.license_limit_client.close()
-    await app.state.teamspace_client.close()
+        await bounded_shutdown_step("registration.stop", registration.stop())
+    await bounded_shutdown_step("consumer_bus.close", consumer_bus.close())
+    await bounded_shutdown_step("event_bus.close", event_bus.close())
+    await bounded_shutdown_step(
+        "app.state.permission_client.close", app.state.permission_client.close()
+    )
+    await bounded_shutdown_step(
+        "app.state.license_limit_client.close", app.state.license_limit_client.close()
+    )
+    await bounded_shutdown_step(
+        "app.state.teamspace_client.close", app.state.teamspace_client.close()
+    )
     if app.state.federation_hub_client is not None:
-        await app.state.federation_hub_client.close()
-    await engine.dispose()
+        await bounded_shutdown_step(
+            "app.state.federation_hub_client.close", app.state.federation_hub_client.close()
+        )
+    await bounded_shutdown_step("engine.dispose", engine.dispose())
 
 
 app = FastAPI(title=settings.service_name, lifespan=lifespan)
@@ -1176,6 +1185,35 @@ async def ensure_realm_roles(
     await _require_service_user_management(x_dms_principal)
     for name in payload.names:
         app.state.keycloak_admin.create_realm_role(payload={"name": name}, skip_exists=True)
+
+
+# Realm roles the system creates or relies on (P94-S3): never deletable.
+_PROTECTED_REALM_ROLE_PREFIXES = ("domain-admin-",)
+_PROTECTED_REALM_ROLE_NAMES = frozenset({"dms-admin", "dms-poststelle"})
+
+
+def _is_protected_realm_role(name: str) -> bool:
+    return (
+        _is_builtin_realm_role(name)
+        or name in _PROTECTED_REALM_ROLE_NAMES
+        or name.startswith(_PROTECTED_REALM_ROLE_PREFIXES)
+    )
+
+
+@app.delete("/realm-roles/{role_name}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_realm_role(role_name: str, x_dms_principal: str = Header(default="")) -> None:
+    """Deletes a realm role (P94-S3) - test suites had left ~130 behind and
+    there was no way to remove one. Keycloak's built-ins, `dms-admin`,
+    `dms-poststelle` and every `domain-admin-*` role are `409`. Same gate as
+    `POST /realm-roles`."""
+    await _require_service_user_management(x_dms_principal)
+    if _is_protected_realm_role(role_name):
+        raise HTTPException(
+            status_code=409, detail=f"Realm-Rolle {role_name!r} ist systemseitig und nicht löschbar"
+        )
+    if admin_users.find_realm_role(app.state.keycloak_admin, role_name) is None:
+        raise HTTPException(status_code=404, detail=f"Rolle {role_name!r} unbekannt")
+    app.state.keycloak_admin.delete_realm_role(role_name)
 
 
 @app.post("/realm-roles/{role_name}/assignments", status_code=status.HTTP_204_NO_CONTENT)

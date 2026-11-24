@@ -4,11 +4,12 @@ import logging
 import socket
 import time
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 
 from dms_common import configure_logging
 from dms_common.otel import setup_observability
+from dms_common.shutdown import bounded_shutdown_step
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
 from dms_metrics_client import (
@@ -150,17 +151,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
 
     retry_poll_task.cancel()
-    with suppress(asyncio.CancelledError):
-        await retry_poll_task
+    await bounded_shutdown_step("task retry_poll_task", retry_poll_task)
     sensor_config_proxy.unbind()
-    await app.state.sensor_config_client.stop()
+    await bounded_shutdown_step(
+        "app.state.sensor_config_client.stop", app.state.sensor_config_client.stop()
+    )
     if registration:
-        await registration.stop()
-    await consumer.close()
-    await producer.close()
-    await app.state.auth_client.close()
-    await app.state.permission_client.close()
-    await engine.dispose()
+        await bounded_shutdown_step("registration.stop", registration.stop())
+    await bounded_shutdown_step("consumer.close", consumer.close())
+    await bounded_shutdown_step("producer.close", producer.close())
+    await bounded_shutdown_step("app.state.auth_client.close", app.state.auth_client.close())
+    await bounded_shutdown_step(
+        "app.state.permission_client.close", app.state.permission_client.close()
+    )
+    await bounded_shutdown_step("engine.dispose", engine.dispose())
 
 
 app = FastAPI(title=settings.service_name, lifespan=lifespan)

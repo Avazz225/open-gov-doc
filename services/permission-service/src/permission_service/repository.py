@@ -188,6 +188,47 @@ async def update_role(
     return role
 
 
+class ProtectedRoleError(Exception):
+    """A seeded role the system relies on can't be deleted."""
+
+
+# Roles the system seeds and relies on (P94-S3): never deletable. The
+# teamspace roles are created by teamspace-service at its startup.
+def protected_role_names() -> frozenset[str]:
+    return frozenset(
+        {name for name, _, _ in DOMAIN_ADMIN_ROLES}
+        | {EVERYONE_ROLE_NAME, "teamspace-member", "teamspace-manager"}
+    )
+
+
+async def delete_role(session: AsyncSession, role_id: int) -> Role:
+    """Deletes a role with its assignments (P94-S3) - test runs had left
+    ~2,600 roles behind and there was no way to remove one. Invalidates the
+    effective-permissions cache like every other permission change."""
+    role = await session.get(Role, role_id)
+    if role is None:
+        raise NotFoundError(f"role_id {role_id!r} unbekannt")
+    if role.name in protected_role_names():
+        raise ProtectedRoleError(
+            f"Rolle {role.name!r} ist systemseitig angelegt und nicht löschbar"
+        )
+    await session.execute(delete(RoleAssignment).where(RoleAssignment.role_id == role_id))
+    await session.delete(role)
+    await session.flush()
+    await invalidate_cache(session)
+    return role
+
+
+async def delete_approval_config(session: AsyncSession, action_type: str) -> None:
+    """Removes an action type's four-eyes row (P94-S3); without one,
+    `requires_approval=False` applies, as for any unconfigured type."""
+    row = await session.get(ApprovalActionConfig, action_type)
+    if row is None:
+        raise NotFoundError(f"Keine Freigabe-Konfiguration für {action_type!r}")
+    await session.delete(row)
+    await session.flush()
+
+
 async def get_role_by_name(session: AsyncSession, name: str) -> Role | None:
     result = await session.execute(select(Role).where(Role.name == name))
     return result.scalars().first()

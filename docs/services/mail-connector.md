@@ -301,3 +301,11 @@ signature-service validates the pair and shows the result on the file. An unpair
 plain document. Tests: `test_signature_pairing.py` (pure), and a filed message with
 `bescheid.txt` + `bescheid.txt.p7s` in `test_api.py`.
 
+## One session per request (P94-S3)
+
+`_mailbox_rows`, `_mailbox_by_id`, `_accessible_mailbox_ids` and `_require_mailbox_access` take the
+request's session; seven handlers (`list_inbound`, `get_inbound`, `route_message`, `search_routing_log`,
+`confirm_match`, `assign_manually`, `reject_message`) pass it down. Before, each opened a second
+`session_factory()` session while the request's held a connection - the pattern that deadlocked
+auth-service's login with the small pool of ADR 0254. `GET /mailboxes` has no request session and still
+opens its own.

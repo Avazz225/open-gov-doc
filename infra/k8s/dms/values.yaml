@@ -1515,6 +1515,68 @@ minio:
 # see ADR 0099). No password/secret needed — NATS runs here without auth,
 # analogous to infra/docker-compose.yml.
 # ---------------------------------------------------------------------------
+# NetworkPolicies (P94-S3, found in P90-S6 / ADR 0248). Off by default: the
+# cluster's CNI must enforce NetworkPolicy, and a deny-by-default rollout on an
+# existing installation should be a deliberate step. When on:
+# - every pod of this release denies all ingress and egress by default;
+# - pods of the release may talk to each other (services, Postgres, NATS,
+#   Keycloak, MinIO, Redis, the tracing/logging stack);
+# - the ingress controller (`ingressController.namespaceSelector` /
+#   `podSelector`) may reach the services with `ingress.enabled` and the
+#   components in `ingressController.extraComponents`;
+# - everyone may resolve DNS (`dns`);
+# - only the components in `internetEgress` may reach addresses outside the
+#   cluster's private ranges, on the listed ports.
+# `extraEgress` takes raw NetworkPolicy egress rules per component (e.g. an
+# external Postgres or an on-premise SMTP relay inside a private range).
+# ---------------------------------------------------------------------------
+networkPolicy:
+  enabled: false
+  ingressController:
+    namespaceSelector:
+      kubernetes.io/metadata.name: ingress-nginx
+    podSelector: {}
+    # Components without a chart Ingress that are still published through the
+    # controller (e.g. Keycloak behind its own Ingress).
+    extraComponents: []
+  dns:
+    namespaceSelector:
+      kubernetes.io/metadata.name: kube-system
+    podSelector:
+      k8s-app: kube-dns
+  # Addresses treated as "inside": excluded from internet egress.
+  privateRanges:
+    - 10.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+    - 169.254.0.0/16
+  internetEgress:
+    # Certificate status (OCSP/CRL) and the EU trusted lists (ADR 0248).
+    signature-service: [80, 443]
+    # IMAP/SMTP of the configured mailboxes.
+    mail-connector: [25, 143, 465, 587, 993]
+    # Mail delivery and outgoing webhooks.
+    notification-service: [25, 80, 443, 465, 587]
+    # An external OIDC issuer, the federation hub.
+    auth-service: [443]
+    gateway-service: [443]
+    workflow-service: [443]
+    # Callbacks to federated installations; fleet agents.
+    federation-hub-service: [443]
+    fleet-management-service: [443]
+    # External object storage (S3, Azure Blob).
+    storage-service: [443]
+  # Components that call the Kubernetes API: Alloy streams pod logs
+  # (logging.enabled), plugin-orchestration-service's scheduler adapter
+  # (ADR 0094). The API server sits on a private address, so it needs its own
+  # rule; narrow `cidr` to the API server's address where known.
+  kubernetesApi:
+    components: [alloy, plugin-orchestration-service]
+    cidr: 0.0.0.0/0
+    ports: [443, 6443]
+  extraEgress: {}
+
+# ---------------------------------------------------------------------------
 # Distributed tracing (P94-S1, ADR 0250). Off by default. When on, every
 # service exports OTLP/HTTP to the bundled OpenTelemetry collector (which
 # forwards to a bundled Tempo) or to an existing collector

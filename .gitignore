@@ -61,3 +61,6 @@ loadtest/notebook/.ipynb_checkpoints/
 .idea/
 
 uv.lock
+
+# Generated SBOMs (scripts/sbom.sh, P94-S3) - a CI artifact, not source.
+/sbom/

@@ -7,6 +7,7 @@ import time
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
 
 import httpx
@@ -1072,6 +1073,58 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title=settings.service_name, lifespan=lifespan)
 setup_observability(app, settings)
 
+
+# Trusted service reads (P94-S3, user decision 2026-11-24): a service that
+# reads as itself - an indexer, an event handler, a migration - may read any
+# document, so it can't be locked out by a narrowed resource (a teamspace
+# folder doesn't inherit "everyone") and fail forever in a redelivery loop.
+# A service acting for a user (`X-DMS-On-Behalf-Of`) is checked as before;
+# writes are never trusted. The gateway strips client-sent `X-DMS-*` headers
+# and sets the principal from the token, so a user can't claim a service
+# name.
+_on_behalf_of: ContextVar[str] = ContextVar("dms_on_behalf_of", default="")
+
+
+class _OnBehalfOfMiddleware:
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        value = ""
+        for name, raw in scope.get("headers", []):
+            if name == b"x-dms-on-behalf-of":
+                value = raw.decode("latin-1").strip()
+                break
+        token = _on_behalf_of.set(value)
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            _on_behalf_of.reset(token)
+
+
+app.add_middleware(_OnBehalfOfMiddleware)
+
+
+def _is_trusted_service_reader(x_dms_principal: str) -> bool:
+    return x_dms_principal in SERVICE_PRINCIPALS and not _on_behalf_of.get()
+
+
+async def _readable_documents(x_dms_principal: str, document_ids: list[str]) -> dict[str, bool]:
+    """`document.read` for many documents in one call - all of them for a
+    service reading as itself (see above)."""
+    if _is_trusted_service_reader(x_dms_principal):
+        return dict.fromkeys(document_ids, True)
+    return await app.state.permission_client.check_batch(
+        principal_id=x_dms_principal,
+        resource_ids=document_ids,
+        permission="document.read",
+        access_type="read",
+    )
+
+
 # Sensor concept (10.1): must run at module level, right after `app` is
 # constructed - see `bootstrap_http_sensors`'s docstring for why this can't
 # move into `lifespan` (FastAPI forbids adding middleware once the app has
@@ -1917,6 +1970,8 @@ async def _require_document_permission(
     destination-folder check still pass a folder `resource_id`."""
     if not x_dms_principal:
         raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    if access_type == "read" and _is_trusted_service_reader(x_dms_principal):
+        return
     allowed = (
         await app.state.permission_client.check(
             principal_id=x_dms_principal,
@@ -2224,12 +2279,7 @@ async def list_documents(
     # gets the hidden count (a migration must not skip silently).
     if not documents:
         return documents
-    allowed = await app.state.permission_client.check_batch(
-        principal_id=x_dms_principal,
-        resource_ids=[document.id for document in documents],
-        permission="document.read",
-        access_type="read",
-    )
+    allowed = await _readable_documents(x_dms_principal, [document.id for document in documents])
     visible = [document for document in documents if allowed.get(document.id, False)]
     if x_dms_principal in SERVICE_PRINCIPALS:
         response.headers["X-DMS-Hidden-Count"] = str(len(documents) - len(visible))
@@ -2306,12 +2356,7 @@ async def list_documents_by_kennzeichen(
     candidates = await repository.list_documents_by_kennzeichen(session, value)
     if not candidates:
         return []
-    allowed = await app.state.permission_client.check_batch(
-        principal_id=x_dms_principal,
-        resource_ids=[document.id for document in candidates],
-        permission="document.read",
-        access_type="read",
-    )
+    allowed = await _readable_documents(x_dms_principal, [document.id for document in candidates])
     return [document for document in candidates if allowed.get(document.id, False)]
 
 
@@ -4427,12 +4472,7 @@ async def get_current_versions_batch(
     document_ids = list(dict.fromkeys(payload.document_ids))
     if not document_ids:
         return DocumentVersionsBatchResult(versions={})
-    allowed = await app.state.permission_client.check_batch(
-        principal_id=x_dms_principal,
-        resource_ids=document_ids,
-        permission="document.read",
-        access_type="read",
-    )
+    allowed = await _readable_documents(x_dms_principal, document_ids)
     versions: dict[str, DocumentVersionOut] = {}
     for document_id in document_ids:
         if not allowed.get(document_id):

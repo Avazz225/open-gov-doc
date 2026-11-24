@@ -21,7 +21,10 @@ exclude = ["libs/dms-ui", "libs/dms-showcase"]
 package = false
 
 [dependency-groups]
-dev = ["ruff>=0.6", "pytest>=8.0", "pytest-asyncio>=0.24"]
+# ruff pinned exactly (P94-S3): uv.lock isn't versioned, so a new ruff release
+# with new rules or formatting turned the check red without any code change.
+# Raise it deliberately, together with `ruff check --fix` / `ruff format`.
+dev = ["ruff==0.16.0", "pytest>=8.0", "pytest-asyncio>=0.24"]
 notebook = [
     "ipykernel>=7.3.0",
     "jupyter>=1.1.1",

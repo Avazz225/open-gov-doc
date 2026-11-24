@@ -113,3 +113,11 @@ None yet — follows in Phase 11.
 - **Fuzzy/mixed ranking is a simple sum of independent per-leaf scores** (since P14-S7), no boolean-structure-aware `ts_rank` like in the pure non-fuzzy path — see ADR 0044 "Rationale".
 - **`OR`/`NOT` are reserved, case-insensitive keywords** (since P14-S7) — the actual words "or"/"not" cannot be entered directly as search terms, the same limitation as with practically every search language that has boolean keywords.
 - **No minimum length for wildcard prefixes** (since P14-S7) — a very short prefix (`a*`) can match many lexemes and is potentially slower; deliberately not artificially restricted (no concept requirement for it).
+
+## Refusals are acknowledged (P94-S3)
+
+`reindex_document` acknowledges an event whose reindex is refused (`403` from document- or folder-service)
+instead of re-raising it: asking again wouldn't change the answer, and such events had been redelivered
+every 30 s forever. It logs `search_reindex_refused` and counts `search.index.failures`; other errors still
+raise for redelivery. Since P94-S3 document-service trusts service reads, so a `403` should no longer occur
+for search-service itself. Test: `test_a_refusal_is_acknowledged_not_redelivered_forever`.

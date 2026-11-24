@@ -87,6 +87,13 @@ tar xzf helm.tar.gz
   Tempo with a PVC (`templates/tracing.yaml`) plus a Grafana datasource ConfigMap
   (`grafana_datasource: "1"`); `bundled.enabled: false` needs `external.endpoint` (rendering fails
   without it). `samplingRatio` (default 0.1) is the start value - admins change it at runtime.
+- **`networkPolicy`** (P94-S3, [ADR 0261](../../docs/adr/0261-hygiene-trusted-service-reads-network-policies-test-debris.md)):
+  off by default (needs an enforcing CNI; a deliberate rollout step). When on: deny by default, traffic
+  inside the release and DNS allowed, the ingress controller to published services
+  (`ingressController.*`), internet egress only for `internetEgress` components on fixed ports, the
+  Kubernetes API for `kubernetesApi.components` (Alloy, plugin-orchestration-service), and raw
+  `extraEgress` rules per component (e.g. an external Postgres). Checked with `helm template` and
+  `kubeconform -strict`, not on a live cluster.
 - **`logging`** (P94-S2, [ADR 0251](../../docs/adr/0251-central-log-aggregation.md)): off by default.
   `enabled: true` deploys a Grafana Alloy Deployment that streams the namespace's pod logs through the
   Kubernetes API (ServiceAccount + namespace-scoped Role on `pods`, `pods/log`) to the bundled Loki

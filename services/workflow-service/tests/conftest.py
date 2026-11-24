@@ -43,6 +43,12 @@ os.environ["DMS_FEDERATION_HUB_BASE_URL"] = FEDERATION_HUB_SERVICE_URL
 # own P78-S1 SSRF tests already use) - passes the guard; nothing here ever
 # attempts a real callback delivery to it.
 os.environ["DMS_INSTALLATION_GATEWAY_BASE_URL"] = "http://8.8.8.8:8000"
+# The test database keeps ONE federation identity and re-registers it with
+# the hub on every start (an upsert). Its display name marks it as the
+# persistent test identity (P94-S3), so a hub cleanup can tell it from
+# per-run leftovers - P91-S5's cleanup revoked it and broke two federation
+# tests in the Phase 91 regression.
+os.environ["DMS_INSTALLATION_DISPLAY_NAME"] = "workflow-service-tests (dauerhafte Testidentität)"
 
 PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://localhost:8004")
 # Fester Principal statt uuid4() je Testlauf, damit die Rollenzuweisung

@@ -212,3 +212,18 @@ def test_list_realm_role_assignments_for_unknown_role_returns_404(
         "/realm-roles/does-not-exist-role/assignments", headers=domain_admin_auth_headers
     )
     assert response.status_code == 404
+
+
+def test_delete_realm_role(client, authorized_principal):
+    """P94-S3: realm roles can be removed; protected ones can't."""
+    role_name = f"realm-role-test-{uuid.uuid4().hex[:8]}"
+    headers = {"X-DMS-Principal": authorized_principal}
+    client.post("/realm-roles", json={"names": [role_name]}, headers=headers)
+
+    assert client.delete(f"/realm-roles/{role_name}").status_code == 403
+    assert client.delete(f"/realm-roles/{role_name}", headers=headers).status_code == 204
+    assert role_name not in [r["name"] for r in client.get("/realm-roles").json()]
+    assert client.delete(f"/realm-roles/{role_name}", headers=headers).status_code == 404
+    for protected in ("dms-admin", "domain-admin-users", "offline_access"):
+        response = client.delete(f"/realm-roles/{protected}", headers=headers)
+        assert response.status_code == 409, protected

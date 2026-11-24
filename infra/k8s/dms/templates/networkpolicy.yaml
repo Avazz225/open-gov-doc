@@ -1,0 +1,145 @@
+{{/*
+NetworkPolicies (P94-S3): deny by default, allow what the system needs - see
+the `networkPolicy` block in values.yaml. One policy for the whole release,
+one per component with an ingress-controller or internet allowance.
+*/}}
+{{- if .Values.networkPolicy.enabled }}
+{{- $np := .Values.networkPolicy }}
+{{- $release := include "dms.selectorLabels" . }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "dms.fullname" . }}-default
+  labels:
+    {{- include "dms.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- $release | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Within the release only.
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- $release | nindent 14 }}
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- $release | nindent 14 }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml $np.dns.namespaceSelector | nindent 14 }}
+          podSelector:
+            matchLabels:
+              {{- toYaml $np.dns.podSelector | nindent 14 }}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+{{- $published := list }}
+{{- range $name, $svc := .Values.services }}
+{{- if and $svc.enabled $svc.ingress $svc.ingress.enabled }}
+{{- $published = append $published $name }}
+{{- end }}
+{{- end }}
+{{- range $np.ingressController.extraComponents }}
+{{- $published = append $published . }}
+{{- end }}
+{{- range $name := $published }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "dms.serviceFullname" (dict "root" $ "name" $name) }}-from-ingress
+  labels:
+    {{- include "dms.serviceLabels" (dict "root" $ "name" $name) | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "dms.serviceSelectorLabels" (dict "root" $ "name" $name) | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml $np.ingressController.namespaceSelector | nindent 14 }}
+          {{- if $np.ingressController.podSelector }}
+          podSelector:
+            matchLabels:
+              {{- toYaml $np.ingressController.podSelector | nindent 14 }}
+          {{- end }}
+{{- end }}
+{{- range $name, $ports := $np.internetEgress }}
+{{- if (index $.Values.services $name | default dict).enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "dms.serviceFullname" (dict "root" $ "name" $name) }}-internet-egress
+  labels:
+    {{- include "dms.serviceLabels" (dict "root" $ "name" $name) | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "dms.serviceSelectorLabels" (dict "root" $ "name" $name) | nindent 6 }}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              {{- toYaml $np.privateRanges | nindent 14 }}
+      ports:
+        {{- range $ports }}
+        - protocol: TCP
+          port: {{ . }}
+        {{- end }}
+{{- end }}
+{{- end }}
+{{- range $name := $np.kubernetesApi.components }}
+{{- if or (and (eq $name "alloy") $.Values.logging.enabled) (index $.Values.services $name | default dict).enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "dms.serviceFullname" (dict "root" $ "name" $name) }}-kubernetes-api
+  labels:
+    {{- include "dms.serviceLabels" (dict "root" $ "name" $name) | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "dms.serviceSelectorLabels" (dict "root" $ "name" $name) | nindent 6 }}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: {{ $np.kubernetesApi.cidr }}
+      ports:
+        {{- range $np.kubernetesApi.ports }}
+        - protocol: TCP
+          port: {{ . }}
+        {{- end }}
+{{- end }}
+{{- end }}
+{{- range $name, $rules := $np.extraEgress }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "dms.serviceFullname" (dict "root" $ "name" $name) }}-extra-egress
+  labels:
+    {{- include "dms.serviceLabels" (dict "root" $ "name" $name) | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "dms.serviceSelectorLabels" (dict "root" $ "name" $name) | nindent 6 }}
+  policyTypes: [Egress]
+  egress:
+    {{- toYaml $rules | nindent 4 }}
+{{- end }}
+{{- end }}

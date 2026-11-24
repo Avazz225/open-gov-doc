@@ -642,17 +642,26 @@ def _require_poststelle(x_dms_principal: str, x_dms_roles: str) -> None:
         )
 
 
-async def _mailbox_rows() -> list:
-    async with app.state.session_factory() as session:
+# Nested sessions (P94-S3): a request handler passes its own session - a
+# second `session_factory()` session while the request's holds a connection
+# can deadlock the small pool (2 + 3, ADR 0254), as auth-service's login did.
+async def _mailbox_rows(session: AsyncSession | None = None) -> list:
+    if session is not None:
         return await mailboxes.list_rows(session)
+    async with app.state.session_factory() as own_session:
+        return await mailboxes.list_rows(own_session)
 
 
-async def _mailbox_by_id(mailbox_id: str):
-    async with app.state.session_factory() as session:
+async def _mailbox_by_id(mailbox_id: str, session: AsyncSession | None = None):
+    if session is not None:
         return await mailboxes.get_row(session, mailbox_id)
+    async with app.state.session_factory() as own_session:
+        return await mailboxes.get_row(own_session, mailbox_id)
 
 
-async def _accessible_mailbox_ids(principal_id: str) -> set[str]:
+async def _accessible_mailbox_ids(
+    principal_id: str, session: AsyncSession | None = None
+) -> set[str]:
     """Department RBAC (P32-S3, ADR 0132) - a central mailbox is open to
     every `poststelle_role` holder (`kind="central"` forbids
     `owning_group_id` entirely, see `settings.MailboxConfig`); a
@@ -663,7 +672,7 @@ async def _accessible_mailbox_ids(principal_id: str) -> set[str]:
     docstring): the routing-target selector needs every mailbox NAME
     visible, central intake routes to departments its own staff aren't
     members of."""
-    rows = await _mailbox_rows()
+    rows = await _mailbox_rows(session)
     accessible = {mailbox.id for mailbox in rows if mailbox.kind == "central"}
     for mailbox in rows:
         if mailbox.kind != "departmental":
@@ -673,13 +682,15 @@ async def _accessible_mailbox_ids(principal_id: str) -> set[str]:
     return accessible
 
 
-async def _require_mailbox_access(mailbox_id: str, principal_id: str) -> None:
+async def _require_mailbox_access(
+    mailbox_id: str, principal_id: str, session: AsyncSession | None = None
+) -> None:
     """Gates read/act access to ONE specific mailbox's content (P32-S3,
     ADR 0132) - an unconfigured `mailbox_id` (e.g. a mailbox removed from
     `DMS_MAILBOXES` after messages were already stored under it) is
     deliberately let through unchecked, same lenient behavior this
     endpoint family already had before this session for an unknown ID."""
-    mailbox = await _mailbox_by_id(mailbox_id)
+    mailbox = await _mailbox_by_id(mailbox_id, session)
     if mailbox is None or mailbox.kind == "central":
         return
     if await app.state.permission_client.is_group_member(mailbox.owning_group_id, principal_id):
@@ -744,12 +755,12 @@ async def list_inbound(
     to), not silently to everything."""
     _require_poststelle(x_dms_principal, x_dms_roles)
     if mailbox_id is not None:
-        await _require_mailbox_access(mailbox_id, x_dms_principal)
+        await _require_mailbox_access(mailbox_id, x_dms_principal, session)
         messages = await repository.list_messages(
             session, status=status_filter, mailbox_id=mailbox_id
         )
     else:
-        accessible = await _accessible_mailbox_ids(x_dms_principal)
+        accessible = await _accessible_mailbox_ids(x_dms_principal, session)
         messages = await repository.list_messages(
             session, status=status_filter, mailbox_ids=accessible
         )
@@ -768,7 +779,7 @@ async def get_inbound(
         message = await repository.get_message(session, message_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    await _require_mailbox_access(message.mailbox_id, x_dms_principal)
+    await _require_mailbox_access(message.mailbox_id, x_dms_principal, session)
     return await _to_message_out(session, message)
 
 
@@ -797,14 +808,14 @@ async def route_message(
         message = await repository.get_message(session, message_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    await _require_mailbox_access(message.mailbox_id, x_dms_principal)
+    await _require_mailbox_access(message.mailbox_id, x_dms_principal, session)
     if message.status in ("confirmed", "rejected"):
         raise HTTPException(
             status_code=409,
             detail=f"Nachricht ist bereits abschließend bearbeitet (status={message.status!r}) "
             "und kann nicht mehr weitergeleitet werden",
         )
-    if await _mailbox_by_id(payload.target_mailbox_id) is None:
+    if await _mailbox_by_id(payload.target_mailbox_id, session) is None:
         raise HTTPException(
             status_code=422, detail=f"Postfach {payload.target_mailbox_id!r} ist nicht konfiguriert"
         )
@@ -862,7 +873,7 @@ async def search_routing_log(
     "Consequences" left open."""
     _require_poststelle(x_dms_principal, x_dms_roles)
     if mailbox_id is not None:
-        await _require_mailbox_access(mailbox_id, x_dms_principal)
+        await _require_mailbox_access(mailbox_id, x_dms_principal, session)
         rows = await repository.search_routing_log(
             session,
             mailbox_id=mailbox_id,
@@ -873,7 +884,7 @@ async def search_routing_log(
             limit=limit,
         )
     else:
-        accessible = await _accessible_mailbox_ids(x_dms_principal)
+        accessible = await _accessible_mailbox_ids(x_dms_principal, session)
         rows = await repository.search_routing_log(
             session,
             mailbox_ids=accessible,
@@ -978,7 +989,7 @@ async def confirm_match(
         message = await repository.get_message(session, message_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    await _require_mailbox_access(message.mailbox_id, x_dms_principal)
+    await _require_mailbox_access(message.mailbox_id, x_dms_principal, session)
     if message.status != "proposed_match":
         raise HTTPException(
             status_code=409,
@@ -1034,7 +1045,7 @@ async def assign_manually(
         message = await repository.get_message(session, message_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    await _require_mailbox_access(message.mailbox_id, x_dms_principal)
+    await _require_mailbox_access(message.mailbox_id, x_dms_principal, session)
     if message.status not in ("unassigned", "proposed_match"):
         raise HTTPException(
             status_code=409,
@@ -1078,7 +1089,7 @@ async def reject_message(
         message = await repository.get_message(session, message_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    await _require_mailbox_access(message.mailbox_id, x_dms_principal)
+    await _require_mailbox_access(message.mailbox_id, x_dms_principal, session)
     if message.status not in ("unassigned", "proposed_match"):
         raise HTTPException(
             status_code=409,

@@ -2413,3 +2413,57 @@ def test_principal_memberships_and_lane_members(client, role_management_headers)
     assert client.get("/lane-members", params={"group": "gibt-es-nicht"}).status_code == 404
     assert client.get("/lane-members").status_code == 422
     assert client.get("/lane-members", params={"group": "a", "role": "b"}).status_code == 422
+
+
+def test_delete_role_removes_it_with_its_assignments(client, role_management_headers):
+    """P94-S3: roles can be removed (test runs had left ~2,600 behind); the
+    assignments go with them and the principal loses the permission."""
+    created = client.post(
+        "/roles",
+        json={"name": "loesch-test", "permissions": ["delete.test"]},
+        headers=role_management_headers,
+    ).json()["role"]
+    client.post(
+        "/role-assignments",
+        json={
+            "principal_type": "user",
+            "principal_id": "loesch-user",
+            "role_id": created["id"],
+            "resource_id": "root",
+        },
+    ).raise_for_status()
+    check = {"principal_id": "loesch-user", "resource_id": "root", "permission": "delete.test"}
+    assert client.get("/check", params=check).json()["allowed"] is True
+
+    forbidden = client.delete(f"/roles/{created['id']}", headers={"X-DMS-Principal": "nobody"})
+    assert forbidden.status_code == 403
+    response = client.delete(f"/roles/{created['id']}", headers=role_management_headers)
+
+    assert response.status_code == 204
+    assert all(r["id"] != created["id"] for r in client.get("/roles").json())
+    assert client.get("/check", params=check).json()["allowed"] is False
+    again = client.delete(f"/roles/{created['id']}", headers=role_management_headers)
+    assert again.status_code == 404
+
+
+def test_seeded_roles_cannot_be_deleted(client, role_management_headers):
+    roles = {r["name"]: r["id"] for r in client.get("/roles").json()}
+    for name in ("domain-admin-users", "everyone"):
+        response = client.delete(f"/roles/{roles[name]}", headers=role_management_headers)
+        assert response.status_code == 409, name
+        assert "nicht löschbar" in response.json()["detail"]
+
+
+def test_delete_approval_config(client, role_management_headers):
+    client.put(
+        "/approval-config/delete.test.action",
+        json={"requires_approval": True},
+        headers=role_management_headers,
+    ).raise_for_status()
+
+    response = client.delete("/approval-config/delete.test.action", headers=role_management_headers)
+
+    assert response.status_code == 204
+    assert client.get("/approval-config/delete.test.action").json()["requires_approval"] is False
+    missing = client.delete("/approval-config/delete.test.action", headers=role_management_headers)
+    assert missing.status_code == 404

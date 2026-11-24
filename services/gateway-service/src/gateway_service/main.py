@@ -7,6 +7,7 @@ import httpx
 from dms_auth_client import InvalidTokenError, MultiIssuerTokenValidator, TokenValidator
 from dms_common import configure_logging
 from dms_common.otel import setup_observability
+from dms_common.shutdown import bounded_shutdown_step
 from dms_metrics_client import (
     SensorConfigClient,
     bootstrap_http_sensors,
@@ -109,10 +110,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
 
     sensor_config_proxy.unbind()
-    await app.state.sensor_config_client.stop()
+    await bounded_shutdown_step(
+        "app.state.sensor_config_client.stop", app.state.sensor_config_client.stop()
+    )
     if registration:
-        await registration.stop()
-    await http_client.aclose()
+        await bounded_shutdown_step("registration.stop", registration.stop())
+    await bounded_shutdown_step("http_client.aclose", http_client.aclose())
 
 
 app = FastAPI(title=settings.service_name, lifespan=lifespan)
@@ -216,7 +219,10 @@ async def proxy(service_type: str, path: str, request: Request) -> Response:
             }
         )
 
-    if not await request.app.state.rate_limiter.allow(rate_limit_key):
+    # Only a verified token's principal can be exempt (P94-S3) - the header
+    # is set above solely after the token check, never from the client.
+    exempt = identity_headers.get("X-DMS-Principal", "") in settings.rate_limit_exempt
+    if not exempt and not await request.app.state.rate_limiter.allow(rate_limit_key):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Rate limit überschritten"
         )

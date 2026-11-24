@@ -21,6 +21,7 @@
 #   scripts/run-tests.sh --build             # Images vor dem Lauf neu bauen
 #   scripts/run-tests.sh --no-ruff           # nur pytest, kein ruff
 #   scripts/run-tests.sh --down              # Stack am Ende stoppen (docker compose down)
+#   scripts/run-tests.sh --no-cleanup        # Testreste nicht wegräumen (siehe unten)
 #   SERVICE_TEST_TIMEOUT=1800 scripts/run-tests.sh   # per-service limit in seconds
 #
 # Per-service limit (P91-S6): a service's suite is stopped after
@@ -28,6 +29,12 @@
 # hanging test can no longer block the whole regression. pytest's
 # `faulthandler_timeout` (pyproject.toml) has dumped the hanging test's stacks
 # into its log by then.
+#
+# Test debris (P94-S3): the suites run against the live stack and some leave
+# root folders, roles, groups, four-eyes configs and realm roles behind. After
+# the run, scripts/cleanup-test-debris.py removes the root folders this run
+# created (by test name patterns, `--since` the run's start) and every
+# pattern-matched role/group/config/realm role. `--no-cleanup` skips it.
 
 set -uo pipefail
 
@@ -96,6 +103,8 @@ declare -A SERVICE_PG_ROLE=(
 BUILD=0
 RUN_RUFF=1
 TEARDOWN=0
+CLEANUP=1
+RUN_STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 SERVICES=()
 
 for arg in "$@"; do
@@ -103,6 +112,7 @@ for arg in "$@"; do
     --build) BUILD=1 ;;
     --no-ruff) RUN_RUFF=0 ;;
     --down) TEARDOWN=1 ;;
+    --no-cleanup) CLEANUP=0 ;;
     -h|--help)
       sed -n '2,25p' "${BASH_SOURCE[0]}"
       exit 0
@@ -262,6 +272,17 @@ if [ "$RUN_RUFF" -eq 1 ]; then
   fi
 fi
 
+CLEANUP_STATUS="übersprungen"
+if [ "$CLEANUP" -eq 1 ]; then
+  echo "==> Testreste wegräumen (seit $RUN_STARTED_AT)"
+  if CLEANUP_OUTPUT="$(uv run python "$REPO_ROOT/scripts/cleanup-test-debris.py" --apply --quiet --since "$RUN_STARTED_AT" 2>&1)"; then
+    CLEANUP_STATUS="$(echo "$CLEANUP_OUTPUT" | tail -1)"
+  else
+    # Not a test failure: the regression's result stays as it is.
+    CLEANUP_STATUS="unvollständig - $(echo "$CLEANUP_OUTPUT" | tail -1)"
+  fi
+fi
+
 if [ "$TEARDOWN" -eq 1 ]; then
   echo "==> docker compose down"
   docker compose -f "$COMPOSE_FILE" down
@@ -276,6 +297,7 @@ for service in "${SERVICES[@]}"; do
 done
 echo "---------------------------------------------------------"
 printf "%-24s %s\n" "ruff" "$RUFF_STATUS"
+printf "%-24s %s\n" "Testreste" "$CLEANUP_STATUS"
 echo "==========================================================="
 echo "Logs: $LOG_DIR/"
 

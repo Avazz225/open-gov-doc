@@ -1903,6 +1903,10 @@ services:
       DMS_AUTH_SERVICE_BASE_URL: http://auth-service:8000
       DMS_RATE_LIMIT_MAX_REQUESTS: ${GATEWAY_SERVICE_RATE_LIMIT_MAX_REQUESTS:-600}
       DMS_RATE_LIMIT_WINDOW_SECONDS: ${GATEWAY_SERVICE_RATE_LIMIT_WINDOW_SECONDS:-60}
+      # P94-S3: the e2e account (`users-admin`, principal "2") isn't rate-limited
+      # in the dev stack - the UI suites back to back exceeded the limit. Set
+      # empty in .env to test the limit with that account.
+      DMS_RATE_LIMIT_EXEMPT_PRINCIPALS: ${GATEWAY_SERVICE_RATE_LIMIT_EXEMPT_PRINCIPALS-2}
       # Shared rate-limit store (since P25-S3, ADR 0097) - internal Compose DNS,
       # see redis service above.
       DMS_REDIS_URL: redis://redis:6379/0

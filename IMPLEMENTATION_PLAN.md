@@ -4802,7 +4802,27 @@ explain lanes and route changes. Design and reasons: [ADR 0249](docs/adr/0249-ch
     `config.import.test.*` approval configs (several with `requires_approval: true`) left by test runs.
     Same treatment: the tests clean up after themselves, and the existing debris is removed once
     (roles have no delete endpoint today, so this needs one or a direct cleanup).
-- **P94-S4 — Scoping: database schema migrations (ADR 0251).** Today schemas evolve through
+  - **Result** ([ADR 0261](docs/adr/0261-hygiene-trusted-service-reads-network-policies-test-debris.md)):
+    - ruff pinned (`0.16.0`); `scripts/sbom.sh` (CycloneDX 1.6, 32 services + 6 apps) and a CI `sbom` job.
+    - Helm `networkPolicy.*` (off by default): deny by default, release-internal traffic, DNS, the
+      ingress controller to published services, internet egress per component on fixed ports, the
+      Kubernetes API for Alloy and plugin-orchestration-service, `extraEgress`; kubeconform-valid.
+    - Docs: 16 stale `docs/services` open points struck (a helper agent's sweep, each verified), the
+      process-designer sentence, PROGRESS.md "Open Decisions" cut from 110 to the 8 still open, with the
+      historical session notes under their own heading.
+    - Nested sessions: only mail-connector (7 handlers) - now one session per request.
+    - Federation test identity: a recognisable display name.
+    - search-service/teamspace `403` loop: document-service trusts a service reading as itself (user
+      decision), search-service acknowledges a refusal.
+    - e2e rate limit: `DMS_RATE_LIMIT_EXEMPT_PRINCIPALS` (dev stack: users-admin); three suites back to
+      back 44/44 green. (Cleanup retries on `429` are therefore not needed.)
+    - Bounded shutdown in the remaining 28 services.
+    - Test debris: `DELETE /roles/{id}`, `DELETE /approval-config/{type}` (permission-service), `DELETE
+      /realm-roles/{name}` (auth-service); `scripts/cleanup-test-debris.py` (dry run by default) and its
+      call at the end of `run-tests.sh` instead of editing each creating test. One-off: 1,043 root
+      folders, the objects of deleted types, 2,585 roles, 93 groups, 60 configs, 206 realm roles removed;
+      ~100 test folders with their own permissions stay out of reach by design.
+- **P94-S4 — Scoping: database schema migrations (ADR 0260; 0251 went to P94-S2's log aggregation).** Today schemas evolve through
   `create_all` plus ad-hoc `ALTER TABLE … IF NOT EXISTS` at startup. Options: Alembic per service,
   formalizing the current pattern, or accepting it, judged against fleet rolling updates and the
   Helm upgrade path. No code. Phase-close regression for Phase 94. (`graphify update .` moved to the end

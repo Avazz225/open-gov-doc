@@ -3,10 +3,11 @@ import json
 import logging
 import time
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 
 from dms_common import MaxBodySizeMiddleware, configure_logging
 from dms_common.otel import setup_observability
+from dms_common.shutdown import bounded_shutdown_step
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
 from dms_metrics_client import (
@@ -185,19 +186,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
 
     retry_poll_task.cancel()
-    with suppress(asyncio.CancelledError):
-        await retry_poll_task
+    await bounded_shutdown_step("task retry_poll_task", retry_poll_task)
     sensor_config_proxy.unbind()
-    await app.state.sensor_config_client.stop()
+    await bounded_shutdown_step(
+        "app.state.sensor_config_client.stop", app.state.sensor_config_client.stop()
+    )
     if registration:
-        await registration.stop()
-    await publisher.close()
-    await event_bus.close()
-    await app.state.document_client.close()
-    await app.state.storage.close()
-    await app.state.ocr_client.close()
-    await app.state.permission_client.close()
-    await engine.dispose()
+        await bounded_shutdown_step("registration.stop", registration.stop())
+    await bounded_shutdown_step("publisher.close", publisher.close())
+    await bounded_shutdown_step("event_bus.close", event_bus.close())
+    await bounded_shutdown_step(
+        "app.state.document_client.close", app.state.document_client.close()
+    )
+    await bounded_shutdown_step("app.state.storage.close", app.state.storage.close())
+    await bounded_shutdown_step("app.state.ocr_client.close", app.state.ocr_client.close())
+    await bounded_shutdown_step(
+        "app.state.permission_client.close", app.state.permission_client.close()
+    )
+    await bounded_shutdown_step("engine.dispose", engine.dispose())
 
 
 app = FastAPI(title=settings.service_name, lifespan=lifespan)

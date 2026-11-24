@@ -1,5 +1,4 @@
 import asyncio
-import contextlib
 import logging
 import time
 from collections.abc import AsyncIterator
@@ -7,6 +6,7 @@ from contextlib import asynccontextmanager
 
 from dms_common import configure_logging
 from dms_common.otel import setup_observability
+from dms_common.shutdown import bounded_shutdown_step
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
 from dms_metrics_client import (
@@ -89,15 +89,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
 
     reminder_task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await reminder_task
+    await bounded_shutdown_step("task reminder_task", reminder_task)
     sensor_config_proxy.unbind()
-    await app.state.sensor_config_client.stop()
+    await bounded_shutdown_step(
+        "app.state.sensor_config_client.stop", app.state.sensor_config_client.stop()
+    )
     if registration:
-        await registration.stop()
-    await event_bus.close()
-    await app.state.permission_client.close()
-    await engine.dispose()
+        await bounded_shutdown_step("registration.stop", registration.stop())
+    await bounded_shutdown_step("event_bus.close", event_bus.close())
+    await bounded_shutdown_step(
+        "app.state.permission_client.close", app.state.permission_client.close()
+    )
+    await bounded_shutdown_step("engine.dispose", engine.dispose())
 
 
 async def run_reminder_tick() -> int | None:

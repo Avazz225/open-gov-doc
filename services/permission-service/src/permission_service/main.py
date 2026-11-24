@@ -10,6 +10,7 @@ from dms_common import (
     require_acting_identity,
 )
 from dms_common.otel import setup_observability
+from dms_common.shutdown import bounded_shutdown_step
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
 from dms_metrics_client import (
@@ -261,13 +262,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
 
     sensor_config_proxy.unbind()
-    await app.state.sensor_config_client.stop()
+    await bounded_shutdown_step(
+        "app.state.sensor_config_client.stop", app.state.sensor_config_client.stop()
+    )
     if registration:
-        await registration.stop()
-    await publisher.close()
-    await event_bus.close()
-    await app.state.auth_client.close()
-    await engine.dispose()
+        await bounded_shutdown_step("registration.stop", registration.stop())
+    await bounded_shutdown_step("publisher.close", publisher.close())
+    await bounded_shutdown_step("event_bus.close", event_bus.close())
+    await bounded_shutdown_step("app.state.auth_client.close", app.state.auth_client.close())
+    await bounded_shutdown_step("engine.dispose", engine.dispose())
 
 
 app = FastAPI(title=settings.service_name, lifespan=lifespan)
@@ -483,6 +486,32 @@ async def update_role(
         actor=x_dms_principal,
     )
     return RoleActionResult(status="updated", role=role)
+
+
+@app.delete("/roles/{role_id}", status_code=204)
+async def delete_role(
+    role_id: int,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """Deletes a role and its assignments (P94-S3) - there was no way to
+    remove one, and test runs had left ~2,600 behind. Seeded roles
+    (`repository.protected_role_names`) are `409`. Same gate as creating
+    and editing roles; audited as `permission.role.deleted`."""
+    await _require_role_management(session, x_dms_principal)
+    try:
+        role = await repository.delete_role(session, role_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except repository.ProtectedRoleError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await session.commit()
+    await publish_event(
+        "permission.role.deleted",
+        {"role_id": role_id, "name": role.name},
+        actor=x_dms_principal,
+    )
+    return Response(status_code=204)
 
 
 @app.post("/groups", response_model=GroupOut, status_code=201)
@@ -1019,6 +1048,23 @@ async def put_approval_config(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     await session.commit()
     return config
+
+
+@app.delete("/approval-config/{action_type}", status_code=204)
+async def delete_approval_config(
+    action_type: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """Removes an action type's four-eyes configuration (P94-S3); the type
+    then needs no approval, as any unconfigured one. Same gate as `PUT`."""
+    await _require_role_management(session, x_dms_principal)
+    try:
+        await repository.delete_approval_config(session, action_type)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await session.commit()
+    return Response(status_code=204)
 
 
 @app.get("/approval-config/{action_type}/recipients", response_model=ApprovalRecipientsOut)

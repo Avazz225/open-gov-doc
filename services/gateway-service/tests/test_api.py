@@ -1,4 +1,5 @@
 import os
+import time
 import uuid
 
 import httpx
@@ -352,3 +353,26 @@ async def test_rate_limit_state_survives_gateway_process_restart():
     second_process_limiter = RateLimiter(redis_url=REDIS_URL, max_requests=2, window_seconds=60.0)
     assert await second_process_limiter.allow(key) is False
     await second_process_limiter.aclose()
+
+
+def test_rate_limit_exempt_principal_is_not_limited(client, make_token, monkeypatch):
+    """P94-S3: a verified principal on the exempt list (the dev stack's e2e
+    account) isn't counted; anyone else still is."""
+    from gateway_service.main import settings as gateway_settings
+
+    monkeypatch.setattr(gateway_settings, "rate_limit_exempt_principals", "e2e-account")
+    app.state.rate_limiter = RateLimiter(redis_url=REDIS_URL, max_requests=2, window_seconds=60.0)
+    exempt = {"Authorization": f"Bearer {make_token(extra_claims={'sub': 'e2e-account'})}"}
+    other = {
+        "Authorization": f"Bearer {make_token(extra_claims={'sub': f'other-{time.time_ns()}'})}"
+    }
+
+    exempt_codes = [
+        client.get("/api/unknown-service/x", headers=exempt).status_code for _ in range(4)
+    ]
+    other_codes = [
+        client.get("/api/unknown-service/x", headers=other).status_code for _ in range(3)
+    ]
+
+    assert 429 not in exempt_codes
+    assert other_codes[-1] == 429

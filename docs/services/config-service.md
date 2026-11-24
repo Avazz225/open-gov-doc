@@ -285,8 +285,9 @@ read-only/diagnostic, changes nothing on either side (7.5). See
   point is about cross-installation automation, not the endpoint's own access control.)
 - **No deep diff of nested structures** — a change deep within an
   object-type layout is reported as "the entire `layouts` field differs", not line-precisely.
-- **No admin UI visualization of the comparison** in this session — CLI and raw API only,
-  see ADR 0040.
+- ~~**No admin UI visualization of the comparison** in this session — CLI and raw API only,
+  see ADR 0040.~~ — **closed in P52-S2**: `apps/admin-ui/src/components/ConfigCompare.tsx`
+  (`/config-compare/`) shows the `POST /config/compare` result, see `docs/services/admin-ui.md`.
 
 ## Configuration
 

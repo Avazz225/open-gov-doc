@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 
 from dms_common import configure_logging
 from dms_common.otel import setup_observability
+from dms_common.shutdown import bounded_shutdown_step
 from dms_constraint_engine import ROOT_PARENT_TYPE
 from dms_constraint_engine import validate as run_validation
 from dms_db_base import build_engine, make_session_factory
@@ -179,11 +180,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
 
     sensor_config_proxy.unbind()
-    await app.state.sensor_config_client.stop()
-    await app.state.permission_client.close()
+    await bounded_shutdown_step(
+        "app.state.sensor_config_client.stop", app.state.sensor_config_client.stop()
+    )
+    await bounded_shutdown_step(
+        "app.state.permission_client.close", app.state.permission_client.close()
+    )
     if registration:
-        await registration.stop()
-    await engine.dispose()
+        await bounded_shutdown_step("registration.stop", registration.stop())
+    await bounded_shutdown_step("engine.dispose", engine.dispose())
 
 
 app = FastAPI(title=settings.service_name, lifespan=lifespan)

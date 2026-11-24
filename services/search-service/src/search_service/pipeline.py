@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime
 
+import httpx
 from search_service import metrics, repository
 from search_service.document_client import DocumentServiceClient
 from search_service.folder_client import FolderServiceClient
@@ -13,9 +14,24 @@ logger = logging.getLogger(__name__)
 
 async def reindex_document(*args, **kwargs) -> None:
     """Counts failures for the `search.index.failures` sensor (P88-S2b) and
-    re-raises, so JetStream still redelivers the event."""
+    re-raises, so JetStream still redelivers the event - except a refusal
+    (`403`, P94-S3): asking again won't change it, and it had kept 16
+    messages in an endless 30-s redelivery loop. It is logged and counted,
+    and the event is acknowledged."""
     try:
         await _reindex_document(*args, **kwargs)
+    except httpx.HTTPStatusError as exc:
+        metrics.count_index_failure()
+        if exc.response.status_code == 403:
+            logger.warning(
+                "search_reindex_refused",
+                extra={
+                    "document_id": args[0] if args else kwargs.get("document_id"),
+                    "url": str(exc.request.url),
+                },
+            )
+            return
+        raise
     except Exception:
         metrics.count_index_failure()
         raise

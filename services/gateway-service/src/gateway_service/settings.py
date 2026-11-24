@@ -142,6 +142,18 @@ class Settings(BaseServiceSettings):
     # real safety net against clients that genuinely run out of control.
     rate_limit_max_requests: int = 600
     rate_limit_window_seconds: float = 60.0
+    # Verified principals (token `sub`, comma-separated) the limit doesn't
+    # apply to (P94-S3). Empty by default; the dev stack exempts its e2e
+    # account (`users-admin`, principal "2"), whose three UI suites back to
+    # back exceeded the limit, failed at random and left test data behind
+    # when their cleanup calls were refused. Not meant for production.
+    rate_limit_exempt_principals: str = ""
+
+    @property
+    def rate_limit_exempt(self) -> frozenset[str]:
+        return frozenset(
+            p.strip() for p in self.rate_limit_exempt_principals.split(",") if p.strip()
+        )
 
     # Shared store for rate limiting (since P25-S3, ADR 0097) - replaces
     # the original in-process `dict` (ADR 0005), so multiple horizontally

@@ -4,11 +4,12 @@ import logging
 import time
 import uuid
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
 from dms_common import configure_logging
 from dms_common.otel import setup_observability
+from dms_common.shutdown import bounded_shutdown_step
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
 from dms_metrics_client import (
@@ -451,22 +452,29 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
 
     poll_task.cancel()
-    with suppress(asyncio.CancelledError):
-        await poll_task
+    await bounded_shutdown_step("task poll_task", poll_task)
     if registration:
-        await registration.stop()
+        await bounded_shutdown_step("registration.stop", registration.stop())
     sensor_config_proxy.unbind()
-    await app.state.sensor_config_client.stop()
-    await consumer_bus.close()
-    await event_bus.close()
-    await app.state.workflow_client.close()
-    await app.state.audit_client.close()
-    await app.state.storage_client.close()
-    await app.state.notification_client.close()
-    await app.state.license_client.close()
-    await app.state.permission_client.close()
-    await app.state.auth_client.close()
-    await engine.dispose()
+    await bounded_shutdown_step(
+        "app.state.sensor_config_client.stop", app.state.sensor_config_client.stop()
+    )
+    await bounded_shutdown_step("consumer_bus.close", consumer_bus.close())
+    await bounded_shutdown_step("event_bus.close", event_bus.close())
+    await bounded_shutdown_step(
+        "app.state.workflow_client.close", app.state.workflow_client.close()
+    )
+    await bounded_shutdown_step("app.state.audit_client.close", app.state.audit_client.close())
+    await bounded_shutdown_step("app.state.storage_client.close", app.state.storage_client.close())
+    await bounded_shutdown_step(
+        "app.state.notification_client.close", app.state.notification_client.close()
+    )
+    await bounded_shutdown_step("app.state.license_client.close", app.state.license_client.close())
+    await bounded_shutdown_step(
+        "app.state.permission_client.close", app.state.permission_client.close()
+    )
+    await bounded_shutdown_step("app.state.auth_client.close", app.state.auth_client.close())
+    await bounded_shutdown_step("engine.dispose", engine.dispose())
 
 
 app = FastAPI(title=settings.service_name, lifespan=lifespan)

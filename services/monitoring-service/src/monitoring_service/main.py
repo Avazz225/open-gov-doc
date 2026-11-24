@@ -1,5 +1,4 @@
 import asyncio
-import contextlib
 import logging
 import time
 from collections.abc import AsyncIterator
@@ -9,6 +8,7 @@ from datetime import UTC, datetime
 import httpx
 from dms_common import configure_logging
 from dms_common.otel import set_sampling_ratio, setup_observability
+from dms_common.shutdown import bounded_shutdown_step
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
 from dms_registry_client import maybe_start_registration
@@ -146,16 +146,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
 
     alert_task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await alert_task
+    await bounded_shutdown_step("task alert_task", alert_task)
     if registration:
-        await registration.stop()
-    await event_bus.close()
-    await app.state.scrape_client.aclose()
-    await app.state.registry_client.close()
-    await app.state.auth_client.close()
-    await app.state.permission_client.close()
-    await engine.dispose()
+        await bounded_shutdown_step("registration.stop", registration.stop())
+    await bounded_shutdown_step("event_bus.close", event_bus.close())
+    await bounded_shutdown_step("app.state.scrape_client.aclose", app.state.scrape_client.aclose())
+    await bounded_shutdown_step(
+        "app.state.registry_client.close", app.state.registry_client.close()
+    )
+    await bounded_shutdown_step("app.state.auth_client.close", app.state.auth_client.close())
+    await bounded_shutdown_step(
+        "app.state.permission_client.close", app.state.permission_client.close()
+    )
+    await bounded_shutdown_step("engine.dispose", engine.dispose())
 
 
 async def _scrape_families() -> dict:

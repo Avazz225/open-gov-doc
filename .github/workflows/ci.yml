@@ -105,3 +105,28 @@ jobs:
 
       - name: Build (statischer Export)
         run: npm run build
+
+  # Software bill of materials (P94-S3): CycloneDX 1.6 per service and app,
+  # kept as a build artifact (scripts/sbom.sh).
+  sbom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Generate SBOMs
+        run: scripts/sbom.sh --out sbom
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx
+          path: sbom/*.cdx.json
+          retention-days: 90

@@ -72,6 +72,10 @@ span is sampled. Unsampled ids are left out, since they lead nowhere in Tempo.
   raises, the message isn't acknowledged, and JetStream redelivers it every 30 s indefinitely: 16
   messages, 64 errors in 10 minutes. Those documents are presumably never indexed. The root cause is a
   question of how a background indexer is authorised, so it isn't fixed here; it is recorded in P94-S3.
+  **Resolved in P94-S3** (user decision): document-service trusts a service principal reading as itself
+  (no `X-DMS-On-Behalf-Of`) - reads only, never writes, and a service acting for a user is checked as
+  before. search-service additionally acknowledges a `403` instead of letting it be redelivered forever.
+  Live afterwards: 0 errors, 0 redelivered messages.
 
 ## Consequences
 
