@@ -25,7 +25,7 @@ from signature_service.document_client import NotFoundError as DocumentNotFoundE
 from signature_service.models import TrustedListFetch
 from signature_service.settings import Settings
 from signature_service.storage_client import StorageClient
-from signature_service.validation import trusted_lists
+from signature_service.validation import cades, trusted_lists
 from signature_service.validation.fetcher import build_fenced_session
 from signature_service.validation.interface import (
     FetchLimits,
@@ -41,7 +41,17 @@ from signature_service.validation.worker import ValidationJob, ValidationWorker
 logger = logging.getLogger(__name__)
 
 HANDLED_EVENTS = {"document.created", "document.version.created"}
-PDF = "application/pdf"
+# Nested enveloping signatures (`.p7m` in `.p7m`) unpacked at most this deep.
+MAX_ENVELOPE_DEPTH = 3
+
+
+def inner_filename(filename: str) -> str:
+    """The name of an enveloped file: "bescheid.pdf.p7m" -> "bescheid.pdf"."""
+    lowered = filename.lower()
+    for suffix in (".p7m", ".p7s"):
+        if lowered.endswith(suffix) and len(filename) > len(suffix):
+            return filename[: -len(suffix)]
+    return f"Inhalt von {filename}"
 
 
 def report_key(document_id: str, run_id: str) -> str:
@@ -99,7 +109,8 @@ class IncomingSignatureService:
         self._fetch_lock = asyncio.Lock()
         self.backfill_status = BackfillStatus()
         self._backfill_task: asyncio.Task | None = None
-        self.validators: list[SignatureValidator] = validators or [PadesValidator()]
+        self._cades = cades.CadesValidator()
+        self.validators: list[SignatureValidator] = validators or [PadesValidator(), self._cades]
         self.worker = ValidationWorker(
             queue_size=settings.incoming_validation_queue_size,
             workers=settings.incoming_validation_workers,
@@ -123,7 +134,8 @@ class IncomingSignatureService:
         if not isinstance(version_number, int) or version_number < 1:
             return
         content_type, filename = data.get("content_type"), data.get("filename")
-        if self.validator_for(content_type, filename) is None:
+        is_attached_signature = data.get("derivation_type") == "signature"
+        if not is_attached_signature and self.validator_for(content_type, filename) is None:
             return
         await self.worker.submit(
             ValidationJob(
@@ -155,6 +167,7 @@ class IncomingSignatureService:
                 max_response_bytes=s.incoming_validation_fetch_max_bytes,
                 proxy=s.signature_validation_http_proxy,
                 extra_blocked_networks=list(s.incoming_validation_blocked_networks),
+                allowed_ports=tuple(s.incoming_validation_allowed_ports),
             ),
             tsp_registry=registry,
         )
@@ -179,39 +192,28 @@ class IncomingSignatureService:
         return self._registry
 
     async def process(self, job: ValidationJob) -> None:
-        validator = self.validator_for(job.content_type, job.filename)
-        if validator is None:
-            return
         async with self._session_factory() as session:
             enabled, policy = await self._policy(session)
         if not enabled:
             return
         try:
-            meta = await self._documents.get_version_meta(job.document_id, job.version_number)
-            if meta["size_bytes"] > self._settings.incoming_validation_max_bytes:
-                outcome = ValidationOutcome(
-                    findings=[
-                        SignatureFinding(
-                            format=validator.format,
-                            position=None,
-                            kind="file",
-                            indication="INDETERMINATE",
-                            sub_indication="FILE_TOO_LARGE",
-                            failure_reason="Datei zu groß für die Signaturprüfung",
-                            technical_detail=f"{meta['size_bytes']} Bytes",
-                        )
-                    ]
+            document = await self._documents.get_document(job.document_id)
+            if document.get("derivation_type") == "signature" and document.get(
+                "derived_from_document_id"
+            ):
+                # A detached signature (`.p7s`, P92-S4) is shown on the
+                # document it signs: validate that version, which picks up
+                # every signature attached to it.
+                job = ValidationJob(
+                    document_id=document["derived_from_document_id"],
+                    version_number=document["derived_from_version_number"],
+                    content_type=None,
+                    filename=None,
+                    trigger=job.trigger,
+                    requested_by=job.requested_by,
                 )
-            else:
-                _content_type, data = await self._documents.get_version_content(
-                    job.document_id, job.version_number
-                )
-                # Cheap pre-check: a signature dictionary can't sit in a
-                # compressed object stream (its byte range must be addressable
-                # in the file), so a PDF without "/ByteRange" is unsigned.
-                if b"/ByteRange" not in data:
-                    return
-                outcome = await self.worker.run_validator(validator, data, policy)
+                document = await self._documents.get_document(job.document_id)
+            outcome = await self._validate_version(document, job, policy)
         except DocumentNotFoundError:
             logger.info("incoming_signature_version_gone", extra={"document_id": job.document_id})
             return
@@ -222,6 +224,8 @@ class IncomingSignatureService:
                 "incoming_signature_fetch_failed",
                 extra={"document_id": job.document_id, "error": type(exc).__name__},
             )
+            return
+        if outcome is None:
             return
         if not outcome.findings:
             return
@@ -273,6 +277,143 @@ class IncomingSignatureService:
             },
             actor=job.requested_by or "system:signature-validation",
         )
+
+    def _too_large(self, format_: str, size: int, position: str | None) -> SignatureFinding:
+        return SignatureFinding(
+            format=format_,
+            position=position,
+            kind="file",
+            indication="INDETERMINATE",
+            sub_indication="FILE_TOO_LARGE",
+            failure_reason="Datei zu groß für die Signaturprüfung",
+            technical_detail=f"{size} Bytes",
+        )
+
+    async def _validate_version(
+        self, document: dict, job: ValidationJob, policy: ValidationPolicy
+    ) -> ValidationOutcome | None:
+        """Every signature of one document version in one outcome: the file's
+        own (PAdES in a PDF, CAdES in a `.p7m`) and the detached `.p7s`
+        signatures attached to exactly this version. None if there is
+        nothing signed."""
+        max_bytes = self._settings.incoming_validation_max_bytes
+        meta = await self._documents.get_version_meta(job.document_id, job.version_number)
+        own = self.validator_for(meta.get("content_type"), meta.get("filename"))
+        data: bytes | None = None
+        findings: list[SignatureFinding] = []
+        truncated = False
+        report_xml = None
+
+        async def content() -> bytes:
+            nonlocal data
+            if data is None:
+                _type, data = await self._documents.get_version_content(
+                    job.document_id, job.version_number
+                )
+            return data
+
+        if own is not None:
+            if meta["size_bytes"] > max_bytes:
+                findings.append(self._too_large(own.format, meta["size_bytes"], None))
+            elif own.format == "pades":
+                # A signature dictionary can't sit in a compressed object
+                # stream (its byte range must be addressable in the file), so
+                # a PDF without "/ByteRange" is unsigned.
+                if b"/ByteRange" in await content():
+                    result = await self.worker.run_validator(own, data, policy)
+                    findings += result.findings
+                    truncated |= result.truncated
+                    report_xml = result.report_xml
+            elif own.format == "cades" and cades.is_detached_type(meta.get("content_type")):
+                pass  # a stray `.p7s` without a link: nothing to check it against
+            else:
+                result = await self.worker.run_validator(own, await content(), policy)
+                findings += result.findings
+                truncated |= result.truncated
+                if own.format == "cades":
+                    await self._extract_enveloped(document, job.version_number, data)
+
+        for signature_doc in await self._detached_signatures(document["id"], job.version_number):
+            sig_meta = await self._documents.get_version_meta(
+                signature_doc["id"], signature_doc["current_version_number"]
+            )
+            position = sig_meta.get("filename") or signature_doc["title"]
+            if sig_meta["size_bytes"] > max_bytes or meta["size_bytes"] > max_bytes:
+                findings.append(
+                    self._too_large(
+                        "cades", max(sig_meta["size_bytes"], meta["size_bytes"]), position
+                    )
+                )
+                continue
+            _type, signature = await self._documents.get_version_content(
+                signature_doc["id"], signature_doc["current_version_number"]
+            )
+            signed = await content()
+            result = await self.worker.run_in_pool(
+                lambda sig=signature, pos=position, doc=signed: self._cades.validate_detached(
+                    sig, doc, policy, position=pos
+                )
+            )
+            findings += result.findings
+            truncated |= result.truncated
+        if not findings:
+            return None
+        return ValidationOutcome(findings=findings, truncated=truncated, report_xml=report_xml)
+
+    async def _detached_signatures(self, document_id: str, version_number: int) -> list[dict]:
+        derived = await self._documents.list_derived(document_id)
+        return [
+            d
+            for d in derived
+            if d.get("derivation_type") == "signature"
+            and d.get("derived_from_version_number") == version_number
+        ]
+
+    async def _extract_enveloped(self, document: dict, version_number: int, data: bytes) -> None:
+        """Stores the content of an enveloping signature as a derived document
+        (once per version), so it can be previewed, searched and OCRed. A
+        nested `.p7m` is unpacked again when its own event arrives - at most
+        `MAX_ENVELOPE_DEPTH` layers."""
+        inner = cades.extract_content(data)
+        if not inner:
+            return
+        depth, current = 0, document
+        while current.get("derivation_type") == "signed_content" and depth < MAX_ENVELOPE_DEPTH:
+            depth += 1
+            current = await self._documents.get_document(current["derived_from_document_id"])
+        if depth >= MAX_ENVELOPE_DEPTH:
+            logger.info("incoming_signature_envelope_depth", extra={"document_id": document["id"]})
+            return
+        existing = await self._documents.list_derived(document["id"])
+        if any(
+            d.get("derivation_type") == "signed_content"
+            and d.get("derived_from_version_number") == version_number
+            for d in existing
+        ):
+            return
+        filename = await self._version_filename(document, version_number)
+        inner_name = inner_filename(filename)
+        try:
+            await self._documents.create_derived_document(
+                source=document,
+                version_number=version_number,
+                data=inner,
+                filename=inner_name,
+                # Told apart from the original in lists; the file name stays.
+                title=f"{inner_name} (Inhalt von {filename})",
+                derivation_type="signed_content",
+            )
+        except httpx.HTTPStatusError as exc:
+            # E.g. no write access for this service in a teamspace, or the
+            # content's format isn't on the upload whitelist.
+            logger.warning(
+                "incoming_signature_extract_failed",
+                extra={"document_id": document["id"], "status": exc.response.status_code},
+            )
+
+    async def _version_filename(self, document: dict, version_number: int) -> str:
+        meta = await self._documents.get_version_meta(document["id"], version_number)
+        return meta.get("filename") or document.get("title") or "inhalt"
 
     # --- re-validation and backfill -----------------------------------------
 
@@ -334,7 +475,9 @@ class IncomingSignatureService:
                     created_from=created_from,
                     created_to=created_to,
                     folder_id=folder_id,
-                    content_type=PDF,
+                    # Every format (PDF, `.p7m`, `.p7s`); filtered below by
+                    # whether a validator applies.
+                    content_type=None,
                     after_id=after_id,
                     limit=500,
                 )
@@ -351,6 +494,11 @@ class IncomingSignatureService:
                         status.limit_reached = True
                         break
                     status.scanned += 1
+                    if (
+                        self.validator_for(version.get("content_type"), version.get("filename"))
+                        is None
+                    ):
+                        continue
                     key = (version["document_id"], version["version_number"])
                     if key in done:
                         status.skipped_validated += 1

@@ -4599,9 +4599,33 @@ should cover the trust settings. Design and reasons: [ADR 0248](docs/adr/0248-va
   - admin-ui `/signature-config/`: trust sources, installation anchors, revocation mode, outbound
     fetching, backfill.
   - e2e with a signed PDF; manual check with a real QES sample; screenshots at 1400/768/390.
+  - **Result:**
+    - signature-service `GET /incoming-signatures/summaries` (batch for list badges).
+    - user-ui: the badge in the document list (current version), "Eingegangene Signaturen" in
+      `SignaturesPanel` (signer, proven or claimed time, qualification, coverage, trust, reason, report
+      download, "Erneut prüfen" with polling); the own-signature text no longer contradicts it.
+    - reviewer-ui: the badge on a routing folder's documents.
+    - admin-ui `/signature-config/` (now "Signaturen"): switches, EU trusted lists (status, fetch now,
+      import), installation anchors, backfill with progress.
+    - **e2e:** user-ui with two signed fixture PDFs (valid via an anchor, changed after signing);
+      admin-ui read-only; screenshots at 1400/768/390.
+    - **Real samples** (EU DSS test data, 2014-2019): correctly "nicht prüfbar" against today's lists;
+      they found a crash (an exception pyHanko lets through) - fixed - and led to allowing port 8080 for
+      OCSP. A current QES sample couldn't be fetched automatically (EUR-Lex blocks scripted requests).
 - **P92-S4 — CAdES (optional, decide after S3).** Detached `.p7s` with pairing in mail-connector and an
   upload-form field; enveloping `.p7m` with the extracted content as a derived document. Phase-close
   regression for Phase 92 (if S4 is skipped, the regression runs at the end of S3).
+  - **Result (built after the user's go-ahead):**
+    - signature-service `validation/cades.py`: enveloping and detached CMS (DER/PEM/base64, parallel
+      signers, AdES and qualification as for PAdES); one result per version including every attached
+      `.p7s`; `.p7m` content stored once as a derived document (at most 3 nested layers).
+    - document-service: CMS sniffing (`application/pkcs7-mime`/`-signature`); `derivation_type`
+      `signature`/`signed_content` on upload (read access to the source required).
+    - mail-connector: pairing `name.ext` + `name.ext.p7s` (or one file + one `.p7s`), filed as linked.
+    - user-ui: optional ".p7s" field in the upload form; CAdES rows name their source.
+    - **User feedback during the session:** the preview's action buttons were cramped; they are now a
+      toolbar with "Weitere Aktionen", and the tree/list context menu offers the same actions.
+
 
 ## Phase 93 — Running Processes and Lanes (user decision 2026-11-23, ADR 0249)
 
@@ -4685,6 +4709,10 @@ explain lanes and route changes. Design and reasons: [ADR 0249](docs/adr/0249-ch
     `dms_common.shutdown.bounded_shutdown_step` now bounds and names each step in document-service,
     mail-connector and workflow-service. Apply it to the remaining services' lifespans, and once a
     `shutdown_step_timeout` names a step, fix that step at its root.
+  - **Test leftovers in the root folder (found in P92-S4):** the root has 1,043 live folders (810 at
+    P91-S4), among them 22 `webdav-viele-kinder-*` from a WebDAV test that never cleaned up (fixed
+    now), plus `cmis-ordner-*`, `Testordner-*`, `Zielordner-*`, `Typisierter Ordner-*`. Trash them once
+    and make the creating tests clean up.
   - **Objects with deleted types (found in P91-S2b):** the conformity report shows 52 folders and 23
     documents on the dev stack whose object type was deleted by a test after use. Tests that delete
     their types should delete their folders and documents first. A one-off cleanup goes with the other
@@ -4719,6 +4747,10 @@ by the pilot's numbers, not a committed rewrite of all of them (see ADR 0257's c
 - **P95-S1 — Load test with a per-service ranking.**
   - Same k6 profile plus a variant that exercises the less-used paths (workflow, search, rendering,
     OCR, case, mail).
+  - **Cold permission cache on large folders (found in P92-S4):** a principal's first filtered listing
+    of a folder with ~1,000 children takes about 3 s (each cache miss is computed on its own; warm it is
+    60-90 ms). Every new user, and every cache-generation change, pays it. Measure it in the profile and
+    consider computing siblings together (one ancestor walk for the shared parent).
   - **Per service, from the existing sensors, cadvisor and P94-S1's traces:**
     - CPU-seconds per 1,000 requests;
     - RSS at rest and under load;

@@ -66,7 +66,11 @@
     "draftHint": "Das Dokument erhält beim Anlegen noch kein Kennzeichen - es kann später über \"Registrieren\" nachgeholt werden.",
     "chooseObjectType": "Dokumenttyp wählen …",
     "noDocumentsAllowed": "In diesem Ordner dürfen keine Dokumente abgelegt werden.",
-    "formLabelInto": "Dokument hochladen in „{name}“"
+    "formLabelInto": "Dokument hochladen in „{name}“",
+    "signatureLabel": "Abgesetzte Signatur (.p7s)",
+    "signatureHint": "Eine abgesetzte Signatur zu dieser Datei – sie wird mit ihr zusammen geprüft.",
+    "signatureError": "Das Dokument wurde abgelegt, die Signaturdatei aber nicht: {reason}",
+    "signatureAdd": "+ Abgesetzte Signatur (.p7s) hinzufügen"
   },
   "iconRail": {
     "label": "Cross-Cutting-Navigation",
@@ -158,7 +162,12 @@
     "noSubfoldersAllowed": "Hier dürfen keine Unterordner angelegt werden.",
     "newFolderChooseObjectType": "Ordnerklasse wählen …",
     "templateApplied": "{count} Ordner aus der Vorlage in „{name}“ angelegt.",
-    "uploadInto": "Hochladen in \"{name}\" …"
+    "uploadInto": "Hochladen in \"{name}\" …",
+    "openDocument": "\"{name}\" öffnen",
+    "downloadDocument": "\"{name}\" herunterladen",
+    "exportDocument": "\"{name}\" als PDF exportieren",
+    "xdomeaExportDocument": "\"{name}\" für Behördenübergabe exportieren …",
+    "xjustizExportDocument": "\"{name}\" für Justizübergabe exportieren …"
   },
   "metadata": {
     "paneLabel": "Metadaten",
@@ -185,7 +194,7 @@
   },
   "signatures": {
     "heading": "Signaturen",
-    "noSignatures": "Dieses Dokument ist noch nicht signiert.",
+    "noSignatures": "In OG Doc wurde dieses Dokument noch nicht signiert.",
     "loadError": "Signaturen konnten nicht geladen werden",
     "signButton": "Jetzt signieren",
     "signing": "Signiere...",
@@ -694,7 +703,9 @@
       "no_lang": "keine Dokumentsprache angegeben",
       "figure_without_alt": "Abbildungen ohne Alternativtext"
     },
-    "setReminder": "Wiedervorlage …"
+    "setReminder": "Wiedervorlage …",
+    "moreActions": "Weitere Aktionen",
+    "actionsFor": "Aktionen für „{title}“"
   },
   "search": {
     "paneLabel": "Suche",
@@ -756,5 +767,59 @@
     "noneFit": "Für diesen Ordner passt keine Strukturvorlage.",
     "loadError": "Vorlagen konnten nicht geladen werden",
     "applyError": "Anlegen aus der Vorlage fehlgeschlagen"
+  },
+  "incomingSignatures": {
+    "heading": "Eingegangene Signaturen",
+    "none": "In dieser Version wurden keine Signaturen geprüft.",
+    "loadError": "Signaturprüfung konnte nicht geladen werden",
+    "checkedAt": "geprüft am {date}",
+    "truncated": "Die Datei enthält mehr Signaturen, als geprüft werden; nur die ersten sind aufgeführt.",
+    "report": "Prüfbericht herunterladen",
+    "reportError": "Prüfbericht konnte nicht geladen werden",
+    "recheck": "Erneut prüfen",
+    "rechecking": "Prüfe erneut…",
+    "recheckError": "Erneute Prüfung fehlgeschlagen",
+    "unknownSigner": "Unbekannte unterzeichnende Person",
+    "timestampBy": "Zeitstempel von {name}",
+    "provenTime": "Nachgewiesen signiert am",
+    "claimedTime": "Angegebene Signaturzeit",
+    "coverageLabel": "Umfang",
+    "trustLabel": "Vertrauen",
+    "reasonLabel": "Grund",
+    "indication": {
+      "TOTAL-PASSED": "gültig",
+      "TOTAL-FAILED": "ungültig",
+      "INDETERMINATE": "nicht prüfbar"
+    },
+    "qualification": {
+      "qes": "Qualifizierte elektronische Signatur (QES)",
+      "adesqc": "Fortgeschritten, mit qualifiziertem Zertifikat",
+      "ades": "Fortgeschrittene elektronische Signatur"
+    },
+    "coverage": {
+      "entire_document": "deckt das ganze Dokument ab",
+      "permitted_changes": "danach nur zulässige Änderungen (z. B. weitere Signaturen, Formularfelder)",
+      "changed_after_signing": "nach dem Signieren unzulässig verändert",
+      "unknown": "nicht feststellbar"
+    },
+    "trust": {
+      "internal": "OG Doc (interne Signatur)",
+      "installation": "vertrauenswürdig (Installation)",
+      "eu_trusted_list": "EU-Vertrauensliste"
+    },
+    "badge": {
+      "qualified": "Qualifiziert signiert",
+      "valid": "Gültig signiert",
+      "invalid": "Signatur ungültig",
+      "unchecked": "Signatur nicht prüfbar"
+    },
+    "badgeHint": {
+      "qualified": "{count} Signatur(en), mindestens eine qualifiziert – geprüft am {date}",
+      "valid": "{count} Signatur(en), alle gültig – geprüft am {date}",
+      "invalid": "Mindestens eine Signatur ist ungültig oder das Dokument wurde danach verändert – geprüft am {date}",
+      "unchecked": "Mindestens eine Signatur ließ sich nicht abschließend prüfen – geprüft am {date}"
+    },
+    "cadesEnveloping": "eingebettete Signatur (.p7m)",
+    "cadesDetached": "Signaturdatei: {name}"
   }
 }

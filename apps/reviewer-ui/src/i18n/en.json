@@ -240,5 +240,11 @@
         "import": "Import process definition"
       }
     }
+  },
+  "signatureBadge": {
+    "qualified": "Qualified signature",
+    "valid": "Validly signed",
+    "invalid": "Signature invalid",
+    "unchecked": "Signature not checkable"
   }
 }

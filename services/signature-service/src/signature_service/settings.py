@@ -100,6 +100,8 @@ class Settings(BaseServiceSettings):
     # service CIDRs if they are public ranges. Private, loopback, link-local
     # and CGNAT ranges are always blocked.
     incoming_validation_blocked_networks: list[str] = []
+    # Ports revocation/certificate fetches may use besides the defaults.
+    incoming_validation_allowed_ports: list[int] = [80, 443, 8080]
 
     # EU trusted lists (P92-S2). 0 disables the scheduled fetch (tests, or an
     # installation that only imports by hand).

@@ -680,6 +680,23 @@ now wraps.
   - folder-service's refusal is shown with the offending node's path.
 - **Errors:** `detail.errors` lists are shown as text, not JSON (`extractErrorMessage`).
 
+## Incoming Signatures on the Signature Page (P92-S3, [ADR 0248](../adr/0248-validating-externally-signed-incoming-documents.md))
+
+`/signature-config/` (now titled "Signaturen") got four sections (`IncomingSignatureSettings`), all behind
+`admin.signature_config`:
+- **Switches:** validation on/off ("Prüfung eingeschaltet" - not the section's name, so screen readers
+  don't hear two identical labels), EU trusted lists, outbound fetching, the revocation mode (soft-fail /
+  hard-fail explained in words). Saved on change.
+- **EU trusted lists:** last fetch with the number stored and the failures per territory, the schedule,
+  "Jetzt abrufen" (polls until the new fetch is finished), "Liste importieren (XML)", and the stored lists
+  (territory, sequence number, issued, next update, source) as a `BoundedList`.
+- **Installation trust anchors:** the internal CA (not removable) and uploaded CA certificates; add by
+  label and PEM (paste or file), remove with a confirmation.
+- **Backfill:** a date range and/or a folder id, "skip versions already checked"; start (disabled without
+  criteria) and live progress.
+- **Tests:** `incoming-signature-settings.test.tsx` (6); e2e `incoming-signature-settings.spec.ts`
+  (read-only, grants `domain-admin-signature` for its duration; no overflow at 1400/768/390).
+
 ## Licence Limits and Extension Hints (P91-S6)
 
 **Licence page** (`/license/`, `admin.license`):

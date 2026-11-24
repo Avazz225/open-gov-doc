@@ -15,8 +15,11 @@ import {
   type Case,
   type CaseDocumentReference,
   type Reminder,
+  getIncomingSignatureSummaries,
+  type IncomingSignatureSummary,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { SignatureBadge } from "./SignatureBadge";
 
 // Case-browsing UI (14.2, Post-Roadmap Phase 74 Session 1, ADR 0141's own
 // named gap - see api.ts's own comment above the case functions for the
@@ -143,6 +146,10 @@ function CaseDetail({
   // `null` = resolution failed, `undefined` = not resolved yet - same idiom
   // as user-ui's CasesPane.tsx.
   const [documentTitles, setDocumentTitles] = useState<Record<string, string | null>>({});
+  // Signature badge per document (P92-S3): its current version's summary.
+  const [signatureSummaries, setSignatureSummaries] = useState<
+    Record<string, IncomingSignatureSummary>
+  >({});
   const [error, setError] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
@@ -157,6 +164,7 @@ function CaseDetail({
       setActiveCase(loadedCase);
       setDocuments(loadedDocuments);
       const titles: Record<string, string | null> = {};
+      const currentVersions: Record<string, number> = {};
       await Promise.all(
         loadedDocuments
           .filter((ref) => !ref.document_deleted_at)
@@ -164,12 +172,24 @@ function CaseDetail({
             try {
               const doc = await getCaseDocument(token, ref.document_id);
               titles[ref.document_id] = doc.title;
+              currentVersions[ref.document_id] = doc.current_version_number;
             } catch {
               titles[ref.document_id] = null;
             }
           })
       );
       setDocumentTitles(titles);
+      // Badges are extra: a failure here leaves them out, nothing else.
+      getIncomingSignatureSummaries(token, Object.keys(currentVersions))
+        .then((all) => {
+          const current: Record<string, IncomingSignatureSummary> = {};
+          for (const [documentId, version] of Object.entries(currentVersions)) {
+            const match = all[documentId]?.find((s) => s.version_number === version);
+            if (match) current[documentId] = match;
+          }
+          setSignatureSummaries(current);
+        })
+        .catch(() => setSignatureSummaries({}));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("cases.loadError"));
     }
@@ -254,6 +274,9 @@ function CaseDetail({
                 >
                   {documentTitles[ref.document_id] ?? ref.document_id}
                 </button>
+              )}
+              {signatureSummaries[ref.document_id] && (
+                <SignatureBadge summary={signatureSummaries[ref.document_id]} />
               )}
               <span className="text-xs opacity-70">
                 {t("cases.documentAddedAt", { date: formatDate(ref.added_at, locale) })}

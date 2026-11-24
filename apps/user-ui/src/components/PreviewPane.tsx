@@ -25,6 +25,8 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { RedactionModal } from "./RedactionModal";
+import type { DocumentAction } from "@/lib/document-actions";
+import { ContextMenu } from "./ContextMenu";
 import { ReminderModal } from "./ReminderModal";
 import { EmptyState } from "./EmptyStateIllustration";
 import { Lock, TriangleAlert } from "lucide-react";
@@ -110,6 +112,8 @@ export function PreviewPane({
   document: activeDocument,
   versionBump = 0,
   onDocumentCreated,
+  requestedAction = null,
+  onActionHandled,
 }: {
   document: DocumentSummary | null;
   // Increments when another component (currently only `SignaturesPanel`,
@@ -125,12 +129,18 @@ export function PreviewPane({
   // `onUploaded` workspace-context callback rather than inventing a second
   // refresh mechanism.
   onDocumentCreated?: () => void;
+  // An action asked for from the tree/list context menu: run once, then
+  // reported back so it isn't repeated.
+  requestedAction?: DocumentAction | null;
+  onActionHandled?: () => void;
 }) {
   const { accessToken } = useAuth();
   const { t } = useI18n();
   const [previewKind, setPreviewKind] = useState<PreviewKind>("none");
   // Follow-up reminder dialog (P90-S2, ADR 0246).
   const [reminderOpen, setReminderOpen] = useState(false);
+  // "Weitere Aktionen" menu, anchored below its button.
+  const [actionsMenu, setActionsMenu] = useState<{ x: number; y: number } | null>(null);
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
   const [textContent, setTextContent] = useState<string | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
@@ -629,6 +639,21 @@ export function PreviewPane({
     }
   }
 
+  // Run an action asked for from the context menu once (see
+  // `DocumentAction`), then report it handled so it isn't repeated. The
+  // handlers read the current document from this render, which is the one
+  // the action was asked for.
+  useEffect(() => {
+    if (!requestedAction || !activeDocument) return;
+    if (requestedAction === "download") void handleDownload();
+    else if (requestedAction === "export") void handleExport();
+    else if (requestedAction === "xdomea") setXdomeaExportOpen(true);
+    else if (requestedAction === "xjustiz") setXjustizExportOpen(true);
+    else if (requestedAction === "redact") setShowRedactionModal(true);
+    onActionHandled?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs per request, not per render
+  }, [requestedAction, activeDocument?.id]);
+
   if (!activeDocument) {
     return (
       <section className="preview-pane" aria-label={t("preview.paneLabel")}>
@@ -814,15 +839,55 @@ export function PreviewPane({
         </p>
       )}
 
-      <button type="button" className={primaryBtn} onClick={handleDownload}>
-        {t("folderBrowser.download")}
-      </button>
-      <button type="button" className={primaryBtn} onClick={handleExport} disabled={exporting}>
-        {exporting ? t("preview.exporting") : t("preview.export")}
-      </button>
-      <button type="button" className={primaryBtn} onClick={() => setReminderOpen(true)}>
-        {t("preview.setReminder")}
-      </button>
+      {/* The actions as one toolbar (user feedback P92-S4): downloading is
+          the common one, opening in Office where it applies; everything else
+          is under "Weitere Aktionen" - the same actions the tree and list
+          offer in their context menu. */}
+      <div
+        className="preview-actions my-2 flex flex-wrap items-center gap-2"
+        role="toolbar"
+        aria-label={t("preview.actionsFor", { title: activeDocument.title })}
+      >
+        <button type="button" className={primaryBtn} onClick={handleDownload}>
+          {t("folderBrowser.download")}
+        </button>
+        {officeLaunchInfo(currentContentType) && (
+          <button type="button" className={secondaryBtn} onClick={handleOfficeLaunch}>
+            {t("preview.openInOffice", { app: officeLaunchInfo(currentContentType)!.label })}
+          </button>
+        )}
+        <button
+          type="button"
+          className={secondaryBtn}
+          aria-haspopup="menu"
+          aria-expanded={actionsMenu !== null}
+          disabled={exporting}
+          onClick={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            setActionsMenu((open) => (open ? null : { x: rect.left, y: rect.bottom + 4 }));
+          }}
+        >
+          {exporting ? t("preview.exporting") : t("preview.moreActions")} ▾
+        </button>
+        {linkCopyMessage && <span className="text-sm opacity-80">{linkCopyMessage}</span>}
+      </div>
+      {actionsMenu && (
+        <ContextMenu
+          x={actionsMenu.x}
+          y={actionsMenu.y}
+          onClose={() => setActionsMenu(null)}
+          items={[
+            { label: t("preview.export"), onSelect: handleExport, disabled: exporting },
+            { label: t("preview.setReminder"), onSelect: () => setReminderOpen(true) },
+            { label: `${t("preview.xdomeaExport")} …`, onSelect: () => setXdomeaExportOpen(true) },
+            { label: `${t("preview.xjustizExport")} …`, onSelect: () => setXjustizExportOpen(true) },
+            { label: t("preview.copyLink"), onSelect: handleCopyLink },
+            ...(currentContentType === "application/pdf"
+              ? [{ label: `${t("redaction.openAction")} …`, onSelect: () => setShowRedactionModal(true) }]
+              : []),
+          ]}
+        />
+      )}
       {reminderOpen && (
         <ReminderModal
           objectType="document"
@@ -871,9 +936,6 @@ export function PreviewPane({
           package (ZIP), unlike the plain-PDF Export button above. Needs the
           receiving authority's name, hence an inline form rather than a
           one-click action. */}
-      <button type="button" className={primaryBtn} onClick={() => setXdomeaExportOpen((prev) => !prev)}>
-        {t("preview.xdomeaExport")}
-      </button>
       {xdomeaExportOpen && (
         <div className="inline-form">
           <label>
@@ -913,9 +975,6 @@ export function PreviewPane({
           labeled ("Justizübergabe"/"Justizbehörde" vs. "Behördenübergabe"/
           "Behörde" above) so the two buttons aren't ambiguous next to each
           other. */}
-      <button type="button" className={primaryBtn} onClick={() => setXjustizExportOpen((prev) => !prev)}>
-        {t("preview.xjustizExport")}
-      </button>
       {xjustizExportOpen && (
         <div className="inline-form">
           <label>
@@ -947,20 +1006,6 @@ export function PreviewPane({
         <p className="text-danger" role="alert">
           {xjustizExportError}
         </p>
-      )}
-      <button type="button" className={primaryBtn} onClick={handleCopyLink}>
-        {t("preview.copyLink")}
-      </button>
-      {linkCopyMessage && <span className="text-sm opacity-80">{linkCopyMessage}</span>}
-      {officeLaunchInfo(currentContentType) && (
-        <button type="button" className={primaryBtn} onClick={handleOfficeLaunch}>
-          {t("preview.openInOffice", { app: officeLaunchInfo(currentContentType)!.label })}
-        </button>
-      )}
-      {currentContentType === "application/pdf" && (
-        <button type="button" className={primaryBtn} onClick={() => setShowRedactionModal(true)}>
-          {t("redaction.openAction")}
-        </button>
       )}
       {showRedactionModal && activeDocument && (
         <RedactionModal

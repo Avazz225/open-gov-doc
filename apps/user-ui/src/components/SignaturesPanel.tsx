@@ -14,6 +14,7 @@ import {
   type SignatureVerification,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { IncomingSignaturesSection } from "./IncomingSignaturesSection";
 
 // The signature format is currently exclusively PAdES (3.10) - the
 // signature service rejects any other current version server-side with an
@@ -162,7 +163,7 @@ export function SignaturesPanel({
       )}
 
       {isSignable ? (
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <label>
             {t("signatures.levelLabel")}
             <select
@@ -190,6 +191,13 @@ export function SignaturesPanel({
           {error}
         </p>
       )}
+
+      {/* Any format can carry incoming signatures since P92-S4 (an enveloping
+          `.p7m`, or a detached `.p7s` attached to the document). */}
+      <IncomingSignaturesSection
+        key={`${activeDocument.id}-${activeDocument.current_version_number}`}
+        document={activeDocument}
+      />
     </section>
   );
 }

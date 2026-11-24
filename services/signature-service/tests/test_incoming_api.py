@@ -219,3 +219,35 @@ def test_trust_anchor_lifecycle(client):
     assert client.delete(f"/incoming-signatures/trust-anchors/{created['id']}").status_code == 204
     assert client.delete(f"/incoming-signatures/trust-anchors/{created['id']}").status_code == 404
     assert len(client.get("/incoming-signatures/trust-anchors").json()) == 1
+
+
+def test_batch_summaries_for_list_badges(client):
+    import asyncio
+
+    root = testpki.make_cert("Root", ca=True)
+    leaf = testpki.make_cert("Signer", root, ca=False)
+    signed_id = _upload(asyncio.run(testpki.sign_pdf(PDF, leaf, [root])))
+    unsigned_id = _upload(PDF, "ohne.pdf")
+    _wait_for(client, signed_id, 1)
+
+    body = client.get(
+        "/incoming-signatures/summaries",
+        params={"document_ids": f"{signed_id},{unsigned_id},{signed_id}"},
+    ).json()
+    assert list(body) == [signed_id]
+    assert body[signed_id][0]["worst_indication"] == "INDETERMINATE"
+
+    assert client.get("/incoming-signatures/summaries", params={"document_ids": ""}).json() == {}
+    too_many = ",".join(f"d{i}" for i in range(201))
+    assert (
+        client.get("/incoming-signatures/summaries", params={"document_ids": too_many}).status_code
+        == 422
+    )
+    assert (
+        client.get(
+            "/incoming-signatures/summaries",
+            params={"document_ids": signed_id},
+            headers={"X-DMS-Principal": ""},
+        ).status_code
+        == 401
+    )

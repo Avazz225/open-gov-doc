@@ -657,3 +657,33 @@ export async function completeReminder(token: string, reminderId: string): Promi
     token
   );
 }
+
+// Incoming-signature results (P92-S3, ADR 0248): the per-version summaries
+// behind the signature badge on a routing folder's documents. Documents the
+// caller can't read are left out by signature-service.
+export interface IncomingSignatureSummary {
+  version_number: number;
+  run_id: string;
+  signature_count: number;
+  worst_indication: "TOTAL-PASSED" | "TOTAL-FAILED" | "INDETERMINATE";
+  best_qualification: "qes" | "adesqc" | "ades" | "unknown";
+  changed_after_signing: boolean;
+  truncated: boolean;
+  validated_at: string;
+}
+
+export async function getIncomingSignatureSummaries(
+  token: string,
+  documentIds: string[]
+): Promise<Record<string, IncomingSignatureSummary[]>> {
+  if (documentIds.length === 0) return {};
+  const query = new URLSearchParams({ document_ids: documentIds.slice(0, 200).join(",") });
+  const response = await request(
+    "signature-service",
+    `incoming-signatures/summaries?${query.toString()}`,
+    {},
+    token
+  );
+  return response.json();
+}
+

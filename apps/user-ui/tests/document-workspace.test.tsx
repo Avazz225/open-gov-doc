@@ -111,7 +111,14 @@ const caseApi = vi.hoisted(() => ({
   listProcessDefinitions: vi.fn<ApiFn>(() => Promise.resolve([])),
 }));
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- typed for the call assertion
+const getIncomingSignatureSummariesMock = vi.fn((..._args: unknown[]) => Promise.resolve({}));
+
 vi.mock("@/lib/api", () => ({
+  // Incoming-signature badges and section (P92-S3): no results by default.
+  getIncomingSignatureSummaries: (...args: unknown[]) => getIncomingSignatureSummariesMock(...args),
+  getIncomingSignatures: (_token: string, documentId: string) =>
+    Promise.resolve({ document_id: documentId, summaries: [], validations: [] }),
   listChildFolders: (...args: unknown[]) => listChildFoldersMock(...args),
   listDocumentsInFolder: (...args: unknown[]) => listDocumentsInFolderMock(...args),
   downloadDocument: (...args: unknown[]) => downloadDocumentMock(...args),
@@ -399,6 +406,30 @@ describe("DocumentWorkspace", () => {
     expect(listChildFoldersMock).toHaveBeenCalledWith("token-123", "root");
   });
 
+  it("shows a signature badge for the current version of a listed document (P92-S3)", async () => {
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([document1]);
+    getIncomingSignatureSummariesMock.mockResolvedValueOnce({
+      [document1.id]: [
+        {
+          version_number: document1.current_version_number,
+          run_id: "r1",
+          signature_count: 1,
+          worst_indication: "TOTAL-PASSED",
+          best_qualification: "qes",
+          changed_after_signing: false,
+          truncated: false,
+          validated_at: "2026-11-24T10:00:00Z",
+        },
+      ],
+    } as never);
+
+    renderWorkspace();
+
+    expect(await screen.findByText("Qualifiziert signiert")).toBeInTheDocument();
+    expect(getIncomingSignatureSummariesMock).toHaveBeenCalledWith("token-123", [document1.id]);
+  });
+
   it("moves a folder via drag-and-drop onto another folder in the list view (P23-S4)", async () => {
     listChildFoldersMock.mockResolvedValue([
       { id: "f1", name: "Verträge", parent_id: "root", object_type_id: null, attributes: {} },
@@ -634,6 +665,29 @@ describe("DocumentWorkspace", () => {
       const button = within(treeContainer).getByText(/Rechnung\.pdf/).closest("button");
       expect(within(button as HTMLElement).getByRole("img", { name: "Favorit" })).toBeInTheDocument();
     });
+  });
+
+  it("runs a preview action from the tree's context menu: opens the document and its form (P92-S4)", async () => {
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([document1]);
+
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await user.click(await screen.findByText("Baum"));
+    const treeContainer = await screen.findByLabelText("Ordner-Baumansicht");
+    const documentRow = within(treeContainer).getByText(/Rechnung\.pdf/).closest("span.tree-row");
+    fireEvent.contextMenu(documentRow!);
+    const menu = await screen.findByRole("menu");
+    // Opening and the preview's actions come first, deleting last.
+    const labels = within(menu).getAllByRole("menuitem").map((item) => item.textContent);
+    expect(labels[0]).toBe('"Rechnung.pdf" öffnen');
+    expect(labels).toContain('"Rechnung.pdf" herunterladen');
+    expect(labels[labels.length - 1]).toBe('"Rechnung.pdf" löschen');
+
+    await user.click(within(menu).getByText('"Rechnung.pdf" für Behördenübergabe exportieren …'));
+
+    expect(await screen.findByLabelText(/Empfangende Behörde/)).toBeInTheDocument();
   });
 
   it("navigates into a subfolder and updates the breadcrumb", async () => {
@@ -1696,6 +1750,33 @@ describe("DocumentWorkspace", () => {
     await waitFor(() => expect(listDocumentsInFolderMock).toHaveBeenCalledTimes(2));
   });
 
+  it("uploads a detached signature file right after its document (P92-S4)", async () => {
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([]);
+    uploadDocumentMock
+      .mockResolvedValueOnce({ id: "doc-new", current_version_number: 1 })
+      .mockResolvedValueOnce({ id: "sig-new", current_version_number: 1 });
+
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await waitFor(() => expect(listDocumentsInFolderMock).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByText("Hochladen"));
+    await user.upload(screen.getByLabelText("Datei"), new File(["x"], "bescheid.txt"));
+    await user.click(screen.getByRole("button", { name: /Abgesetzte Signatur/ }));
+    await user.upload(
+      screen.getByLabelText("Abgesetzte Signatur (.p7s)"),
+      new File(["sig"], "bescheid.txt.p7s")
+    );
+    fireEvent.submit(screen.getByRole("form", { name: "Dokument hochladen" }));
+
+    await waitFor(() => expect(uploadDocumentMock).toHaveBeenCalledTimes(2));
+    expect(uploadDocumentMock.mock.calls[1][1]).toMatchObject({
+      title: "bescheid.txt.p7s",
+      signs: { documentId: "doc-new", versionNumber: 1 },
+    });
+  });
+
   it("uploads as a draft when the draft checkbox is checked (post-roadmap phase 31 session 2)", async () => {
     listChildFoldersMock.mockResolvedValue([]);
     listDocumentsInFolderMock.mockResolvedValue([]);
@@ -1862,7 +1943,8 @@ describe("DocumentWorkspace", () => {
     await waitFor(() => expect(listDocumentsInFolderMock).toHaveBeenCalledTimes(1));
     await user.click(await screen.findByText(/Rechnung.pdf/));
 
-    await user.click(screen.getByText("Schwärzen"));
+    await user.click(screen.getByRole("button", { name: /Weitere Aktionen/ }));
+    await user.click(screen.getByRole("menuitem", { name: /^Schwärzen/ }));
     await screen.findByAltText("Seite 1");
     await waitFor(() =>
       expect(getRedactionPreviewPageCountMock).toHaveBeenCalledWith("token-123", "d1")

@@ -70,6 +70,43 @@ class DocumentServiceClient:
         response.raise_for_status()
         return response.json()
 
+    async def list_derived(self, document_id: str) -> list[dict]:
+        """Documents derived from this one (P92-S4: detached signatures and
+        content extracted from an enveloping signature)."""
+        response = await self._client.get(f"/documents/{document_id}/derived")
+        if response.status_code == 404:
+            raise NotFoundError(f"document_id {document_id!r} unbekannt")
+        response.raise_for_status()
+        return response.json()
+
+    async def create_derived_document(
+        self,
+        *,
+        source: dict,
+        version_number: int,
+        data: bytes,
+        filename: str,
+        title: str,
+        derivation_type: str,
+    ) -> dict:
+        """A derived document in the source's folder (P92-S4: the content of
+        an enveloping signature), created by this service."""
+        form = {
+            "title": title,
+            "derived_from_document_id": source["id"],
+            "derived_from_version_number": str(version_number),
+            "derivation_type": derivation_type,
+        }
+        if source.get("folder_id"):
+            form["folder_id"] = source["folder_id"]
+        response = await self._client.post(
+            "/documents",
+            data=form,
+            files={"file": (filename, data, "application/octet-stream")},
+        )
+        response.raise_for_status()
+        return response.json()
+
     async def get_version_content(
         self, document_id: str, version_number: int
     ) -> tuple[str | None, bytes]:

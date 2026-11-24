@@ -41,10 +41,18 @@ class DocumentClient:
         title: str,
         created_by: str,
         folder_id: str | None,
+        signs_document_id: str | None = None,
     ) -> dict:
+        """`signs_document_id` (P92-S4): this file is a detached signature of
+        that document's first version - stored as derived from it, so
+        signature-service validates the pair."""
         form: dict = {"title": title}
         if folder_id is not None:
             form["folder_id"] = folder_id
+        if signs_document_id is not None:
+            form["derived_from_document_id"] = signs_document_id
+            form["derived_from_version_number"] = "1"
+            form["derivation_type"] = "signature"
         response = await self._client.post(
             "/documents",
             data=form,

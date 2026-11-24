@@ -23,6 +23,7 @@ import "dockview-react/dist/styles/dockview.css";
 import { X } from "lucide-react";
 import { useI18n } from "@/i18n";
 import { getKennzeichenConfig, listObjectTypes, type DocumentSummary, type Folder, type ObjectType } from "@/lib/api";
+import type { DocumentAction } from "@/lib/document-actions";
 import { formatDocumentTitle } from "@/lib/kennzeichen";
 import { useNarrow } from "@/lib/use-narrow";
 import { ExplorerPane, type BreadcrumbEntry } from "./ExplorerPane";
@@ -88,6 +89,11 @@ interface WorkspaceContextValue {
   // True while the single-pane mode is shown (P83-S13): the hidden dockview
   // panels then render nothing, so explorer and preview don't load twice.
   dockSuppressed: boolean;
+  // An action asked for from the context menu, per document: opened, then
+  // run once by its preview (see `DocumentAction`).
+  pendingActions: Record<string, DocumentAction>;
+  onRequestDocumentAction: (doc: DocumentSummary, action: DocumentAction) => void;
+  onDocumentActionHandled: (documentId: string) => void;
 }
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
@@ -120,6 +126,7 @@ function ExplorerPanelContent() {
       favoritesUser={ctx.favoritesUser}
       currentFolderId={ctx.currentFolderId}
       onUploaded={ctx.onUploaded}
+      onRequestDocumentAction={ctx.onRequestDocumentAction}
     />
   );
 }
@@ -143,7 +150,15 @@ function DocumentPreviewContent(props: IDockviewPanelProps<{ documentId: string 
   const ctx = useWorkspaceContext();
   const doc = ctx.openDocumentsById.get(props.params.documentId) ?? null;
   const versionBump = doc ? (ctx.versionBumps[doc.id] ?? 0) : 0;
-  return <PreviewPane document={doc} versionBump={versionBump} onDocumentCreated={ctx.onUploaded} />;
+  return (
+    <PreviewPane
+      document={doc}
+      versionBump={versionBump}
+      onDocumentCreated={ctx.onUploaded}
+      requestedAction={doc ? ctx.pendingActions[doc.id] ?? null : null}
+      onActionHandled={() => doc && ctx.onDocumentActionHandled(doc.id)}
+    />
+  );
 }
 
 // The dockview copies of the panels render nothing while the single-pane
@@ -244,7 +259,13 @@ function SinglePaneWorkspace({
                 ))}
               </div>
             )}
-            <PreviewPane document={activeDocument} versionBump={versionBump} onDocumentCreated={ctx.onUploaded} />
+            <PreviewPane
+              document={activeDocument}
+              versionBump={versionBump}
+              onDocumentCreated={ctx.onUploaded}
+              requestedAction={activeDocument ? ctx.pendingActions[activeDocument.id] ?? null : null}
+              onActionHandled={() => activeDocument && ctx.onDocumentActionHandled(activeDocument.id)}
+            />
           </>
         )}
         {view === "metadata" && <MetadataPanelContent />}
@@ -585,6 +606,25 @@ export const DockableDocumentArea = forwardRef<DockableDocumentAreaHandle, Docka
       [addDocumentPanel, propsOnOpenDocument]
     );
 
+    // Context-menu actions (tree and list): remember the action, open the
+    // document; its preview runs the action once and clears it.
+    const [pendingActions, setPendingActions] = useState<Record<string, DocumentAction>>({});
+    const requestDocumentAction = useCallback(
+      (doc: DocumentSummary, action: DocumentAction) => {
+        setPendingActions((prev) => ({ ...prev, [doc.id]: action }));
+        openDocument(doc);
+      },
+      [openDocument]
+    );
+    const documentActionHandled = useCallback((documentId: string) => {
+      setPendingActions((prev) => {
+        if (!(documentId in prev)) return prev;
+        const next = { ...prev };
+        delete next[documentId];
+        return next;
+      });
+    }, []);
+
     // Closing from the single-pane chips: only the open-documents state
     // changes; dockview catches up when the window widens again.
     const closeDocumentNarrow = useCallback(
@@ -654,6 +694,9 @@ export const DockableDocumentArea = forwardRef<DockableDocumentAreaHandle, Docka
       versionBumps,
       onDocumentVersionBump,
       dockSuppressed: narrow,
+      pendingActions,
+      onRequestDocumentAction: requestDocumentAction,
+      onDocumentActionHandled: documentActionHandled,
     };
 
     const titleOf = (doc: DocumentSummary) => formatDocumentTitle(doc, documentTypeById, kennzeichenShowByDefault);

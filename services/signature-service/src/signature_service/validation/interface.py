@@ -87,6 +87,9 @@ class FetchLimits:
     per_request_timeout_seconds: float = 10.0
     max_response_bytes: int = 2 * 1024 * 1024
     proxy: str | None = None
+    # Ports a fetch may use (P92-S3): 8080 is common for OCSP responders -
+    # the German root's among them. The address checks are what protect.
+    allowed_ports: tuple[int, ...] = (80, 443, 8080)
     # Only for tests with a local revocation server on a random port: lifts
     # the address and port checks. No setting maps to it, so a deployment
     # can't turn it on.

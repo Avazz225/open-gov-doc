@@ -35,7 +35,10 @@ import {
 } from "@/lib/api";
 import { Clock, Paperclip, Pencil } from "lucide-react";
 import { DocumentIcon, FavoriteMarker, FolderClassIcon, UiIcon } from "@/lib/ui-icons";
+import type { DocumentAction } from "@/lib/document-actions";
 import { formatDocumentTitle } from "@/lib/kennzeichen";
+import { summaryForVersion, useIncomingSignatureSummaries } from "@/lib/incoming-signatures";
+import { SignatureBadge } from "./SignatureBadge";
 import { BulkEditModal, type BulkEditItem } from "./BulkEditModal";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { FolderRetentionModal } from "./FolderRetentionModal";
@@ -104,6 +107,7 @@ export function ExplorerPane({
   favoritesUser,
   currentFolderId,
   onUploaded,
+  onRequestDocumentAction,
 }: {
   trail: BreadcrumbEntry[];
   folders: Folder[];
@@ -123,6 +127,9 @@ export function ExplorerPane({
   favoritesUser: string;
   currentFolderId: string;
   onUploaded: () => void;
+  // Document actions from the context menu that run in the preview
+  // (download, exports, redaction): opens the document and runs it there.
+  onRequestDocumentAction?: (doc: DocumentSummary, action: DocumentAction) => void;
 }) {
   const { t } = useI18n();
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
@@ -143,6 +150,12 @@ export function ExplorerPane({
   const [templateMessage, setTemplateMessage] = useState<string | null>(null);
   const [documentTypeById, setDocumentTypeById] = useState<Record<number, ObjectType>>({});
   const [kennzeichenShowByDefault, setKennzeichenShowByDefault] = useState(true);
+  // Signature badges for the listed documents (P92-S3): one batched request
+  // per listing; refreshed when the listing changes.
+  const signatureSummaries = useIncomingSignatureSummaries(
+    token,
+    documents.map((doc) => doc.id)
+  );
   const [showTrash, setShowTrash] = useState(false);
   const [trashDocuments, setTrashDocuments] = useState<DocumentSummary[]>([]);
   const [trashFolders, setTrashFolders] = useState<Folder[]>([]);
@@ -587,12 +600,22 @@ export function ExplorerPane({
       x: event.clientX,
       y: event.clientY,
       items: [
-        {
-          label: documentDeleteRequiresApproval
-            ? t("explorer.requestDeleteDocument", { name })
-            : t("explorer.deleteDocument", { name }),
-          onSelect: () => handleDeleteDocument(doc),
-        },
+        // The preview's actions first (they open the document), then the
+        // marking and sharing ones, deleting last.
+        { label: t("explorer.openDocument", { name }), onSelect: () => onOpenDocument(doc) },
+        ...(onRequestDocumentAction
+          ? (
+              [
+                ["download", "explorer.downloadDocument"],
+                ["export", "explorer.exportDocument"],
+                ["xdomea", "explorer.xdomeaExportDocument"],
+                ["xjustiz", "explorer.xjustizExportDocument"],
+              ] as const
+            ).map(([action, key]) => ({
+              label: t(key, { name }),
+              onSelect: () => onRequestDocumentAction(doc, action),
+            }))
+          : []),
         {
           label: isFavorite ? t("explorer.removeFavorite", { name }) : t("explorer.addFavorite", { name }),
           onSelect: () => toggleFavorite("document", doc.id),
@@ -619,6 +642,12 @@ export function ExplorerPane({
               },
             ]
           : []),
+        {
+          label: documentDeleteRequiresApproval
+            ? t("explorer.requestDeleteDocument", { name })
+            : t("explorer.deleteDocument", { name }),
+          onSelect: () => handleDeleteDocument(doc),
+        },
       ],
     });
   }
@@ -988,6 +1017,13 @@ export function ExplorerPane({
                   <DocumentIcon />
                   <span>{formatDocumentTitle(doc, documentTypeById, kennzeichenShowByDefault)}</span>
                 </button>
+                {(() => {
+                  const summary = summaryForVersion(
+                    signatureSummaries[doc.id],
+                    doc.current_version_number
+                  );
+                  return summary ? <SignatureBadge summary={summary} /> : null;
+                })()}
               </li>
             ))}
           </ul>

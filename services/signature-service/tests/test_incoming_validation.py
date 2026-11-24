@@ -315,7 +315,7 @@ def test_public_addresses_and_configured_cluster_ranges():
     [
         "ftp://example.org/crl",
         "file:///etc/passwd",
-        "http://example.org:8080/crl",
+        "http://example.org:8443/crl",
         "http://127.0.0.1/crl",
         "http://[::1]/crl",
         "http://169.254.169.254/latest/meta-data",
@@ -329,6 +329,10 @@ def test_disallowed_urls_are_refused(url):
 def test_allowed_urls_pass_the_url_check():
     _check_url("http://crl.example.org/ca.crl", FetchLimits())
     _check_url("https://ocsp.example.org", FetchLimits())
+    # Common for OCSP responders (the German root's among them).
+    _check_url("http://ocsp.example.org:8080/ocsp", FetchLimits())
+    with pytest.raises(FetchBlockedError):
+        _check_url("http://ocsp.example.org:8080/ocsp", FetchLimits(allowed_ports=()))
 
 
 async def test_a_name_resolving_to_an_internal_address_is_refused(crl_server):
@@ -380,3 +384,25 @@ def test_uploaded_anchor_must_be_a_ca_certificate():
         parse_anchor_pem(leaf.pem)
     with pytest.raises(InvalidAnchorError):
         parse_anchor_pem(b"not a certificate")
+
+
+async def test_an_error_pyhanko_lets_through_is_a_finding_not_a_crash(monkeypatch):
+    """Found with a real sample in P92-S3: an unreachable OCSP responder in
+    hard-fail mode surfaces as `OCSPFetchError` out of pyHanko's validation;
+    it must become "nicht prüfbar", not end the job."""
+    from pyhanko.sign.validation import ades
+    from pyhanko_certvalidator.errors import OCSPFetchError
+
+    async def boom(*_args, **_kwargs):
+        raise OCSPFetchError("Failed to fetch OCSP response")
+
+    monkeypatch.setattr(ades, "ades_basic_validation", boom)
+    root = testpki.make_cert("Root", ca=True)
+    leaf = testpki.make_cert("Signer", root, ca=False)
+    signed = await testpki.sign_pdf(PDF, leaf, [root])
+
+    [finding] = (await validator.validate(signed, _policy([root.der]))).findings
+
+    assert finding.indication == "INDETERMINATE"
+    assert finding.sub_indication == "VALIDATION_ERROR"
+    assert "OCSPFetchError" in finding.technical_detail

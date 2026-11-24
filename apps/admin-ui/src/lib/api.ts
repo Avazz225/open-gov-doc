@@ -3857,3 +3857,165 @@ export async function putLicenseDisplayConfig(
   );
   return response.json();
 }
+
+// Incoming-signature validation settings (P92-S3, ADR 0248): the switches,
+// installation trust anchors, EU trusted lists and the backfill - all gated
+// by `admin.signature_config` in signature-service.
+export interface IncomingValidationConfig {
+  enabled: boolean;
+  revocation_mode: "soft-fail" | "hard-fail";
+  outbound_fetching: boolean;
+  eu_trusted_lists: boolean;
+  updated_at: string;
+  updated_by: string | null;
+}
+
+export async function getIncomingValidationConfig(token: string): Promise<IncomingValidationConfig> {
+  const response = await request("signature-service", "incoming-signatures/config", {}, token);
+  return response.json();
+}
+
+export async function putIncomingValidationConfig(
+  token: string,
+  config: Omit<IncomingValidationConfig, "updated_at" | "updated_by">
+): Promise<IncomingValidationConfig> {
+  const response = await request(
+    "signature-service",
+    "incoming-signatures/config",
+    { ...jsonInit(config), method: "PUT" },
+    token
+  );
+  return response.json();
+}
+
+export interface IncomingTrustAnchor {
+  id: number | null;
+  source: "internal" | "installation";
+  label: string;
+  subject: string;
+  fingerprint_sha256: string;
+  not_after: string;
+  created_at: string | null;
+  created_by: string | null;
+}
+
+export async function listIncomingTrustAnchors(token: string): Promise<IncomingTrustAnchor[]> {
+  const response = await request("signature-service", "incoming-signatures/trust-anchors", {}, token);
+  return response.json();
+}
+
+export async function addIncomingTrustAnchor(
+  token: string,
+  label: string,
+  certificatePem: string
+): Promise<IncomingTrustAnchor> {
+  const response = await request(
+    "signature-service",
+    "incoming-signatures/trust-anchors",
+    jsonInit({ label, certificate_pem: certificatePem }),
+    token
+  );
+  return response.json();
+}
+
+export async function deleteIncomingTrustAnchor(token: string, id: number): Promise<void> {
+  await request(
+    "signature-service",
+    `incoming-signatures/trust-anchors/${id}`,
+    { method: "DELETE" },
+    token
+  );
+}
+
+export interface TrustedListEntry {
+  kind: "lotl" | "tl";
+  territory: string;
+  location_uri: string | null;
+  sequence_number: number | null;
+  issued_at: string | null;
+  next_update: string | null;
+  fetched_at: string;
+  source: "fetch" | "import";
+}
+
+export interface TrustedListsStatus {
+  lists: TrustedListEntry[];
+  last_fetch: {
+    started_at: string;
+    finished_at: string | null;
+    source: string;
+    lists_stored: number;
+    errors: string[];
+    triggered_by: string;
+  } | null;
+  poll_interval_seconds: number;
+  territories: string[];
+}
+
+export async function getTrustedLists(token: string): Promise<TrustedListsStatus> {
+  const response = await request("signature-service", "incoming-signatures/trusted-lists", {}, token);
+  return response.json();
+}
+
+export async function refreshTrustedLists(token: string): Promise<void> {
+  await request(
+    "signature-service",
+    "incoming-signatures/trusted-lists/refresh",
+    { method: "POST" },
+    token
+  );
+}
+
+export async function importTrustedList(token: string, file: File): Promise<TrustedListEntry> {
+  const form = new FormData();
+  form.append("file", file);
+  const response = await request(
+    "signature-service",
+    "incoming-signatures/trusted-lists/import",
+    { method: "POST", body: form },
+    token
+  );
+  return response.json();
+}
+
+export interface BackfillStatus {
+  state: "idle" | "running" | "done" | "failed";
+  started_at: string | null;
+  finished_at: string | null;
+  started_by: string | null;
+  criteria: Record<string, unknown>;
+  scanned: number;
+  queued: number;
+  skipped_validated: number;
+  limit_reached: boolean;
+  error: string | null;
+  queue_pending: number | null;
+}
+
+export async function getBackfillStatus(token: string): Promise<BackfillStatus> {
+  const response = await request("signature-service", "incoming-signatures/backfill", {}, token);
+  return response.json();
+}
+
+export async function startBackfill(
+  token: string,
+  params: {
+    folderId?: string;
+    createdFrom?: string;
+    createdTo?: string;
+    onlyUnvalidated: boolean;
+  }
+): Promise<BackfillStatus> {
+  const response = await request(
+    "signature-service",
+    "incoming-signatures/backfill",
+    jsonInit({
+      folder_id: params.folderId || null,
+      created_from: params.createdFrom || null,
+      created_to: params.createdTo || null,
+      only_unvalidated: params.onlyUnvalidated,
+    }),
+    token
+  );
+  return response.json();
+}

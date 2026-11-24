@@ -80,10 +80,15 @@ class ValidationWorker:
     ) -> ValidationOutcome:
         """Runs one validation in the pool, on a fresh event loop owned by that
         thread (the fenced aiohttp session is created and closed there)."""
+        return await self.run_in_pool(lambda: validator.validate(data, policy))
+
+    async def run_in_pool(
+        self, make_coroutine: Callable[[], Awaitable[ValidationOutcome]]
+    ) -> ValidationOutcome:
+        """Any validation coroutine in the pool (e.g. a detached CAdES check,
+        which needs the signed document's bytes too)."""
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            self._executor, lambda: asyncio.run(validator.validate(data, policy))
-        )
+        return await loop.run_in_executor(self._executor, lambda: asyncio.run(make_coroutine()))
 
     async def stop(self) -> None:
         for task in self._tasks:

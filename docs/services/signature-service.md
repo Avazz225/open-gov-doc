@@ -20,6 +20,7 @@
 | `GET`/`PUT` | `/incoming-signatures/config` | **Since P92-S1**: `{enabled, revocation_mode: soft-fail\|hard-fail, outbound_fetching}`. `GET` ungated, `PUT` needs `admin.signature_config` |
 | `GET`/`POST` | `/incoming-signatures/trust-anchors` | **Since P92-S1**: the installation anchors (`POST {label, certificate_pem}`: one CA certificate; `422` not a CA/not PEM, `409` already there). The listing starts with the internal CA (`source: internal`, `id: null`, not removable). Both need `admin.signature_config` |
 | `DELETE` | `/incoming-signatures/trust-anchors/{id}` | **Since P92-S1**: removes an installation anchor (`404` unknown). Earlier results stay as they were |
+| `GET` | `/incoming-signatures/summaries?document_ids=a,b,…` | **Since P92-S3**: per-version summaries for up to 200 documents (list badges); documents the caller can't read are left out (one batch permission check), documents without results are absent. `401` without principal, `422` above 200 |
 | `POST` | `/incoming-signatures/revalidate` `{document_id, version_number?}` | **Since P92-S2**: queues the version (default: current) for another run, `202`. `document.read`; `404` unknown document/version. The run is added (`trigger: revalidation`, `requested_by`) |
 | `POST`/`GET` | `/incoming-signatures/backfill` | **Since P92-S2**: `POST {folder_id?, created_from?, created_to?, only_unvalidated=true}` starts a background run over existing PDF versions (`202`; `422` without folder or range, `409` while one runs); `GET` shows its progress (`scanned`, `queued`, `skipped_validated`, `limit_reached`, `queue_pending`). Both `admin.signature_config` |
 | `GET` | `/incoming-signatures/reports/{run_id}` | **Since P92-S2**: the run's ETSI TS 119 102-2 report (XML download). `document.read`; `404` unknown run or no report |
@@ -160,7 +161,9 @@ the same path and are validated against the internal CA.
   the file can help build a path but never become anchors; the OS trust store is never used. Every anchor
   carries the path-length limit.
 - `fetcher.py`: the fenced `aiohttp` session for pyHanko's OCSP/CRL/AIA fetchers.
-  - Only `http`/`https` on ports 80/443.
+  - Only `http`/`https`, on the default ports or `incoming_validation_allowed_ports` (since P92-S3:
+    80, 443 and 8080 - the German root's OCSP responder, for one, listens on 8080; the address checks are
+    what protect).
   - Every resolved address must be public (no private, loopback, link-local, multicast, reserved, CGNAT
     or configured networks), checked in the resolver and, for IP literals, on request start.
   - Redirects only to the same host; a body cap per response; a timeout per request; an optional proxy
@@ -199,6 +202,48 @@ the same path and are validated against the internal CA.
 and/or time range), skips versions that already have a result unless asked not to, and stops after
 `incoming_backfill_max_versions`. Its status lives in memory (lost on restart; it can simply be repeated).
 A job dropped because document-service was unreachable (P92-S1) is caught up this way.
+
+**CAdES (P92-S4, `validation/cades.py`):**
+- **Enveloping `.p7m`:** validated like a PAdES signature (basic or with-time AdES, same trust manager and
+  qualification); `position` is `enveloping` (`enveloping#n` for parallel signers - DER sorts them, so
+  the numbering isn't the signing order). Its content is stored once per version as a derived document
+  (`derivation_type="signed_content"`, title "name (Inhalt von name.p7m)", file name without `.p7m`, the
+  source's folder), so it can be previewed, searched and OCRed; a nested `.p7m` is unpacked again by its
+  own event, at most 3 layers. Creating it can fail (no write access for this service in a teamspace,
+  or the format isn't on the upload whitelist) - logged, the validation stands.
+- **Detached `.p7s`:** stored as a document derived from the version it signs
+  (`derivation_type="signature"`; document-service accepts that on upload since P92-S4). Its event
+  re-validates the **signed** document's version; every run of a version includes all `.p7s` attached
+  to exactly that version, next to the file's own signatures - one summary per version (a PDF with a
+  PAdES signature and a `.p7s` shows both). The rows name the signature file in `position`; nothing is
+  recorded on the `.p7s` document itself. A `.p7s` without a link is not checked.
+- DER, PEM and bare base64 are read; several signers are split (pyHanko validates one per SignedData).
+  A detached signature without its document is `SIGNED_DATA_NOT_FOUND`; a CMS signature has no
+  incremental updates, so coverage is "entire document" or, on a hash mismatch, "changed".
+- No ETSI report for CAdES runs (pyHanko's builder is PDF-specific); the PAdES part of a run still has one.
+- The backfill now considers every format a validator applies to (PDF, `.p7m`, `.p7s`).
+- **Tests:** `test_cades_validation.py` (9: enveloping, PEM/base64, detached against matching and
+  changed content, missing content, parallel signers, not CMS, QES via the EU lists) and
+  `test_cades_api.py` (4: `.p7m` validated and extracted once, `.p7s` shown on its document, a `.p7s` for
+  other content fails, PAdES plus `.p7s` in one result). `testpki.cms_sign` signs in binary mode
+  (cryptography's default S/MIME text mode turns LF into CRLF and signs other bytes).
+
+**Checked with real samples (P92-S3)** - five public PAdES samples from the EU DSS project's test data
+(2014-2019, LuxTrust, Certipost, Universign, D-TRUST, a Costa Rican CA) against the live stack with the
+real EU lists:
+- Their CAs are no longer on today's lists (LuxTrust "CA 2" was succeeded by "CA 3/4", Universign
+  "Timestamping CA 2015" is gone), so they are `INDETERMINATE` / "Aussteller ist nicht als vertrauenswürdig
+  hinterlegt" - correct against current lists; point-in-time historical lists aren't part of the build.
+- The D-TRUST sample is `TOTAL-FAILED`: pyHanko's modification analysis classes its later revisions as
+  not permitted.
+- A Belgian sample has a hybrid cross-reference table: "Dateistruktur nicht prüfbar" (the strict reader,
+  ADR 0248 Decision 6).
+- **Bug found and fixed:** pyHanko let an `OCSPFetchError` (a responder on port 8080, blocked at the time)
+  escape the validation, which ended the job without any result. Every exception of a signature's check
+  is now a finding (`VALIDATION_ERROR`, or `STRUCTURE_NOT_CHECKABLE` for a hybrid file), and 8080 is
+  allowed.
+- A current QES sample couldn't be fetched automatically (EUR-Lex answers scripted requests with an empty
+  `202`); the qualified path is covered by the generated, XAdES-signed test lists.
 
 **Revocation modes** (pyHanko's semantics): `soft-fail` (default) lets a signature pass when revocation
 information can't be obtained; `hard-fail` makes it `INDETERMINATE` (`CERTIFICATE_CHAIN_GENERAL_FAILURE`).

@@ -1,6 +1,6 @@
 # 0248 — Validating externally signed incoming documents (scoping)
 
-**Status:** accepted (scoping in P90-S6; built in Phase 92, scheduled 2026-11-23; stage 1 backend in P92-S1, trusted lists, reports, audit, re-validation and backfill in P92-S2)
+**Status:** accepted (scoping in P90-S6; built in Phase 92, scheduled 2026-11-23; stage 1 backend in P92-S1, trusted lists, reports, audit, re-validation and backfill in P92-S2, UI in P92-S3, CAdES in P92-S4)
 **Context:** P90-S6 (Phase 90, user-selected from the comparison with an external reference system).
 
 OG Doc signs documents itself (signature-service, PAdES-B-LTA with an internal CA, ADR 0025/0155). It
@@ -249,4 +249,30 @@ Built as decided, with these refinements:
   document-service got a service-only version listing for it.
 - **Live (2026-11-24):** 29 of 31 national lists fetched and verified in 2.4 minutes (EE refuses
   automated fetches, BE timed out).
+
+## Implementation notes (P92-S3)
+
+- **List badges need a batch read:** `GET /incoming-signatures/summaries` (up to 200 documents, one batch
+  permission check) - one request per listing instead of one per row.
+- **Port 8080 is allowed for fetches** besides 80/443 (configurable): Decision 4 said "standard ports",
+  but OCSP responders often listen on 8080 (the German root's does). The address checks are what keep
+  the cluster out of reach.
+- **Real samples** (2014-2019) are correctly "nicht prüfbar" against today's lists, whose members have
+  replaced those CAs; validating against historical lists stays out of scope. Checking them found a crash
+  (an exception pyHanko lets through), now a finding.
+- **Hybrid cross-reference files** (common from LibreOffice) are "Dateistruktur nicht prüfbar", as
+  Decision 6 intended.
+
+## Implementation notes (P92-S4)
+
+- **One result per version, whatever the format:** a run of a version includes the file's own
+  signatures (PAdES, or CAdES in a `.p7m`) and every detached `.p7s` attached to exactly that version.
+  A `.p7s` arriving later re-validates its document.
+- **Content type:** libmagic doesn't recognise CMS, so document-service's sniffer does
+  (`application/pkcs7-mime` / `-signature`); signature-service also goes by the file name, for bare
+  base64 files.
+- **The extracted content's title** names its origin ("… (Inhalt von ….p7m)"), so it can be told apart
+  from an identical file in the same folder; the file name stays the inner one.
+- **No ETSI report for CAdES** yet (pyHanko's builder is PDF-specific).
+- **Pairing in the upload form** is an explicit, optional second file rather than a guess.
 

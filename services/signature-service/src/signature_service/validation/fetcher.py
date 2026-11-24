@@ -6,7 +6,8 @@ the uploader picks them. Without a fence, any user could make the cluster call
 internal addresses (other services, cloud metadata endpoints). pyHanko's
 fetchers take an `aiohttp.ClientSession`; this module builds one that:
 
-- only speaks `http`/`https` on the standard ports;
+- only speaks `http`/`https`, on the default ports or `allowed_ports`
+  (80, 443 and 8080 by default - many OCSP responders use 8080);
 - refuses hosts that resolve to private, loopback, link-local, multicast,
   reserved, shared (CGNAT) or configured cluster networks - every resolved
   address must be public, so a name can't mix a public and an internal one;
@@ -72,7 +73,8 @@ def _check_url(url: aiohttp.client.URL | str, limits: FetchLimits) -> None:
     scheme = (parsed.scheme or "").lower()
     if scheme not in _ALLOWED_SCHEMES:
         raise FetchBlockedError(f"Schema nicht erlaubt: {scheme!r}")
-    if parsed.port not in (None, _ALLOWED_SCHEMES[scheme]) and not limits.allow_local_test_server:
+    port_ok = parsed.port in (None, _ALLOWED_SCHEMES[scheme]) or parsed.port in limits.allowed_ports
+    if not port_ok and not limits.allow_local_test_server:
         raise FetchBlockedError(f"Port nicht erlaubt: {parsed.port}")
     host = parsed.host or ""
     try:

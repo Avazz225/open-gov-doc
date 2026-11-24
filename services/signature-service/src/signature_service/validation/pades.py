@@ -29,7 +29,6 @@ from pyhanko.pdf_utils.misc import PdfReadError
 from pyhanko.pdf_utils.reader import PdfFileReader
 from pyhanko.sign.diff_analysis import ModificationLevel
 from pyhanko.sign.validation import ades, generic_cms
-from pyhanko.sign.validation.errors import SignatureValidationError
 from pyhanko.sign.validation.pdf_embedded import (
     EmbeddedPdfSignature,
     async_validate_pdf_timestamp,
@@ -311,15 +310,21 @@ class PadesValidator:
             return await self._signature(
                 embedded, spec, sources, position, pairs, eu_lists=policy.tsp_registry is not None
             )
-        except (SignatureValidationError, PdfReadError, ValueError, KeyError) as exc:
+        except Exception as exc:  # noqa: BLE001 - one signature must not end the run
+            # pyHanko lets some errors through (e.g. `OCSPFetchError` when a
+            # responder can't be reached in hard-fail mode); the signature
+            # then can't be decided - never a crash of the whole job.
             logger.info("incoming_signature_validation_error", exc_info=True)
+            # A hybrid cross-reference table (e.g. from LibreOffice) is what
+            # the strict reader refuses on purpose (ADR 0248 Decision 6).
+            sub = "STRUCTURE_NOT_CHECKABLE" if "hybrid" in str(exc) else "VALIDATION_ERROR"
             return SignatureFinding(
                 format=FORMAT,
                 position=position,
                 kind="signature",
                 indication="INDETERMINATE",
-                sub_indication="VALIDATION_ERROR",
-                failure_reason=_reason("VALIDATION_ERROR"),
+                sub_indication=sub,
+                failure_reason=_reason(sub),
                 technical_detail=f"{type(exc).__name__}: {exc}"[:2000],
             )
 

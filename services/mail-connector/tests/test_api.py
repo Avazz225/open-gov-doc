@@ -1221,3 +1221,54 @@ async def test_structure_refusal_keeps_filed_attachments_and_names_the_refused_o
     )
     assert retried.status_code == 200, retried.text
     assert len(calls) == 3  # only the refused attachment was sent again
+
+
+async def test_assign_files_a_detached_signature_as_derived_from_its_file(client, session):
+    """P92-S4 (ADR 0248): `bescheid.txt` + `bescheid.txt.p7s` in one message -
+    the `.p7s` is filed after its file, as a detached signature of it, so
+    signature-service validates the pair."""
+    msg = email.message.EmailMessage()
+    msg["From"] = "behoerde@example.com"
+    msg["To"] = "posteingang@dms.local"
+    msg["Subject"] = "Signierter Bescheid"
+    msg.set_content("Anbei der Bescheid.")
+    # The .p7s first: pairing must not depend on attachment order.
+    msg.add_attachment(
+        b"0\x80signatur",
+        maintype="application",
+        subtype="pkcs7-signature",
+        filename="bescheid.txt.p7s",
+    )
+    msg.add_attachment(
+        b"Bescheid-Inhalt", maintype="text", subtype="plain", filename="bescheid.txt"
+    )
+    await _ingest_message(
+        session, "central", RawIncomingMessage(uid="uid-p7s", raw_bytes=bytes(msg))
+    )
+    await session.commit()
+    [message] = [
+        m
+        for m in client.get("/inbound", headers=ADMIN_HEADERS).json()
+        if m["subject"] == "Signierter Bescheid"
+    ]
+
+    response = client.post(
+        f"/inbound/{message['id']}/assign",
+        json={"title": "Signierter Bescheid", "folder_id": "root"},
+        headers=ADMIN_HEADERS,
+    )
+    assert response.status_code == 200, response.text
+
+    detail = client.get("/inbound", headers=ADMIN_HEADERS).json()
+    [message] = [m for m in detail if m["id"] == message["id"]]
+    ids = {a["filename"]: a["resulting_document_id"] for a in message["attachments"]}
+    async with httpx.AsyncClient() as http:
+        signature = (
+            await http.get(
+                f"{DOCUMENT_SERVICE_URL}/documents/{ids['bescheid.txt.p7s']}",
+                headers={"X-DMS-Principal": "mail-connector"},
+            )
+        ).json()
+    assert signature["derivation_type"] == "signature"
+    assert signature["derived_from_document_id"] == ids["bescheid.txt"]
+    assert signature["derived_from_version_number"] == 1

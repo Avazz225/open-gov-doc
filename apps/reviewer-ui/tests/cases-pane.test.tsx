@@ -11,6 +11,7 @@ const downloadDocumentVersionMock = vi.fn();
 const listCaseRemindersMock = vi.fn();
 const createCaseReminderMock = vi.fn();
 const completeReminderMock = vi.fn();
+const getIncomingSignatureSummariesMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   listCases: (...args: unknown[]) => listCasesMock(...args),
@@ -21,6 +22,7 @@ vi.mock("@/lib/api", () => ({
   listCaseReminders: (...args: unknown[]) => listCaseRemindersMock(...args),
   createCaseReminder: (...args: unknown[]) => createCaseReminderMock(...args),
   completeReminder: (...args: unknown[]) => completeReminderMock(...args),
+  getIncomingSignatureSummaries: (...args: unknown[]) => getIncomingSignatureSummariesMock(...args),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {
@@ -60,6 +62,7 @@ const CASE_A = {
 
 describe("CasesPane", () => {
   beforeEach(() => {
+    getIncomingSignatureSummariesMock.mockReset().mockResolvedValue({});
     listCasesMock.mockReset();
     getCaseMock.mockReset();
     listCaseDocumentsMock.mockReset();
@@ -156,6 +159,45 @@ describe("CasesPane", () => {
     fireEvent.click(await screen.findByText("Beispielvorgang (VG-1)"));
     expect(await screen.findByText("Dokument gelöscht")).toBeTruthy();
     expect(getCaseDocumentMock).not.toHaveBeenCalled();
+  });
+
+  it("shows the signature badge of a document's current version (P92-S3)", async () => {
+    listCasesMock.mockResolvedValue([CASE_A]);
+    getCaseMock.mockResolvedValue(CASE_A);
+    listCaseDocumentsMock.mockResolvedValue([
+      { document_id: "doc-1", added_at: "2026-01-02T10:00:00Z", document_deleted_at: null },
+      { document_id: "doc-2", added_at: "2026-01-02T10:00:00Z", document_deleted_at: null },
+    ]);
+    getCaseDocumentMock.mockImplementation((_token: string, id: string) =>
+      Promise.resolve({ id, title: `${id}.pdf`, current_version_number: 2 })
+    );
+    const summary = {
+      run_id: "r",
+      signature_count: 1,
+      best_qualification: "ades",
+      changed_after_signing: false,
+      truncated: false,
+      validated_at: "2026-11-24T10:00:00Z",
+    };
+    getIncomingSignatureSummariesMock.mockResolvedValue({
+      // doc-1: the current version (2) failed; an older valid one doesn't count.
+      "doc-1": [
+        { ...summary, version_number: 1, worst_indication: "TOTAL-PASSED" },
+        { ...summary, version_number: 2, worst_indication: "TOTAL-FAILED" },
+      ],
+      // doc-2: only an older version was signed - no badge.
+      "doc-2": [{ ...summary, version_number: 1, worst_indication: "TOTAL-PASSED" }],
+    });
+
+    renderPane();
+    fireEvent.click(await screen.findByText("Beispielvorgang (VG-1)"));
+
+    expect(await screen.findByText("Signatur ungültig")).toBeTruthy();
+    expect(screen.getAllByTestId("signature-badge")).toHaveLength(1);
+    expect(getIncomingSignatureSummariesMock).toHaveBeenCalledWith(
+      "token-123",
+      expect.arrayContaining(["doc-1", "doc-2"])
+    );
   });
 
   it("resolves a document's title and downloads it on click", async () => {

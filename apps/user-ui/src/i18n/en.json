@@ -66,7 +66,11 @@
     "draftHint": "The document does not receive a file reference number on creation - this can be done later via \"Register\".",
     "chooseObjectType": "Choose document type …",
     "noDocumentsAllowed": "No documents may be filed in this folder.",
-    "formLabelInto": "Upload document into \"{name}\""
+    "formLabelInto": "Upload document into \"{name}\"",
+    "signatureLabel": "Detached signature (.p7s)",
+    "signatureHint": "A detached signature of this file – checked together with it.",
+    "signatureError": "The document was filed, but not its signature file: {reason}",
+    "signatureAdd": "+ Add a detached signature (.p7s)"
   },
   "iconRail": {
     "label": "Cross-cutting navigation",
@@ -158,7 +162,12 @@
     "noSubfoldersAllowed": "No subfolders may be created here.",
     "newFolderChooseObjectType": "Choose folder class …",
     "templateApplied": "{count} folders created from the template in \"{name}\".",
-    "uploadInto": "Upload into \"{name}\" …"
+    "uploadInto": "Upload into \"{name}\" …",
+    "openDocument": "Open \"{name}\"",
+    "downloadDocument": "Download \"{name}\"",
+    "exportDocument": "Export \"{name}\" as PDF",
+    "xdomeaExportDocument": "Export \"{name}\" for agency handover …",
+    "xjustizExportDocument": "Export \"{name}\" for court handover …"
   },
   "metadata": {
     "paneLabel": "Metadata",
@@ -185,7 +194,7 @@
   },
   "signatures": {
     "heading": "Signatures",
-    "noSignatures": "This document is not yet signed.",
+    "noSignatures": "This document hasn't been signed in OG Doc yet.",
     "loadError": "Signatures could not be loaded",
     "signButton": "Sign now",
     "signing": "Signing...",
@@ -694,7 +703,9 @@
       "no_lang": "no document language set",
       "figure_without_alt": "figures without alternative text"
     },
-    "setReminder": "Follow-up …"
+    "setReminder": "Follow-up …",
+    "moreActions": "More actions",
+    "actionsFor": "Actions for \"{title}\""
   },
   "search": {
     "paneLabel": "Search",
@@ -756,5 +767,59 @@
     "noneFit": "No structure template fits this folder.",
     "loadError": "Templates couldn't be loaded",
     "applyError": "Creating from the template failed"
+  },
+  "incomingSignatures": {
+    "heading": "Incoming signatures",
+    "none": "No signatures were checked in this version.",
+    "loadError": "Could not load the signature check",
+    "checkedAt": "checked on {date}",
+    "truncated": "The file holds more signatures than are checked; only the first ones are listed.",
+    "report": "Download validation report",
+    "reportError": "Could not load the validation report",
+    "recheck": "Check again",
+    "rechecking": "Checking again…",
+    "recheckError": "Checking again failed",
+    "unknownSigner": "Unknown signer",
+    "timestampBy": "Timestamp by {name}",
+    "provenTime": "Proven signing time",
+    "claimedTime": "Claimed signing time",
+    "coverageLabel": "Coverage",
+    "trustLabel": "Trust",
+    "reasonLabel": "Reason",
+    "indication": {
+      "TOTAL-PASSED": "valid",
+      "TOTAL-FAILED": "invalid",
+      "INDETERMINATE": "not checkable"
+    },
+    "qualification": {
+      "qes": "Qualified electronic signature (QES)",
+      "adesqc": "Advanced, with a qualified certificate",
+      "ades": "Advanced electronic signature"
+    },
+    "coverage": {
+      "entire_document": "covers the whole document",
+      "permitted_changes": "only permitted changes afterwards (e.g. further signatures, form fields)",
+      "changed_after_signing": "changed impermissibly after signing",
+      "unknown": "not determinable"
+    },
+    "trust": {
+      "internal": "OG Doc (internal signature)",
+      "installation": "trusted (installation)",
+      "eu_trusted_list": "EU trusted list"
+    },
+    "badge": {
+      "qualified": "Qualified signature",
+      "valid": "Validly signed",
+      "invalid": "Signature invalid",
+      "unchecked": "Signature not checkable"
+    },
+    "badgeHint": {
+      "qualified": "{count} signature(s), at least one qualified – checked on {date}",
+      "valid": "{count} signature(s), all valid – checked on {date}",
+      "invalid": "At least one signature is invalid or the document was changed afterwards – checked on {date}",
+      "unchecked": "At least one signature could not be checked conclusively – checked on {date}"
+    },
+    "cadesEnveloping": "enveloping signature (.p7m)",
+    "cadesDetached": "Signature file: {name}"
   }
 }

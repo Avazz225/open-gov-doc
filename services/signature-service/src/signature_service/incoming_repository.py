@@ -192,6 +192,17 @@ async def list_summaries(session: AsyncSession, document_id: str) -> list[Incomi
     return list(result.scalars())
 
 
+async def list_summaries_for(
+    session: AsyncSession, document_ids: list[str]
+) -> list[IncomingSignatureSummary]:
+    result = await session.execute(
+        select(IncomingSignatureSummary)
+        .where(IncomingSignatureSummary.document_id.in_(document_ids))
+        .order_by(IncomingSignatureSummary.document_id, IncomingSignatureSummary.version_number)
+    )
+    return list(result.scalars())
+
+
 async def list_validations(
     session: AsyncSession,
     document_id: str,

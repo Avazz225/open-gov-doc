@@ -188,15 +188,31 @@ def test_listing_a_folder_with_many_children_stays_fast(real_user):
     import time
 
     parent = _create_folder(name=f"webdav-viele-kinder-{uuid.uuid4().hex[:8]}")
-    for _ in range(60):
-        _create_folder(parent_id=parent["id"], name=f"kind-{uuid.uuid4().hex[:8]}")
+    try:
+        for _ in range(60):
+            _create_folder(parent_id=parent["id"], name=f"kind-{uuid.uuid4().hex[:8]}")
+        client = _dav_client(real_user)
+        # Warm-up (P92-S4): resolving `/<name>` lists the root folder, and a
+        # fresh user's first filtered listing pays for a cold permission
+        # cache - about 3 s for the dev stack's ~1,000 root folders. That cost
+        # isn't what this test is about (it's noted for the P95 load test);
+        # the N+1 behaviour below is.
+        client.ls("/", detail=False)
 
-    started = time.monotonic()
-    entries = _dav_client(real_user).ls(f"/{parent['name']}", detail=True)
-    elapsed = time.monotonic() - started
+        started = time.monotonic()
+        entries = client.ls(f"/{parent['name']}", detail=True)
+        elapsed = time.monotonic() - started
 
-    assert len(entries) == 60
-    assert elapsed < 5.0, f"listing 60 children took {elapsed:.1f}s - N+1 regression?"
+        assert len(entries) == 60
+        assert elapsed < 5.0, f"listing 60 children took {elapsed:.1f}s - N+1 regression?"
+    finally:
+        # Earlier runs left their parent folder in the root (22 by P92-S4).
+        httpx.post(
+            f"{FOLDER_SERVICE_URL}/folders/{parent['id']}/trash",
+            json={"deleted_by": "webdav-tests"},
+            headers={"X-DMS-Principal": "webdav-tests"},
+            timeout=30.0,
+        )
 
 
 def test_put_creates_a_new_document(real_user):

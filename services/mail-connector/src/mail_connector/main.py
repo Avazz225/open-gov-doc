@@ -48,6 +48,7 @@ from mail_connector.schemas import (
     RouteMessageRequest,
 )
 from mail_connector.settings import Settings
+from mail_connector.signature_pairing import pair_detached_signatures
 from mail_connector.storage_client import ObjectNotFoundError, StorageClient
 from mail_connector.virus_scan_client import VirusScanClient
 from sqlalchemy import text
@@ -905,10 +906,24 @@ async def _create_documents_for_message(
     body text, see `_ingest_message`'s `parts.insert(0, ...)`) - with
     multiple attachments, the remaining ones keep their own filename as the
     title, since a single form-provided title does not sensibly fit
-    multiple different enclosures at once."""
-    for index, attachment in enumerate(await repository.list_attachments(session, message.id)):
+    multiple different enclosures at once.
+
+    Detached signatures (P92-S4, ADR 0248): a `.p7s` paired with the file it
+    signs (`signature_pairing`) is filed after that file, as derived from it,
+    so signature-service validates the pair and shows the result on the
+    file."""
+    attachments = list(await repository.list_attachments(session, message.id))
+    pairs = pair_detached_signatures([a.filename for a in attachments], skip={0})
+    # Files first, then the signatures that refer to them.
+    order = [i for i in range(len(attachments)) if i not in pairs] + list(pairs)
+    for index in order:
+        attachment = attachments[index]
         if attachment.scan_status != "clean" or attachment.storage_object_key is None:
             continue
+        signs = None
+        if index in pairs:
+            # The target's document id: filed in this call or an earlier one.
+            signs = attachments[pairs[index]].resulting_document_id
         try:
             data = await app.state.storage.download(attachment.storage_object_key)
         except ObjectNotFoundError as exc:
@@ -924,6 +939,7 @@ async def _create_documents_for_message(
                 title=title if index == 0 else attachment.filename,
                 created_by=created_by,
                 folder_id=folder_id,
+                signs_document_id=signs,
             )
         except StructureRefusedError as exc:
             # Filing structure (P91-S2a, ADR 0255): keep what was already

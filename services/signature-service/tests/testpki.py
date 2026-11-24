@@ -165,3 +165,29 @@ def flip_signed_byte(signed_pdf: bytes) -> bytes:
     size), keeping the file length so the byte ranges still line up."""
     assert b"200 200" in signed_pdf
     return signed_pdf.replace(b"200 200", b"200 201", 1)
+
+
+def cms_sign(
+    content: bytes,
+    signers: list[Party],
+    chain: list[Party],
+    *,
+    detached: bool,
+    pem: bool = False,
+) -> bytes:
+    """A CMS (CAdES-BES-like) signature: enveloping (`.p7m`) or detached
+    (`.p7s`), with one or more parallel signers (P92-S4)."""
+    from cryptography.hazmat.primitives.serialization import pkcs7
+
+    builder = pkcs7.PKCS7SignatureBuilder().set_data(content)
+    for signer in signers:
+        builder = builder.add_signer(signer.cert, signer.key, hashes.SHA256())
+    for party in chain:
+        builder = builder.add_certificate(party.cert)
+    # `Binary`: sign the bytes as they are - without it, cryptography applies
+    # S/MIME text canonicalisation (LF -> CRLF) and signs other bytes.
+    options = [pkcs7.PKCS7Options.Binary]
+    if detached:
+        options.append(pkcs7.PKCS7Options.DetachedSignature)
+    encoding = serialization.Encoding.PEM if pem else serialization.Encoding.DER
+    return builder.sign(encoding, options)

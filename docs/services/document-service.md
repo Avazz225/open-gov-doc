@@ -77,6 +77,18 @@
 | `GET` | `/public/share-links/content?token=...` | **Public, unauthenticated** — file content of the current main version, same status codes as above. Publishes `document.share_link.accessed` |
 
 
+**CMS signatures and `derivation_type` on upload (P92-S4, [ADR 0248](../adr/0248-validating-externally-signed-incoming-documents.md)):**
+- The content sniffer recognises CMS SignedData, which libmagic calls `application/octet-stream`:
+  `application/pkcs7-mime` when the content is inside (`.p7m`), `application/pkcs7-signature` when not
+  (`.p7s`), for DER and PEM. A small DER reader walks to `encapContentInfo`; a BER file it can't walk
+  counts as enveloping. Bare base64 stays `text/plain` (signature-service also goes by the file name).
+- `POST /documents` takes `derivation_type` for `signature` (a detached signature of
+  `derived_from_document_id`/`_version_number`) and `signed_content` (content extracted from a `.p7m`);
+  anything else is `422`, and so is a type without a source. It needs read access to the source document,
+  and `document.created` carries `derivation_type`/`derived_from_version_number`. "redaction" stays
+  internal to the redaction endpoint.
+- If an installation keeps an upload whitelist, `application/pkcs7-mime`/`-signature` must be on it.
+
 **`GET /document-versions`** (P92-S2, [ADR 0248](../adr/0248-validating-externally-signed-incoming-documents.md)): versions across documents for service batch jobs (`created_from`, `created_to`, `folder_id` - the folder's own documents -, `content_type`, `after_id`, `limit` ≤ 5000), ordered by version row id. Service principals only (`403` for everyone else, since it ignores per-document permissions); deleted documents are left out. Caller: signature-service's backfill.
 
 ## Data Model

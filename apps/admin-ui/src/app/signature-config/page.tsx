@@ -1,6 +1,7 @@
 "use client";
 
 import { AdminShell } from "@/components/AdminShell";
+import { IncomingSignatureSettings } from "@/components/IncomingSignatureSettings";
 import { RequireAuth } from "@/components/RequireAuth";
 import { RequireCapability } from "@/components/RequireCapability";
 import { RetimestampStatus } from "@/components/RetimestampStatus";
@@ -15,6 +16,7 @@ export default function SignatureConfigPage() {
         <AdminShell title={t("signatureConfig.pageTitle")}>
           <SignatureConfig />
           <RetimestampStatus />
+          <IncomingSignatureSettings />
         </AdminShell>
       </RequireCapability>
     </RequireAuth>

@@ -1937,6 +1937,13 @@ async def _require_document_permission(
         )
 
 
+# Derivation reasons a client may name on upload (P92-S4, ADR 0248 Decision 2):
+# a detached signature (`.p7s`) stored next to the document it signs, and the
+# content extracted from an enveloping signature (`.p7m`). "redaction" stays
+# internal to the redaction endpoint.
+CLIENT_DERIVATION_TYPES = frozenset({"signature", "signed_content"})
+
+
 @app.post("/documents", response_model=DocumentOut, status_code=status.HTTP_201_CREATED)
 async def create_document(
     file: UploadFile = File(...),
@@ -1948,12 +1955,23 @@ async def create_document(
     derived_from_version_number: int | None = Form(None),
     originating_case_id: str | None = Form(None),
     draft: bool = Form(False),
+    derivation_type: str | None = Form(None),
     x_dms_principal: str = Header(default=""),
     x_dms_maintenance_active: str = Header(default="false"),
     identity: ActingIdentity = Depends(require_acting_identity),
     session: AsyncSession = Depends(get_session),
 ) -> DocumentOut:
     actor_created_by = identity.actor
+    if derivation_type is not None:
+        if derivation_type not in CLIENT_DERIVATION_TYPES:
+            raise HTTPException(
+                status_code=422,
+                detail=f"derivation_type muss einer von {sorted(CLIENT_DERIVATION_TYPES)} sein",
+            )
+        if derived_from_document_id is None:
+            raise HTTPException(
+                status_code=422, detail="derivation_type verlangt derived_from_document_id"
+            )
     # Sensor "document.upload.duration" (10.1, P11-S1): start time is only
     # captured if the sensor is currently active - when disabled, even this
     # minimal overhead is avoided entirely.
@@ -2022,6 +2040,12 @@ async def create_document(
         check_structure=identity.principal not in _STRUCTURE_EXEMPT_PRINCIPALS,
     )
     await _require_document_permission(x_dms_principal, folder_id or "root", access_type="write")
+    if derivation_type is not None:
+        # Attaching a signature to, or extracting from, a document needs read
+        # access to that document.
+        await _require_document_permission(
+            x_dms_principal, derived_from_document_id, access_type="read"
+        )
 
     content_type = await _resolve_content_type(session, data)
 
@@ -2059,6 +2083,15 @@ async def create_document(
         archive_after=archive_after,
         draft=draft,
         classification_level=classification_level,
+        derivation_type=derivation_type,
+        extra_event_payload=(
+            {
+                "derivation_type": derivation_type,
+                "derived_from_version_number": derived_from_version_number,
+            }
+            if derivation_type
+            else None
+        ),
     )
     if upload_started_at is not None:
         upload_sensor.observe(time.monotonic() - upload_started_at)

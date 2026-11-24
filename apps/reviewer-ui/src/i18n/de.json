@@ -240,5 +240,11 @@
         "import": "Prozessdefinition importieren"
       }
     }
+  },
+  "signatureBadge": {
+    "qualified": "Qualifiziert signiert",
+    "valid": "Gültig signiert",
+    "invalid": "Signatur ungültig",
+    "unchecked": "Signatur nicht prüfbar"
   }
 }

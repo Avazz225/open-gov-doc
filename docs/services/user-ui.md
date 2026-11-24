@@ -641,6 +641,45 @@ in a folder (its class, or the root): `undefined` while loading, `null` if the r
 - Folders and documents the user can't read no longer appear, because the server filters the listings.
   Nothing changed in the UI for that.
 
+## Incoming Signatures (P92-S3, [ADR 0248](../adr/0248-validating-externally-signed-incoming-documents.md))
+
+- **Badge in the document list** (`SignatureBadge`, `lib/incoming-signatures.ts`): one batched
+  `GET /incoming-signatures/summaries` per listing (chunks of 200); the summary of the document's current
+  version decides: "Qualifiziert signiert" (QES), "Gültig signiert", "Signatur ungültig" (failed or
+  changed after signing), "Signatur nicht prüfbar". Text carries the meaning; the badge tone supports it.
+  A failed request leaves the badges out. Not yet in the tree view or the search results.
+- **"Eingegangene Signaturen"** (`IncomingSignaturesSection`, in `SignaturesPanel` for PDFs): the current
+  version's latest run - per signature the indication, the signer's common name (full subject as a
+  tooltip), qualification, the proven time (from a timestamp) or else the claimed one, coverage, trust
+  source and, for a failure, the reason in plain German; document timestamps as "Zeitstempel von …".
+  "Prüfbericht herunterladen" (ETSI XML) and "Erneut prüfen" (queues a run, then polls until it appears).
+- The existing text for own signatures now says "In OG Doc wurde dieses Dokument noch nicht signiert", so
+  it doesn't contradict a signed incoming document; the sign row wraps on narrow screens (the button was
+  cut off at 390 px).
+- **Tests:** `incoming-signatures.test.tsx` (badge kinds, section rows, failure reason, nothing checked,
+  report download, re-check polling); a badge case in `document-workspace.test.tsx`; e2e
+  `incoming-signatures.spec.ts` (two signed fixture PDFs - valid against an installation anchor, changed
+  after signing - badges, section, report download, re-check, no overflow at 768/390). Fixtures in
+  `e2e/fixtures/` (a test CA valid until 2046).
+
+## Detached Signature on Upload, CAdES Rows, Document Actions (P92-S4)
+
+- **Upload form:** "+ Abgesetzte Signatur (.p7s) hinzufügen" reveals an optional field; the `.p7s` is
+  uploaded right after the document, as its signature (`derivation_type="signature"`). If only the
+  signature upload fails, the document stays filed and the message says so.
+- **"Eingegangene Signaturen"** is shown for every format now (a `.p7m`, or a `.p7s` attached to any
+  document); CAdES rows name their source ("Signaturdatei: …" or "eingebettete Signatur (.p7m)").
+- **Document actions (user feedback in P92-S4):** the preview's eight equal buttons, packed without
+  spacing, are one toolbar ("Aktionen für …"): "Herunterladen", "In … öffnen" where it applies, and
+  "Weitere Aktionen ▾" (export, follow-up, agency and court handover, copy link, redact for PDFs).
+  The tree's and list's document context menu offers the same: open, download, export as PDF, agency
+  and court handover, then follow-up, link, sharing, favourite, watch, and deleting last. Actions that
+  need the preview (download, exports, handover forms) open the document and run there once
+  (`lib/document-actions.ts`, `pendingActions` in `DockableDocumentArea`'s context).
+- **Tests:** a signature upload and a context-menu action (tree → handover form) in
+  `document-workspace.test.tsx`; `PreviewPane.test.tsx` goes through "Weitere Aktionen"; e2e: CAdES
+  upload with `.p7s` through the form plus `.p7m` extraction, and the preview toolbar.
+
 ## Authenticated direct links (Post-Roadmap Phase 29, [ADR 0109](../adr/0109-direct-link-url-scheme.md))
 
 `DocumentWorkspace.tsx` reads `?document=<id>`/`?folder=<id>` (and since P90-S2 `?case=<id>`, which opens the case view as "Open" from the favorites does) from `window.location.search` once on mount (not `useSearchParams()`, same Suspense-avoidance reasoning as the share link's `/share/` page above) and resolves them via the already-existing `GET /documents/{id}`/`GET /folders/{id}` plus the already-existing `openDocumentTab`/`openFolderPath` navigation functions — no new backend endpoint. A `403`/`404` surfaces via the normal `error` state instead of a silent fallback to the root folder. Structurally opposite to the public share link (anonymous, single-document, token-bearing) — a direct link carries no secret, just a stable resource ID resolved through the normal session/permission-check path, see ADR 0109 for the full comparison.

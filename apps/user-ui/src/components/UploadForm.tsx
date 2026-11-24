@@ -49,6 +49,10 @@ export function UploadForm({
 }) {
   const { t } = useI18n();
   const [file, setFile] = useState<File | null>(null);
+  // Optional detached signature of the file (P92-S4): uploaded right after
+  // it, as its signature document.
+  const [signatureFile, setSignatureFile] = useState<File | null>(null);
+  const [showSignatureField, setShowSignatureField] = useState(false);
   const [title, setTitle] = useState("");
   const [objectTypes, setObjectTypes] = useState<ObjectType[]>([]);
   const [objectTypeId, setObjectTypeId] = useState("");
@@ -106,7 +110,7 @@ export function UploadForm({
     setError(null);
     setSubmitting(true);
     try {
-      await uploadDocument(token, {
+      const created = await uploadDocument(token, {
         file,
         title: title || file.name,
         folderId,
@@ -114,7 +118,28 @@ export function UploadForm({
         attributes: selectedObjectType ? values : undefined,
         draft,
       });
+      if (signatureFile) {
+        try {
+          await uploadDocument(token, {
+            file: signatureFile,
+            title: signatureFile.name,
+            folderId,
+            signs: { documentId: created.id, versionNumber: created.current_version_number },
+          });
+        } catch (err) {
+          // The document is filed; only its signature file failed - say so
+          // instead of pretending the whole upload failed.
+          onUploaded();
+          setError(
+            t("upload.signatureError", {
+              reason: err instanceof ApiError ? err.message : t("upload.error"),
+            })
+          );
+          return;
+        }
+      }
       setFile(null);
+      setSignatureFile(null);
       setTitle("");
       setObjectTypeId("");
       setValues({});
@@ -186,6 +211,28 @@ export function UploadForm({
             required
           />
           {file && <p className="upload-selected-file">{file.name}</p>}
+          {showSignatureField ? (
+            <div className="upload-signature flex flex-col gap-1">
+              <label className="flex flex-col gap-1">
+                {t("upload.signatureLabel")}
+                <input
+                  type="file"
+                  className={fileInput}
+                  accept=".p7s,application/pkcs7-signature"
+                  onChange={(e) => setSignatureFile(e.target.files?.[0] ?? null)}
+                />
+              </label>
+              <span className="text-xs opacity-70">{t("upload.signatureHint")}</span>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="self-start border-0 bg-transparent p-0 text-left text-sm text-accent underline"
+              onClick={() => setShowSignatureField(true)}
+            >
+              {t("upload.signatureAdd")}
+            </button>
+          )}
           <input
             type="text"
             className={fieldInput}

@@ -5,6 +5,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PreviewPane } from "@/components/PreviewPane";
 import { I18nProvider } from "@/i18n";
 import type { DocumentSummary, DocumentVersion, RenditionSummary } from "@/lib/api";
+
+// The preview's secondary actions sit under "Weitere Aktionen" (P92-S4).
+async function chooseAction(
+  user: { click: (element: Element) => Promise<void> },
+  pane: HTMLElement,
+  label: string
+) {
+  await user.click(within(pane).getByRole("button", { name: /Weitere Aktionen/ }));
+  await user.click(
+    within(pane).getByRole("menuitem", {
+      name: new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
+    })
+  );
+}
 import { ApiError } from "@/lib/api";
 
 const listDocumentVersionsMock = vi.fn();
@@ -500,7 +514,7 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
 
     expect(within(previewPane).queryByLabelText("Exporthistorie")).not.toBeInTheDocument();
 
-    await user.click(within(previewPane).getByText("Exportieren"));
+    await chooseAction(user, previewPane, "Exportieren");
 
     expect(exportDocumentMock).toHaveBeenCalledWith("token-123", "d1");
   });
@@ -517,7 +531,7 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
     const previewPane = screen.getByLabelText("Vorschau: vertrag.pdf");
     await within(previewPane).findByTitle("vertrag.pdf");
 
-    await user.click(within(previewPane).getByText("Exportieren"));
+    await chooseAction(user, previewPane, "Exportieren");
 
     expect(
       await within(previewPane).findByText("Export fehlgeschlagen. Bitte später erneut versuchen.")
@@ -540,7 +554,7 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
       within(previewPane).queryByLabelText("Empfangende Behörde")
     ).not.toBeInTheDocument();
 
-    await user.click(within(previewPane).getByText("Export für Behördenübergabe"));
+    await chooseAction(user, previewPane, "Export für Behördenübergabe");
     await user.type(
       within(previewPane).getByLabelText("Empfangende Behörde"),
       "Landesarchiv Test"
@@ -561,7 +575,7 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
     const previewPane = screen.getByLabelText("Vorschau: vertrag.pdf");
     await within(previewPane).findByTitle("vertrag.pdf");
 
-    await user.click(within(previewPane).getByText("Export für Behördenübergabe"));
+    await chooseAction(user, previewPane, "Export für Behördenübergabe");
     expect(within(previewPane).getByText("Paket exportieren")).toBeDisabled();
     expect(exportDocumentXdomeaMock).not.toHaveBeenCalled();
   });
@@ -578,7 +592,7 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
     const previewPane = screen.getByLabelText("Vorschau: vertrag.pdf");
     await within(previewPane).findByTitle("vertrag.pdf");
 
-    await user.click(within(previewPane).getByText("Export für Behördenübergabe"));
+    await chooseAction(user, previewPane, "Export für Behördenübergabe");
     await user.type(
       within(previewPane).getByLabelText("Empfangende Behörde"),
       "Andere Behoerde"
@@ -608,7 +622,7 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
       within(previewPane).queryByLabelText("Empfangende Justizbehörde")
     ).not.toBeInTheDocument();
 
-    await user.click(within(previewPane).getByText("Export für Justizübergabe"));
+    await chooseAction(user, previewPane, "Export für Justizübergabe");
     await user.type(
       within(previewPane).getByLabelText("Empfangende Justizbehörde"),
       "Testgericht"
@@ -629,7 +643,7 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
     const previewPane = screen.getByLabelText("Vorschau: vertrag.pdf");
     await within(previewPane).findByTitle("vertrag.pdf");
 
-    await user.click(within(previewPane).getByText("Export für Justizübergabe"));
+    await chooseAction(user, previewPane, "Export für Justizübergabe");
     expect(within(previewPane).getByText("Justiz-Paket exportieren")).toBeDisabled();
     expect(exportDocumentXjustizMock).not.toHaveBeenCalled();
   });
@@ -646,7 +660,7 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
     const previewPane = screen.getByLabelText("Vorschau: vertrag.pdf");
     await within(previewPane).findByTitle("vertrag.pdf");
 
-    await user.click(within(previewPane).getByText("Export für Justizübergabe"));
+    await chooseAction(user, previewPane, "Export für Justizübergabe");
     await user.type(
       within(previewPane).getByLabelText("Empfangende Justizbehörde"),
       "Anderes Gericht"
@@ -671,7 +685,7 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
     const previewPane = screen.getByLabelText("Vorschau: vertrag.pdf");
     await within(previewPane).findByTitle("vertrag.pdf");
 
-    await user.click(within(previewPane).getByText("Link kopieren"));
+    await chooseAction(user, previewPane, "Link kopieren");
 
     expect(
       await within(previewPane).findByText("Link in die Zwischenablage kopiert.")

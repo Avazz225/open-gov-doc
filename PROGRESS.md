@@ -2,6 +2,114 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P92-S4, CAdES (detached `.p7s`, enveloping `.p7m`), document actions regrouped,
+and **Phase 92 closed** (full regression).
+([ADR 0248](docs/adr/0248-validating-externally-signed-incoming-documents.md), implementation notes added.)
+
+**What changed:**
+- **signature-service `validation/cades.py`:**
+  - Reads enveloping and detached CMS in DER, PEM or bare base64, with parallel signers.
+  - AdES validation and qualification work as for PAdES.
+- **One result per version:** a run includes the file's own signatures and every `.p7s` attached to
+  that version. A `.p7s` arriving later re-validates its document.
+- **`.p7m` content:** stored once as a derived document (`signed_content`, title "… (Inhalt von
+  ….p7m)"), at most 3 nested layers.
+- **The backfill** considers every format.
+- **document-service:**
+  - The sniffer recognises CMS (`application/pkcs7-mime`/`-signature`); libmagic said
+    `octet-stream`.
+  - `POST /documents` takes `derivation_type` `signature`/`signed_content`. It needs read access to the
+    source, and the event carries the type.
+- **mail-connector:** `signature_pairing` pairs `name.ext` + `name.ext.p7s`, or one file + one `.p7s`.
+  Files are filed first, then the linked signature.
+- **user-ui:**
+  - The upload form has "+ Abgesetzte Signatur (.p7s) hinzufügen"; the field is hidden by default. It
+    first broke three e2e locators as an always-visible "Signaturdatei" field.
+  - "Eingegangene Signaturen" is shown for every format; CAdES rows name their source.
+- **User feedback during the session (cramped action buttons):**
+  - The preview's eight equal buttons are now a toolbar: "Herunterladen", "In … öffnen", and
+    "Weitere Aktionen ▾".
+  - The tree/list context menu offers the same actions: open, download, PDF export, agency/court
+    handover, then follow-up, link, sharing, favourite, watch, and deleting last. Actions that need the
+    preview open the document and run there once (`lib/document-actions.ts`).
+- **webdav-connector:** the listing-speed test failed in the regression (5.3–5.6 s against < 5 s). The
+  cause wasn't P92:
+  - **leftovers:** the root folder grew to 1,043 live folders (810 at P91-S4), 22 of them left by this
+    very test;
+  - **cold cache:** a fresh user's first filtered root listing pays a cold permission cache (~2.9 s;
+    warm 60–90 ms).
+  - **Fix:** the test warms up and trashes its folder. The cold-cache cost is noted in P95-S1; the
+    leftovers are noted in P94-S3.
+- **Docs:** signature-service, document-service, mail-connector, user-ui, ADR 0248 notes, plan (P92-S4
+  result, P94-S3, P95-S1).
+
+**Checks:**
+- **Full regression** (`scripts/run-tests.sh`): all 32 services green, ruff green. webdav-connector after
+  the test fix: 19/19.
+  - signature-service 108;
+  - document-service 454 (+5: CMS sniffing, `derivation_type`);
+  - mail-connector 95 (+6: pairing, a filed message with `.p7s`).
+- **UI tests:** user-ui vitest 339, tsc and eslint clean. user-ui e2e 10/10:
+  - CAdES: upload with `.p7s` through the form, `.p7m` extraction, badges, the section naming the
+    signature file;
+  - the preview toolbar.
+- **Screenshots:** the upload form with the signature field, the CAdES list and section, the preview
+  toolbar with its menu.
+- **Containers rebuilt:** document-service, signature-service, mail-connector, user-ui.
+
+**Next session:** P93-S1 (lanes as an opt-in authorization boundary, ADR 0249).
+
+---
+
+**Last completed:** P92-S3, incoming signatures in the UIs
+([ADR 0248](docs/adr/0248-validating-externally-signed-incoming-documents.md), implementation notes added).
+
+**What changed:**
+- **signature-service:**
+  - `GET /incoming-signatures/summaries` (up to 200 documents, one batch permission check) for list
+    badges.
+  - Fetch ports configurable, default 80/443/8080.
+  - Any exception of a signature's check becomes a finding instead of ending the job; a hybrid
+    cross-reference file is "Dateistruktur nicht prüfbar".
+- **user-ui:**
+  - `SignatureBadge` in the document list: one batched request per listing, current version. States:
+    qualified / valid / invalid / not checkable.
+  - `IncomingSignaturesSection` in `SignaturesPanel` for PDFs: signer, proven or claimed time,
+    qualification, coverage, trust, a plain-German reason, the report download, and "Erneut prüfen" with
+    polling.
+  - The own-signature text says "In OG Doc wurde … noch nicht signiert", and the sign row wraps at 390 px
+    (the button was cut off; pre-existing).
+- **reviewer-ui:** the badge on a routing folder's documents (`CasesPane`).
+- **admin-ui `/signature-config/`** (title now "Signaturen"), `IncomingSignatureSettings`:
+  - switches (the checkbox is "Prüfung eingeschaltet", not the section's name);
+  - EU trusted lists: status, failures per territory, "Jetzt abrufen", import, a `BoundedList`;
+  - installation anchors: add by PEM or file, remove;
+  - backfill with live progress.
+- **e2e fixtures:** `apps/user-ui/e2e/fixtures/` holds two PDFs signed by a test CA valid until 2046 (valid,
+  and changed after signing) plus the CA's PEM.
+- **Manual check with real samples** (5 public PAdES files from the EU DSS project, 2014-2019):
+  - all are explainable: CAs that are no longer on today's lists give "nicht prüfbar"; a D-TRUST file
+    "ungültig" (later revisions not permitted); a Belgian hybrid file "Dateistruktur nicht prüfbar";
+  - this found the crash above: an `OCSPFetchError` from a blocked port-8080 responder;
+  - a current QES sample couldn't be fetched (EUR-Lex returns an empty 202 to scripts). The qualified path
+    stays covered by the generated, signed test lists.
+- **Docs:** user-ui, reviewer-ui, admin-ui, signature-service, ADR 0248 notes, plan.
+
+**Checks:**
+- signature-service 95 passed (+2); user-ui vitest 336 (+9); reviewer-ui 69 (+1); admin-ui 403 (+6); tsc and
+  eslint clean in all three.
+- **e2e:**
+  - user-ui 9/9, including `incoming-signatures.spec.ts` (3 repeats green);
+  - admin-ui 23/23 (new: `incoming-signature-settings.spec.ts`). The first run directly after the user-ui
+    suite hit the gateway's rate limit (600/min per user, known since P91-S4); green after a minute.
+- **Screenshots:** list badges, the section at 1400/768/390, the admin page at 1400/768/390.
+- **Containers rebuilt:** signature-service, user-ui, reviewer-ui, admin-ui.
+
+**Next session:** decide on P92-S4 (CAdES, optional). If it is skipped, the Phase 92 regression runs now,
+then P93-S1.
+
+---
+
 **Last completed:** P92-S2, EU trusted lists, reports, audit, re-validation and backfill
 ([ADR 0248](docs/adr/0248-validating-externally-signed-incoming-documents.md), implementation notes added).
 

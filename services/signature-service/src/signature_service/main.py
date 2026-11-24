@@ -725,6 +725,43 @@ async def get_incoming_signatures(
     )
 
 
+@app.get(
+    "/incoming-signatures/summaries", response_model=dict[str, list[IncomingSignatureSummaryOut]]
+)
+async def get_incoming_signature_summaries(
+    document_ids: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, list[IncomingSignatureSummaryOut]]:
+    """Per-version summaries for several documents at once (comma-separated
+    `document_ids`, at most 200) - for the badges in document lists (P92-S3).
+    Documents the caller may not read are left out silently, like in the
+    listings themselves (ADR 0259); documents without results are absent."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    ids = list(dict.fromkeys(i for i in document_ids.split(",") if i))
+    if len(ids) > 200:
+        raise HTTPException(status_code=422, detail="Höchstens 200 Dokumente je Abfrage")
+    if not ids:
+        return {}
+    summaries = await incoming_repository.list_summaries_for(session, ids)
+    if not summaries:
+        return {}
+    allowed = await app.state.permission_client.check_batch(
+        principal_id=x_dms_principal,
+        resource_ids=sorted({s.document_id for s in summaries}),
+        permission="document.read",
+        access_type="read",
+    )
+    result: dict[str, list[IncomingSignatureSummaryOut]] = {}
+    for summary in summaries:
+        if allowed.get(summary.document_id, False):
+            result.setdefault(summary.document_id, []).append(
+                IncomingSignatureSummaryOut.model_validate(summary)
+            )
+    return result
+
+
 @app.get("/incoming-signatures/config", response_model=IncomingValidationConfigOut)
 async def get_incoming_validation_config(
     session: AsyncSession = Depends(get_session),

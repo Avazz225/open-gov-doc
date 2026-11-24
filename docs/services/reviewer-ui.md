@@ -237,6 +237,13 @@ Exclusively via the API Gateway (3.5):
 | Read/write theme and locale preference | `GET/PUT /api/auth-service/me/preferences` (`locale` since Phase 47 Session 2) |
 | Emergency shutdown / maintenance mode status | `GET /api/permission-service/maintenance-mode` |
 
+## Signature Badge on Task Documents (P92-S3, [ADR 0248](../adr/0248-validating-externally-signed-incoming-documents.md))
+
+The documents of a routing folder (`CasesPane`) carry the same four-state signature badge as the user UI,
+from one batched `GET /incoming-signatures/summaries` for the current versions. Tailwind tokens: success
+for valid/qualified, danger for invalid, the accent tone for "nicht prüfbar" (the app has no warning
+token). Test: `cases-pane.test.tsx` (only the current version counts).
+
 ## Theming/i18n/Auth State
 
 Identical provider copy from user-ui/admin-ui/process-designer (`ThemeProvider`, `I18nProvider`, `auth-context.tsx`), own `src/i18n/de.json`, global `dms.tokens` storage key (single installation like process-designer/user-ui, no `InstallationSwitcher` like admin-ui).

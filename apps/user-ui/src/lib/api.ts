@@ -702,9 +702,18 @@ export async function uploadDocument(
     // Draft / pre-registration lifecycle (post-roadmap phase 31 session 2,
     // ADR 0113) - defaults to false, matching the server-side default.
     draft?: boolean;
+    // A detached signature of another document (P92-S4, ADR 0248): stored
+    // as derived from that document's version so signature-service checks
+    // the pair.
+    signs?: { documentId: string; versionNumber: number };
   }
 ): Promise<DocumentSummary> {
   const formData = new FormData();
+  if (params.signs) {
+    formData.append("derived_from_document_id", params.signs.documentId);
+    formData.append("derived_from_version_number", String(params.signs.versionNumber));
+    formData.append("derivation_type", "signature");
+  }
   formData.append("file", params.file);
   formData.append("title", params.title);
   formData.append("folder_id", params.folderId);
@@ -3199,4 +3208,105 @@ export async function getAllowedChildren(
     token
   );
   return response.json();
+}
+
+// Incoming-signature validation (P92-S1..S3, ADR 0248): signature-service
+// checks signatures in every new PDF version on its own; these read the
+// results, ask for another run and fetch the ETSI report.
+export type SignatureIndication = "TOTAL-PASSED" | "TOTAL-FAILED" | "INDETERMINATE";
+export type SignatureQualification = "qes" | "adesqc" | "ades" | "unknown";
+
+export interface IncomingSignatureSummary {
+  version_number: number;
+  run_id: string;
+  signature_count: number;
+  worst_indication: SignatureIndication;
+  best_qualification: SignatureQualification;
+  changed_after_signing: boolean;
+  truncated: boolean;
+  validated_at: string;
+}
+
+export interface IncomingSignatureValidation {
+  run_id: string;
+  version_number: number;
+  trigger: string;
+  format: string;
+  position: string | null;
+  kind: "signature" | "certification" | "document_timestamp" | "file";
+  indication: SignatureIndication;
+  sub_indication: string | null;
+  qualification: SignatureQualification;
+  trust_source: "internal" | "installation" | "eu_trusted_list" | null;
+  signer_subject: string | null;
+  signer_issuer: string | null;
+  claimed_signing_time: string | null;
+  best_signature_time: string | null;
+  coverage: "entire_document" | "permitted_changes" | "changed_after_signing" | "unknown";
+  qc_type: string | null;
+  report_available: boolean;
+  failure_reason: string | null;
+  validated_at: string;
+}
+
+export interface IncomingSignatures {
+  document_id: string;
+  summaries: IncomingSignatureSummary[];
+  validations: IncomingSignatureValidation[];
+}
+
+export async function getIncomingSignatures(
+  token: string,
+  documentId: string
+): Promise<IncomingSignatures> {
+  const query = new URLSearchParams({ document_id: documentId });
+  const response = await request(
+    "signature-service",
+    `incoming-signatures?${query.toString()}`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function getIncomingSignatureSummaries(
+  token: string,
+  documentIds: string[]
+): Promise<Record<string, IncomingSignatureSummary[]>> {
+  const query = new URLSearchParams({ document_ids: documentIds.join(",") });
+  const response = await request(
+    "signature-service",
+    `incoming-signatures/summaries?${query.toString()}`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function revalidateIncomingSignatures(
+  token: string,
+  documentId: string,
+  versionNumber?: number
+): Promise<{ document_id: string; version_number: number }> {
+  const response = await request(
+    "signature-service",
+    "incoming-signatures/revalidate",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ document_id: documentId, version_number: versionNumber ?? null }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export async function downloadIncomingSignatureReport(token: string, runId: string): Promise<Blob> {
+  const response = await request(
+    "signature-service",
+    `incoming-signatures/reports/${encodeURIComponent(runId)}`,
+    {},
+    token
+  );
+  return response.blob();
 }
