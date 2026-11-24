@@ -43,11 +43,14 @@
   - The temporary `domain-admin-monitoring` grant is revoked; the tracing ratio is back at 100 %.
 - **Docs:** `docs/operations/performance-ranking.md` (new), loadtest README, ocr-service, plan.
 
-**Open for you:** whether to schedule the seven fix candidates before P95-S2's Rust scoping. They are
-algorithmic and would survive a rewrite; the report recommends at least the gateway bulkhead and the
-workflow ready-task index first.
+**Scheduled (user decision 2026-11-24):** all fix candidates go before P95-S2, in P95-S1a–e:
+- S1a: gateway bulkhead and single-flight;
+- S1b: workflow ready-task index;
+- S1c: inbox paging, orphan cases, terminate operation plus debris;
+- S1d: permission cache scoping and DB pool;
+- S1e: measure again.
 
-**Next session:** P95-S2 (scoping: migrating services to Rust, ADR 0257).
+**Next session:** P95-S1a (gateway: bulkhead and single-flight, ADR 0262).
 
 ---
 

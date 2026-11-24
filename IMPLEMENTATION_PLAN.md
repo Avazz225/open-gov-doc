@@ -4900,6 +4900,47 @@ by the pilot's numbers, not a committed rewrite of all of them (see ADR 0257's c
       index, inbox paging, case cleanup, scoped cache invalidation, pool sizing, dev debris) - placement
       is the user's call. For P95-S2: the algorithmic problems would survive a rewrite; permission-service
       and gateway stay the candidates.
+- **Fixes before the Rust decision (user decision 2026-11-24).** P95-S1 found that the biggest problems
+  are algorithmic and would survive a rewrite (`docs/operations/performance-ranking.md`, "What follows").
+  They are fixed first, then everything is measured again, so P95-S2 decides on a clean basis.
+- **P95-S1a — Gateway: bulkhead and single-flight (ADR 0262).**
+  - A connection limit per upstream service type instead of one shared `httpx` pool, so a slow service
+    exhausts only its own share. Limits as settings with a default per service and an override map;
+    a full share answers fast (`503` with `Retry-After`) instead of queueing up to the timeout.
+  - Registry resolution and the maintenance-mode state: single-flight (one fetch per expiry, the others
+    wait for it) on their own small pool, so they can't be starved by the proxied traffic.
+  - Tests (one stalled upstream doesn't slow another; one fetch per expiry under concurrency), a metric
+    per upstream (in use, refused), docs.
+- **P95-S1b — workflow-service: a ready-task index.**
+  - A table of ready user tasks per instance (task id, name, lane, claim, circulation step, created),
+    maintained wherever the engine state changes: start, complete, skip/send back/migrate, timers,
+    retries, federation callbacks, route edits; filled once at startup from the running instances.
+  - `GET /tasks` (with `eligible=me`) reads the index with `limit`/`offset` in SQL; the SLA poll loop and
+    the claim-expiry loop read it instead of deserializing every instance.
+  - Tests for every state change keeping the index right, a consistency check against a full scan, and a
+    test with thousands of running instances showing constant cost per call.
+- **P95-S1c — mail inbox paging, orphan cases, instance debris.**
+  - mail-connector `GET /inbound` and `GET /routing-log` paged (`limit`/`offset`, default 100), attachments
+    and routing log loaded in one query each per page; user-ui and admin-ui callers adapted.
+  - case-service removes the case (or marks it failed and says so) when the workflow start fails for any
+    reason - timeout, `5xx`, connection error - not only `422`; a startup reconciliation handles cases
+    without an instance (the 519 orphans from P95-S1).
+  - An administrative "terminate instance" operation (capability `workflow.instance_modify`, reason,
+    audited, claims released) and its use in `scripts/cleanup-test-debris.py` for test-created instances:
+    the ~1,200 case-test instances and the 1,046 open `ocr_review` instances of test documents in the dev
+    stack. Tests that start instances end them.
+- **P95-S1d — Permission cache and DB pool (ADR 0263).**
+  - Scoped invalidation instead of one global generation bump: a change invalidates the principals and
+    resources it can affect (a role assignment: its principal or group members, a resource subtree), so
+    an unrelated role assignment no longer makes every user's cache cold.
+  - Large filtered listings compute siblings together (one ancestor walk for the shared parent) - target:
+    the 1,000-child cold listing well under the 3.7 s measured.
+  - The pool budget of ADR 0254 revisited for the hot services: overflow connections are closed after
+    use and reopened (SCRAM handshakes in the profile) - a larger base pool or keeping overflow alive,
+    within the Postgres connection budget.
+- **P95-S1e — Measure again.** Both k6 scenarios, the cold-cache measurement and the py-spy profiles with
+  the same tools and settings as P95-S1; the ranking report updated with before/after per fix. Phase-close
+  style full regression. This is the basis for P95-S2.
 - **P95-S2 — Scoping: migrating services to Rust (ADR 0257). No code.**
   - **Selection:** from S1's ranking, only services where own compute or memory dominates. Not
     I/O-bound ones, where tuning (queries, caching, batching, pools) is the cheaper fix.

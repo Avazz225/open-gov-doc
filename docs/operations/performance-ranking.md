@@ -161,7 +161,8 @@ cold cost again on a large folder.
     libraries;
   - document- and folder-service spend their time in drivers and calls to others.
 
-**Fixes worth doing before or instead of a rewrite** (proposed, not scheduled):
+**Fixes before the rewrite decision** - scheduled as P95-S1a–e (user decision 2026-11-24), with a
+second measurement in P95-S1e as the basis for P95-S2:
 1. **gateway:** a connection limit per upstream service (bulkhead) and single-flight for its caches.
 2. **workflow-service:**
    - a ready-task index maintained on every state change, so the scan goes away (and the SLA loop
