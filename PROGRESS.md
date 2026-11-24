@@ -2,6 +2,55 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P95-S1, load test with a per-service ranking
+([report](docs/operations/performance-ranking.md)).
+
+**What changed:**
+- **Load test:**
+  - k6 `SCENARIO=extended` adds workflow, case, rendering, OCR and mail paths; the mail paths get the
+    `dms-poststelle` role in setup.
+  - New tools in `loadtest/`: `rank_services.py` (cost and latency-share rankings from cadvisor,
+    service metrics and Tempo traces), `profile_layers.py` (py-spy samples by layer), `cold_cache.py`.
+  - The notebook has a per-service section.
+- **Two full runs** (20 min each, 200 VUs, tracing at 10 %):
+  - **Base:** 73,770 requests at 61/s, 0 errors, goodput 99.93 %.
+  - **Extended collapsed:** goodput 26 %, 17 % errors. The trace proved the cause: a slow list_folder
+    spent 17.6 s in the gateway waiting for a connection, and 21 ms in folder-service.
+- **Rankings (base):**
+  - **Cost:** permission-service highest of the request services (636 CPU-s, 4.4 ms per request);
+    rendering highest overall (84 ms per upload, native conversion).
+  - **Latency share:** permission-service 25 % own time, document 14 %, gateway 9 %; DB 15–18 % of the
+    busy services' work.
+- **py-spy:** our middleware costs 1–2 % - not the per-hop cost.
+- **Found** (none fixed except the ocr startup; details and fix candidates in the report):
+  - workflow-service `GET /tasks` scans all running instances: 2,259 debris instances before the run,
+    N+1 queries, 1.0 core;
+  - the gateway's single shared pool lets one slow service starve every route;
+  - the gateway's caches stampede (no single-flight);
+  - mail `/inbound` is unpaged;
+  - case-service leaves orphan cases when the workflow start times out (519);
+  - the small DB pool's overflow churn costs SCRAM handshakes;
+  - cold permission cache: 3.7 s cold, 62 ms warm, and 3.5 s again after any unrelated permission change.
+- **Fixed:** ocr-service crashed at startup when permission-service was briefly unreachable (that is how
+  it went down after the P94-S4 regression). It now retries with backoff. Verified with permission-service
+  held down: 5 retries, then a normal start. ocr-service 61 tests green.
+- **Cleanup:**
+  - The 1,059 circulation instances the extended run started were set to `completed` by SQL. Only their
+    status changed; history is kept. Selected by definition "Umlauf", the run's time window, and exactly
+    the 50 load-test users.
+  - The other debris (1,046 open `ocr_review` instances, ~1,200 case-test instances, 519 orphan load-test
+    cases) is listed in the report, not touched.
+  - The temporary `domain-admin-monitoring` grant is revoked; the tracing ratio is back at 100 %.
+- **Docs:** `docs/operations/performance-ranking.md` (new), loadtest README, ocr-service, plan.
+
+**Open for you:** whether to schedule the seven fix candidates before P95-S2's Rust scoping. They are
+algorithmic and would survive a rewrite; the report recommends at least the gateway bulkhead and the
+workflow ready-task index first.
+
+**Next session:** P95-S2 (scoping: migrating services to Rust, ADR 0257).
+
+---
+
 **Last completed:** P94-S4, scoping database schema migrations
 ([ADR 0260](docs/adr/0260-database-schema-migrations-scoping.md)), and **Phase 94 closed** (full regression).
 

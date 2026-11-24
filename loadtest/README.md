@@ -70,6 +70,21 @@ killed outright (not even a graceful stop) before teardown, the
 `loadtest-*` users and `Load Test *` folder must be cleaned up manually via
 the auth-service/folder-service admin APIs.
 
+## Scenarios and per-service ranking (P95-S1)
+
+- `SCENARIO=extended loadtest/run.sh` adds the less-used paths to the base mix: start, find and complete a
+  circulation (workflow-service), create and list cases, renditions, OCR results, mailboxes and the mail
+  inbox. `setup()` grants the test users the `dms-poststelle` realm role for the mail paths.
+- `uv run python loadtest/rank_services.py --start <unix> --end <unix> [--rest-start <unix>] --out
+  results/ranking-<name>.json` - the two rankings for a run window: cost (CPU-seconds per 1,000 requests,
+  RSS, from cadvisor and the services' own metrics) and latency share (own time and DB time per service,
+  from Tempo traces). The notebook's last section reads the `ranking-*.json` files.
+- `uv run python loadtest/profile_layers.py <py-spy raw file>` - a py-spy recording (`--format raw`)
+  attributed by layer (DB driver, HTTP client, ASGI, middleware, service code).
+- `uv run python loadtest/cold_cache.py` - first vs. second filtered listing of a 1,000-child folder, and
+  again after a permission change.
+- Results of the first full run: `docs/operations/performance-ranking.md`.
+
 ## License limits
 
 `license-service` enforces the installed license's document/user limits

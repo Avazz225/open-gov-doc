@@ -4879,6 +4879,27 @@ by the pilot's numbers, not a committed rewrite of all of them (see ADR 0257's c
     are different lists: a service can be slow because it waits on the DB or another service, and a
     rewrite doesn't fix waiting.
   - The notebook gains the per-service section.
+  - **Result** ([docs/operations/performance-ranking.md](docs/operations/performance-ranking.md)):
+    - Base run healthy: 73,770 requests at 61/s, 0 errors, goodput 99.93 %, p50 9–91 ms per action.
+    - Cost (request services): permission-service first (636 CPU-s, 4.4 ms CPU per request, 1.5 calls per
+      user request), then document-, gateway-, folder-, storage-service; event-driven per upload:
+      rendering 84 ms, audit 24, OCR 17, search 16. RAM no differentiator (85–195 MB).
+    - Latency share: permission-service 25 % own time of end-to-end (its own time doubles under load:
+      queueing), document 14 %, gateway 9 %; DB only 15–18 % of the busy services' work.
+    - py-spy: our middleware (sensors, access log, tracing) 1–2 % - not the per-hop cost; SCRAM handshakes
+      from the small pool's overflow churn show up in permission-service.
+    - **Extended run collapsed** (goodput 26 %): workflow-service's `GET /tasks` scans every running
+      instance (2,259 before the run, N+1 queries, 94 % DB/pool wait, 1.0 core); the gateway's one shared
+      HTTP pool let it starve every other route (trace: 17.6 s in the gateway, 21 ms in folder-service);
+      the gateway's caches stampede; mail-connector's `/inbound` is unpaged (343 ms CPU per request);
+      case-service leaves orphan cases when the workflow start times out (519).
+    - Cold permission cache: 3.7 s cold / 62 ms warm on 1,000 children, 3.5 s again after any unrelated
+      permission change.
+    - Fixed on the way: ocr-service's startup bootstrap retries instead of crashing.
+    - Seven fix candidates listed in the report (gateway bulkhead + single-flight, workflow ready-task
+      index, inbox paging, case cleanup, scoped cache invalidation, pool sizing, dev debris) - placement
+      is the user's call. For P95-S2: the algorithmic problems would survive a rewrite; permission-service
+      and gateway stay the candidates.
 - **P95-S2 — Scoping: migrating services to Rust (ADR 0257). No code.**
   - **Selection:** from S1's ranking, only services where own compute or memory dominates. Not
     I/O-bound ones, where tuning (queries, caching, batching, pools) is the cheaper fix.

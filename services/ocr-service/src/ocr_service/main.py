@@ -22,6 +22,7 @@ from dms_metrics_client import (
 )
 from dms_permission_client import PermissionServiceClient
 from dms_registry_client import maybe_start_registration
+from dms_retry import compute_backoff_seconds
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import Response
 from ocr_service import metrics, repository
@@ -55,6 +56,33 @@ def _read_resource(name: str) -> str:
         return f.read().replace(
             "__SELF_BASE_URL__", settings.self_address or "http://localhost:8000"
         )
+
+
+async def _bootstrap_review_workflow() -> int:
+    """Grant and review definition at startup, retried with backoff (P95-S1):
+    a permission- or workflow-service that is briefly unreachable at this
+    moment (a restart, a rolling update, a test run stopping it) crashed the
+    whole service before, and with no restart policy it stayed down. Gives
+    up after ~2 minutes, so a real misconfiguration still fails visibly."""
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            await _ensure_review_workflow_permission()
+            return await app.state.workflow_client.ensure_process_definition(
+                name="ocr_review", bpmn_xml=_read_resource("ocr_review.bpmn")
+            )
+        except httpx.HTTPError:
+            if attempt >= 8:
+                raise
+            # At least a second between tries; full-jitter above that.
+            delay = 1.0 + compute_backoff_seconds(attempt - 1, base=1.0, cap=30.0)
+            logger.warning(
+                "ocr_review_bootstrap_retry",
+                extra={"attempt": attempt, "retry_in_seconds": round(delay, 1)},
+                exc_info=True,
+            )
+            await asyncio.sleep(delay)
 
 
 async def _ensure_review_workflow_permission() -> None:
@@ -188,10 +216,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
     app.state.workflow_client = WorkflowServiceClient(settings.workflow_service_base_url)
 
-    await _ensure_review_workflow_permission()
-    app.state.ocr_review_definition_id = await app.state.workflow_client.ensure_process_definition(
-        name="ocr_review", bpmn_xml=_read_resource("ocr_review.bpmn")
-    )
+    app.state.ocr_review_definition_id = await _bootstrap_review_workflow()
 
     sensor_config_client = SensorConfigClient(settings.monitoring_service_base_url)
     await sensor_config_client.start()

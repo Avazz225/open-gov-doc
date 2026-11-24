@@ -24,6 +24,9 @@ const SLA_MS = Number(__ENV.SLA_MS || 1000);
 const USER_POOL_SIZE = Number(__ENV.USER_POOL_SIZE || 50);
 const ADMIN_USERNAME = __ENV.ADMIN_USERNAME || "users-admin";
 const ADMIN_PASSWORD = __ENV.ADMIN_PASSWORD || "users-admin";
+// P95-S1: "base" (the agreed browse/search/upload/download mix) or
+// "extended" (adds the less-used paths: workflow, case, rendering, OCR, mail).
+const SCENARIO = __ENV.SCENARIO || "base";
 
 const goodput = new Rate("goodput");
 const actionDuration = new Trend("action_duration", true);
@@ -173,8 +176,36 @@ export function setup() {
     throw new Error(`setup: failed to upload seed document: ${seedUpload.status} ${seedUpload.body}`);
   }
 
+  // P95-S1, extended: the shipped circulation template (seeded by
+  // workflow-service) drives the workflow and case paths.
+  let circulationDefinitionId = null;
+  if (SCENARIO === "extended") {
+    const defs = http.get(
+      apiUrl("workflow-service", "process-definitions?name=Umlauf"),
+      withName("setup_circulation_template", authHeaders(adminToken))
+    );
+    if (defs.status !== 200 || !defs.json().length) {
+      throw new Error(`setup: no circulation template: ${defs.status} ${defs.body}`);
+    }
+    circulationDefinitionId = defs.json()[0].id;
+    // The mail paths need the mail-room realm role (mail-connector's
+    // `poststelle_role`); granted before the VUs log in, so it is in their
+    // tokens. Removed with the users in teardown.
+    for (const user of users) {
+      const grant = http.post(
+        apiUrl("auth-service", "realm-roles/dms-poststelle/assignments"),
+        JSON.stringify({ username: user.username }),
+        withName("setup_grant_poststelle", authHeaders(adminToken, { "Content-Type": "application/json" }))
+      );
+      if (grant.status !== 204) {
+        throw new Error(`setup: could not grant dms-poststelle to ${user.username}: ${grant.status} ${grant.body}`);
+      }
+    }
+  }
+
   return {
     runId,
+    circulationDefinitionId,
     users,
     folderId,
     seedDocumentId: seedUpload.json().id,
@@ -229,14 +260,108 @@ function uploadDocument(token, data) {
   recordAction("upload", res);
 }
 
+// --- Extended scenario (P95-S1) -------------------------------------------
+
+// Starts a one-step circulation for the user, finds the task in "my tasks"
+// and completes it: workflow-service's start, task scan and completion paths
+// (with permission-service's lane/route check and the audit/notification
+// fan-out behind them).
+function circulationRound(token, data, user) {
+  const route = [{ kind: "kenntnis", assignee_type: "principal", assignee: user.id }];
+  const started = http.post(
+    apiUrl("workflow-service", `process-definitions/${data.circulationDefinitionId}/instances`),
+    JSON.stringify({ initial_data: { dms_route: route } }),
+    withName("workflow_start", authHeaders(token, { "Content-Type": "application/json" }))
+  );
+  recordAction("workflow_start", started);
+  if (started.status !== 201) return;
+  const instanceId = started.json().id;
+  const mine = http.get(
+    apiUrl("workflow-service", "tasks?eligible=me&limit=20"),
+    withName("workflow_my_tasks", authHeaders(token))
+  );
+  recordAction("workflow_my_tasks", mine);
+  const tasks = http.get(
+    apiUrl("workflow-service", `instances/${instanceId}/tasks`),
+    withName("workflow_instance_tasks", authHeaders(token))
+  );
+  if (tasks.status !== 200 || !tasks.json().length) return;
+  const done = http.post(
+    apiUrl("workflow-service", `instances/${instanceId}/tasks/${tasks.json()[0].id}/complete`),
+    "{}",
+    withName("workflow_complete", authHeaders(token, { "Content-Type": "application/json" }))
+  );
+  recordAction("workflow_complete", done);
+}
+
+function createCase(token, data, user) {
+  const res = http.post(
+    apiUrl("case-service", "cases"),
+    JSON.stringify({
+      name: `Lasttest-Umlauf ${__VU}-${__ITER}`,
+      process_definition_id: data.circulationDefinitionId,
+      initial_data: {
+        dms_route: [{ kind: "kenntnis", assignee_type: "principal", assignee: user.id }],
+      },
+    }),
+    withName("case_create", authHeaders(token, { "Content-Type": "application/json" }))
+  );
+  recordAction("case_create", res);
+}
+
+function listCases(token) {
+  const res = http.get(apiUrl("case-service", "cases?status=open"), withName("case_list", authHeaders(token)));
+  recordAction("case_list", res);
+}
+
+function listRenditions(token, data) {
+  const res = http.get(
+    apiUrl("rendering-service", `renditions?document_id=${data.seedDocumentId}`),
+    withName("rendition_list", authHeaders(token))
+  );
+  recordAction("rendition_list", res);
+}
+
+function listOcrResults(token, data) {
+  const res = http.get(
+    apiUrl("ocr-service", `ocr-results?document_id=${data.seedDocumentId}`),
+    withName("ocr_list", authHeaders(token))
+  );
+  recordAction("ocr_list", res);
+}
+
+function listMailboxes(token) {
+  const res = http.get(apiUrl("mail-connector", "mailboxes"), withName("mail_mailboxes", authHeaders(token)));
+  recordAction("mail_mailboxes", res);
+  const inbound = http.get(apiUrl("mail-connector", "inbound"), withName("mail_inbound", authHeaders(token)));
+  recordAction("mail_inbound", inbound);
+}
+
 // Weighted mixed workload: browsing/searching dominates, uploads are the
 // rarest action - matches typical DMS usage (many reads per write).
-const ACTIONS = [
+const BASE_ACTIONS = [
   { weight: 0.35, run: listFolder },
   { weight: 0.25, run: downloadSeedDocument },
   { weight: 0.2, run: searchDocuments },
   { weight: 0.2, run: uploadDocument },
 ];
+
+// P95-S1: the less-used paths, with a share of the base mix so the shared
+// services (gateway, permission, folder, document) stay under realistic load.
+const EXTENDED_ACTIONS = [
+  { weight: 0.12, run: listFolder },
+  { weight: 0.08, run: downloadSeedDocument },
+  { weight: 0.1, run: searchDocuments },
+  { weight: 0.08, run: uploadDocument },
+  { weight: 0.15, run: circulationRound },
+  { weight: 0.07, run: createCase },
+  { weight: 0.07, run: listCases },
+  { weight: 0.12, run: listRenditions },
+  { weight: 0.12, run: listOcrResults },
+  { weight: 0.09, run: listMailboxes },
+];
+
+const ACTIONS = SCENARIO === "extended" ? EXTENDED_ACTIONS : BASE_ACTIONS;
 
 function pickAction() {
   const r = Math.random();
@@ -255,7 +380,7 @@ export default function (data) {
     return;
   }
   const action = pickAction();
-  action(token, data);
+  action(token, data, user);
   sleep(randomIntBetween(1, 3));
 }
 

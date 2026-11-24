@@ -173,3 +173,12 @@ the body. The `ocr.reviewed` event carries `workflow-service` as `actor` and the
 - **`ocrEnabled` is only visible/controllable as a Compose profile** — the Admin UI only shows "reachable"/"not reachable", no toggle (see ADR 0016 for the rationale).
 - **Text-layer embedding for very short recognized text (under 20 characters) stays stuck in the overlay fallback** — see "Searchable PDF" above for the rationale; in practice affects no real multi-line scans.
 - **No retry/no four-eyes check for the text-layer versioning itself** — a failed `create_version()` call (e.g. network error) is only logged, the scan remains permanently without a searchable version until reprocessing (e.g. by a future retry mechanism, see above) catches up on it.
+
+## Startup bootstrap retries (P95-S1)
+
+The review-workflow bootstrap at startup (self-granting `domain-admin-config` at permission-service, then
+`ensure_process_definition` at workflow-service) retries with backoff for about two minutes
+(`_bootstrap_review_workflow`). Before, a permission- or workflow-service that was briefly unreachable at
+that moment crashed the service, and with no restart policy it stayed down - found when a regression run
+had stopped permission-service exactly then. Verified by keeping permission-service down during a
+restart: five logged `ocr_review_bootstrap_retry`, then a normal start.
