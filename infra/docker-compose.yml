@@ -45,6 +45,8 @@ volumes:
   # volume only persists other Grafana-internal state across restarts.
   grafana-data:
   tempo-data:
+  loki-data:
+  alloy-data:
   # Deletion register ledger (10.4, P11-S4) - see audit-service comment above.
   deletion-ledger-data:
 
@@ -1730,6 +1732,43 @@ services:
     networks:
       - dms-net
 
+  loki:
+    # Central log store (P94-S2, ADR 0251).
+    image: grafana/loki:3.2.1
+    restart: "no"
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    # The image runs as uid 10001, a fresh named volume belongs to root -
+    # dev stack only, same as tempo.
+    user: "0"
+    volumes:
+      - ./logging/loki.yaml:/etc/loki/loki.yaml:ro
+      - loki-data:/loki
+    ports:
+      - "${INFRA_UI_BIND_ADDRESS:-127.0.0.1}:${LOKI_PORT:-3100}:3100"
+    networks:
+      - dms-net
+
+  alloy:
+    # Log shipper (P94-S2, ADR 0251): every container of this compose project
+    # via the Docker socket (read-only) -> Loki. Its UI on ALLOY_PORT shows
+    # the pipeline and the discovered containers.
+    image: grafana/alloy:v1.4.3
+    restart: "no"
+    command: ["run", "--server.http.listen-addr=0.0.0.0:12345", "--storage.path=/var/lib/alloy/data", "/etc/alloy/config.alloy"]
+    volumes:
+      - ./logging/alloy.river:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Read positions per container - without them a recreated alloy would
+      # ship every container's log again.
+      - alloy-data:/var/lib/alloy/data
+    ports:
+      - "127.0.0.1:${ALLOY_PORT:-12345}:12345"
+    depends_on:
+      loki:
+        condition: service_started
+    networks:
+      - dms-net
+
   grafana:
     image: grafana/grafana:11.3.1
     restart: "no"
@@ -1753,6 +1792,8 @@ services:
       prometheus:
         condition: service_started
       tempo:
+        condition: service_started
+      loki:
         condition: service_started
     networks:
       - dms-net

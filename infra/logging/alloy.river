@@ -1,0 +1,57 @@
+// Grafana Alloy as the log shipper (P94-S2, ADR 0251): reads every container
+// of the compose project "dms" through the Docker socket and pushes to Loki.
+// Labels stay few: `service` (the compose service), `container`, `level`.
+// The services' JSON lines (dms_common.logging) give `level` and `trace_id`;
+// `trace_id` becomes structured metadata, so Grafana links a line to Tempo.
+
+discovery.docker "dms" {
+  host = "unix:///var/run/docker.sock"
+  filter {
+    name   = "label"
+    values = ["com.docker.compose.project=dms"]
+  }
+}
+
+discovery.relabel "dms" {
+  targets = []
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+}
+
+loki.source.docker "dms" {
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.docker.dms.targets
+  relabel_rules = discovery.relabel.dms.rules
+  forward_to    = [loki.process.dms.receiver]
+}
+
+loki.process "dms" {
+  // Lines that aren't JSON (postgres, keycloak, nginx) pass unchanged.
+  stage.json {
+    expressions = {
+      level    = "level",
+      trace_id = "trace_id",
+    }
+  }
+  stage.labels {
+    values = { level = "" }
+  }
+  stage.structured_metadata {
+    values = { trace_id = "" }
+  }
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

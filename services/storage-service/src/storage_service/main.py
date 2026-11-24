@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 
 from dms_common import MaxBodySizeMiddleware, configure_logging
-from dms_common.otel import setup_tracing
+from dms_common.otel import setup_observability
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
 from dms_metrics_client import (
@@ -274,7 +274,7 @@ async def publish_event(
 
 
 app = FastAPI(title=settings.service_name, lifespan=lifespan)
-setup_tracing(app, settings)
+setup_observability(app, settings)
 
 # Max upload size (Phase 61 Session 2, ADR 0187) - `upload_object`/
 # `upload_archive_copy` previously read the entire request body into

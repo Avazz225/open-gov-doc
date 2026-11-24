@@ -4732,6 +4732,15 @@ explain lanes and route changes. Design and reasons: [ADR 0249](docs/adr/0249-ch
       `sensors.spec.ts` 2/2.
 - **P94-S2 — Central log aggregation (§10.1).** Loki plus promtail (or Alloy) in compose and Helm, with
   the JSON logs that already exist and a Grafana datasource. Trace-id ↔ log correlation with S1.
+  - **Result** ([ADR 0251](docs/adr/0251-central-log-aggregation.md)):
+    - Loki 3.2.1 + Alloy v1.4.3 in compose (Docker socket) and Helm (`logging.*`: Alloy streams pod logs
+      through the Kubernetes API with a namespace-scoped Role; bundled Loki with a PVC or an external
+      push URL). Labels `service`/`container`/`level`, `trace_id` as structured metadata.
+    - `dms_common`: `trace_id`/`span_id` on every line inside a sampled trace; uvicorn's loggers through
+      the JSON handler; a structured access log (`dms.access`) inside the request's trace, replacing
+      uvicorn's; `setup_observability` in all 32 services.
+    - Grafana: Loki derived field → Tempo, Tempo `tracesToLogsV2` → Loki (both verified in Explore).
+    - **Tests:** dms-common 32 (+4); targeted service runs green.
 - **P94-S3 — Hygiene bundle.**
   - ~~ruff fully green: run `ruff format`, wrap the 12 long lines in the LibreOffice add-in, exclude
     `loadtest/notebook/*.ipynb`.~~ Done in P90-S5 (ruff 0.16): formatted, lines wrapped, the notebook
@@ -4757,6 +4766,13 @@ explain lanes and route changes. Design and reasons: [ADR 0249](docs/adr/0249-ch
     the real leftovers, which made two federation tests fail (`401` from the hub) in the Phase 91
     regression; the revocation was undone. Distinguish such a persistent test identity from per-run
     leftovers (for example a recognisable display name) before any further cleanup.
+  - **search-service can't read teamspace documents (found in P94-S2, ADR 0251):** its `document.created`
+    handler gets `403` from document-service for a document in a teamspace folder (no inherited "everyone"
+    grant, search-service isn't a member), raises, and JetStream redelivers the message every 30 s
+    forever (16 messages, 64 errors in 10 min in the dev stack). Such documents are presumably never
+    indexed. Decide how a background indexer is authorised (a service read grant, or document-service
+    trusting service principals for reads) - search results are filtered per caller anyway - and stop
+    the endless redelivery for a refusal (ack or max-deliver with a dead-letter).
   - **e2e suites and the gateway rate limit (found in P93-S3):** user-ui, reviewer-ui and admin-ui all
     run as `users-admin`; back to back they exceed 600 requests/min, specs fail at random and their
     cleanup calls are refused (`429`), leaving test data behind (a role assignment, a trust anchor, a

@@ -178,6 +178,18 @@ def setup_tracing(app, settings: BaseServiceSettings) -> bool:
     return True
 
 
+def setup_observability(app, settings: BaseServiceSettings) -> bool:
+    """The one call every service makes right after `app = FastAPI(...)`
+    (P94-S1/S2): the structured access log (always) and tracing (when an
+    exporter endpoint is set). Returns whether tracing is on. The access-log
+    middleware is added first, so the tracing middleware wraps it and every
+    access line carries its request's trace id."""
+    from dms_common.access_log import AccessLogMiddleware
+
+    app.add_middleware(AccessLogMiddleware)
+    return setup_tracing(app, settings)
+
+
 def _instrument_sqlalchemy() -> None:
     """Database statements as spans - only where the service has a database
     (gateway-, config-service and the two connectors have none)."""
@@ -208,5 +220,6 @@ __all__ = [
     "configure_tracing",
     "current_sampling_ratio",
     "set_sampling_ratio",
+    "setup_observability",
     "setup_tracing",
 ]

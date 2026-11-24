@@ -248,6 +248,19 @@ point, not mandatory use)." Implemented as:
   trace id in Grafana - it is recorded regardless of the ratio.
 - **Overhead:** under 0.5 ms per request at ratio 1 (measured in P94-S1).
 
+## Central logs (P94-S2, [ADR 0251](../adr/0251-central-log-aggregation.md))
+
+- **Path:** every container → Grafana Alloy (Docker socket in compose, Kubernetes API in Helm) → Loki
+  (`loki`, 3100, 7 days) → Grafana datasource "Loki".
+- **Labels:** `service`, `container`, `level`. `trace_id` is structured metadata: filter with
+  `{service="document-service"} | trace_id="<id>"`, or over all services with `{service=~".+"} | trace_id="<id>"`.
+  JSON fields can be filtered after `| json`, e.g. `{service="permission-service"} | json | http_status >= 500`.
+- **Access log:** one line per request, logger `dms.access` (`http_method`, `http_route`, `http_path`,
+  `http_status`, `duration_ms`), written inside the request's trace; health and metrics calls skipped.
+- **Trace ↔ log:** a line with `trace_id` shows "Trace öffnen" (Tempo); in a trace, each span's log icon
+  opens that service's lines of the same trace.
+- **Alloy's UI** (`localhost:12345`) shows the pipeline and the discovered containers.
+
 ## CheckMK — deliberately not part of this build-out stage (P11-S2)
 
 Concept 10.1 names CheckMK as a third possible integration target (alongside Prometheus/Grafana),

@@ -1,0 +1,320 @@
+{{/*
+Central log aggregation (P94-S2, ADR 0251): Grafana Alloy reads the pod logs
+of this release's namespace through the Kubernetes API and pushes them to the
+bundled Loki or to logging.loki.external.pushUrl. Same pipeline as
+infra/logging/ in compose (Docker discovery there, Kubernetes here).
+*/}}
+{{- if .Values.logging.enabled }}
+{{- $alloy := include "dms.serviceFullname" (dict "root" . "name" "alloy") }}
+{{- $loki := include "dms.serviceFullname" (dict "root" . "name" "loki") }}
+{{- $l := .Values.logging.loki.bundled }}
+{{- $a := .Values.logging.alloy }}
+{{- $pushUrl := "" }}
+{{- if $l.enabled }}
+{{- $pushUrl = printf "http://%s:3100/loki/api/v1/push" $loki }}
+{{- else }}
+{{- $pushUrl = required "logging.loki.external.pushUrl ist Pflicht, wenn logging.enabled und logging.loki.bundled.enabled=false" .Values.logging.loki.external.pushUrl }}
+{{- end }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $alloy }}
+  labels:
+    {{- include "dms.serviceLabels" (dict "root" . "name" "alloy") | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $alloy }}
+  labels:
+    {{- include "dms.serviceLabels" (dict "root" . "name" "alloy") | nindent 4 }}
+rules:
+  # Discover the namespace's pods and stream their logs - nothing else.
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $alloy }}
+  labels:
+    {{- include "dms.serviceLabels" (dict "root" . "name" "alloy") | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $alloy }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $alloy }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $alloy }}
+  labels:
+    {{- include "dms.serviceLabels" (dict "root" . "name" "alloy") | nindent 4 }}
+data:
+  config.alloy: |
+    discovery.kubernetes "pods" {
+      role = "pod"
+      namespaces {
+        names = [{{ .Release.Namespace | quote }}]
+      }
+    }
+
+    discovery.relabel "pods" {
+      targets = discovery.kubernetes.pods.targets
+
+      rule {
+        source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_component"]
+        target_label  = "service"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_name"]
+        target_label  = "pod"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_container_name"]
+        target_label  = "container"
+      }
+    }
+
+    loki.source.kubernetes "pods" {
+      targets    = discovery.relabel.pods.output
+      forward_to = [loki.process.dms.receiver]
+    }
+
+    loki.process "dms" {
+      stage.json {
+        expressions = {
+          level    = "level",
+          trace_id = "trace_id",
+        }
+      }
+      stage.labels {
+        values = { level = "" }
+      }
+      stage.structured_metadata {
+        values = { trace_id = "" }
+      }
+      forward_to = [loki.write.default.receiver]
+    }
+
+    loki.write "default" {
+      endpoint {
+        url = {{ $pushUrl | quote }}
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $alloy }}
+  labels:
+    {{- include "dms.serviceLabels" (dict "root" . "name" "alloy") | nindent 4 }}
+spec:
+  # One instance: it streams through the API, two would ship every line twice.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "dms.serviceSelectorLabels" (dict "root" . "name" "alloy") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "dms.serviceSelectorLabels" (dict "root" . "name" "alloy") | nindent 8 }}
+      annotations:
+        checksum/config: {{ printf "%s%s" $pushUrl .Release.Namespace | sha256sum | trunc 16 }}
+    spec:
+      serviceAccountName: {{ $alloy }}
+      containers:
+        - name: alloy
+          image: {{ printf "%s:%s" $a.image.repository $a.image.tag | quote }}
+          args:
+            - run
+            - --server.http.listen-addr=0.0.0.0:12345
+            - --storage.path=/var/lib/alloy/data
+            - /etc/alloy/config.alloy
+          ports:
+            - name: http
+              containerPort: 12345
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: http
+          resources:
+            requests:
+              memory: {{ $a.resources.memory.requests | quote }}
+              cpu: {{ $a.resources.cpu.requests | quote }}
+            limits:
+              memory: {{ $a.resources.memory.limits | quote }}
+              cpu: {{ $a.resources.cpu.limits | quote }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/alloy
+            - name: data
+              mountPath: /var/lib/alloy/data
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $alloy }}
+        - name: data
+          emptyDir: {}
+{{- if $l.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $loki }}
+  labels:
+    {{- include "dms.serviceLabels" (dict "root" . "name" "loki") | nindent 4 }}
+data:
+  loki.yaml: |
+    auth_enabled: false
+    server:
+      http_listen_port: 3100
+      log_level: warn
+    common:
+      path_prefix: /loki
+      storage:
+        filesystem:
+          chunks_directory: /loki/chunks
+          rules_directory: /loki/rules
+      replication_factor: 1
+      ring:
+        kvstore:
+          store: inmemory
+    schema_config:
+      configs:
+        - from: 2026-01-01
+          store: tsdb
+          object_store: filesystem
+          schema: v13
+          index:
+            prefix: index_
+            period: 24h
+    limits_config:
+      retention_period: {{ $l.retention }}
+      allow_structured_metadata: true
+    compactor:
+      working_directory: /loki/compactor
+      retention_enabled: true
+      delete_request_store: filesystem
+    analytics:
+      reporting_enabled: false
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $loki }}-data
+  labels:
+    {{- include "dms.serviceLabels" (dict "root" . "name" "loki") | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- if $l.persistence.storageClassName }}
+  storageClassName: {{ $l.persistence.storageClassName | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $l.persistence.size | quote }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $loki }}
+  labels:
+    {{- include "dms.serviceLabels" (dict "root" . "name" "loki") | nindent 4 }}
+spec:
+  replicas: 1
+  # RWO PVC + single binary, same rationale as templates/nats.yaml.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "dms.serviceSelectorLabels" (dict "root" . "name" "loki") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "dms.serviceSelectorLabels" (dict "root" . "name" "loki") | nindent 8 }}
+    spec:
+      securityContext:
+        runAsUser: 10001
+        fsGroup: 10001
+      containers:
+        - name: loki
+          image: {{ printf "%s:%s" $l.image.repository $l.image.tag | quote }}
+          args: ["-config.file=/etc/loki/loki.yaml"]
+          ports:
+            - name: http
+              containerPort: 3100
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 10
+          resources:
+            requests:
+              memory: {{ $l.resources.memory.requests | quote }}
+              cpu: {{ $l.resources.cpu.requests | quote }}
+            limits:
+              memory: {{ $l.resources.memory.limits | quote }}
+              cpu: {{ $l.resources.cpu.limits | quote }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/loki
+            - name: data
+              mountPath: /loki
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $loki }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ $loki }}-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $loki }}
+  labels:
+    {{- include "dms.serviceLabels" (dict "root" . "name" "loki") | nindent 4 }}
+spec:
+  selector:
+    {{- include "dms.serviceSelectorLabels" (dict "root" . "name" "loki") | nindent 4 }}
+  ports:
+    - name: http
+      port: 3100
+      targetPort: http
+{{- if .Values.logging.grafanaDatasource.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $loki }}-grafana-datasource
+  labels:
+    {{- include "dms.serviceLabels" (dict "root" . "name" "loki") | nindent 4 }}
+    grafana_datasource: "1"
+data:
+  dms-loki.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Loki (OG Doc)
+        uid: loki
+        type: loki
+        access: proxy
+        url: {{ printf "http://%s:3100" $loki }}
+        editable: false
+        jsonData:
+          derivedFields:
+            - name: TraceID
+              matcherType: regex
+              matcherRegex: '"trace_id": "([0-9a-f]{32})"'
+              url: "$${__value.raw}"
+              datasourceUid: tempo
+{{- end }}
+{{- end }}
+{{- end }}

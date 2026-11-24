@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 
 from asgiref.wsgi import WsgiToAsgi
 from dms_common import configure_logging
-from dms_common.otel import setup_tracing
+from dms_common.otel import setup_observability
 from dms_connector_sdk import ConnectorDescriptor, DmsTreeClient
 from dms_metrics_client import (
     SensorConfigClient,
@@ -119,7 +119,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title=settings.service_name, lifespan=lifespan)
-setup_tracing(app, settings)
+setup_observability(app, settings)
 
 # Sensor concept (10.1, full rollout): must run at module level, right
 # after `app` is constructed - see bootstrap_http_sensors's docstring

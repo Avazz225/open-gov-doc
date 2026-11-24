@@ -254,5 +254,17 @@ data:
         access: proxy
         url: {{ printf "http://%s:3200" $tempo }}
         editable: false
+        {{- if .Values.logging.enabled }}
+        jsonData:
+          # From a span to its service's log lines of that trace (P94-S2).
+          tracesToLogsV2:
+            datasourceUid: loki
+            spanStartTimeShift: "-2m"
+            spanEndTimeShift: "2m"
+            filterByTraceID: true
+            tags:
+              - key: service.name
+                value: service
+        {{- end }}
 {{- end }}
 {{- end }}

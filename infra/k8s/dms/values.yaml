@@ -1561,6 +1561,51 @@ tracing:
     grafanaDatasource:
       enabled: true
 
+# ---------------------------------------------------------------------------
+# Central log aggregation (P94-S2, ADR 0251). Off by default. When on, a
+# Grafana Alloy Deployment streams every pod log of this release's namespace
+# through the Kubernetes API (namespace-scoped Role on pods + pods/log, no
+# DaemonSet, no hostPath) to the bundled Loki (single binary with a PVC) or
+# to `loki.external.pushUrl`. The services' JSON lines give `level` (label)
+# and `trace_id` (structured metadata). A Grafana datasource ConfigMap
+# (label `grafana_datasource: "1"`) links log lines to Tempo traces.
+# ---------------------------------------------------------------------------
+logging:
+  enabled: false
+  loki:
+    bundled:
+      enabled: true
+      image:
+        repository: grafana/loki
+        tag: "3.2.1"
+      retention: 168h
+      persistence:
+        size: 20Gi
+        storageClassName: ""
+      resources:
+        memory:
+          requests: 256Mi
+          limits: 1Gi
+        cpu:
+          requests: 100m
+          limits: "1"
+    external:
+      # e.g. https://loki.monitoring.svc:3100/loki/api/v1/push
+      pushUrl: ""
+  alloy:
+    image:
+      repository: grafana/alloy
+      tag: "v1.4.3"
+    resources:
+      memory:
+        requests: 128Mi
+        limits: 512Mi
+      cpu:
+        requests: 50m
+        limits: 500m
+  grafanaDatasource:
+    enabled: true
+
 nats:
   image:
     repository: nats

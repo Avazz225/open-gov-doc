@@ -87,6 +87,12 @@ tar xzf helm.tar.gz
   Tempo with a PVC (`templates/tracing.yaml`) plus a Grafana datasource ConfigMap
   (`grafana_datasource: "1"`); `bundled.enabled: false` needs `external.endpoint` (rendering fails
   without it). `samplingRatio` (default 0.1) is the start value - admins change it at runtime.
+- **`logging`** (P94-S2, [ADR 0251](../../docs/adr/0251-central-log-aggregation.md)): off by default.
+  `enabled: true` deploys a Grafana Alloy Deployment that streams the namespace's pod logs through the
+  Kubernetes API (ServiceAccount + namespace-scoped Role on `pods`, `pods/log`) to the bundled Loki
+  (single binary, PVC, `retention` 168h) or to `loki.external.pushUrl` (required with
+  `loki.bundled.enabled: false`). A Grafana datasource ConfigMap links log lines to Tempo; with
+  `tracing.enabled` the Tempo datasource links back to the logs.
 - **`resources.baseline`**: default requests/limits for all services
   without their own `resources` block. A service with its own (even
   partial) `resources` block selectively overrides it (deep merge in

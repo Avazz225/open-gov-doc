@@ -14,3 +14,13 @@ datasources:
         datasourceUid: prometheus
       nodeGraph:
         enabled: true
+      # From a span to its service's log lines of that trace (P94-S2).
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: "-2m"
+        spanEndTimeShift: "2m"
+        filterByTraceID: true
+        filterBySpanID: false
+        tags:
+          - key: service.name
+            value: service

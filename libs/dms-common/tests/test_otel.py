@@ -131,3 +131,30 @@ async def test_trace_crosses_an_http_hop():
     inner_span = next(s for s in spans if s.name == "GET /inner")
     client_span = next(s for s in spans if s.kind == trace.SpanKind.CLIENT)
     assert inner_span.parent.span_id == client_span.context.span_id
+
+
+def test_access_line_names_the_requests_trace(capsys):
+    """P94-S2 (ADR 0251): `setup_observability`'s order - access log inside
+    the tracing middleware - puts the request's trace id on its access line."""
+    import json
+
+    from dms_common.access_log import AccessLogMiddleware
+    from dms_common.logging import configure_logging
+    from fastapi.testclient import TestClient
+
+    configure_logging(ExampleSettings(_env_file=None))
+    app = FastAPI()
+    app.add_middleware(AccessLogMiddleware)
+
+    @app.get("/ping")
+    async def ping():
+        return {}
+
+    FastAPIInstrumentor.instrument_app(app, exclude_spans=["receive", "send"])
+    with TestClient(app) as client:
+        client.get("/ping")
+
+    [server] = [s for s in EXPORTER.get_finished_spans() if s.name == "GET /ping"]
+    lines = [json.loads(x) for x in capsys.readouterr().out.strip().splitlines()]
+    [access] = [x for x in lines if x["logger"] == "dms.access"]
+    assert access["trace_id"] == format(server.context.trace_id, "032x")
