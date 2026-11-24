@@ -4551,6 +4551,22 @@ should cover the trust settings. Design and reasons: [ADR 0248](docs/adr/0248-va
     ranges, timeouts, size cap, optional proxy, switchable.
   - Tests with a generated test PKI: valid, changed after signing, revoked, unknown CA, a shadow-attack
     style incremental update, an SSRF attempt (AIA URL to an internal address).
+  - **Result:**
+    - signature-service `validation/`: the interface and result model, the PAdES validator (strict
+      reader; LTA process with a signature timestamp, basic validation for B-B; changes after signing
+      make it `TOTAL-FAILED`), the trust manager (internal CA plus installation anchors, path-length
+      limit, never the OS store), the fenced fetcher and the bounded worker (queue plus thread pool, a
+      time limit per run).
+    - Tables `incoming_signature_validation`, `incoming_signature_summary`, `incoming_trust_anchor`,
+      `incoming_validation_config`. Endpoints `GET /incoming-signatures`, config and trust-anchor CRUD
+      (`admin.signature_config`). Events `signature.incoming.validated` and `signature.trust_anchor.*`.
+    - Consumer `document.>` (durable `signature-service-incoming`, `deliver_new`). document-service adds
+      `version_number`/`content_type`/`filename` to `document.created` and `content_type`/`filename` to
+      `document.version.created`.
+    - **Tests:** 79 in signature-service (+43), including the end-to-end path through document-service.
+      Live through the gateway: a signed upload has its result within seconds.
+    - **Deviation, recorded in ADR 0248:** the revocation modes follow pyHanko (`soft-fail` passes when
+      revocation data is unavailable, `hard-fail` makes it INDETERMINATE).
 - **P92-S2 — EU trusted lists, reports, audit.**
   - LOTL and national lists: scheduled fetch (default daily), cache with sequence number and next
     update, offline import; qualification (`qes`/`adesqc`/`ades`).

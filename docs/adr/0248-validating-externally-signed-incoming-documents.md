@@ -1,6 +1,6 @@
 # 0248 — Validating externally signed incoming documents (scoping)
 
-**Status:** accepted (scoping in P90-S6; built in Phase 92, scheduled 2026-11-23)
+**Status:** accepted (scoping in P90-S6; built in Phase 92, scheduled 2026-11-23; stage 1 backend in P92-S1)
 **Context:** P90-S6 (Phase 90, user-selected from the comparison with an external reference system).
 
 OG Doc signs documents itself (signature-service, PAdES-B-LTA with an internal CA, ADR 0025/0155). It
@@ -208,3 +208,29 @@ in session 2, and a real QES sample (e.g. from a public validation demo) one in 
 - **storage:** one report object per validation run.
 - **Ops:** outbound HTTPS to `ec.europa.eu`, the national list hosts and certificate authorities, or
   the offline import. Both are documented in the operations docs.
+
+## Implementation notes (P92-S1)
+
+Built as decided, with these refinements:
+
+- **Events:** `document.created` carries `version_number` too, not only `content_type`/`filename`, so the
+  consumer needn't ask which version the event means. The consumer subscribes `document.>` with one
+  durable (`signature-service-incoming`) and filters, the pattern every other consumer uses.
+- **Revocation modes follow pyHanko's semantics.** Decision 3 reads as if `soft-fail` meant
+  "unreachable → INDETERMINATE". In pyHanko, `soft-fail` lets a signature pass when revocation data can't
+  be obtained, and `hard-fail` makes it INDETERMINATE (never FAILED). That pair is what was built:
+  `soft-fail` is the forgiving default, `hard-fail` the strict choice. A certificate actually revoked
+  never passes in either mode.
+- **B-B signatures:** EN 319 102-1's with-time and LTA processes require a signature timestamp, and
+  received PDFs often have none. Those go through basic validation (§5.3); signatures with a timestamp
+  through the LTA process.
+- **Changed after signing overrides the cryptography.** If the modification analysis finds changes beyond
+  form filling, annotations, further signatures and validation data, the finding is `TOTAL-FAILED` with
+  `MODIFIED_AFTER_SIGNING`, even though the signature still verifies over its own revision.
+- **Unsigned PDFs are cheap:** a PDF without `/ByteRange` doesn't reach the worker, and a run without
+  findings stores nothing.
+- **A job is dropped when its version can't be fetched** (document-service unreachable), because the
+  event was acknowledged on queueing. The admin backfill (P92-S2) catches up.
+- **pyHanko 0.36 quirks** (basic validation ignores `status_cls`; certvalidator's path-length qualifier
+  typo) are worked around and described in `docs/services/signature-service.md`.
+

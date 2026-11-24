@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 SignatureLevel = Literal["ses", "aes", "qes"]
 
@@ -59,3 +59,80 @@ class SignatureProviderStatusOut(BaseModel):
 class SignatureProviderLevelsIn(BaseModel):
     id: str
     levels: list[SignatureLevel]
+
+
+# --- Incoming-signature validation (P92-S1, ADR 0248) ----------------------
+
+
+class IncomingValidationConfigIn(BaseModel):
+    enabled: bool
+    revocation_mode: Literal["soft-fail", "hard-fail"]
+    outbound_fetching: bool
+
+
+class IncomingValidationConfigOut(IncomingValidationConfigIn):
+    model_config = ConfigDict(from_attributes=True)
+    updated_at: datetime
+    updated_by: str | None
+
+
+class IncomingTrustAnchorIn(BaseModel):
+    label: str = Field(min_length=1, max_length=256)
+    certificate_pem: str = Field(min_length=1, max_length=64 * 1024)
+
+
+class IncomingTrustAnchorOut(BaseModel):
+    """`source="internal"` is the installation's own CA: listed for
+    completeness, not removable (`id` is `None`)."""
+
+    id: int | None
+    source: Literal["internal", "installation"]
+    label: str
+    subject: str
+    fingerprint_sha256: str
+    not_after: datetime
+    created_at: datetime | None = None
+    created_by: str | None = None
+
+
+class IncomingSignatureValidationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    run_id: str
+    version_number: int
+    trigger: str
+    format: str
+    position: str | None
+    kind: str
+    indication: str
+    sub_indication: str | None
+    qualification: str
+    trust_source: str | None
+    signer_subject: str | None
+    signer_issuer: str | None
+    signer_serial: str | None
+    claimed_signing_time: datetime | None
+    best_signature_time: datetime | None
+    coverage: str
+    modification_level: str | None
+    failure_reason: str | None
+    technical_detail: str | None
+    revocation_mode: str
+    validated_at: datetime
+
+
+class IncomingSignatureSummaryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    version_number: int
+    run_id: str
+    signature_count: int
+    worst_indication: str
+    best_qualification: str
+    changed_after_signing: bool
+    truncated: bool
+    validated_at: datetime
+
+
+class IncomingSignaturesOut(BaseModel):
+    document_id: str
+    summaries: list[IncomingSignatureSummaryOut]
+    validations: list[IncomingSignatureValidationOut]

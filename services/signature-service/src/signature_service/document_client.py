@@ -36,6 +36,15 @@ class DocumentServiceClient:
         response.raise_for_status()
         return response.json()
 
+    async def get_version_meta(self, document_id: str, version_number: int) -> dict:
+        """Version metadata (content type, size) without the bytes - lets the
+        incoming-signature check refuse an oversized file before download."""
+        response = await self._client.get(f"/documents/{document_id}/versions/{version_number}")
+        if response.status_code == 404:
+            raise NotFoundError(f"document_id {document_id!r} Version {version_number} unbekannt")
+        response.raise_for_status()
+        return response.json()
+
     async def get_version_content(
         self, document_id: str, version_number: int
     ) -> tuple[str | None, bytes]:

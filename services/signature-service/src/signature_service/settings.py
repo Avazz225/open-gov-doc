@@ -77,3 +77,26 @@ class Settings(BaseServiceSettings):
     # against, so there is no need for a tight cadence.
     retimestamp_poll_interval_seconds: int = 24 * 60 * 60
     retimestamp_interval_days: int = 365
+
+    # Incoming-signature validation (P92-S1, ADR 0248). The admin-editable
+    # part (on/off, revocation mode, outbound fetching) lives in the
+    # `incoming_validation_config` row; these are the operator's bounds.
+    incoming_validation_max_bytes: int = 50 * 1024 * 1024
+    incoming_validation_max_signatures: int = 20
+    # Certificates between anchor and signer (intermediates), excluding the
+    # anchor itself.
+    incoming_validation_max_path_length: int = 6
+    incoming_validation_time_limit_seconds: float = 60.0
+    # A bounded queue in front of a small thread pool: a flood of signed
+    # uploads delays results, it never blocks the signing API.
+    incoming_validation_queue_size: int = 200
+    incoming_validation_workers: int = 2
+    incoming_validation_fetch_timeout_seconds: float = 10.0
+    incoming_validation_fetch_max_bytes: int = 2 * 1024 * 1024
+    # `DMS_SIGNATURE_VALIDATION_HTTP_PROXY`: optional egress proxy for every
+    # revocation/certificate fetch.
+    signature_validation_http_proxy: str | None = None
+    # Extra networks the fetcher must never reach, e.g. the cluster's pod and
+    # service CIDRs if they are public ranges. Private, loopback, link-local
+    # and CGNAT ranges are always blocked.
+    incoming_validation_blocked_networks: list[str] = []

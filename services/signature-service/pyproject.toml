@@ -9,6 +9,9 @@ dependencies = [
     "httpx>=0.27",
     "cryptography>=42.0",
     "pyhanko>=0.25",
+    # Revocation/certificate fetching for incoming-signature validation goes
+    # through pyHanko's aiohttp fetchers on a fenced session (P92-S1).
+    "aiohttp>=3.9",
     "dms-common",
     "dms-db-base",
     "dms-eventbus-client",

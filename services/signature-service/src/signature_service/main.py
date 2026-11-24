@@ -2,12 +2,14 @@ import asyncio
 import logging
 import time
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 
+from cryptography import x509
 from dms_common import ActingIdentity, configure_logging, require_acting_identity
+from dms_common.shutdown import bounded_shutdown_step
 from dms_db_base import build_engine, make_session_factory
-from dms_eventbus_client import Event, NatsEventBusClient
+from dms_eventbus_client import Event, NatsEventBusClient, SubjectNotFoundError
 from dms_metrics_client import (
     SensorConfigClient,
     bootstrap_http_sensors,
@@ -20,15 +22,23 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from signature_service import repository
+from signature_service import incoming_repository, repository
 from signature_service.auth_client import AuthServiceClient
 from signature_service.connectors import build_connectors, resolve_connector_for_level
 from signature_service.document_client import DocumentServiceClient, LockConflictError
 from signature_service.document_client import NotFoundError as DocumentNotFoundError
+from signature_service.incoming import IncomingSignatureService
 from signature_service.models import Base
 from signature_service.object_type_client import NotFoundError as ObjectTypeNotFoundError
 from signature_service.object_type_client import ObjectTypeServiceClient
 from signature_service.schemas import (
+    IncomingSignaturesOut,
+    IncomingSignatureSummaryOut,
+    IncomingSignatureValidationOut,
+    IncomingTrustAnchorIn,
+    IncomingTrustAnchorOut,
+    IncomingValidationConfigIn,
+    IncomingValidationConfigOut,
     SignatureCreate,
     SignatureOut,
     SignatureProviderLevelsIn,
@@ -36,6 +46,12 @@ from signature_service.schemas import (
     VerificationOut,
 )
 from signature_service.settings import Settings, SignatureProviderConfig
+from signature_service.validation.trust import (
+    InvalidAnchorError,
+    der_of,
+    fingerprint_sha256,
+    parse_anchor_pem,
+)
 
 settings = Settings()
 configure_logging(settings)
@@ -164,25 +180,51 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     app.state.retimestamp_task = asyncio.create_task(_retimestamp_poll_loop(app))
 
+    # Incoming-signature validation (P92-S1, ADR 0248): a durable consumer on
+    # `document.>` with `deliver_new` - the existing estate isn't replayed
+    # (a backfill endpoint follows in P92-S2) - feeding a bounded worker.
+    app.state.internal_ca_pem = ca_certificate_pem
+    incoming = IncomingSignatureService(
+        settings=settings,
+        session_factory=app.state.session_factory,
+        document_client=app.state.document_client,
+        internal_ca_pem=ca_certificate_pem,
+        publish_event=publish_event,
+    )
+    incoming.worker.start()
+    app.state.incoming = incoming
+    consumer_bus = NatsEventBusClient(settings.nats_url, ensure_stream=False)
+    await consumer_bus.connect()
+    app.state.consumer_bus = consumer_bus
+    try:
+        await consumer_bus.subscribe(
+            "document.>",
+            incoming.handle_event,
+            durable="signature-service-incoming",
+            deliver_new=True,
+        )
+    except SubjectNotFoundError:
+        logger.warning("incoming_signature_stream_missing")
+
     startup_end = time.time()
     millis = round((startup_end - startup_start) * 1000, 3)
     logger.info("Startup completed in %s ms.", millis, exc_info=True)
 
     yield
 
+    # Every step bounded and named (dms_common.shutdown).
     app.state.retimestamp_task.cancel()
-    with suppress(asyncio.CancelledError):
-        await app.state.retimestamp_task
+    await bounded_shutdown_step("retimestamp_task", app.state.retimestamp_task)
+    await bounded_shutdown_step("consumer_bus.close", consumer_bus.close())
+    await bounded_shutdown_step("incoming.worker.stop", incoming.worker.stop())
     sensor_config_proxy.unbind()
-    await app.state.sensor_config_client.stop()
+    await bounded_shutdown_step("sensor_config_client.stop", app.state.sensor_config_client.stop())
     if registration:
-        await registration.stop()
-    await producer.close()
-    await app.state.document_client.close()
-    await app.state.object_type_client.close()
-    await app.state.auth_client.close()
-    await app.state.permission_client.close()
-    await engine.dispose()
+        await bounded_shutdown_step("registration.stop", registration.stop())
+    await bounded_shutdown_step("producer.close", producer.close())
+    for name in ("document_client", "object_type_client", "auth_client", "permission_client"):
+        await bounded_shutdown_step(f"{name}.close", getattr(app.state, name).close())
+    await bounded_shutdown_step("engine.dispose", engine.dispose())
 
 
 app = FastAPI(title=settings.service_name, lifespan=lifespan)
@@ -589,3 +631,164 @@ async def verify_signature(
         certificate_expired=certificate_expired,
         errors=errors,
     )
+
+
+# --- Incoming-signature validation (P92-S1, ADR 0248) ----------------------
+
+
+@app.get("/incoming-signatures", response_model=IncomingSignaturesOut)
+async def get_incoming_signatures(
+    document_id: str,
+    version_number: int | None = None,
+    history: bool = False,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> IncomingSignaturesOut:
+    """Validation results for a document's versions: the per-version summary
+    and the rows of the latest run (`history=true`: every run). Needs
+    `document.read` on the document."""
+    await _require_document_read_permission(x_dms_principal, document_id)
+    summaries = await incoming_repository.list_summaries(session, document_id)
+    if version_number is not None:
+        summaries = [s for s in summaries if s.version_number == version_number]
+    validations = await incoming_repository.list_validations(
+        session, document_id, version_number=version_number, latest_only=not history
+    )
+    return IncomingSignaturesOut(
+        document_id=document_id,
+        summaries=[IncomingSignatureSummaryOut.model_validate(s) for s in summaries],
+        validations=[IncomingSignatureValidationOut.model_validate(v) for v in validations],
+    )
+
+
+@app.get("/incoming-signatures/config", response_model=IncomingValidationConfigOut)
+async def get_incoming_validation_config(
+    session: AsyncSession = Depends(get_session),
+) -> IncomingValidationConfigOut:
+    config = await incoming_repository.get_config(session)
+    await session.commit()
+    return IncomingValidationConfigOut.model_validate(config)
+
+
+@app.put("/incoming-signatures/config", response_model=IncomingValidationConfigOut)
+async def put_incoming_validation_config(
+    body: IncomingValidationConfigIn,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> IncomingValidationConfigOut:
+    await _require_signature_config_permission(x_dms_principal)
+    config = await incoming_repository.update_config(
+        session,
+        enabled=body.enabled,
+        revocation_mode=body.revocation_mode,
+        outbound_fetching=body.outbound_fetching,
+        updated_by=x_dms_principal,
+    )
+    await session.commit()
+    return IncomingValidationConfigOut.model_validate(config)
+
+
+def _internal_anchor_out() -> IncomingTrustAnchorOut:
+    cert = x509.load_pem_x509_certificate(app.state.internal_ca_pem)
+    return IncomingTrustAnchorOut(
+        id=None,
+        source="internal",
+        label="Interne Signatur-CA (OG Doc)",
+        subject=cert.subject.rfc4514_string(),
+        fingerprint_sha256=fingerprint_sha256(der_of(cert)),
+        not_after=cert.not_valid_after_utc,
+    )
+
+
+@app.get("/incoming-signatures/trust-anchors", response_model=list[IncomingTrustAnchorOut])
+async def list_incoming_trust_anchors(
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> list[IncomingTrustAnchorOut]:
+    await _require_signature_config_permission(x_dms_principal)
+    anchors = await incoming_repository.list_anchors(session)
+    return [_internal_anchor_out()] + [
+        IncomingTrustAnchorOut(
+            id=a.id,
+            source="installation",
+            label=a.label,
+            subject=a.subject,
+            fingerprint_sha256=a.fingerprint_sha256,
+            not_after=a.not_after,
+            created_at=a.created_at,
+            created_by=a.created_by,
+        )
+        for a in anchors
+    ]
+
+
+@app.post(
+    "/incoming-signatures/trust-anchors",
+    response_model=IncomingTrustAnchorOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_incoming_trust_anchor(
+    body: IncomingTrustAnchorIn,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> IncomingTrustAnchorOut:
+    """Uploads a CA certificate (PEM) as an installation anchor. Takes effect
+    for validations from now on; earlier results stay as they were."""
+    await _require_signature_config_permission(x_dms_principal)
+    try:
+        cert = parse_anchor_pem(body.certificate_pem.encode())
+    except InvalidAnchorError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    der = der_of(cert)
+    try:
+        anchor = await incoming_repository.add_anchor(
+            session,
+            label=body.label,
+            certificate_der=der,
+            fingerprint_sha256=fingerprint_sha256(der),
+            subject=cert.subject.rfc4514_string(),
+            not_after=cert.not_valid_after_utc,
+            created_by=x_dms_principal,
+        )
+    except incoming_repository.DuplicateAnchorError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await session.commit()
+    await publish_event(
+        "signature.trust_anchor.added",
+        subject=str(anchor.id),
+        payload={"label": anchor.label, "fingerprint_sha256": anchor.fingerprint_sha256},
+        actor=x_dms_principal,
+    )
+    return IncomingTrustAnchorOut(
+        id=anchor.id,
+        source="installation",
+        label=anchor.label,
+        subject=anchor.subject,
+        fingerprint_sha256=anchor.fingerprint_sha256,
+        not_after=anchor.not_after,
+        created_at=anchor.created_at,
+        created_by=anchor.created_by,
+    )
+
+
+@app.delete(
+    "/incoming-signatures/trust-anchors/{anchor_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+async def delete_incoming_trust_anchor(
+    anchor_id: int,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    await _require_signature_config_permission(x_dms_principal)
+    try:
+        anchor = await incoming_repository.delete_anchor(session, anchor_id)
+    except incoming_repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await session.commit()
+    await publish_event(
+        "signature.trust_anchor.removed",
+        subject=str(anchor_id),
+        payload={"label": anchor.label, "fingerprint_sha256": anchor.fingerprint_sha256},
+        actor=x_dms_principal,
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

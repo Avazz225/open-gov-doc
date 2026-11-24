@@ -600,8 +600,8 @@ This service remains the sole authority for the document lifecycle fields (alrea
 
 | event_type | payload |
 |---|---|
-| `document.created` | `{title, created_by, folder_id}` (since P7-S2b: `folder_id` additionally in the payload, basis for the `reporting-service` document-volume report's folder grouping, see `docs/services/reporting-service.md`), plus `{derived_from_document_id}` for an editing copy (since P6-S3, see below) |
-| `document.version.created` | `{version_number, is_conflict, created_by}` |
+| `document.created` | `{title, created_by, folder_id}` (since P7-S2b: `folder_id` additionally in the payload, basis for the `reporting-service` document-volume report's folder grouping, see `docs/services/reporting-service.md`), plus `{derived_from_document_id}` for an editing copy (since P6-S3, see below) | Since **P92-S1** also `{version_number, content_type, filename}` (ADR 0248).
+| `document.version.created` | `{version_number, is_conflict, created_by}`, since **P92-S1** also `{content_type, filename}` ([ADR 0248](../adr/0248-validating-externally-signed-incoming-documents.md): signature-service's incoming-signature check skips versions it doesn't handle without downloading them) |
 | `document.lock.force_released` | `{original_locked_by, released_by, reason}` |
 | `document.force_unlock.failed` | `{approval_request_id, released_by, reason}` (since **P66-S3**, [ADR 0196](../adr/0196-document-service-force-unlock-failure-event-and-checkin-lock-precheck.md)) — an approved force-unlock's queued execution failed (e.g. the lock was already resolved another way by the time approval arrived); makes the failure visible system-wide instead of only in a local log line |
 | `document.metadata.updated` | `{title}` (since P4-S4) |

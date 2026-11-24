@@ -49,7 +49,7 @@ TEST_DB="dms_test"
 # Container gerade laufend, ein Stoppen bricht sie (P17-S3-Fund: fälschlich
 # hinzugefügtes `config-service` ließ jeden `config-service`-Test mit
 # "Connection refused" fehlschlagen).
-CONSUMER_SERVICES=(audit-service auth-service case-service document-service folder-service notification-service ocr-service permission-service query-service registry-service rendering-service reporting-service search-service teamspace-service workflow-service)
+CONSUMER_SERVICES=(audit-service auth-service case-service document-service folder-service notification-service ocr-service permission-service query-service registry-service rendering-service reporting-service search-service signature-service teamspace-service workflow-service)
 
 # Per-service Postgres role (Konzept 3.1, P68-S1) - "<role>:<dev-default-password>",
 # same mapping as infra/postgres-init/002-service-roles.sh/docker-compose.yml's

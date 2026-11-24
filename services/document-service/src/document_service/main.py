@@ -1855,6 +1855,11 @@ async def _persist_new_document(
         "created_by": created_by,
         "folder_id": folder_id,
         "draft": draft,
+        # P92-S1 (ADR 0248): lets consumers that only care about some formats
+        # (signature-service's incoming-signature check) skip a download.
+        "version_number": document.current_version_number,
+        "content_type": content_type,
+        "filename": filename,
     }
     if derived_from_document_id is not None:
         event_payload["derived_from_document_id"] = derived_from_document_id
@@ -4545,6 +4550,9 @@ async def checkin_version(
             "version_number": version.version_number,
             "is_conflict": is_conflict,
             "created_by": actor_created_by,
+            # P92-S1 (ADR 0248), as on document.created.
+            "content_type": content_type,
+            "filename": version.filename,
         },
         actor=actor_created_by,
     )

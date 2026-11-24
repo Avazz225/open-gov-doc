@@ -2,6 +2,69 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P92-S1, validating incoming signatures: the PAdES backend
+([ADR 0248](docs/adr/0248-validating-externally-signed-incoming-documents.md), implementation notes added).
+
+**What changed:**
+- **signature-service `validation/`:**
+  - `interface.py`: the format-agnostic validator contract and `SignatureFinding` (indication,
+    sub-indication, qualification, trust source, signer, times, coverage, a plain-German reason).
+  - `pades.py`: every signature field. It uses the strict reader; a refused file gets "Dateistruktur
+    nicht prüfbar".
+    - A signature with a signature timestamp goes through the LTA process, a B-B signature through basic
+      validation.
+    - Document timestamps are listed but not counted as signatures.
+    - A change beyond form filling, annotations, further signatures and validation data gives
+      `TOTAL-FAILED` / `MODIFIED_AFTER_SIGNING` (the shadow-attack case).
+  - `trust.py`: the internal CA plus uploaded CA certificates, with a path-length limit. Certificates in
+    the file never become anchors, and the OS store is never used.
+  - `fetcher.py`: a fenced aiohttp session for pyHanko's fetchers.
+    - Only http/https on 80/443, with every resolved address public; private, loopback, link-local and
+      CGNAT ranges plus configured networks are blocked.
+    - IP literals are checked on request start.
+    - Redirects only to the same host; a body cap and timeouts; an optional proxy.
+  - `worker.py`: a bounded queue and thread pool, a time limit per run.
+- **Persistence and API:**
+  - 4 tables: validations (never updated), per-version summary, trust anchors, config.
+  - `GET /incoming-signatures` (`document.read`); config and trust-anchor CRUD
+    (`admin.signature_config`).
+  - `signature.incoming.validated`, `signature.trust_anchor.added/removed`.
+- **Consumer:** `document.>`, durable `signature-service-incoming`, `deliver_new`. Own signatures take the
+  same path and pass against the internal CA. signature-service is now in run-tests'
+  `CONSUMER_SERVICES`; its lifespan shutdown uses `bounded_shutdown_step`.
+- **document-service:**
+  - `document.created` gets `version_number`, `content_type` and `filename`;
+  - `document.version.created` gets `content_type` and `filename`.
+- **pyHanko quirks worked around** (both in the service docs):
+  - `ades_basic_validation` ignores `status_cls`;
+  - certvalidator copies `max_aa_path_length` only when `max_path_length` is set, then crashes through an
+    intermediate.
+- **Deviation from the ADR wording, recorded there:** the revocation modes follow pyHanko. `soft-fail`
+  passes when revocation data can't be obtained, `hard-fail` makes it INDETERMINATE. A revoked
+  certificate never passes.
+- **Docs:** signature-service (new section, API, events), document-service (event fields), architecture,
+  ADR 0248 implementation notes, plan.
+
+**Checks:**
+- **signature-service 79 passed** (+43): `test_incoming_validation.py` with the test PKI and a local
+  aiohttp server as CRL point and SSRF target, and `test_incoming_api.py` end to end through
+  document-service.
+- document-service 447 passed (event fields).
+- ruff clean.
+- **Live through the gateway:**
+  - a signed PDF (unknown CA) had its result within seconds: INDETERMINATE, "Aussteller ist nicht als
+    vertrauenswürdig hinterlegt";
+  - `users-admin` gets 403 on the trust anchors;
+  - the test document was deleted.
+- **Containers rebuilt:** document-service, signature-service.
+- While document-service's tests ran (its container stopped), the live signature-service dropped jobs with
+  name-resolution errors. Those were events from the test suite; they are now one warning line each
+  instead of a traceback.
+
+**Next session:** P92-S2 (EU trusted lists, reports, audit, re-validation and backfill).
+
+---
+
 **Last completed:** P91-S6, licence limits in the admin UI, and **Phase 91 closed** (full regression).
 
 **What changed:**

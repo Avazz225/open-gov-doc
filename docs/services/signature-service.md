@@ -16,6 +16,10 @@
 | `GET` | `/signature-config` | Current connector levels (since **Post-Roadmap Phase 22 Session 6**, [ADR 0091](../adr/0091-connector-operational-config-live-editable.md)) — `id`/`type` structurally from `Settings.signature_providers`, `levels` live-editable, default row seeded from the previous env-var values on first call |
 | `GET` | `/signatures/due-for-retimestamp` | **Since P71-S4**: system-wide list of signatures the PAdES-B-LTA poll loop will re-timestamp on its next tick — gated behind `admin.signature_config`, read-only (no manual trigger, see "PAdES-B-LTA" below) |
 | `PUT` | `/signature-config` | Updates `levels` ONLY for the named connector `id`s (`[{id, levels}]`, ones not named keep their value) — takes effect **without a restart**; `422` on an unknown `id` ("can only edit existing entries"), empty `levels`, or `qes` for `type=internal` (the same rule as `SignatureProviderConfig._check_levels`) |
+| `GET` | `/incoming-signatures?document_id=…[&version_number=…][&history=true]` | **Since P92-S1** ([ADR 0248](../adr/0248-validating-externally-signed-incoming-documents.md)): validation results for signatures in a document's versions - `summaries` (one per version) and `validations` (the latest run's rows; `history=true`: every run). `401`/`403` like the other reads (`document.read`) |
+| `GET`/`PUT` | `/incoming-signatures/config` | **Since P92-S1**: `{enabled, revocation_mode: soft-fail\|hard-fail, outbound_fetching}`. `GET` ungated, `PUT` needs `admin.signature_config` |
+| `GET`/`POST` | `/incoming-signatures/trust-anchors` | **Since P92-S1**: the installation anchors (`POST {label, certificate_pem}`: one CA certificate; `422` not a CA/not PEM, `409` already there). The listing starts with the internal CA (`source: internal`, `id: null`, not removable). Both need `admin.signature_config` |
+| `DELETE` | `/incoming-signatures/trust-anchors/{id}` | **Since P92-S1**: removes an installation anchor (`404` unknown). Earlier results stay as they were |
 | `GET` | `/healthz` | Health check |
 
 ## Data Model
@@ -110,8 +114,84 @@ choice — 3.10 does not call for one):
 | event_type | payload |
 |---|---|
 | `signature.created` | `{version_number, level, signer_principal_id, connector_id}` |
+| `signature.incoming.validated` | **Since P92-S1**: `{version_number, run_id, signature_count, worst_indication, best_qualification, changed_after_signing, trigger}` (subject: `document_id`, actor `system:signature-validation`). Goes to the audit ledger from P92-S2 |
+| `signature.trust_anchor.added` / `.removed` | **Since P92-S1**: `{label, fingerprint_sha256}` (subject: anchor id) |
 
-No consumer - a pure producer, like `workflow-service`.
+**Consumed since P92-S1:** `document.>` with its own durable `signature-service-incoming` and `deliver_new` (only `document.created`/`document.version.created` are used). Until P92-S1 the service was a pure producer. Because of that consumer it is now in `scripts/run-tests.sh`'s `CONSUMER_SERVICES`.
+
+## Validating Incoming Signatures (P92-S1, [ADR 0248](../adr/0248-validating-externally-signed-incoming-documents.md))
+
+**Flow:** document-service publishes `document.created`/`document.version.created` with `content_type`,
+`filename` and `version_number` → the consumer (`incoming.IncomingSignatureService.handle_event`) queues
+versions a validator applies to → a runner fetches the version (refusing files above
+`incoming_validation_max_bytes` without downloading), skips PDFs without `/ByteRange` (unsigned), runs the
+validator in a thread pool, stores the run and publishes `signature.incoming.validated`. Own signatures take
+the same path and are validated against the internal CA.
+
+**Parts** (`validation/`):
+- `interface.py`: the format-agnostic contract (`SignatureValidator.applies/validate`) and result model
+  (`SignatureFinding`: indication per EN 319 102-1, sub-indication, qualification, trust source, signer,
+  claimed and proven time, coverage, plain-German `failure_reason`, `technical_detail`).
+- `pades.py`: every signature field of a PDF.
+  - The strict reader; a refused file is one `INDETERMINATE` finding "Dateistruktur nicht prüfbar".
+  - Signatures with a signature timestamp go through the LTA process (DSS and document timestamps
+    count); B-B signatures through basic validation (§5.3), since the with-time process rejects them for
+    the missing timestamp alone.
+  - Document timestamps are listed (`kind: document_timestamp`) but not counted as signatures.
+  - The modification analysis (pyHanko's default diff policy) decides coverage: `entire_document`,
+    `permitted_changes` (form filling, annotations, further signatures, validation data), or
+    `changed_after_signing`, which makes the finding `TOTAL-FAILED` / `MODIFIED_AFTER_SIGNING` whatever
+    the cryptography says (the shadow-attack case).
+  - Qualification is `ades` for a pass against an internal or installation anchor; `qes`/`adesqc` need the
+    EU trusted lists (P92-S2).
+- `trust.py`: anchors only from the installation (internal CA, uploaded CA certificates). Certificates in
+  the file can help build a path but never become anchors; the OS trust store is never used. Every anchor
+  carries the path-length limit.
+- `fetcher.py`: the fenced `aiohttp` session for pyHanko's OCSP/CRL/AIA fetchers.
+  - Only `http`/`https` on ports 80/443.
+  - Every resolved address must be public (no private, loopback, link-local, multicast, reserved, CGNAT
+    or configured networks), checked in the resolver and, for IP literals, on request start.
+  - Redirects only to the same host; a body cap per response; a timeout per request; an optional proxy
+    (`DMS_SIGNATURE_VALIDATION_HTTP_PROXY`, whose own host is exempt).
+  - A refusal looks like an unreachable server to pyHanko, so it can never turn into a pass.
+- `worker.py`: a bounded queue (`incoming_validation_queue_size`) in front of `incoming_validation_workers`
+  runners. Each validation runs in a thread with its own event loop and a time limit, so a flood of signed
+  uploads delays results without blocking the signing API.
+
+**Revocation modes** (pyHanko's semantics): `soft-fail` (default) lets a signature pass when revocation
+information can't be obtained; `hard-fail` makes it `INDETERMINATE` (`CERTIFICATE_CHAIN_GENERAL_FAILURE`).
+A revoked certificate never passes in either mode. Embedded revocation data (DSS) is used first.
+
+**Tables:** `incoming_signature_validation` (one row per signature and run, never updated),
+`incoming_signature_summary` (the latest run per version: worst indication, best qualification,
+`changed_after_signing`, `truncated`), `incoming_trust_anchor`, `incoming_validation_config` (singleton).
+
+**Settings (operator bounds):** `incoming_validation_max_bytes` (50 MiB), `_max_signatures` (20),
+`_max_path_length` (6), `_time_limit_seconds` (60), `_queue_size` (200), `_workers` (2),
+`_fetch_timeout_seconds` (10), `_fetch_max_bytes` (2 MiB), `_blocked_networks` (extra CIDRs, e.g. public
+pod ranges), `signature_validation_http_proxy`.
+
+**Operations:** with outbound fetching on, signature-service needs egress to the CRL/OCSP/AIA hosts named
+in the certificates it sees (or a proxy). Switching fetching off leaves results `INDETERMINATE` where only
+the network could decide (hard-fail) or unchecked revocation (soft-fail). A job whose version can't be
+fetched (document-service unreachable) is dropped after a warning, since the event is already
+acknowledged; the backfill in P92-S2 catches up.
+
+**pyHanko quirks worked around** (0.36 / certvalidator 0.31):
+- `ades_basic_validation` builds a plain CMS status whatever `status_cls` says, so the PDF integrity facts
+  come from `EmbeddedPdfSignature.summarise_integrity_info()` (after `compute_integrity_info()`).
+- `init_pkix_validation_state` copies `max_aa_path_length` only when `max_path_length` is set and then
+  crashes through an intermediate; both qualifiers are set.
+
+**Tests:** `test_incoming_validation.py` (generated test PKI in `tests/testpki.py`, a local aiohttp server
+as CRL point and SSRF target): valid, intermediate and path-length limit, unknown CA, changed bytes,
+shadow-style incremental update, a second signature as a permitted change, truncation, revoked via a
+fetched CRL, unreachable revocation in both modes, SSRF (no request reaches the internal server), own
+B-LTA signatures against the internal CA, a structure the strict reader refuses, the fence on its own
+(addresses, URLs, a name resolving to loopback, redirect to another host, oversized body), anchor parsing.
+`test_incoming_api.py`: end to end through document-service (upload → event → result), a later change as
+version 2, unknown CA vs. unsigned PDF, own signature, switched off, config and anchor gating, anchor
+lifecycle.
 
 ## Self-Registration (Concept 3.2a)
 

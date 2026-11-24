@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from dms_db_base import make_declarative_base
-from sqlalchemy import JSON, DateTime, Integer, LargeBinary, String
+from sqlalchemy import JSON, Boolean, DateTime, Integer, LargeBinary, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 Base = make_declarative_base("signature")
@@ -102,3 +102,96 @@ class SignatureConfig(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     provider_levels: Mapped[dict] = mapped_column(JSON)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+INCOMING_VALIDATION_CONFIG_ID = 1
+
+
+class IncomingValidationConfig(Base):
+    """Admin settings for validating incoming signatures (P92-S1, ADR 0248) -
+    singleton like `SignatureConfig`. `revocation_mode`: `soft-fail` (an
+    unreachable revocation source doesn't stop a pass) or `hard-fail` (it
+    makes the result INDETERMINATE). `outbound_fetching`: whether OCSP/CRL/
+    AIA may be fetched at all (through the fenced client)."""
+
+    __tablename__ = "incoming_validation_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    revocation_mode: Mapped[str] = mapped_column(String(16), default="soft-fail")
+    outbound_fetching: Mapped[bool] = mapped_column(Boolean, default=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+
+class IncomingTrustAnchor(Base):
+    """A CA certificate an admin uploaded as a trust anchor (ADR 0248
+    Decision 3, "installation anchors") - for example a partner authority's
+    PKI. Results based on it say "vertrauenswürdig (Installation)", never
+    "qualifiziert"."""
+
+    __tablename__ = "incoming_trust_anchor"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    label: Mapped[str] = mapped_column(String(256))
+    certificate_der: Mapped[bytes] = mapped_column(LargeBinary)
+    fingerprint_sha256: Mapped[str] = mapped_column(String(64), unique=True)
+    subject: Mapped[str] = mapped_column(String(1024))
+    not_after: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_by: Mapped[str] = mapped_column(String(128))
+
+
+class IncomingSignatureValidation(Base):
+    """One signature in one document version, as seen by one validation run
+    (ADR 0248 Decision 5). Rows are never updated: a re-validation adds a run
+    with a new `run_id`, so the history of statements stays visible."""
+
+    __tablename__ = "incoming_signature_validation"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(36), index=True)
+    document_id: Mapped[str] = mapped_column(String(128), index=True)
+    version_number: Mapped[int] = mapped_column(Integer)
+    trigger: Mapped[str] = mapped_column(String(16))
+    format: Mapped[str] = mapped_column(String(16))
+    position: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    kind: Mapped[str] = mapped_column(String(32))
+    indication: Mapped[str] = mapped_column(String(16))
+    sub_indication: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    qualification: Mapped[str] = mapped_column(String(8))
+    trust_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    signer_subject: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    signer_issuer: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    signer_serial: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    claimed_signing_time: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    best_signature_time: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    coverage: Mapped[str] = mapped_column(String(32))
+    modification_level: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    failure_reason: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    technical_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    revocation_mode: Mapped[str] = mapped_column(String(16))
+    validated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class IncomingSignatureSummary(Base):
+    """The latest run's verdict per document version, for lists and badges:
+    the worst indication, the best proven qualification, and whether any
+    signature doesn't cover what is shown. Replaced by each new run (the
+    per-signature rows above keep the history)."""
+
+    __tablename__ = "incoming_signature_summary"
+
+    document_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    version_number: Mapped[int] = mapped_column(Integer, primary_key=True)
+    run_id: Mapped[str] = mapped_column(String(36))
+    signature_count: Mapped[int] = mapped_column(Integer)
+    worst_indication: Mapped[str] = mapped_column(String(16))
+    best_qualification: Mapped[str] = mapped_column(String(8))
+    changed_after_signing: Mapped[bool] = mapped_column(Boolean)
+    truncated: Mapped[bool] = mapped_column(Boolean)
+    validated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

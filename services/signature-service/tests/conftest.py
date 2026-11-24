@@ -1,4 +1,5 @@
 import os
+import sys
 import uuid
 
 import httpx
@@ -26,6 +27,10 @@ os.environ["DMS_OBJECT_TYPE_SERVICE_BASE_URL"] = OBJECT_TYPE_SERVICE_URL
 os.environ["DMS_AUTH_SERVICE_BASE_URL"] = AUTH_SERVICE_URL
 
 SAMPLE_PDF_PATH = os.path.join(os.path.dirname(__file__), "fixtures", "sample.pdf")
+
+# `testpki.py` (P92-S1) is a plain helper module next to the tests;
+# `--import-mode=importlib` doesn't put this directory on the path by itself.
+sys.path.insert(0, os.path.dirname(__file__))
 
 PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://localhost:8004")
 # Post-Roadmap Phase 38 Session 3: `PUT /signature-config` now requires
@@ -127,7 +132,9 @@ async def _clean_tables():
         await conn.execute(
             text(
                 "TRUNCATE signature.signature, signature.internal_ca, signature.internal_tsa, "
-                "signature.signature_config CASCADE"
+                "signature.signature_config, signature.incoming_signature_validation, "
+                "signature.incoming_signature_summary, signature.incoming_trust_anchor, "
+                "signature.incoming_validation_config CASCADE"
             )
         )
     await eng.dispose()
