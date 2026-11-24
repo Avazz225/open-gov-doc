@@ -203,6 +203,20 @@ async def _sla_poll_loop(
             for result in results:
                 for fired in result.fired:
                     metrics.count_escalation()
+                    # A bound lane's members are notified (P93-S1, ADR 0249).
+                    binding = None
+                    members: list[str] = []
+                    if fired.lane:
+                        async with session_factory() as session:
+                            definition = await repository.get_process_definition(
+                                session, result.instance.process_definition_id
+                            )
+                            binding = (definition.lane_bindings or {}).get(fired.lane)
+                        if binding is not None:
+                            try:
+                                members = await permission_client.lane_members(binding)
+                            except Exception:  # noqa: BLE001 - escalation still goes out
+                                logger.warning("lane_members_lookup_failed", exc_info=True)
                     await publish_event(
                         "workflow.task.escalated",
                         subject=result.instance.id,
@@ -211,6 +225,8 @@ async def _sla_poll_loop(
                             "business_key": result.instance.business_key,
                             "task_name": fired.name,
                             "lane": fired.lane,
+                            "lane_binding": binding,
+                            "lane_members": members,
                             "escalation_email": fired.data.get("escalation_email"),
                         },
                         actor="system:sla-poll",
@@ -408,6 +424,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             text(
                 "ALTER TABLE workflow.process_definition "
                 "ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1"
+            )
+        )
+        # Lane bindings (P93-S1, ADR 0249).
+        await conn.execute(
+            text(
+                "ALTER TABLE workflow.process_definition "
+                "ADD COLUMN IF NOT EXISTS lane_bindings JSON NOT NULL DEFAULT '{}'"
             )
         )
         await conn.execute(
@@ -965,11 +988,34 @@ async def create_process_definition(
     except UnicodeDecodeError as exc:
         raise HTTPException(status_code=422, detail="bpmn_xml ist kein gültiges UTF-8") from exc
 
+    # Lane bindings (P93-S1, ADR 0249): every bound group or role must exist
+    # here - checked before a four-eyes request, which then shows them.
+    try:
+        lane_bindings = spiff_adapter.parse_lane_bindings(xml_text)
+    except spiff_adapter.BpmnParseError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    unknown = [
+        f"{lane}: {_describe_binding(binding)}"
+        for lane, binding in lane_bindings.items()
+        if not await app.state.permission_client.binding_exists(binding)
+    ]
+    if unknown:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Lane-Bindung an unbekannte Gruppe/Rolle: {'; '.join(unknown)}",
+        )
+
     if await app.state.approval_client.requires_approval("workflow.process_definition.import"):
         request = await app.state.approval_client.create_request(
             action_type="workflow.process_definition.import",
             initiated_by=x_dms_principal,
-            payload={"name": name, "bpmn_xml": xml_text, "process_id": process_id},
+            payload={
+                "name": name,
+                "bpmn_xml": xml_text,
+                "process_id": process_id,
+                # Shown to the reviewer: who the model lets work on what.
+                "lane_bindings": lane_bindings,
+            },
         )
         pending = ProcessDefinitionImportResult(
             status="pending_approval", approval_request_id=request["id"]
@@ -1427,6 +1473,8 @@ async def list_instances(
 async def list_ready_tasks(
     limit: int = 100,
     offset: int = 0,
+    eligible: str | None = None,
+    x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> list[ReadyTaskWithInstanceOut]:
     """Cross-instance task list (8, P14-S2 reviewer/approval UI) - until now
@@ -1445,8 +1493,14 @@ async def list_ready_tasks(
     every `running` instance still needs to be scanned to find all ready
     tasks system-wide, a page of instances could silently omit ready tasks
     that legitimately exist beyond that page."""
+    if eligible is not None and eligible != "me":
+        raise HTTPException(status_code=422, detail="eligible kennt nur den Wert 'me'")
+    if eligible == "me" and not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
     instances = await repository.list_instances(session, status="running")
     tasks: list[ReadyTaskWithInstanceOut] = []
+    binding_cache: dict = {}
+    caller_memberships = await _memberships(x_dms_principal) if x_dms_principal else None
     for instance in instances:
         claims_by_task_id = {
             claim.task_id: claim
@@ -1456,6 +1510,17 @@ async def list_ready_tasks(
             if task.extensions.get("taskType") in _FEDERATED_TASK_TYPES:
                 continue
             claim = claims_by_task_id.get(task.id)
+            binding = await _lane_binding_for(session, instance, task.lane, binding_cache)
+            may_work = None
+            if caller_memberships is not None:
+                # "Meine Aufgaben" (P93-S1, ADR 0249): claimed by me, or
+                # unclaimed and in an unbound lane or one of mine.
+                if claim is not None:
+                    may_work = claim.principal_id == x_dms_principal
+                else:
+                    may_work = binding is None or _matches_binding(caller_memberships, binding)
+            if eligible == "me" and not may_work:
+                continue
             tasks.append(
                 ReadyTaskWithInstanceOut(
                     id=task.id,
@@ -1465,6 +1530,8 @@ async def list_ready_tasks(
                     extensions=task.extensions,
                     claimed_by=claim.principal_id if claim else None,
                     grant_kind=claim.grant_kind if claim else None,
+                    lane_binding=binding,
+                    eligible=may_work,
                     instance_id=instance.id,
                     process_definition_id=instance.process_definition_id,
                     business_key=instance.business_key,
@@ -1701,6 +1768,81 @@ async def _require_claim_authorization_if_claimed(
         )
 
 
+# --- Lane eligibility (P93-S1, ADR 0249) ------------------------------------
+
+
+async def _lane_binding_for(
+    session: AsyncSession, instance, lane: str | None, cache: dict | None = None
+) -> dict[str, str] | None:
+    """The binding of a task's lane, from its instance's definition version
+    (an instance stays on the version it started with). None for an unbound
+    lane or a model without lanes."""
+    if not lane:
+        return None
+    key = instance.process_definition_id
+    if cache is not None and key in cache:
+        bindings = cache[key]
+    else:
+        definition = await repository.get_process_definition(session, key)
+        bindings = definition.lane_bindings or {}
+        if cache is not None:
+            cache[key] = bindings
+    return bindings.get(lane)
+
+
+async def _memberships(principal_id: str, cache: dict | None = None) -> dict:
+    if cache is not None and principal_id in cache:
+        return cache[principal_id]
+    result = await app.state.permission_client.memberships(principal_id)
+    if cache is not None:
+        cache[principal_id] = result
+    return result
+
+
+def _matches_binding(memberships: dict, binding: dict[str, str]) -> bool:
+    if "group" in binding:
+        return any(g["name"] == binding["group"] for g in memberships["groups"])
+    return binding["role"] in memberships["roles"]
+
+
+def _describe_binding(binding: dict[str, str]) -> str:
+    return f"Gruppe {binding['group']!r}" if "group" in binding else f"Rolle {binding['role']!r}"
+
+
+async def _require_lane_eligibility(
+    session: AsyncSession,
+    instance_id: str,
+    task_id: str,
+    principal_id: str,
+    *,
+    who: str = "Sie",
+) -> None:
+    """A bound lane restricts who may claim, complete or receive its tasks:
+    members of the bound group (or org unit), or holders of the bound role.
+    Unbound lanes, unknown tasks and unknown instances pass here - the
+    callers' own checks answer those."""
+    try:
+        instance = await repository.get_instance(session, instance_id)
+    except repository.NotFoundError:
+        return
+    tasks = await repository.get_ready_tasks(session, instance_id)
+    task = next((t for t in tasks if t.id == task_id), None)
+    if task is None:
+        return
+    binding = await _lane_binding_for(session, instance, task.lane)
+    if binding is None:
+        return
+    if _matches_binding(await _memberships(principal_id), binding):
+        return
+    raise HTTPException(
+        status_code=403,
+        detail=(
+            f"Die Aufgabe gehört zur Lane {task.lane!r} ({_describe_binding(binding)}) - "
+            f"{who} gehör{'en' if who == 'Sie' else 't'} nicht dazu"
+        ),
+    )
+
+
 async def _revoke_claim_grants(delegation_ids: list[str]) -> None:
     """Best-effort cleanup of org-hierarchy-auto-created delegations
     (Post-Roadmap Phase 31 Session 10) - called when a claim is released
@@ -1748,6 +1890,8 @@ async def claim_task(
     actor_principal_id = identity.actor
     await _reject_during_maintenance(x_dms_maintenance_active)
     await _require_workflow_permission(x_dms_principal, access_type="write")
+    if not await _is_active_superuser(actor_principal_id):
+        await _require_lane_eligibility(session, instance_id, task_id, actor_principal_id)
     try:
         claim = await repository.claim_task(session, instance_id, task_id, actor_principal_id)
     except repository.NotFoundError as exc:
@@ -1850,6 +1994,11 @@ async def reassign_task(
                 "diese Aufgabe neu zuweisen"
             ),
         )
+    # Whoever receives a task in a bound lane must belong to it (P93-S1) -
+    # also when a superuser reassigns.
+    await _require_lane_eligibility(
+        session, instance_id, task_id, payload.new_principal_id, who=payload.new_principal_id
+    )
     try:
         new_claim, delegation_ids = await repository.reassign_task_claim(
             session, instance_id, task_id, payload.new_principal_id
@@ -1961,6 +2110,20 @@ async def complete_task(
         await _require_claim_authorization_if_claimed(
             session, instance_id, task_id, payload, identity.actor
         )
+        # Lane binding (P93-S1): under delegation the represented principal
+        # must belong to the lane, not the deputy.
+        if not await _is_active_superuser(identity.actor):
+            await _require_lane_eligibility(
+                session,
+                instance_id,
+                task_id,
+                payload.on_behalf_of_principal_id or identity.actor,
+                who=(
+                    payload.on_behalf_of_principal_id
+                    if payload.on_behalf_of_principal_id
+                    else "Sie"
+                ),
+            )
         instance = await repository.complete_task(
             session,
             instance_id,

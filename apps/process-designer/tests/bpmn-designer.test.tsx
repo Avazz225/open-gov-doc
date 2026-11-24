@@ -56,7 +56,8 @@ describe("BpmnDesigner", () => {
 
   it("instantiates the modeler with the properties panel modules and imports the initial XML", async () => {
     render(
-      <BpmnDesigner initialXml={STARTER_XML} federationInstallations={[]} knownDecisionIds={[]} />,
+      <BpmnDesigner initialXml={STARTER_XML} federationInstallations={[]} knownDecisionIds={[]}
+        laneBindingOptions={{ groups: [], roles: [] }} />,
       { wrapper }
     );
 
@@ -66,8 +67,9 @@ describe("BpmnDesigner", () => {
     };
     // 4 previous modules + FederatedStepPropertiesProviderModule + its didi
     // inline binding (P6-S9) + DmnValidationPropertiesProviderModule + its
-    // own didi inline binding (P71-S3).
-    expect(options.additionalModules).toHaveLength(8);
+    // own didi inline binding (P71-S3) + LaneBindingPropertiesProviderModule
+    // and its options binding (P93-S1).
+    expect(options.additionalModules).toHaveLength(10);
 
     await waitFor(() => expect(importXMLMock).toHaveBeenCalledWith(STARTER_XML));
   });
@@ -81,6 +83,7 @@ describe("BpmnDesigner", () => {
         initialXml={STARTER_XML}
         federationInstallations={[]}
         knownDecisionIds={[]}
+        laneBindingOptions={{ groups: [], roles: [] }}
         onImportError={onImportError}
       />,
       { wrapper }
@@ -96,6 +99,7 @@ describe("BpmnDesigner", () => {
         initialXml={STARTER_XML}
         federationInstallations={[]}
         knownDecisionIds={[]}
+        laneBindingOptions={{ groups: [], roles: [] }}
         onReady={(h) => {
           handle = h;
         }}
@@ -119,7 +123,8 @@ describe("BpmnDesigner", () => {
 
   it("destroys the modeler on unmount", async () => {
     const { unmount } = render(
-      <BpmnDesigner initialXml={STARTER_XML} federationInstallations={[]} knownDecisionIds={[]} />,
+      <BpmnDesigner initialXml={STARTER_XML} federationInstallations={[]} knownDecisionIds={[]}
+        laneBindingOptions={{ groups: [], roles: [] }} />,
       { wrapper }
     );
     await waitFor(() => expect(modelerConstructorMock).toHaveBeenCalledTimes(1));
@@ -131,7 +136,8 @@ describe("BpmnDesigner", () => {
 
   it("hides the properties panel behind a toggle below 768px (P83-S10, ADR 0238 Decision 6)", () => {
     const { container } = render(
-      <BpmnDesigner initialXml={STARTER_XML} federationInstallations={[]} knownDecisionIds={[]} />,
+      <BpmnDesigner initialXml={STARTER_XML} federationInstallations={[]} knownDecisionIds={[]}
+        laneBindingOptions={{ groups: [], roles: [] }} />,
       { wrapper }
     );
     const toggle = screen.getByRole("button", { name: "Eigenschaften anzeigen" });

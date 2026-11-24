@@ -1733,3 +1733,85 @@ async def create_org_hierarchy_grant(
             )
         )
     return delegations
+
+
+# --- Lane bindings (P93-S1, ADR 0249) ----------------------------------------
+
+
+async def principal_memberships(session: AsyncSession, principal_id: str) -> dict:
+    """The groups a principal belongs to and the roles it holds - directly or
+    through one of its groups (including the implicit "everyone" group), on
+    any resource. What workflow-service's lane eligibility checks against."""
+    rows = await session.execute(
+        select(Group)
+        .join(GroupMembership, GroupMembership.group_id == Group.id)
+        .where(GroupMembership.principal_id == principal_id)
+        .order_by(Group.name)
+    )
+    groups = list(rows.scalars())
+    group_ids = [g.id for g in groups] + [EVERYONE_PRINCIPAL_ID]
+    role_rows = await session.execute(
+        select(Role.name)
+        .join(RoleAssignment, RoleAssignment.role_id == Role.id)
+        .where(
+            or_(
+                (RoleAssignment.principal_type == "user")
+                & (RoleAssignment.principal_id == principal_id),
+                (RoleAssignment.principal_type == "group")
+                & (RoleAssignment.principal_id.in_(group_ids)),
+            )
+        )
+        .distinct()
+    )
+    return {
+        "principal_id": principal_id,
+        "groups": [{"id": g.id, "name": g.name, "is_org_unit": g.is_org_unit} for g in groups],
+        "roles": sorted(role_rows.scalars()),
+    }
+
+
+class UnknownBindingError(Exception):
+    pass
+
+
+async def lane_members(
+    session: AsyncSession, *, group: str | None, role: str | None, limit: int
+) -> list[str]:
+    """Principal ids behind a lane binding: a group's members, or a role's
+    holders (direct user assignments and members of assigned groups). The
+    implicit "everyone" group has no member list - a role held through it
+    yields its explicit holders only."""
+    if group is not None:
+        found = await session.execute(select(Group).where(Group.name == group))
+        target = found.scalar_one_or_none()
+        if target is None:
+            raise UnknownBindingError(f"Gruppe {group!r} unbekannt")
+        members = await session.execute(
+            select(GroupMembership.principal_id)
+            .where(GroupMembership.group_id == target.id)
+            .order_by(GroupMembership.principal_id)
+            .limit(limit)
+        )
+        return list(members.scalars())
+    found_role = await session.execute(select(Role).where(Role.name == role))
+    target_role = found_role.scalar_one_or_none()
+    if target_role is None:
+        raise UnknownBindingError(f"Rolle {role!r} unbekannt")
+    assignments = await session.execute(
+        select(RoleAssignment.principal_type, RoleAssignment.principal_id).where(
+            RoleAssignment.role_id == target_role.id
+        )
+    )
+    principals: set[str] = set()
+    group_ids: set[str] = set()
+    for principal_type, principal in assignments.all():
+        if principal_type == "user":
+            principals.add(principal)
+        elif principal != EVERYONE_PRINCIPAL_ID:
+            group_ids.add(principal)
+    if group_ids:
+        members = await session.execute(
+            select(GroupMembership.principal_id).where(GroupMembership.group_id.in_(group_ids))
+        )
+        principals.update(members.scalars())
+    return sorted(principals)[:limit]

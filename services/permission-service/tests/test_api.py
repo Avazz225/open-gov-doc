@@ -2367,3 +2367,49 @@ def test_check_batch_matches_single_checks_across_cache_states(client, role_mana
         },
     )
     assert batch() == {"batch-a": True, "batch-b": True, "batch-c": True}
+
+
+def test_principal_memberships_and_lane_members(client, role_management_headers):
+    """Lane bindings (P93-S1, ADR 0249): groups and roles of a principal -
+    roles also through a group - and the principals behind a group or role."""
+    group = client.post(
+        "/groups", json={"name": "Lane-Sachbearbeitung"}, headers=role_management_headers
+    ).json()
+    for principal in ("lena", "lars"):
+        client.post(
+            f"/groups/{group['id']}/members",
+            json={"principal_id": principal},
+            headers=role_management_headers,
+        )
+    role = client.post(
+        "/roles",
+        json={"name": "Lane-Freigabe", "permissions": ["x.approve"]},
+        headers=role_management_headers,
+    ).json()["role"]
+    # The role directly for "frida" and through the group for its members.
+    for principal_type, principal in (("user", "frida"), ("group", group["id"])):
+        client.post(
+            "/role-assignments",
+            json={
+                "principal_type": principal_type,
+                "principal_id": principal,
+                "role_id": role["id"],
+                "resource_id": ROOT_RESOURCE_ID,
+            },
+        )
+
+    lena = client.get("/principals/lena/memberships").json()
+    assert [g["name"] for g in lena["groups"]] == ["Lane-Sachbearbeitung"]
+    assert "Lane-Freigabe" in lena["roles"]
+    frida = client.get("/principals/frida/memberships").json()
+    assert frida["groups"] == [] and "Lane-Freigabe" in frida["roles"]
+    assert "Lane-Freigabe" not in client.get("/principals/nobody/memberships").json()["roles"]
+
+    by_group = client.get("/lane-members", params={"group": "Lane-Sachbearbeitung"}).json()
+    assert by_group["principal_ids"] == ["lars", "lena"]
+    by_role = client.get("/lane-members", params={"role": "Lane-Freigabe"}).json()
+    assert by_role["principal_ids"] == ["frida", "lars", "lena"]
+
+    assert client.get("/lane-members", params={"group": "gibt-es-nicht"}).status_code == 404
+    assert client.get("/lane-members").status_code == 422
+    assert client.get("/lane-members", params={"group": "a", "role": "b"}).status_code == 422

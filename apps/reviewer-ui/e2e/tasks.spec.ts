@@ -19,10 +19,14 @@ test("loads the task inbox and the edit form validates JSON without submitting",
 
   // Role-based, not the `.data-table` class the Tailwind migration (P75-S4) removed
   const table = page.getByRole("table");
+  // "Meine Aufgaben" is the default view since P93-S1, with its own empty
+  // text; wait until either the table or an empty state has loaded.
+  const empty = page.getByText(/Keine offenen Aufgaben|Keine Aufgaben für Sie/);
+  await expect(table.or(empty).first()).toBeVisible();
   const hasTasks = (await table.count()) > 0;
 
   if (!hasTasks) {
-    await expect(page.getByText("Keine offenen Aufgaben.")).toBeVisible();
+    await expect(empty).toBeVisible();
     return;
   }
 

@@ -416,6 +416,16 @@ loaded once, and the per-resource ancestor walk only runs when any lock is activ
   folders took about 1 s.
 - **Now:** 48 ms.
 
+## Lane Bindings (P93-S1, [ADR 0249](../adr/0249-changing-running-processes-and-lane-semantics.md))
+
+Two read-only endpoints for workflow-service's lanes:
+- `GET /principals/{principal_id}/memberships` - `{groups: [{id, name, is_org_unit}], roles: [names]}`;
+  roles directly assigned or through one of the principal's groups (including the implicit "everyone"
+  group), on any resource.
+- `GET /lane-members?group=…|role=…[&limit=200]` - `{principal_ids}`: a group's members, or a role's
+  holders (direct user assignments plus members of assigned groups; "everyone" has no member list).
+  `404` unknown group/role, `422` unless exactly one is given.
+
 ## Open Points
 
 - ~~Real, custom group membership continues to go unresolved~~ — **admin-defined groups with real membership resolution added in Post-Roadmap Phase 22 Session 2**, see "Admin-Creatable Groups" above. **Reworded during Phase 65+'s gap-analysis round** (the "planned as a standalone Phase 24 Session 2" framing was stale — that phase shipped long ago and was extended twice more, ADR 0153/ADR 0171): AD group → internal **role** mapping is real and live (since **P24-S2**, [ADR 0093](../adr/0093-ad-group-role-mapping-simple-1to1-scope-cut.md), extended by ADR 0153/0171), but it maps straight to roles, bypassing this service's own `Group`/`GroupMembership` model entirely — an AD group membership change does NOT automatically populate/sync an admin-defined `Group`'s membership here. That narrower gap remains genuinely open, no concrete trigger identified.

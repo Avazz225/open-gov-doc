@@ -1,6 +1,6 @@
 # 0249 — Changing running processes, and what a BPMN lane means (scoping)
 
-**Status:** accepted (scoping in P90-S7; built in Phase 93, scheduled 2026-11-23)
+**Status:** accepted (scoping in P90-S7; built in Phase 93, scheduled 2026-11-23; lanes in P93-S1)
 **Context:** P90-S7 (Phase 90, user-selected from the comparison with an external reference system).
 
 Two related gaps in workflow-service:
@@ -167,3 +167,19 @@ routes use one membership check.
 - **reviewer-ui:** the "Meine Aufgaben" filter. **admin-ui:** instance operations. **user-ui:** the
   route editor.
 - **notification-service:** lane-member escalation, plus route-change notices.
+
+## Implementation notes (P93-S1)
+
+- **The binding is a `camunda:property` (`dmsGroup` / `dmsRole`) on the lane,** not a `dms:` element:
+  signature and federated steps already use `camunda:properties`, so no new XML namespace or moddle
+  extension was needed. Groups and roles are referenced by name, which survives export to another
+  installation; ids wouldn't.
+- **Lanes are keyed by name** in `lane_bindings`, because SpiffWorkflow puts the lane's name on a task.
+- **"Meine Aufgaben"** means: claimed by me, or unclaimed and in an unbound lane or one of mine. A task in
+  my lane claimed by someone else isn't mine to pick up.
+- **A superuser** may claim and complete regardless of the binding, like every other gate it bypasses;
+  but whoever *receives* a reassigned task must belong to the lane, also when a superuser reassigns.
+- **permission-service** got `GET /principals/{id}/memberships` and `GET /lane-members`; escalations name
+  the members, and notification-service notifies each.
+- **Open:** a deputy's "Meine Aufgaben" doesn't yet include the delegator's lane tasks.
+

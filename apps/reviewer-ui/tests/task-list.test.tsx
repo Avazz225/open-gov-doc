@@ -29,10 +29,12 @@ vi.mock("@/lib/api", () => ({
   },
 }));
 
+let mockPermissions: string[] = [];
+
 vi.mock("@/lib/auth-context", () => ({
   useAuth: () => ({
     user: { sub: "00000000-0000-4000-8000-0000000a11ce", username: "alice", email: null, realm_roles: [] },
-    permissions: [],
+    permissions: mockPermissions,
     accessToken: "token-123",
     isLoading: false,
     login: vi.fn(),
@@ -79,6 +81,7 @@ const SIGNATURE_TASK = {
 describe("TaskList", () => {
   beforeEach(() => {
     listReadyTasksMock.mockReset();
+    mockPermissions = [];
     completeTaskMock.mockReset();
     listActiveDelegationsForDeputyMock.mockReset();
     listActiveDelegationsForDeputyMock.mockResolvedValue([]);
@@ -92,7 +95,35 @@ describe("TaskList", () => {
     listReadyTasksMock.mockResolvedValue([]);
     renderList();
 
-    await waitFor(() => expect(screen.getByText(/Keine offenen Aufgaben/)).toBeInTheDocument());
+    // "Meine Aufgaben" is the default view (P93-S1).
+    await waitFor(() => expect(screen.getByText(/Keine Aufgaben für Sie/)).toBeInTheDocument());
+    expect(listReadyTasksMock).toHaveBeenCalledWith("token-123", { mine: true });
+  });
+
+  it("switches between my tasks and all tasks for workflow readers (P93-S1)", async () => {
+    mockPermissions = ["workflow.read"];
+    listReadyTasksMock.mockResolvedValue([]);
+    renderList();
+
+    const all = await screen.findByRole("button", { name: "Alle Aufgaben" });
+    expect(screen.getByRole("button", { name: "Meine Aufgaben" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(all);
+
+    await waitFor(() =>
+      expect(listReadyTasksMock).toHaveBeenLastCalledWith("token-123", { mine: false })
+    );
+    expect(await screen.findByText(/Keine offenen Aufgaben/)).toBeInTheDocument();
+  });
+
+  it("shows a lane's binding and says 'nicht zuständig' instead of offering a claim (P93-S1)", async () => {
+    listReadyTasksMock.mockResolvedValue([
+      { ...MANUAL_TASK, lane: "Freigabe", lane_binding: { role: "Freigabe-Rolle" }, eligible: false },
+    ]);
+    renderList();
+
+    expect(await screen.findByText("Rolle: Freigabe-Rolle")).toBeInTheDocument();
+    expect(screen.getByText("nicht zuständig")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Beanspruchen/ })).not.toBeInTheDocument();
   });
 
   it("lists ready tasks with their process/business-key context", async () => {

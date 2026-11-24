@@ -22,7 +22,11 @@ import { ShortKey } from "@/lib/display";
 // system (previously only retrievable per instance individually via the
 // Process Designer/curl, see docs/services/reviewer-ui.md).
 export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: string) => void }) {
-  const { accessToken, user } = useAuth();
+  const { accessToken, user, permissions } = useAuth();
+  // "Meine Aufgaben" (P93-S1, ADR 0249) is the default; the full list stays
+  // one click away for those who may read all workflow tasks.
+  const [scope, setScope] = useState<"mine" | "all">("mine");
+  const canSeeAll = permissions.includes("workflow.read");
   const { t } = useI18n();
 
   const [tasks, setTasks] = useState<ReadyTaskWithInstance[]>([]);
@@ -59,12 +63,12 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
 
   const reload = () => {
     if (!accessToken) return;
-    listReadyTasks(accessToken)
+    listReadyTasks(accessToken, { mine: scope === "mine" })
       .then(setTasks)
       .catch(() => setError(t("common.loadError")));
   };
 
-  useEffect(reload, [accessToken, t]);
+  useEffect(reload, [accessToken, t, scope]);
 
   useEffect(() => {
     if (!accessToken || !user) return;
@@ -197,8 +201,28 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
         </p>
       )}
 
+      {canSeeAll && (
+        <div className="mb-3 inline-flex rounded-md border border-border p-0.5" role="group" aria-label={t("taskList.scopeLabel")}>
+          {(["mine", "all"] as const).map((value) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={scope === value}
+              onClick={() => setScope(value)}
+              className={`rounded px-3 py-1 text-sm ${
+                scope === value ? "bg-accent-bg font-semibold text-accent" : "bg-transparent text-fg"
+              }`}
+            >
+              {t(value === "mine" ? "taskList.scopeMine" : "taskList.scopeAll")}
+            </button>
+          ))}
+        </div>
+      )}
+
       {tasks.length === 0 ? (
-        <p className="italic opacity-70">{t("taskList.empty")}</p>
+        <p className="italic opacity-70">
+          {scope === "mine" ? t("taskList.emptyMine") : t("taskList.empty")}
+        </p>
       ) : (
         <div className="dms-scroll-x mb-6">
           {/* Contained scroll from 768px; below it each row stacks into a card (P83-S11, ADR 0238 Decision 4) */}
@@ -235,12 +259,24 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
                       <td className={td} data-label={t("taskList.businessKeyColumn")}>
                         <ShortKey value={task.business_key} />
                       </td>
-                      <td className={td} data-label={t("taskList.laneColumn")}>{task.lane ?? "-"}</td>
+                      <td className={td} data-label={t("taskList.laneColumn")}>
+                        {task.lane ?? "-"}
+                        {task.lane_binding && (
+                          <span className="block text-xs opacity-70">
+                            {task.lane_binding.group
+                              ? t("taskList.laneGroup", { name: task.lane_binding.group })
+                              : t("taskList.laneRole", { name: task.lane_binding.role ?? "" })}
+                          </span>
+                        )}
+                      </td>
                       <td className={td} data-label={t("taskList.claimColumn")}>
                         {/* Task-claim mechanism (post-roadmap phase 31 session
                             10) - the prerequisite for the org-hierarchy access
                             grant offered inside the expanded detail row below. */}
-                        {task.claimed_by === null ? (
+                        {task.claimed_by === null && task.eligible === false ? (
+                          // A bound lane that isn't mine (P93-S1): claiming would be refused.
+                          <span className="text-sm opacity-70">{t("taskList.notEligible")}</span>
+                        ) : task.claimed_by === null ? (
                           <button type="button" onClick={() => handleClaim(task)} className={secondaryBtn}>
                             {t("taskList.claimButton")}
                           </button>

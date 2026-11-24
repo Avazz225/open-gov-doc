@@ -12,6 +12,7 @@ import {
   isPendingApproval,
   listDmnDefinitions,
   listFederationInstallations,
+  listLaneBindingOptions,
 } from "@/lib/api";
 import type { FederationInstallationSummary } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -61,6 +62,10 @@ function DesignerPageInner() {
   // the federation properties panel group (7.4, P6-S9) already gets the
   // correct installation list injected during the very first
   // construction of the modeler (see components/BpmnDesigner.tsx).
+  const [laneBindingOptions, setLaneBindingOptions] = useState<{
+    groups: string[];
+    roles: string[];
+  } | null>(null);
   const [federationInstallations, setFederationInstallations] = useState<
     FederationInstallationSummary[] | null
   >(null);
@@ -97,6 +102,15 @@ function DesignerPageInner() {
       setInitialXml(STARTER_BPMN_XML);
     }
   }
+
+  useEffect(() => {
+    if (!accessToken) return;
+    // Lane bindings (P93-S1): fail-open with empty lists - the panel then
+    // offers only "nicht gebunden" and shows an existing binding as unknown.
+    listLaneBindingOptions(accessToken)
+      .then(setLaneBindingOptions)
+      .catch(() => setLaneBindingOptions({ groups: [], roles: [] }));
+  }, [accessToken]);
 
   useEffect(() => {
     if (!accessToken) return;
@@ -233,11 +247,15 @@ function DesignerPageInner() {
           </span>
         )}
       </div>
-      {initialXml !== null && federationInstallations !== null && knownDecisionIds !== null && (
+      {initialXml !== null &&
+        federationInstallations !== null &&
+        knownDecisionIds !== null &&
+        laneBindingOptions !== null && (
         <BpmnDesigner
           initialXml={initialXml}
           federationInstallations={federationInstallations}
           knownDecisionIds={knownDecisionIds}
+          laneBindingOptions={laneBindingOptions}
           onReady={handleReady}
           onImportError={(message) => setLoadError(message)}
         />

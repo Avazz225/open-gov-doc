@@ -11,6 +11,8 @@ class ProcessDefinitionOut(BaseModel):
     bpmn_process_id: str
     created_at: datetime
     updated_at: datetime
+    # P93-S1 (ADR 0249): lane name -> {"group": …} | {"role": …}.
+    lane_bindings: dict[str, dict[str, str]] = {}
 
     model_config = {"from_attributes": True}
 
@@ -85,6 +87,11 @@ class ReadyTaskOut(BaseModel):
     # part of the transient task itself, see `models.TaskClaim`).
     claimed_by: str | None = None
     grant_kind: str | None = None
+    # Lane eligibility (P93-S1, ADR 0249) for the calling principal: whether
+    # they may work on this task now (unbound lane or their lane, and not
+    # claimed by someone else). `None` without a caller principal.
+    lane_binding: dict[str, str] | None = None
+    eligible: bool | None = None
 
 
 class ReadyTaskWithInstanceOut(ReadyTaskOut):

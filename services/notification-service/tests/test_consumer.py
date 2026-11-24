@@ -1816,3 +1816,32 @@ async def test_watch_triggered_tells_the_watcher_with_a_link_to_what_changed(
     deleted = by_target[("in_app", "dirk")]
     assert deleted.subject == "Beobachtet: Dokument – endgültig gelöscht"
     assert "localhost:3000" not in deleted.body
+
+
+async def test_escalation_in_a_bound_lane_notifies_each_member(engine, settings, rate_limiter):
+    """P93-S1 (ADR 0249): a bound lane's members (resolved by workflow-service
+    into `lane_members`) each get the in-app notice instead of the lane name."""
+
+    async def fake_publish(event_type, subject, payload, actor=None):
+        pass
+
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
+    event = Event(
+        event_type="workflow.task.escalated",
+        service_name="workflow-service",
+        subject="instance-2",
+        payload={
+            "process_definition_id": 1,
+            "business_key": None,
+            "task_name": "Prüfen",
+            "lane": "Sachbearbeitung",
+            "lane_binding": {"group": "Sachbearbeitung"},
+            "lane_members": ["lena", "lars"],
+        },
+    )
+
+    await handler(event.to_bytes())
+
+    async with _session_factory(engine)() as session:
+        notifications = await repository.list_notifications(session)
+    assert sorted(n.recipient for n in notifications if n.channel == "in_app") == ["lars", "lena"]

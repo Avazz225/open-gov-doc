@@ -196,6 +196,12 @@ Registers itself with the registry on startup, identical pattern to every other 
 
 None yet - follows in Phase 11.
 
+## Escalation to a Bound Lane (P93-S1)
+
+`workflow.task.escalated` with `lane_members` (a lane bound to a group or role, ADR 0249) sends the in-app
+notice to each member instead of one notice addressed to the lane name; the optional `escalation_email`
+is unchanged. Test: `test_escalation_in_a_bound_lane_notifies_each_member`.
+
 ## Tests
 
 `uv run pytest services/notification-service/tests` (**100 tests since Phase 61 Session 1**, +4:

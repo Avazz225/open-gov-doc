@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Two bound lanes and one unbound (P93-S1, ADR 0249). __GROUP__ and
+     __ROLE__ are replaced per test with a group and role that exist. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:camunda="http://camunda.org/schema/1.0/bpmn" id="Definitions_lanes_bound" targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:collaboration id="Collaboration_lanes_bound">
+    <bpmn:participant id="Participant_1" name="Antrag" processRef="lane_bindings" />
+  </bpmn:collaboration>
+  <bpmn:process id="lane_bindings" isExecutable="true">
+    <bpmn:laneSet id="LaneSet_1">
+      <bpmn:lane id="Lane_Sachbearbeitung" name="Sachbearbeitung">
+        <bpmn:extensionElements>
+          <camunda:properties>
+            <camunda:property name="dmsGroup" value="__GROUP__" />
+          </camunda:properties>
+        </bpmn:extensionElements>
+        <bpmn:flowNodeRef>StartEvent_1</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Pruefen</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_Freigabe" name="Freigabe">
+        <bpmn:extensionElements>
+          <camunda:properties>
+            <camunda:property name="dmsRole" value="__ROLE__" />
+          </camunda:properties>
+        </bpmn:extensionElements>
+        <bpmn:flowNodeRef>Task_Freigeben</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_Registratur" name="Registratur">
+        <bpmn:flowNodeRef>Task_Ablegen</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>EndEvent_1</bpmn:flowNodeRef>
+      </bpmn:lane>
+    </bpmn:laneSet>
+    <bpmn:startEvent id="StartEvent_1">
+      <bpmn:outgoing>Flow_1</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:manualTask id="Task_Pruefen" name="Prüfen">
+      <bpmn:incoming>Flow_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_2</bpmn:outgoing>
+    </bpmn:manualTask>
+    <bpmn:manualTask id="Task_Freigeben" name="Freigeben">
+      <bpmn:incoming>Flow_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_3</bpmn:outgoing>
+    </bpmn:manualTask>
+    <bpmn:manualTask id="Task_Ablegen" name="Ablegen">
+      <bpmn:incoming>Flow_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_4</bpmn:outgoing>
+    </bpmn:manualTask>
+    <bpmn:endEvent id="EndEvent_1">
+      <bpmn:incoming>Flow_4</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_1" sourceRef="StartEvent_1" targetRef="Task_Pruefen" />
+    <bpmn:sequenceFlow id="Flow_2" sourceRef="Task_Pruefen" targetRef="Task_Freigeben" />
+    <bpmn:sequenceFlow id="Flow_3" sourceRef="Task_Freigeben" targetRef="Task_Ablegen" />
+    <bpmn:sequenceFlow id="Flow_4" sourceRef="Task_Ablegen" targetRef="EndEvent_1" />
+  </bpmn:process>
+</bpmn:definitions>

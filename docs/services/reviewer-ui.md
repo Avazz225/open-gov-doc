@@ -270,6 +270,15 @@ Two-stage Docker image (`apps/reviewer-ui/Dockerfile`, `node:22-alpine` build st
 
 **Since Phase 49 Session 1**: the build stage's `WORKDIR`/`COPY` layout changed to mirror the actual repo shape (`/repo/apps/reviewer-ui/`, plus `/repo/libs/dms-ui/`) instead of flattening this app into `/app` — needed so `globals.css`'s new relative `@import` of `libs/dms-ui/tokens.css` resolves identically to a local `npm run build`.
 
+## "Meine Aufgaben" (P93-S1, [ADR 0249](../adr/0249-changing-running-processes-and-lane-semantics.md))
+
+The task list opens on "Meine Aufgaben" (`GET /tasks?eligible=me`: claimed by me, or unclaimed in an
+unbound lane or one of mine); "Alle Aufgaben" is one click away for holders of `workflow.read`. The lane
+column names a binding ("Gruppe: …"/"Rolle: …"), and an unclaimed task in a lane that isn't mine shows
+"nicht zuständig" instead of the claim button. The four-eyes view of a process import shows the
+`lane_bindings` in its payload. Tests in `task-list.test.tsx`; `tasks.spec.ts` waits for either the table
+or an empty state (the default view has its own empty text).
+
 ## Tests
 
 - `npm run typecheck` / `npm run lint` / `npm run build` — TypeScript check, ESLint, production-ready static export.

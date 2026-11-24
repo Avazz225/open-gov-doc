@@ -166,6 +166,7 @@ async def create_process_definition(
         _, resolved_process_id = spiff_adapter.parse_bpmn(
             bpmn_xml, process_id, dmn_definitions=dmn_xmls
         )
+        lane_bindings = spiff_adapter.parse_lane_bindings(bpmn_xml)
     except spiff_adapter.BpmnParseError as exc:
         raise InvalidBpmnError(str(exc)) from exc
 
@@ -175,6 +176,7 @@ async def create_process_definition(
         version=next_version,
         bpmn_process_id=resolved_process_id,
         bpmn_xml=bpmn_xml,
+        lane_bindings=lane_bindings,
         created_at=now,
         updated_at=now,
     )

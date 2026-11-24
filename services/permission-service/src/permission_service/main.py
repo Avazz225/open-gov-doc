@@ -17,7 +17,7 @@ from dms_metrics_client import (
     refreshed_metrics_payload,
 )
 from dms_registry_client import maybe_start_registration
-from fastapi import Depends, FastAPI, Header, HTTPException, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -629,6 +629,35 @@ async def delete_supervisor_assignment(
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     await session.commit()
+
+
+@app.get("/principals/{principal_id}/memberships")
+async def get_principal_memberships(
+    principal_id: str, session: AsyncSession = Depends(get_session)
+) -> dict:
+    """Groups and roles of a principal, roles also through its groups (P93-S1,
+    ADR 0249: lane eligibility in workflow-service). Read-only, like the other
+    membership listings."""
+    return await repository.principal_memberships(session, principal_id)
+
+
+@app.get("/lane-members")
+async def get_lane_members(
+    group: str | None = None,
+    role: str | None = None,
+    limit: int = Query(default=200, ge=1, le=1000),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Who stands behind a lane binding (`group` or `role` by name) - for
+    escalations to a lane's members (P93-S1). `404` for an unknown group or
+    role, `422` unless exactly one is given."""
+    if (group is None) == (role is None):
+        raise HTTPException(status_code=422, detail="Genau einen von group/role angeben")
+    try:
+        members = await repository.lane_members(session, group=group, role=role, limit=limit)
+    except repository.UnknownBindingError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"principal_ids": members}
 
 
 @app.get("/supervisor-chain/{principal_id}", response_model=SupervisorChainOut)

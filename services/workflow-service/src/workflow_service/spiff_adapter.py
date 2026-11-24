@@ -543,3 +543,47 @@ def check_timers(wf: BpmnWorkflow) -> list[FiredBoundaryEvent]:
     wf.refresh_waiting_tasks()
     wf.do_engine_steps(did_complete_task=did_complete)
     return fired
+
+
+# --- Lane bindings (P93-S1, ADR 0249) ----------------------------------------
+
+_BPMN_NS = "http://www.omg.org/spec/BPMN/20100524/MODEL"
+_CAMUNDA_NS = "http://camunda.org/schema/1.0/bpmn"
+# `camunda:property` names on a `bpmn:lane` - the same extension format the
+# signature and federated steps use, so no new XML namespace is needed.
+LANE_GROUP_PROPERTY = "dmsGroup"
+LANE_ROLE_PROPERTY = "dmsRole"
+
+
+def parse_lane_bindings(bpmn_xml: str) -> dict[str, dict[str, str]]:
+    """Lane name -> `{"group": name}` or `{"role": name}` for every lane that
+    is bound. Lanes are keyed by name because that is what SpiffWorkflow puts
+    on a task (`task_spec.lane`). An unbound lane is absent - it keeps working
+    as before. Raises `BpmnParseError` for a lane with both a group and a
+    role, or for one lane name bound differently in two places."""
+    try:
+        root = ET.fromstring(bpmn_xml)
+    except ET.ParseError as exc:
+        raise BpmnParseError(f"BPMN nicht lesbar: {exc}") from exc
+    bindings: dict[str, dict[str, str]] = {}
+    for lane in root.iter(f"{{{_BPMN_NS}}}lane"):
+        name = (lane.get("name") or "").strip()
+        values = {
+            prop.get("name"): (prop.get("value") or "").strip()
+            for prop in lane.iter(f"{{{_CAMUNDA_NS}}}property")
+        }
+        group = values.get(LANE_GROUP_PROPERTY) or ""
+        role = values.get(LANE_ROLE_PROPERTY) or ""
+        if not group and not role:
+            continue
+        if not name:
+            raise BpmnParseError("Eine gebundene Lane braucht einen Namen")
+        if group and role:
+            raise BpmnParseError(
+                f"Lane {name!r} ist zugleich an Gruppe und Rolle gebunden - nur eines erlaubt"
+            )
+        binding = {"group": group} if group else {"role": role}
+        if name in bindings and bindings[name] != binding:
+            raise BpmnParseError(f"Lane {name!r} ist mehrfach unterschiedlich gebunden")
+        bindings[name] = binding
+    return bindings

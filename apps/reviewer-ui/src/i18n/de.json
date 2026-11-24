@@ -78,7 +78,14 @@
     "grantOrgUnitOfCreator": "Erstellender Person",
     "grantSubmit": "Freigabe erteilen",
     "grantEmptyResult": "Keine Person gefunden (keine Vorgesetzten/Gruppenmitgliedschaft konfiguriert).",
-    "grantResult": "Freigabe erteilt an: {deputies}"
+    "grantResult": "Freigabe erteilt an: {deputies}",
+    "scopeLabel": "Aufgaben anzeigen",
+    "scopeMine": "Meine Aufgaben",
+    "scopeAll": "Alle Aufgaben",
+    "emptyMine": "Keine Aufgaben für Sie – in Ihren Bahnen, ungebundenen Bahnen oder von Ihnen übernommen.",
+    "laneGroup": "Gruppe: {name}",
+    "laneRole": "Rolle: {name}",
+    "notEligible": "nicht zuständig"
   },
   "teamTaskList": {
     "heading": "Team-Aufgaben",

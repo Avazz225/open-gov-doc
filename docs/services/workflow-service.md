@@ -83,7 +83,7 @@ transactions for a narrow edge case.
 
 The entire SpiffWorkflow API surface is isolated in a single module (`src/workflow_service/spiff_adapter.py`) — `repository.py` does not know SpiffWorkflow classes directly, only the service's own wrapper functions. Reason: SpiffWorkflow's API is not formally documented as stable; a future version bump then only needs to be followed up in one place. Verified against the actually installed version (**3.1.2**) via `help()`/`inspect`, not just taken from the documentation — among other things it was empirically established that `BpmnWorkflow.set_data()` is **not** sufficient to make process variables visible at start (data is passed to a task's children upon its completion, not read retroactively from the workflow-wide `data` dict) — `initial_data` is therefore set directly on the start task that is ready at the beginning.
 
-- **Manual/User Tasks** (`<bpmn:manualTask>`/`<bpmn:userTask>`, both have `task_spec.manual == True`): remain ready after `do_engine_steps()` until `POST .../complete` is called. `task_spec.lane` (lane/role name from the BPMN model, `None` if the model defines no lanes) is delivered informationally — **no evaluation/enforcement** in this session, see "Open Points".
+- **Manual/User Tasks** (`<bpmn:manualTask>`/`<bpmn:userTask>`, both have `task_spec.manual == True`): remain ready after `do_engine_steps()` until `POST .../complete` is called. `task_spec.lane` (lane/role name from the BPMN model, `None` if the model defines no lanes) is delivered with every task; since **P93-S1** a lane can be bound and then enforced, see "Lanes as an Authorization Boundary".
 - **Automatic Tasks (Script Tasks)**: run automatically via SpiffWorkflow's built-in standard Python scripting environment as soon as they are ready — no own connector/delegate registration in this foundation.
 - **Timer/Boundary Events (P6-S2, SLA time monitoring, 7.1)**: `spiff_adapter.check_timers()` wraps `wf.refresh_waiting_tasks()`+`do_engine_steps()` and reports fired boundary timers (detected via `isinstance(task_spec, BoundaryEvent)`) back. Both BPMN semantics tested for real against the installed version: non-interrupting (`cancelActivity="false"`) lets the original task keep running, interrupting (`cancelActivity="true"`, BPMN default) cancels it — both entirely SpiffWorkflow's own semantics, see module docstring.
 
@@ -300,6 +300,37 @@ A failed `connector_call` (e.g. target unreachable) puts SpiffWorkflow's task in
 
 `ProcessInstanceCreate.instance_id` (optional) lets the caller determine their own reference for a new instance instead of accepting a server-generated one — same pattern as `federation-hub-service`'s `handover_id` (ADR 0028). Important for a caller like `migration-service`, which wants to persist the ID already **before** starting: if even the first automatic step fails, the (still-created) instance would otherwise not be findable for a later `/retry` call.
 
+## Lanes as an Authorization Boundary (P93-S1, [ADR 0249](../adr/0249-changing-running-processes-and-lane-semantics.md))
+
+- **The binding** lives in the BPMN, on the `bpmn:lane`, as `camunda:properties` `dmsGroup` (a group or
+  org unit, by name) or `dmsRole` (a role, by name) - the extension format of signature and federated
+  steps. process-designer sets it in its "Zuständigkeit (Lane)" panel.
+- **At upload** `spiff_adapter.parse_lane_bindings` reads them into `process_definition.lane_bindings`
+  (lane name -> `{"group": …}` | `{"role": …}`; lanes are keyed by name because that is what SpiffWorkflow
+  puts on a task). `422` for a lane bound to both, for one lane name bound differently twice, and for a
+  group or role that doesn't exist in permission-service - checked before a four-eyes request, whose
+  payload then carries `lane_bindings` for the reviewer. `ProcessDefinitionOut` returns the bindings.
+  An instance uses the bindings of the version it started with.
+- **Enforced** (`_require_lane_eligibility`, membership from permission-service
+  `GET /principals/{id}/memberships` - groups, and roles directly or through a group):
+  - **claim:** the claimant must belong to the lane;
+  - **complete:** the effective principal - under delegation the represented one, not the deputy;
+  - **reassign:** the receiver must belong to the lane - also when a supervisor or superuser reassigns;
+    who may reassign is unchanged (claimant, supervisor, superuser);
+  - an active superuser may claim and complete regardless; unbound lanes and models without lanes are
+    unchanged.
+- **`GET /tasks?eligible=me`** lists what the caller may work on now: claimed by them, or unclaimed in an
+  unbound lane or one of theirs. Every task in `GET /tasks` carries `lane_binding` and, with a caller
+  principal, `eligible`. Visibility isn't restricted (ADR 0249).
+- **Escalation:** a fired boundary timer in a bound lane adds `lane_binding` and `lane_members` to
+  `workflow.task.escalated`; notification-service notifies each member in-app.
+- **Not covered:** a deputy's "Meine Aufgaben" doesn't include the tasks of the person they stand in for
+  (they switch to "Alle Aufgaben", completing for them works).
+- **Tests:** `test_lanes.py` with `fixtures/lane_bindings.bpmn` (a group lane, a role lane, an unbound
+  lane) against the real permission-service: upload checks, member and non-member, the role lane,
+  supervisor reassign to a member only, a deputy completing for a member, the "Meine Aufgaben" filter and
+  the flag.
+
 ## Events
 
 **Published** (stream `workflow`, `ensure_stream=True`):
@@ -309,7 +340,7 @@ A failed `connector_call` (e.g. target unreachable) puts SpiffWorkflow's task in
 | `workflow.instance.started` | `{process_definition_id, created_by}` |
 | `workflow.instance.completed` | `{business_key}` |
 | `workflow.task.completed` | `{task_id, completed_by}` — since P14-S11 additionally the envelope field `on_behalf_of` set when completion used a delegation (4.4a); `workflow.instance.completed` also carries this field in the same call when status `completed` is reached |
-| `workflow.task.escalated` | `{process_definition_id, business_key, task_name, lane, escalation_email}` (P6-S2, fired by the SLA poll loop on a triggered boundary timer; `escalation_email` is an opaque process datum from `initial_data`, see SLA poll loop section) |
+| `workflow.task.escalated` | `{process_definition_id, business_key, task_name, lane, escalation_email}`, since **P93-S1** also `{lane_binding, lane_members}` (the bound lane's members, resolved through permission-service, at most 200) (P6-S2, fired by the SLA poll loop on a triggered boundary timer; `escalation_email` is an opaque process datum from `initial_data`, see SLA poll loop section) |
 | `workflow.federation.inbound_received` | `{business_key, from_installation_id, process_type, notify_email}` (P6-S9, fired by `POST /federation/inbound` after a successful instance start; `notify_email` is an opaque process datum from the sender side's payload, same pattern as `escalation_email`) |
 
 **Consumed:** none — pure producer. `notification-service` (P6-S2) is the first consumer of `workflow.task.escalated` (since P6-S9 also of `workflow.federation.inbound_received`), `case-service` (P6-S3) the first consumer of `workflow.instance.completed` (triggers the completion snapshot of a circulation folder there, see `docs/services/case-service.md`), see per service. No other existing service currently emits anything that workflow-service would need to react to (e.g. the `needs_review` flag from `ocr.completed`, see `docs/services/ocr-service.md` "Open Points") — this integration remains deferred to a later Phase 6 session, presumably together with the generic approval mechanism (P6-S4).
@@ -393,7 +424,7 @@ None yet — follows in Phase 11.
 ## Open Points
 
 - ~~Role check since P6-S6 only for process definitions (`admin.object_config`) — instance start/task completion deliberately remain open to every authenticated principal~~ — **fixed in Post-Roadmap Phase 19 Session 9** ([ADR 0074](../adr/0074-workflow-instance-task-rbac.md)): both now check `workflow.write` via `permission-service` (the "everyone" group retains the previous open behavior, but makes it admin-editable). `completed_by`/`created_by` remain purely unchecked strings — the gating decision only affects *whether* an action may be performed, not whether the given name is correct.
-- ~~`workflow.write` alone meant ANY caller could complete ANY ready task system-wide, claimed by someone else or not — BPMN lanes are parsed and displayed but never enforced as an authorization boundary~~ — **claim-based half closed in Post-Roadmap Phase 73 Session 1** ([ADR 0211](../adr/0211-workflow-service-per-claimant-task-completion-authorization.md), see "Per-claimant completion authorization" above): a CLAIMED task now requires the claimant, a supervisor, or a valid delegate to complete it. An UNCLAIMED task stays fully open, unchanged. **Lane-based enforcement (`task_spec.lane`, see "SpiffWorkflow integration" above) remains genuinely unimplemented** — a different, narrower authorization dimension (BPMN-modeled roles, not claim-based assignees) this session deliberately didn't attempt. **Scoped in P90-S7** ([ADR 0249](../adr/0249-changing-running-processes-and-lane-semantics.md), built in Phase 93): lanes become a boundary only when bound to a group, org unit or role in the BPMN.
+- ~~`workflow.write` alone meant ANY caller could complete ANY ready task system-wide, claimed by someone else or not — BPMN lanes are parsed and displayed but never enforced as an authorization boundary~~ — **claim-based half closed in Post-Roadmap Phase 73 Session 1** ([ADR 0211](../adr/0211-workflow-service-per-claimant-task-completion-authorization.md), see "Per-claimant completion authorization" above): a CLAIMED task now requires the claimant, a supervisor, or a valid delegate to complete it. An UNCLAIMED task stays fully open, unchanged. ~~**Lane-based enforcement (`task_spec.lane`, see "SpiffWorkflow integration" above) remains genuinely unimplemented**~~ **built in P93-S1** (see "Lanes as an Authorization Boundary") — a different, narrower authorization dimension (BPMN-modeled roles, not claim-based assignees) this session deliberately didn't attempt. **Scoped in P90-S7** ([ADR 0249](../adr/0249-changing-running-processes-and-lane-semantics.md), built in Phase 93): lanes become a boundary only when bound to a group, org unit or role in the BPMN.
 - **Running instances can't be changed** (no skip, send back, or route change; an instance stays on its start version). Scoped in P90-S7 ([ADR 0249](../adr/0249-changing-running-processes-and-lane-semantics.md)): data-driven circulation routes plus three guarded admin operations built on SpiffWorkflow's `reset_from_task_id` and `migrate_workflow`.
 - ~~Script Tasks execute arbitrary Python code embedded in the BPMN XML server-side (SpiffWorkflow's standard scripting environment) — effectively secured since P6-S6 by the `admin.object_config` gating at the upload endpoint, but a single domain admin could previously enable this unobserved~~ — **optional four-eyes gate added in Post-Roadmap Phase 21 Session 4** ([ADR 0087](../adr/0087-bpmn-import-review-gate.md), see "BPMN import review gate" above): with the approval requirement enabled, a second admin must confirm every BPMN import before the contained script code becomes instance-startable. Deliberately *optional* (default remains ungated, as with `config-service`'s P17-S3 retrofit) — an installation without multiple trusted domain admins can leave the gate unused.
 - ~~**Intermittent "federation/xdomea-dispatch" test flake**, first observed in ADR 0195 and reconfirmed still unresolved in ADR 0211~~ — **root-caused and closed in Phase 79 Session 3** ([ADR 0232](../adr/0232-federation-self-registration-ssrf-guard-test-conflict.md)): not actually intermittent — `installation_gateway_base_url`'s dev-stack default (`http://gateway-service:8000`) resolves to a private Docker-network address, which Phase 60's callback SSRF guard correctly rejects, leaving this service's federation self-registration silently failed on every single test run (this service's own `conftest.py` enables federation unconditionally for all tests). Fixed by overriding the callback URL to a public placeholder (`8.8.8.8`) for tests only — no production behavior change.

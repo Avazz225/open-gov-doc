@@ -42,6 +42,10 @@ class ProcessDefinition(Base):
     # `spiff_adapter.parse_bpmn` call at instance start.
     bpmn_process_id: Mapped[str] = mapped_column(String(256))
     bpmn_xml: Mapped[str] = mapped_column(Text)
+    # Lane name -> {"group": name} | {"role": name} (P93-S1, ADR 0249): read
+    # from the BPMN at upload; a bound lane restricts who may claim and
+    # complete its tasks.
+    lane_bindings: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 

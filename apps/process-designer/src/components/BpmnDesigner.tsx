@@ -14,6 +14,8 @@ import type { FederationInstallation } from "./FederatedStepPropertiesProvider";
 import { FederatedStepPropertiesProviderModule } from "./FederatedStepPropertiesProvider";
 import { SignatureTaskPropertiesProviderModule } from "./SignatureTaskPropertiesProvider";
 import { DmnValidationPropertiesProviderModule } from "./DmnValidationPropertiesProvider";
+import type { LaneBindingOptions } from "./LaneBindingPropertiesProvider";
+import { LaneBindingPropertiesProviderModule } from "./LaneBindingPropertiesProvider";
 
 import "bpmn-js/dist/assets/diagram-js.css";
 import "bpmn-js/dist/assets/bpmn-js.css";
@@ -38,6 +40,8 @@ interface BpmnDesignerProps {
   // `DmnValidationPropertiesProvider` to warn when a `businessRuleTask`'s
   // `camunda:decisionRef` doesn't match any of them.
   knownDecisionIds: string[];
+  // Groups and roles a lane can be bound to (P93-S1), injected the same way.
+  laneBindingOptions: LaneBindingOptions;
   onImportError?: (message: string) => void;
   // Callback prop instead of `forwardRef`/`useImperativeHandle` - avoids any
   // uncertainty about ref forwarding through `next/dynamic` (which this
@@ -59,6 +63,7 @@ export function BpmnDesigner({
   initialXml,
   federationInstallations,
   knownDecisionIds,
+  laneBindingOptions,
   onImportError,
   onReady,
 }: BpmnDesignerProps) {
@@ -79,10 +84,12 @@ export function BpmnDesigner({
         SignatureTaskPropertiesProviderModule,
         FederatedStepPropertiesProviderModule,
         DmnValidationPropertiesProviderModule,
+        LaneBindingPropertiesProviderModule,
         // Not a dedicated bpmn-js module, but a didi inline binding for the
         // static installation list (see FederatedStepPropertiesProvider.tsx).
         { federationInstallations: ["value", federationInstallations] },
         { knownDecisionIds: ["value", knownDecisionIds] },
+        { laneBindingOptions: ["value", laneBindingOptions] },
       ],
       moddleExtensions: { camunda: camundaModdleDescriptor },
     });

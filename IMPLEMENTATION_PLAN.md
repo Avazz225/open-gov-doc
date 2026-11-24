@@ -4643,6 +4643,18 @@ explain lanes and route changes. Design and reasons: [ADR 0249](docs/adr/0249-ch
   - `GET /tasks?eligible=me` and an `eligible` flag; reviewer-ui "Meine Aufgaben" as the default
     filter; escalations to lane members in notification-service.
   - Tests with a two-lane model (member, non-member, delegate, supervisor reassign).
+  - **Result:**
+    - workflow-service: `lane_bindings` read at upload (`camunda:property` `dmsGroup`/`dmsRole` on the
+      lane), `422` for unknown/conflicting bindings, shown in the four-eyes payload; eligibility on
+      claim, complete (the represented principal under delegation) and reassign (the receiver);
+      `GET /tasks?eligible=me`, `lane_binding`/`eligible` on every task; escalation names the members.
+    - permission-service: `GET /principals/{id}/memberships`, `GET /lane-members`.
+    - notification-service: in-app escalation to each lane member.
+    - process-designer: "Zuständigkeit (Lane)" panel; reviewer-ui: "Meine Aufgaben" by default, "nicht
+      zuständig" instead of a claim button.
+    - **Tests:** workflow-service 249 (+5, `test_lanes.py`), permission-service 212, notification-service
+      120, process-designer 65 + e2e `lane-binding.spec.ts`, reviewer-ui 71 + e2e 8/8.
+
 - **P93-S2 — Engine operations for running instances.**
   - Skip a READY user task, send back to a completed task (`reset_from_task_id`), migrate to a newer
     definition version (`migrate_workflow` after a dry-run `SpecDiff` that must align every

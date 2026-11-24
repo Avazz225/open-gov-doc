@@ -108,3 +108,27 @@ class PermissionServiceClient(_BasePermissionServiceClient):
         response = await self._client.get(f"/supervisor-chain/{of_principal_id}")
         response.raise_for_status()
         return principal_id in response.json()["supervisor_ids"]
+
+    async def memberships(self, principal_id: str) -> dict:
+        """Groups and roles of a principal, roles also through its groups
+        (P93-S1, ADR 0249: lane eligibility)."""
+        response = await self._client.get(f"/principals/{principal_id}/memberships")
+        response.raise_for_status()
+        return response.json()
+
+    async def lane_members(self, binding: dict[str, str], *, limit: int = 200) -> list[str]:
+        """Principal ids behind a lane binding (escalation to a lane, P93-S1).
+        An unknown group or role yields none."""
+        response = await self._client.get("/lane-members", params={**binding, "limit": limit})
+        if response.status_code == 404:
+            return []
+        response.raise_for_status()
+        return response.json()["principal_ids"]
+
+    async def binding_exists(self, binding: dict[str, str]) -> bool:
+        """Whether a lane binding's group or role exists (upload check)."""
+        response = await self._client.get("/lane-members", params={**binding, "limit": 1})
+        if response.status_code == 404:
+            return False
+        response.raise_for_status()
+        return True

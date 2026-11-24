@@ -247,26 +247,31 @@ async def _handle_task_escalated(
     }
 
     async with session_factory() as session:
-        recipient = data.get("lane") or "unassigned"
-        subject, body = await _render_or_fallback(
-            session,
-            use_case="workflow.task.escalated",
-            recipient=recipient,
-            fallback_subject=fallback_subject,
-            fallback_body=fallback_body,
-            **placeholders,
-        )
-        in_app = await repository.create_and_send(
-            session,
-            settings,
-            channel="in_app",
-            recipient=recipient,
-            subject=subject,
-            body=body,
-            rate_limiter=rate_limiter,
-        )
-        await session.commit()
-        await publish_notification_result(publish_event, in_app)
+        # A bound lane (P93-S1, ADR 0249) names its members: each gets the
+        # in-app notice. An unbound lane keeps the previous behaviour - one
+        # notice addressed to the lane name.
+        members = [m for m in (data.get("lane_members") or []) if isinstance(m, str)]
+        recipients = members or [data.get("lane") or "unassigned"]
+        for recipient in recipients:
+            subject, body = await _render_or_fallback(
+                session,
+                use_case="workflow.task.escalated",
+                recipient=recipient,
+                fallback_subject=fallback_subject,
+                fallback_body=fallback_body,
+                **placeholders,
+            )
+            in_app = await repository.create_and_send(
+                session,
+                settings,
+                channel="in_app",
+                recipient=recipient,
+                subject=subject,
+                body=body,
+                rate_limiter=rate_limiter,
+            )
+            await session.commit()
+            await publish_notification_result(publish_event, in_app)
 
         escalation_email = data.get("escalation_email")
         if escalation_email:

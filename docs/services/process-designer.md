@@ -169,6 +169,16 @@ Two-stage Docker image (`apps/process-designer/Dockerfile`, `node:22-alpine` bui
 
 **Since Phase 49 Session 1**: the build stage's `WORKDIR`/`COPY` layout changed from flattening this app directly into `/app` to mirroring the actual repo shape (`/repo/apps/process-designer/`, plus `/repo/libs/dms-ui/`) — needed so `globals.css`'s new relative `@import` of `libs/dms-ui/tokens.css` resolves identically inside the Docker build stage and in a local `npm run build` (the flattened layout put the app's own files one directory shallower than local dev, breaking the same relative path). `npm install`/`npm run build` now run via `--prefix apps/process-designer` instead of relying on `WORKDIR` alone.
 
+## Lane Binding Panel (P93-S1, [ADR 0249](../adr/0249-changing-running-processes-and-lane-semantics.md))
+
+`LaneBindingPropertiesProvider` adds "Zuständigkeit (Lane)" to every `bpmn:Lane`: one select with "Alle
+(nicht gebunden)", "Gruppe: …" and "Rolle: …" (groups and roles from permission-service, loaded once by
+`designer/page.tsx` and injected as `laneBindingOptions`; fail-open with empty lists). It writes
+`camunda:property` `dmsGroup` or `dmsRole` on the lane, keeping other properties; a binding whose name no
+longer exists stays visible as "(unbekannt)" - workflow-service refuses the upload then. Tests: pure
+helpers in `lane-binding-properties-provider.test.ts`; e2e `lane-binding.spec.ts` (bind a lane, save,
+the stored version carries the binding).
+
 ## Tests
 
 - `npm run typecheck` / `npm run lint` / `npm run build` — TypeScript check, ESLint (including one deliberate, justified `no-explicit-any` exception in `SignatureTaskPropertiesProvider.tsx`: `bpmn-js` itself types `Moddle`/`ModdleElement` as `any`, and neither properties panel package ships type declarations at all), production-ready static export.

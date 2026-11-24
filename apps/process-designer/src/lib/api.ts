@@ -376,6 +376,21 @@ export interface FederationInstallationSummary {
   supported_process_types: string[];
 }
 
+// Groups and roles a lane can be bound to (P93-S1, ADR 0249) - by name, the
+// identifier the BPMN carries across installations.
+export async function listLaneBindingOptions(
+  token: string
+): Promise<{ groups: string[]; roles: string[] }> {
+  const [groups, roles] = await Promise.all([
+    request("permission-service", "groups", {}, token).then((r) => r.json()),
+    request("permission-service", "roles", {}, token).then((r) => r.json()),
+  ]);
+  return {
+    groups: (groups as { name: string }[]).map((g) => g.name).sort(),
+    roles: (roles as { name: string }[]).map((r) => r.name).sort(),
+  };
+}
+
 export async function listFederationInstallations(
   token: string
 ): Promise<FederationInstallationSummary[]> {

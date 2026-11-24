@@ -78,7 +78,14 @@
     "grantOrgUnitOfCreator": "Creator",
     "grantSubmit": "Grant access",
     "grantEmptyResult": "No one found (no supervisors/group membership configured).",
-    "grantResult": "Access granted to: {deputies}"
+    "grantResult": "Access granted to: {deputies}",
+    "scopeLabel": "Show tasks",
+    "scopeMine": "My tasks",
+    "scopeAll": "All tasks",
+    "emptyMine": "No tasks for you – in your lanes, unbound lanes, or claimed by you.",
+    "laneGroup": "Group: {name}",
+    "laneRole": "Role: {name}",
+    "notEligible": "not responsible"
   },
   "teamTaskList": {
     "heading": "Team tasks",

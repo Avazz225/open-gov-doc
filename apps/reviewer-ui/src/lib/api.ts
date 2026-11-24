@@ -194,10 +194,18 @@ export interface ReadyTaskWithInstance {
   // "Unclaimed team work" view (Post-Roadmap Phase 35 Session 3, ADR 0145) -
   // the only attribution signal an UNCLAIMED task has (`claimed_by` is `null`).
   created_by: string;
+  // Lanes as an authorization boundary (P93-S1, ADR 0249): the lane's
+  // binding, and whether the caller may work on the task now.
+  lane_binding?: { group?: string; role?: string } | null;
+  eligible?: boolean | null;
 }
 
-export async function listReadyTasks(token: string): Promise<ReadyTaskWithInstance[]> {
-  const response = await request("workflow-service", "tasks", {}, token);
+export async function listReadyTasks(
+  token: string,
+  options: { mine?: boolean } = {}
+): Promise<ReadyTaskWithInstance[]> {
+  const path = options.mine ? "tasks?eligible=me" : "tasks";
+  const response = await request("workflow-service", path, {}, token);
   return response.json();
 }
 
