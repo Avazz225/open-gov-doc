@@ -12,6 +12,8 @@ from signature_service.models import (
     IncomingSignatureValidation,
     IncomingTrustAnchor,
     IncomingValidationConfig,
+    TrustedList,
+    TrustedListFetch,
 )
 from signature_service.validation.interface import (
     INDICATION_RANK,
@@ -36,6 +38,7 @@ async def get_config(session: AsyncSession) -> IncomingValidationConfig:
             enabled=True,
             revocation_mode="soft-fail",
             outbound_fetching=True,
+            eu_trusted_lists=True,
             updated_at=datetime.now(UTC),
         )
         session.add(config)
@@ -49,9 +52,11 @@ async def update_config(
     enabled: bool,
     revocation_mode: str,
     outbound_fetching: bool,
+    eu_trusted_lists: bool,
     updated_by: str,
 ) -> IncomingValidationConfig:
     config = await get_config(session)
+    config.eu_trusted_lists = eu_trusted_lists
     config.enabled = enabled
     config.revocation_mode = revocation_mode
     config.outbound_fetching = outbound_fetching
@@ -114,13 +119,15 @@ async def record_run(
     trigger: str,
     revocation_mode: str,
     outcome: ValidationOutcome,
+    run_id: str | None = None,
+    report_key: str | None = None,
 ) -> IncomingSignatureSummary | None:
     """Stores one run: a row per finding and the version's summary. A run
     without findings (an unsigned PDF) stores nothing - there is nothing to
     show, and an earlier summary for the version stays as it was."""
     if not outcome.findings:
         return None
-    run_id = str(uuid.uuid4())
+    run_id = run_id or str(uuid.uuid4())
     now = datetime.now(UTC)
     for finding in outcome.findings:
         session.add(
@@ -143,6 +150,8 @@ async def record_run(
                 best_signature_time=finding.best_signature_time,
                 coverage=finding.coverage,
                 modification_level=finding.modification_level,
+                qc_type=finding.qc_type,
+                report_key=report_key,
                 failure_reason=finding.failure_reason,
                 technical_detail=finding.technical_detail,
                 revocation_mode=revocation_mode,
@@ -207,3 +216,113 @@ async def list_validations(
     )
     result = await session.execute(query)
     return list(result.scalars())
+
+
+async def get_run(session: AsyncSession, run_id: str) -> IncomingSignatureValidation:
+    """Any row of a run (they share document, version and report key)."""
+    result = await session.execute(
+        select(IncomingSignatureValidation)
+        .where(IncomingSignatureValidation.run_id == run_id)
+        .limit(1)
+    )
+    row = result.scalar_one_or_none()
+    if row is None:
+        raise NotFoundError(f"Prüflauf {run_id} unbekannt")
+    return row
+
+
+async def validated_versions(
+    session: AsyncSession, keys: list[tuple[str, int]]
+) -> set[tuple[str, int]]:
+    """Which (document, version) pairs already have a summary - the backfill
+    skips them unless asked not to."""
+    if not keys:
+        return set()
+    document_ids = {d for d, _ in keys}
+    result = await session.execute(
+        select(IncomingSignatureSummary.document_id, IncomingSignatureSummary.version_number).where(
+            IncomingSignatureSummary.document_id.in_(document_ids)
+        )
+    )
+    return {(d, v) for d, v in result.all()} & set(keys)
+
+
+# --- EU trusted lists (P92-S2) ---------------------------------------------
+
+
+async def store_trusted_list(
+    session: AsyncSession,
+    *,
+    kind: str,
+    territory: str,
+    location_uri: str | None,
+    xml: str,
+    sha256: str,
+    sequence_number: int | None,
+    issued_at: datetime | None,
+    next_update: datetime | None,
+    source: str,
+) -> TrustedList:
+    """Replaces the stored list for (kind, territory)."""
+    await session.execute(
+        delete(TrustedList).where(TrustedList.kind == kind, TrustedList.territory == territory)
+    )
+    row = TrustedList(
+        kind=kind,
+        territory=territory,
+        location_uri=location_uri,
+        xml=xml,
+        sha256=sha256,
+        sequence_number=sequence_number,
+        issued_at=issued_at,
+        next_update=next_update,
+        fetched_at=datetime.now(UTC),
+        source=source,
+    )
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def get_lotl(session: AsyncSession) -> TrustedList | None:
+    result = await session.execute(select(TrustedList).where(TrustedList.kind == "lotl"))
+    return result.scalar_one_or_none()
+
+
+async def list_trusted_lists(session: AsyncSession) -> list[TrustedList]:
+    result = await session.execute(
+        select(TrustedList).order_by(TrustedList.kind, TrustedList.territory)
+    )
+    return list(result.scalars())
+
+
+async def trusted_list_generation(session: AsyncSession) -> str:
+    """Changes whenever a national list is stored or replaced - the key of
+    the in-memory registry cache."""
+    result = await session.execute(
+        select(TrustedList.id, TrustedList.sha256)
+        .where(TrustedList.kind == "tl")
+        .order_by(TrustedList.id)
+    )
+    return ",".join(f"{i}:{h[:12]}" for i, h in result.all())
+
+
+async def national_list_xmls(session: AsyncSession) -> list[str]:
+    result = await session.execute(select(TrustedList.xml).where(TrustedList.kind == "tl"))
+    return list(result.scalars())
+
+
+async def start_fetch(session: AsyncSession, *, source: str, triggered_by: str) -> TrustedListFetch:
+    fetch = TrustedListFetch(
+        started_at=datetime.now(UTC), source=source, triggered_by=triggered_by, errors=[]
+    )
+    session.add(fetch)
+    await session.flush()
+    return fetch
+
+
+async def last_fetch(session: AsyncSession) -> TrustedListFetch | None:
+    result = await session.execute(
+        select(TrustedListFetch).order_by(TrustedListFetch.id.desc()).limit(1)
+    )
+    return result.scalar_one_or_none()

@@ -48,6 +48,9 @@ class SignatureFinding:
     best_signature_time: datetime | None = None
     coverage: Coverage = "unknown"
     modification_level: str | None = None
+    # From the EU trusted lists (P92-S2): "esign", "eseal" or "web" for a
+    # qualified certificate, else None.
+    qc_type: str | None = None
     # Plain German for the UI; technical detail goes to `technical_detail`.
     failure_reason: str | None = None
     technical_detail: str | None = None
@@ -73,6 +76,10 @@ class ValidationPolicy:
     max_path_length: int
     time_limit_seconds: float
     fetch: "FetchLimits"
+    # The EU trusted lists as a pyHanko `TSPRegistry` (P92-S2), or None when
+    # the source is off or nothing is stored yet. Shared read-only between
+    # runs.
+    tsp_registry: object | None = None
 
 
 @dataclass(frozen=True)
@@ -92,6 +99,9 @@ class ValidationOutcome:
     findings: list[SignatureFinding]
     # More signatures than `max_signatures`: only the first ones were checked.
     truncated: bool = False
+    # ETSI TS 119 102-2 validation report (XML) for the run, if one could be
+    # built (P92-S2).
+    report_xml: str | None = None
 
 
 class SignatureValidator(Protocol):

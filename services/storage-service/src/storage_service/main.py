@@ -364,6 +364,9 @@ _TRUSTED_STORAGE_CALLERS = frozenset(
         # aggregate/maintenance endpoints below. Fixed here rather than
         # left for a dedicated session, since it's the same one-line fix.
         "reporting-service",
+        # P92-S2 (ADR 0248): ETSI validation reports of incoming-signature
+        # runs, one object per run.
+        "signature-service",
         # The Helm chart's storage CronJob (`storageCronJob`, ADR 0101) -
         # already sends this exact identity, anticipating this gate before
         # it existed ("even if storage-service later gates this endpoint").

@@ -34,6 +34,7 @@ from fastapi import (
     Form,
     Header,
     HTTPException,
+    Query,
     Response,
     UploadFile,
     status,
@@ -121,6 +122,7 @@ from document_service.schemas import (
     TrashResult,
     UploadConfigIn,
     UploadConfigOut,
+    VersionListingOut,
     WebdavEditTokenOut,
     WebdavEditTokenResolveOut,
     WebdavEditTokenSummary,
@@ -2197,6 +2199,48 @@ async def list_documents(
     if x_dms_principal in SERVICE_PRINCIPALS:
         response.headers["X-DMS-Hidden-Count"] = str(len(documents) - len(visible))
     return visible
+
+
+@app.get("/document-versions", response_model=list[VersionListingOut])
+async def list_document_versions(
+    created_from: datetime | None = None,
+    created_to: datetime | None = None,
+    folder_id: str | None = None,
+    content_type: str | None = None,
+    after_id: int = 0,
+    limit: int = Query(default=1000, ge=1, le=5000),
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> list[VersionListingOut]:
+    """Versions across documents, for service-side batch jobs only (P92-S2,
+    ADR 0248: signature-service's backfill by time range or folder). No
+    end user may call it - it ignores per-document permissions - so only
+    service principals pass. Deleted documents are left out. Page with
+    `after_id` (the last `id` seen); `folder_id` means the folder's own
+    documents, not its subfolders."""
+    if x_dms_principal not in SERVICE_PRINCIPALS:
+        raise HTTPException(status_code=403, detail="Nur für interne Dienste")
+    rows = await repository.list_versions_for_batch(
+        session,
+        created_from=created_from,
+        created_to=created_to,
+        folder_id=folder_id,
+        content_type=content_type,
+        after_id=after_id,
+        limit=limit,
+    )
+    return [
+        VersionListingOut(
+            id=version.id,
+            document_id=version.document_id,
+            version_number=version.version_number,
+            content_type=version.content_type,
+            filename=version.filename,
+            size_bytes=version.size_bytes,
+            created_at=version.created_at,
+        )
+        for version in rows
+    ]
 
 
 @app.get("/documents/by-kennzeichen", response_model=list[DocumentOut])

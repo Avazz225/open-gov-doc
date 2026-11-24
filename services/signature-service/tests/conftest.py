@@ -32,6 +32,16 @@ SAMPLE_PDF_PATH = os.path.join(os.path.dirname(__file__), "fixtures", "sample.pd
 # `--import-mode=importlib` doesn't put this directory on the path by itself.
 sys.path.insert(0, os.path.dirname(__file__))
 
+import testtl  # noqa: E402 - needs the path above
+
+# EU trusted lists (P92-S2): no scheduled fetch in tests, the generated test
+# LOTL signer instead of the real EU one, reports to the live storage-service.
+os.environ["DMS_TRUSTED_LIST_POLL_INTERVAL_SECONDS"] = "0"
+os.environ["DMS_TRUSTED_LIST_LOTL_SIGNERS_PEM"] = testtl.LOTL_SIGNER.pem.decode()
+os.environ["DMS_STORAGE_SERVICE_BASE_URL"] = os.environ.get(
+    "TEST_STORAGE_SERVICE_URL", "http://localhost:8005"
+)
+
 PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://localhost:8004")
 # Post-Roadmap Phase 38 Session 3: `PUT /signature-config` now requires
 # `admin.signature_config`.
@@ -134,7 +144,8 @@ async def _clean_tables():
                 "TRUNCATE signature.signature, signature.internal_ca, signature.internal_tsa, "
                 "signature.signature_config, signature.incoming_signature_validation, "
                 "signature.incoming_signature_summary, signature.incoming_trust_anchor, "
-                "signature.incoming_validation_config CASCADE"
+                "signature.incoming_validation_config, signature.trusted_list, "
+                "signature.trusted_list_fetch CASCADE"
             )
         )
     await eng.dispose()

@@ -603,6 +603,8 @@ services:
       - document-service
       - object-type-service
       - auth-service
+      # P92-S2: ETSI validation reports of incoming-signature runs.
+      - storage-service
     env: {}
 
   # Deliberately NOT an internal service of this installation (see

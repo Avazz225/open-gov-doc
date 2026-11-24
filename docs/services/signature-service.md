@@ -20,6 +20,12 @@
 | `GET`/`PUT` | `/incoming-signatures/config` | **Since P92-S1**: `{enabled, revocation_mode: soft-fail\|hard-fail, outbound_fetching}`. `GET` ungated, `PUT` needs `admin.signature_config` |
 | `GET`/`POST` | `/incoming-signatures/trust-anchors` | **Since P92-S1**: the installation anchors (`POST {label, certificate_pem}`: one CA certificate; `422` not a CA/not PEM, `409` already there). The listing starts with the internal CA (`source: internal`, `id: null`, not removable). Both need `admin.signature_config` |
 | `DELETE` | `/incoming-signatures/trust-anchors/{id}` | **Since P92-S1**: removes an installation anchor (`404` unknown). Earlier results stay as they were |
+| `POST` | `/incoming-signatures/revalidate` `{document_id, version_number?}` | **Since P92-S2**: queues the version (default: current) for another run, `202`. `document.read`; `404` unknown document/version. The run is added (`trigger: revalidation`, `requested_by`) |
+| `POST`/`GET` | `/incoming-signatures/backfill` | **Since P92-S2**: `POST {folder_id?, created_from?, created_to?, only_unvalidated=true}` starts a background run over existing PDF versions (`202`; `422` without folder or range, `409` while one runs); `GET` shows its progress (`scanned`, `queued`, `skipped_validated`, `limit_reached`, `queue_pending`). Both `admin.signature_config` |
+| `GET` | `/incoming-signatures/reports/{run_id}` | **Since P92-S2**: the run's ETSI TS 119 102-2 report (XML download). `document.read`; `404` unknown run or no report |
+| `GET` | `/incoming-signatures/trusted-lists` | **Since P92-S2**: stored EU lists (territory, sequence number, issue date, next update, source, fetched at) and the latest fetch/import with its errors. `admin.signature_config` |
+| `POST` | `/incoming-signatures/trusted-lists/refresh` | **Since P92-S2**: fetch now, in the background (`202`). `admin.signature_config` |
+| `POST` | `/incoming-signatures/trusted-lists/import` | **Since P92-S2**: offline import of one list (multipart `file`): the LOTL first, then national lists (`422` wrong order, bad signature or not a list, `413` too large). `admin.signature_config` |
 | `GET` | `/healthz` | Health check |
 
 ## Data Model
@@ -114,7 +120,7 @@ choice — 3.10 does not call for one):
 | event_type | payload |
 |---|---|
 | `signature.created` | `{version_number, level, signer_principal_id, connector_id}` |
-| `signature.incoming.validated` | **Since P92-S1**: `{version_number, run_id, signature_count, worst_indication, best_qualification, changed_after_signing, trigger}` (subject: `document_id`, actor `system:signature-validation`). Goes to the audit ledger from P92-S2 |
+| `signature.incoming.validated` | **Since P92-S1**: `{version_number, run_id, signature_count, worst_indication, best_qualification, changed_after_signing, trigger}`, since P92-S2 also `{requested_by, signers: [{subject, indication, qualification}]}` (subject: `document_id`; actor: the requesting principal, else `system:signature-validation`). In the audit ledger through audit-service's existing `signature.>` subscription (verified live in P92-S2) |
 | `signature.trust_anchor.added` / `.removed` | **Since P92-S1**: `{label, fingerprint_sha256}` (subject: anchor id) |
 
 **Consumed since P92-S1:** `document.>` with its own durable `signature-service-incoming` and `deliver_new` (only `document.created`/`document.version.created` are used). Until P92-S1 the service was a pure producer. Because of that consumer it is now in `scripts/run-tests.sh`'s `CONSUMER_SERVICES`.
@@ -142,8 +148,14 @@ the same path and are validated against the internal CA.
     `permitted_changes` (form filling, annotations, further signatures, validation data), or
     `changed_after_signing`, which makes the finding `TOTAL-FAILED` / `MODIFIED_AFTER_SIGNING` whatever
     the cryptography says (the shadow-attack case).
-  - Qualification is `ades` for a pass against an internal or installation anchor; `qes`/`adesqc` need the
-    EU trusted lists (P92-S2).
+  - Qualification (P92-S2): `qes` for a qualified certificate whose key is on a QSCD, `adesqc` for a
+    qualified one without, `ades` for any other pass, `unknown` otherwise - only the EU trusted lists
+    can establish "qualified" (pyHanko's assessment from the certificate's QcStatements and the TL's
+    service entry); `qc_type` says `esign`/`eseal`/`web`.
+  - The run's ETSI TS 119 102-2 report (P92-S2) covers every AdES-validated signature; it is stored in
+    storage-service as `signature-validation-reports/{document_id}/{run_id}.xml` (`report_key` on the
+    rows). pyHanko's public `generate_report` covers one signature, so its internal builders are joined.
+    Document timestamps (validated through pyHanko's older API) aren't part of the report.
 - `trust.py`: anchors only from the installation (internal CA, uploaded CA certificates). Certificates in
   the file can help build a path but never become anchors; the OS trust store is never used. Every anchor
   carries the path-length limit.
@@ -157,6 +169,36 @@ the same path and are validated against the internal CA.
 - `worker.py`: a bounded queue (`incoming_validation_queue_size`) in front of `incoming_validation_workers`
   runners. Each validation runs in a thread with its own event loop and a time limit, so a flood of signed
   uploads delays results without blocking the signing API.
+
+**EU trusted lists** (P92-S2, `validation/trusted_lists.py`):
+- **Fetch:** the LOTL (`trusted_list_lotl_url`) and the national lists it names, optionally only
+  `trusted_list_territories`. Through the fenced client, with cross-host redirects allowed (each hop still
+  checked), gzip inflated with a cap on the inflated size (`trusted_list_max_bytes`). Runs in its own
+  thread and event loop.
+- **Checks before storage:** the LOTL against its signers (pyHanko's bundled last known set, or
+  `trusted_list_lotl_signers_pem`; on failure the official bootstrap via the pivot LOTLs); each national
+  list against the signers the LOTL names for its territory. Only passing lists are stored, in
+  `trusted_list` (one row per kind and territory, replaced on refresh) - the table is the offline cache.
+- **Schedule:** `_trusted_list_poll_loop`, a minute after start if nothing is stored, then every
+  `trusted_list_poll_interval_seconds` (default daily, `0` = off; compose:
+  `SIGNATURE_SERVICE_TRUSTED_LIST_POLL_INTERVAL_SECONDS`), only while `eu_trusted_lists` is on in the
+  config. Each attempt is a row in `trusted_list_fetch` (lists stored, errors per territory, who).
+- **Offline:** `POST /incoming-signatures/trusted-lists/import`, LOTL first; same checks.
+- **Use:** the stored national lists become a pyHanko `TSPRegistry`, built in a thread once per change of
+  the stored set (keyed by row ids and hashes) and shared read-only by runs. `trust.CombinedTrustManager`
+  (a `TSPTrustManager`, which is what makes pyHanko run its qualification analysis) puts the
+  installation's own anchors first and gives the EU anchors the same path-length limit. A pass through an
+  EU anchor has `trust_source: eu_trusted_list`.
+- **Measured live (2026-11-24):** LOTL sequence 398 plus 29 national lists stored in 2.4 minutes; EE
+  refused the fetch (`403`), BE timed out. Building the registry and validating a PDF took about 5 s on
+  first use; the container uses about 440 MB.
+
+**Re-validation and backfill** (P92-S2): both queue jobs on the same worker (`trigger: revalidation`/
+`backfill`, `requested_by`). The backfill pages through document-service's service-only
+`GET /document-versions` (PDF versions of non-deleted documents, by folder - the folder's own documents -
+and/or time range), skips versions that already have a result unless asked not to, and stops after
+`incoming_backfill_max_versions`. Its status lives in memory (lost on restart; it can simply be repeated).
+A job dropped because document-service was unreachable (P92-S1) is caught up this way.
 
 **Revocation modes** (pyHanko's semantics): `soft-fail` (default) lets a signature pass when revocation
 information can't be obtained; `hard-fail` makes it `INDETERMINATE` (`CERTIFICATE_CHAIN_GENERAL_FAILURE`).
@@ -172,7 +214,8 @@ A revoked certificate never passes in either mode. Embedded revocation data (DSS
 pod ranges), `signature_validation_http_proxy`.
 
 **Operations:** with outbound fetching on, signature-service needs egress to the CRL/OCSP/AIA hosts named
-in the certificates it sees (or a proxy). Switching fetching off leaves results `INDETERMINATE` where only
+in the certificates it sees (or a proxy); with the EU trusted lists on, to `ec.europa.eu` and the national
+list hosts (or the offline import). Switching fetching off leaves results `INDETERMINATE` where only
 the network could decide (hard-fail) or unchecked revocation (soft-fail). A job whose version can't be
 fetched (document-service unreachable) is dropped after a warning, since the event is already
 acknowledged; the backfill in P92-S2 catches up.
@@ -189,6 +232,12 @@ shadow-style incremental update, a second signature as a permitted change, trunc
 fetched CRL, unreachable revocation in both modes, SSRF (no request reaches the internal server), own
 B-LTA signatures against the internal CA, a structure the strict reader refuses, the fence on its own
 (addresses, URLs, a name resolving to loopback, redirect to another host, oversized body), anchor parsing.
+`test_eu_trusted_lists.py` (P92-S2; generated XAdES-signed LOTL and TL in `tests/testtl.py`, so pyHanko's
+real list checks run): description, LOTL/TL signature checks (wrong signer, forged TL, list changed after
+signing), qualification (QES, AdES-QC, AdES from a listed CA, CA not listed), the ETSI report, fetch from a
+local list server (store what passes, report what fails, territory filter). `test_incoming_trust_api.py`:
+import order and checks, a qualified signature as `qes` with its report downloadable, re-validation as a
+second run, backfill of versions missed while switched off, refresh from a list server.
 `test_incoming_api.py`: end to end through document-service (upload → event → result), a later change as
 version 2, unknown CA vs. unsigned PDF, own signature, switched off, config and anchor gating, anchor
 lifecycle.

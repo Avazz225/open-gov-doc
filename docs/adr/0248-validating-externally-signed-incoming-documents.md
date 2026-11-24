@@ -1,6 +1,6 @@
 # 0248 — Validating externally signed incoming documents (scoping)
 
-**Status:** accepted (scoping in P90-S6; built in Phase 92, scheduled 2026-11-23; stage 1 backend in P92-S1)
+**Status:** accepted (scoping in P90-S6; built in Phase 92, scheduled 2026-11-23; stage 1 backend in P92-S1, trusted lists, reports, audit, re-validation and backfill in P92-S2)
 **Context:** P90-S6 (Phase 90, user-selected from the comparison with an external reference system).
 
 OG Doc signs documents itself (signature-service, PAdES-B-LTA with an internal CA, ADR 0025/0155). It
@@ -233,4 +233,20 @@ Built as decided, with these refinements:
   event was acknowledged on queueing. The admin backfill (P92-S2) catches up.
 - **pyHanko 0.36 quirks** (basic validation ignores `status_cls`; certvalidator's path-length qualifier
   typo) are worked around and described in `docs/services/signature-service.md`.
+
+## Implementation notes (P92-S2)
+
+- **Trusted lists are checked before they are stored.** The LOTL against its signers (pyHanko's bundled
+  set, an operator override, or the official bootstrap), each national list against the signers the
+  LOTL names. The table of stored lists is the offline cache; the import takes the same path.
+- **Qualification needs a `TSPTrustManager`.** pyHanko runs its qualification analysis only for that
+  class, so a combined trust manager puts the installation's anchors first and the EU lists second.
+  `qes` = qualified certificate on a QSCD, `adesqc` = qualified without, `ades` = any other pass.
+- **One report per run**, joining pyHanko's per-signature builders; document timestamps aren't in it.
+- **Audit came free:** audit-service already subscribes to `signature.>`. The event gained the signers
+  and who asked.
+- **Backfill by folder means the folder's own documents**, not its subtree; a time range covers bulk use.
+  document-service got a service-only version listing for it.
+- **Live (2026-11-24):** 29 of 31 national lists fetched and verified in 2.4 minutes (EE refuses
+  automated fetches, BE timed out).
 

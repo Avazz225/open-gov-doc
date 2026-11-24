@@ -100,3 +100,24 @@ class Settings(BaseServiceSettings):
     # service CIDRs if they are public ranges. Private, loopback, link-local
     # and CGNAT ranges are always blocked.
     incoming_validation_blocked_networks: list[str] = []
+
+    # EU trusted lists (P92-S2). 0 disables the scheduled fetch (tests, or an
+    # installation that only imports by hand).
+    trusted_list_poll_interval_seconds: int = 24 * 60 * 60
+    trusted_list_lotl_url: str = "https://ec.europa.eu/tools/lotl/eu-lotl.xml"
+    # Only these member states' lists (ISO 3166-1 alpha-2, e.g. ["DE", "AT"]);
+    # empty means all.
+    trusted_list_territories: list[str] = []
+    # PEM of the certificates the LOTL must be signed with. Empty: pyHanko's
+    # bundled last known set (with the official bootstrap as a fallback on
+    # fetch). An operator sets this only if the EU changed its signers before
+    # a pyHanko update.
+    trusted_list_lotl_signers_pem: str | None = None
+    trusted_list_fetch_timeout_seconds: float = 120.0
+    trusted_list_max_bytes: int = 64 * 1024 * 1024
+
+    # ETSI validation reports are stored here, one object per run.
+    storage_service_base_url: str = "http://localhost:8005"
+
+    # Backfill bound: versions looked at per request.
+    incoming_backfill_max_versions: int = 20000

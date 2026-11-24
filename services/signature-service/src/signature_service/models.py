@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from dms_db_base import make_declarative_base
-from sqlalchemy import JSON, Boolean, DateTime, Integer, LargeBinary, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, Integer, LargeBinary, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 Base = make_declarative_base("signature")
@@ -120,6 +120,8 @@ class IncomingValidationConfig(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     revocation_mode: Mapped[str] = mapped_column(String(16), default="soft-fail")
     outbound_fetching: Mapped[bool] = mapped_column(Boolean, default=True)
+    # P92-S2: use the EU trusted lists (scheduled fetch and qualification).
+    eu_trusted_lists: Mapped[bool] = mapped_column(Boolean, default=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
@@ -172,6 +174,9 @@ class IncomingSignatureValidation(Base):
     )
     coverage: Mapped[str] = mapped_column(String(32))
     modification_level: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    qc_type: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    # Storage key of the run's ETSI report (same for every row of the run).
+    report_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
     failure_reason: Mapped[str | None] = mapped_column(String(512), nullable=True)
     technical_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     revocation_mode: Mapped[str] = mapped_column(String(16))
@@ -195,3 +200,40 @@ class IncomingSignatureSummary(Base):
     changed_after_signing: Mapped[bool] = mapped_column(Boolean)
     truncated: Mapped[bool] = mapped_column(Boolean)
     validated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class TrustedList(Base):
+    """A stored EU trusted list (P92-S2, ADR 0248 Decision 3): the LOTL
+    (`kind="lotl"`, territory `EU`) or one member state's list. Stored only
+    after its signature passed, so the table is the offline cache: a fetch or
+    an import replaces the row for its territory."""
+
+    __tablename__ = "trusted_list"
+    __table_args__ = (UniqueConstraint("kind", "territory"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    kind: Mapped[str] = mapped_column(String(8))
+    territory: Mapped[str] = mapped_column(String(8))
+    location_uri: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    xml: Mapped[str] = mapped_column(Text)
+    sha256: Mapped[str] = mapped_column(String(64))
+    sequence_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    issued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_update: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    source: Mapped[str] = mapped_column(String(8))  # "fetch" | "import"
+
+
+class TrustedListFetch(Base):
+    """One fetch or import attempt of the trusted lists, for the admin page:
+    when, how many lists passed, and what failed."""
+
+    __tablename__ = "trusted_list_fetch"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    source: Mapped[str] = mapped_column(String(8))
+    lists_stored: Mapped[int] = mapped_column(Integer, default=0)
+    errors: Mapped[list] = mapped_column(JSON, default=list)
+    triggered_by: Mapped[str] = mapped_column(String(128))

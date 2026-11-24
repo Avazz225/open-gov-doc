@@ -109,7 +109,7 @@ class FencedResolver(AbstractResolver):
         await self._inner.close()
 
 
-def _trace_config(limits: FetchLimits) -> aiohttp.TraceConfig:
+def _trace_config(limits: FetchLimits, *, same_host_redirects: bool) -> aiohttp.TraceConfig:
     trace = aiohttp.TraceConfig()
 
     async def on_request_start(_session, ctx: SimpleNamespace, params) -> None:
@@ -121,7 +121,7 @@ def _trace_config(limits: FetchLimits) -> aiohttp.TraceConfig:
     async def on_request_redirect(_session, ctx: SimpleNamespace, params) -> None:
         location = params.response.headers.get("Location", "")
         target = aiohttp.client.URL(urljoin(str(params.url), location))
-        if target.host != ctx.origin_host:
+        if same_host_redirects and target.host != ctx.origin_host:
             raise FetchBlockedError(f"Umleitung auf anderen Host nicht erlaubt: {target.host}")
 
     async def on_response_chunk_received(_session, ctx: SimpleNamespace, params) -> None:
@@ -135,16 +135,24 @@ def _trace_config(limits: FetchLimits) -> aiohttp.TraceConfig:
     return trace
 
 
-def build_fenced_session(limits: FetchLimits) -> aiohttp.ClientSession:
-    """A session for one validation run. Must be created inside the event loop
-    that uses it and closed afterwards."""
+def build_fenced_session(
+    limits: FetchLimits, *, same_host_redirects: bool = True, decompress: bool = False
+) -> aiohttp.ClientSession:
+    """A session for one validation run (or one trusted-list fetch). Must be
+    created inside the event loop that uses it and closed afterwards.
+
+    `same_host_redirects=False` is for the EU trusted lists, whose national
+    hosts redirect across domains; every hop is still checked by the URL check
+    and the resolver. `decompress=True` (trusted lists, which the EU serves
+    gzip-compressed) lets aiohttp inflate bodies; the caller must then cap
+    the inflated size itself (`trusted_lists._get` does)."""
     connector = aiohttp.TCPConnector(resolver=FencedResolver(limits), limit=8)
     return aiohttp.ClientSession(
         connector=connector,
         timeout=aiohttp.ClientTimeout(total=limits.per_request_timeout_seconds),
-        trace_configs=[_trace_config(limits)],
+        trace_configs=[_trace_config(limits, same_host_redirects=same_host_redirects)],
         proxy=limits.proxy,
-        # No transparent decompression: the size cap counts the bytes on the
-        # wire, and a small compressed body must not inflate past it.
-        auto_decompress=False,
+        # Off by default: the size cap counts the bytes on the wire, and a
+        # small compressed body must not inflate past it unchecked.
+        auto_decompress=decompress,
     )

@@ -68,6 +68,8 @@ class IncomingValidationConfigIn(BaseModel):
     enabled: bool
     revocation_mode: Literal["soft-fail", "hard-fail"]
     outbound_fetching: bool
+    # P92-S2; defaults to on so a P92-S1 client keeps working.
+    eu_trusted_lists: bool = True
 
 
 class IncomingValidationConfigOut(IncomingValidationConfigIn):
@@ -114,6 +116,8 @@ class IncomingSignatureValidationOut(BaseModel):
     best_signature_time: datetime | None
     coverage: str
     modification_level: str | None
+    qc_type: str | None = None
+    report_available: bool = False
     failure_reason: str | None
     technical_detail: str | None
     revocation_mode: str
@@ -136,3 +140,53 @@ class IncomingSignaturesOut(BaseModel):
     document_id: str
     summaries: list[IncomingSignatureSummaryOut]
     validations: list[IncomingSignatureValidationOut]
+
+
+class RevalidateIn(BaseModel):
+    document_id: str
+    version_number: int | None = None
+
+
+class RevalidateOut(BaseModel):
+    document_id: str
+    version_number: int
+
+
+class BackfillIn(BaseModel):
+    folder_id: str | None = None
+    created_from: datetime | None = None
+    created_to: datetime | None = None
+    only_unvalidated: bool = True
+
+
+class BackfillStatusOut(BaseModel):
+    state: str
+    started_at: datetime | None
+    finished_at: datetime | None
+    started_by: str | None
+    criteria: dict
+    scanned: int
+    queued: int
+    skipped_validated: int
+    limit_reached: bool
+    error: str | None
+    queue_pending: int | None = None
+
+
+class TrustedListOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    kind: str
+    territory: str
+    location_uri: str | None
+    sequence_number: int | None
+    issued_at: datetime | None
+    next_update: datetime | None
+    fetched_at: datetime
+    source: str
+
+
+class TrustedListsOut(BaseModel):
+    lists: list[TrustedListOut]
+    last_fetch: dict | None
+    poll_interval_seconds: int
+    territories: list[str]

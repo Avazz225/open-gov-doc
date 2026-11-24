@@ -2,6 +2,58 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P92-S2, EU trusted lists, reports, audit, re-validation and backfill
+([ADR 0248](docs/adr/0248-validating-externally-signed-incoming-documents.md), implementation notes added).
+
+**What changed:**
+- **EU trusted lists** (`validation/trusted_lists.py`):
+  - **Fetch:** LOTL and national lists through the fenced client. Cross-host redirects are allowed (each
+    hop still checked), and gzip is inflated with a cap on the inflated size.
+  - **Checks:** the LOTL against its signers (pyHanko's bundled set, an operator override, or the
+    official bootstrap), each national list against the signers the LOTL names for its territory.
+  - **Storage:** only lists that pass, in tables `trusted_list` and `trusted_list_fetch`.
+  - **Schedule:** daily (`trusted_list_poll_interval_seconds`, 0 = off), only while `eu_trusted_lists`
+    is on in the config. Plus a refresh endpoint and an offline import (LOTL first).
+- **Qualification:** `trust.CombinedTrustManager` (a `TSPTrustManager`, which is what makes pyHanko
+  assess qualification) puts our own anchors first, then the EU lists with the same path-length limit.
+  - Results are `qes` (qualified on a QSCD), `adesqc` or `ades`, plus `qc_type`, and
+    `trust_source: eu_trusted_list`.
+  - The registry is built in a thread once per change of the stored set.
+- **Report:** ETSI TS 119 102-2 per run, joining pyHanko's per-signature builders. It is stored in
+  storage-service (signature-service is now a trusted caller) and downloadable through
+  `GET /incoming-signatures/reports/{run_id}` (`document.read`).
+- **Audit:** audit-service already subscribes to `signature.>`. The event now names the signers and who
+  asked.
+- **Re-validation and backfill:**
+  - `POST /incoming-signatures/revalidate` (`document.read`) adds a run.
+  - `POST`/`GET /incoming-signatures/backfill` (admin, by folder or time range, in the background, status
+    in memory) uses document-service's new service-only `GET /document-versions`.
+- **Config:** `eu_trusted_lists` (default on). New columns: `qc_type`, `report_key`.
+- **Ops:**
+  - compose: `DMS_STORAGE_SERVICE_BASE_URL` and `SIGNATURE_SERVICE_TRUSTED_LIST_POLL_INTERVAL_SECONDS`;
+  - Helm: storage-service in signature-service's `dependsOnServices`. Not rendered: helm isn't installed
+    here.
+- **Found:** `python-multipart` was missing from signature-service, so the container didn't start; the
+  shared venv hid it locally. Added, and all services checked: none else is missing it.
+- **Docs:** signature-service, document-service, storage-service, ADR 0248 notes, plan.
+
+**Checks:**
+- **Tests:**
+  - signature-service 93 passed (+14). `tests/testtl.py` generates XAdES-signed test lists, so pyHanko's
+    real list checks run.
+  - document-service 449 (+2, `/document-versions`), storage-service 170, ruff clean.
+- **Live (manual LOTL check):**
+  - the real LOTL (sequence 398) and 29 national lists were verified and stored in 2.4 minutes; EE
+    refuses automated fetches (`403`), BE timed out;
+  - the first validation including the registry build took about 5 s; the container uses about 440 MB;
+  - the audit entry (`signature.incoming.validated` with signers) and the stored report (ETSI XML, 2.9 KB)
+    checked; the test document was deleted.
+- **Containers rebuilt:** storage-service, document-service, signature-service.
+
+**Next session:** P92-S3 (UI: user-ui badge and panel, reviewer-ui badge, admin-ui trust page).
+
+---
+
 **Last completed:** P92-S1, validating incoming signatures: the PAdES backend
 ([ADR 0248](docs/adr/0248-validating-externally-signed-incoming-documents.md), implementation notes added).
 

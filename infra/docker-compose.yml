@@ -948,6 +948,10 @@ services:
       # RBAC (Post-Roadmap Phase 38 Session 3) - `PUT /signature-config`
       # now requires `admin.signature_config`.
       DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
+      # P92-S2: ETSI validation reports of incoming-signature runs.
+      DMS_STORAGE_SERVICE_BASE_URL: http://storage-service:8000
+      # Scheduled fetch of the EU trusted lists (0 = off, import by hand).
+      DMS_TRUSTED_LIST_POLL_INTERVAL_SECONDS: ${SIGNATURE_SERVICE_TRUSTED_LIST_POLL_INTERVAL_SECONDS:-86400}
     ports:
       - "127.0.0.1:${SIGNATURE_SERVICE_PORT:-8017}:8000"
     depends_on:

@@ -28,7 +28,9 @@ class ValidationJob:
     version_number: int
     content_type: str | None
     filename: str | None
-    trigger: str  # "event", later "revalidation"/"backfill"
+    trigger: str  # "event", "revalidation" or "backfill"
+    # Who asked (re-validation, backfill); None for the event path.
+    requested_by: str | None = None
 
 
 class ValidationWorker:

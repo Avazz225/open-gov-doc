@@ -4574,6 +4574,24 @@ should cover the trust settings. Design and reasons: [ADR 0248](docs/adr/0248-va
   - `signature.incoming.validated` to the audit ledger; re-validation (`document.read`) and backfill
     (admin, by folder or time range) endpoints.
   - Dependencies: `pyhanko[etsi,async-http]`, `uv lock`. Manual check: a live LOTL fetch.
+  - **Result:**
+    - `validation/trusted_lists.py`: fetch (fenced, cross-host redirects, gzip with an inflated-size
+      cap), the LOTL checked against its signers (bundled, override, or bootstrap), each national list
+      against the LOTL's signers, storage only after passing (`trusted_list`, `trusted_list_fetch`);
+      daily schedule, refresh and offline import endpoints.
+    - Qualification through a combined trust manager (`qes`/`adesqc`/`ades`, `qc_type`,
+      `trust_source: eu_trusted_list`); the registry is built in a thread once per change.
+    - The ETSI TS 119 102-2 report per run in storage-service, downloadable (`document.read`).
+    - Audit through audit-service's existing `signature.>` subscription; the event names the signers
+      and who asked.
+    - Re-validation (`document.read`) and backfill (admin, by folder or time range, in the background)
+      endpoints; document-service `GET /document-versions` (service principals only).
+    - **Tests:** signature-service 93 (+14, generated XAdES-signed lists), document-service 449 (+2),
+      storage-service 170.
+    - **Live:** the real LOTL plus 29 national lists in 2.4 minutes (EE `403`, BE timeout); first
+      validation with the registry about 5 s; the audit entry and the stored report checked.
+    - **Found:** `python-multipart` was missing from signature-service (the container wouldn't start
+      after adding the upload endpoint; locally the shared venv hid it).
 - **P92-S3 — UI.**
   - user-ui: a badge in the document list; "Eingegangene Signaturen" in `SignaturesPanel` (signer, time,
     qualification, coverage, failure reason in plain German, report download, "erneut prüfen").

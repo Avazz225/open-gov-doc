@@ -161,6 +161,35 @@ async def mark_resource_backfill_completed(session: AsyncSession) -> None:
     await session.flush()
 
 
+async def list_versions_for_batch(
+    session: AsyncSession,
+    *,
+    created_from: datetime | None,
+    created_to: datetime | None,
+    folder_id: str | None,
+    content_type: str | None,
+    after_id: int,
+    limit: int,
+) -> list[DocumentVersion]:
+    """Versions of non-deleted documents for service batch jobs (P92-S2,
+    `GET /document-versions`), ordered by the version row id for paging."""
+    query = (
+        select(DocumentVersion)
+        .join(Document, Document.id == DocumentVersion.document_id)
+        .where(Document.deleted_at.is_(None), DocumentVersion.id > after_id)
+    )
+    if created_from is not None:
+        query = query.where(DocumentVersion.created_at >= created_from)
+    if created_to is not None:
+        query = query.where(DocumentVersion.created_at < created_to)
+    if folder_id is not None:
+        query = query.where(Document.folder_id == folder_id)
+    if content_type is not None:
+        query = query.where(DocumentVersion.content_type == content_type)
+    result = await session.execute(query.order_by(DocumentVersion.id).limit(limit))
+    return list(result.scalars())
+
+
 async def list_documents_by_folder(
     session: AsyncSession, folder_id: str, *, registered: bool | None = None
 ) -> list[Document]:

@@ -46,6 +46,18 @@ class DocumentOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class VersionListingOut(BaseModel):
+    """One row of `GET /document-versions` (P92-S2, service batch jobs)."""
+
+    id: int
+    document_id: str
+    version_number: int
+    content_type: str | None
+    filename: str
+    size_bytes: int
+    created_at: datetime
+
+
 class DocumentVersionOut(BaseModel):
     version_number: int
     filename: str

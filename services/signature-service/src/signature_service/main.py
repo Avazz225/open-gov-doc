@@ -18,7 +18,7 @@ from dms_metrics_client import (
 )
 from dms_permission_client import PermissionServiceClient
 from dms_registry_client import maybe_start_registration
-from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Response, UploadFile, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,6 +32,8 @@ from signature_service.models import Base
 from signature_service.object_type_client import NotFoundError as ObjectTypeNotFoundError
 from signature_service.object_type_client import ObjectTypeServiceClient
 from signature_service.schemas import (
+    BackfillIn,
+    BackfillStatusOut,
     IncomingSignaturesOut,
     IncomingSignatureSummaryOut,
     IncomingSignatureValidationOut,
@@ -39,19 +41,25 @@ from signature_service.schemas import (
     IncomingTrustAnchorOut,
     IncomingValidationConfigIn,
     IncomingValidationConfigOut,
+    RevalidateIn,
+    RevalidateOut,
     SignatureCreate,
     SignatureOut,
     SignatureProviderLevelsIn,
     SignatureProviderStatusOut,
+    TrustedListOut,
+    TrustedListsOut,
     VerificationOut,
 )
 from signature_service.settings import Settings, SignatureProviderConfig
+from signature_service.storage_client import StorageClient
 from signature_service.validation.trust import (
     InvalidAnchorError,
     der_of,
     fingerprint_sha256,
     parse_anchor_pem,
 )
+from signature_service.validation.trusted_lists import TrustedListError
 
 settings = Settings()
 configure_logging(settings)
@@ -109,6 +117,27 @@ async def _run_retimestamp_tick(app: FastAPI, *, cutoff: datetime) -> None:
                 await session.rollback()
 
 
+async def _trusted_list_poll_loop(app: FastAPI) -> None:
+    """Scheduled fetch of the EU trusted lists (P92-S2): soon after start if
+    none are stored yet, then every `trusted_list_poll_interval_seconds` -
+    only while the source is switched on."""
+    interval = settings.trusted_list_poll_interval_seconds
+    async with app.state.session_factory() as session:
+        have_lists = await incoming_repository.get_lotl(session) is not None
+    await asyncio.sleep(60 if not have_lists else interval)
+    while True:
+        try:
+            async with app.state.session_factory() as session:
+                config = await incoming_repository.get_config(session)
+                enabled = config.eu_trusted_lists
+                await session.commit()
+            if enabled:
+                await app.state.incoming.refresh_trusted_lists(triggered_by="system:schedule")
+        except Exception:
+            logger.exception("trusted_list_poll_failed")
+        await asyncio.sleep(interval)
+
+
 async def _retimestamp_poll_loop(app: FastAPI) -> None:
     while True:
         try:
@@ -134,6 +163,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ADD COLUMN IF NOT EXISTS last_timestamped_at TIMESTAMPTZ"
             )
         )
+        # P92-S2 additions to the tables from P92-S1.
+        for statement in (
+            "ALTER TABLE signature.incoming_validation_config "
+            "ADD COLUMN IF NOT EXISTS eu_trusted_lists BOOLEAN NOT NULL DEFAULT TRUE",
+            "ALTER TABLE signature.incoming_signature_validation "
+            "ADD COLUMN IF NOT EXISTS qc_type VARCHAR(8)",
+            "ALTER TABLE signature.incoming_signature_validation "
+            "ADD COLUMN IF NOT EXISTS report_key VARCHAR(512)",
+        ):
+            await conn.execute(text(statement))
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 
@@ -159,6 +198,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.object_type_client = ObjectTypeServiceClient(settings.object_type_service_base_url)
     app.state.auth_client = AuthServiceClient(settings.auth_service_base_url)
     app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
+    app.state.storage = StorageClient(settings.storage_service_base_url)
 
     sensor_config_client = SensorConfigClient(settings.monitoring_service_base_url)
     await sensor_config_client.start()
@@ -190,6 +230,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         document_client=app.state.document_client,
         internal_ca_pem=ca_certificate_pem,
         publish_event=publish_event,
+        storage=app.state.storage,
     )
     incoming.worker.start()
     app.state.incoming = incoming
@@ -205,6 +246,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
     except SubjectNotFoundError:
         logger.warning("incoming_signature_stream_missing")
+    app.state.trusted_list_task = (
+        asyncio.create_task(_trusted_list_poll_loop(app))
+        if settings.trusted_list_poll_interval_seconds > 0
+        else None
+    )
+    app.state.background_tasks = set()
 
     startup_end = time.time()
     millis = round((startup_end - startup_start) * 1000, 3)
@@ -215,6 +262,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Every step bounded and named (dms_common.shutdown).
     app.state.retimestamp_task.cancel()
     await bounded_shutdown_step("retimestamp_task", app.state.retimestamp_task)
+    if app.state.trusted_list_task is not None:
+        app.state.trusted_list_task.cancel()
+        await bounded_shutdown_step("trusted_list_task", app.state.trusted_list_task)
+    for task in list(app.state.background_tasks):
+        task.cancel()
+    await bounded_shutdown_step("incoming.stop_backfill", incoming.stop_backfill())
     await bounded_shutdown_step("consumer_bus.close", consumer_bus.close())
     await bounded_shutdown_step("incoming.worker.stop", incoming.worker.stop())
     sensor_config_proxy.unbind()
@@ -222,7 +275,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if registration:
         await bounded_shutdown_step("registration.stop", registration.stop())
     await bounded_shutdown_step("producer.close", producer.close())
-    for name in ("document_client", "object_type_client", "auth_client", "permission_client"):
+    for name in (
+        "document_client",
+        "object_type_client",
+        "auth_client",
+        "permission_client",
+        "storage",
+    ):
         await bounded_shutdown_step(f"{name}.close", getattr(app.state, name).close())
     await bounded_shutdown_step("engine.dispose", engine.dispose())
 
@@ -657,7 +716,12 @@ async def get_incoming_signatures(
     return IncomingSignaturesOut(
         document_id=document_id,
         summaries=[IncomingSignatureSummaryOut.model_validate(s) for s in summaries],
-        validations=[IncomingSignatureValidationOut.model_validate(v) for v in validations],
+        validations=[
+            IncomingSignatureValidationOut.model_validate(v).model_copy(
+                update={"report_available": v.report_key is not None}
+            )
+            for v in validations
+        ],
     )
 
 
@@ -682,6 +746,7 @@ async def put_incoming_validation_config(
         enabled=body.enabled,
         revocation_mode=body.revocation_mode,
         outbound_fetching=body.outbound_fetching,
+        eu_trusted_lists=body.eu_trusted_lists,
         updated_by=x_dms_principal,
     )
     await session.commit()
@@ -792,3 +857,158 @@ async def delete_incoming_trust_anchor(
         actor=x_dms_principal,
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# --- P92-S2: re-validation, backfill, reports, EU trusted lists -------------
+
+
+@app.post(
+    "/incoming-signatures/revalidate",
+    response_model=RevalidateOut,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def revalidate_incoming_signatures(
+    body: RevalidateIn,
+    x_dms_principal: str = Header(default=""),
+) -> RevalidateOut:
+    """Queues a version (default: the current one) for another run. Anyone who
+    may read the document may ask; the result is added, earlier runs stay."""
+    try:
+        await app.state.document_client.get_document(body.document_id)
+    except DocumentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await _require_document_read_permission(x_dms_principal, body.document_id)
+    try:
+        version = await app.state.incoming.revalidate(
+            body.document_id, body.version_number, requested_by=x_dms_principal
+        )
+    except DocumentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return RevalidateOut(document_id=body.document_id, version_number=version)
+
+
+@app.post(
+    "/incoming-signatures/backfill",
+    response_model=BackfillStatusOut,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def start_incoming_signature_backfill(
+    body: BackfillIn,
+    x_dms_principal: str = Header(default=""),
+) -> BackfillStatusOut:
+    """Validates existing PDF versions - of one folder's documents (not its
+    subfolders) and/or created in a time range. Runs in the background;
+    `GET /incoming-signatures/backfill` shows progress. One at a time."""
+    await _require_signature_config_permission(x_dms_principal)
+    if body.folder_id is None and body.created_from is None and body.created_to is None:
+        raise HTTPException(
+            status_code=422, detail="Ordner oder Zeitraum angeben (kein unbegrenzter Nachlauf)"
+        )
+    if app.state.incoming.backfill_running():
+        raise HTTPException(status_code=409, detail="Ein Nachlauf läuft bereits")
+    status_ = app.state.incoming.start_backfill(
+        folder_id=body.folder_id,
+        created_from=body.created_from,
+        created_to=body.created_to,
+        only_unvalidated=body.only_unvalidated,
+        requested_by=x_dms_principal,
+    )
+    return BackfillStatusOut(**status_.as_dict())
+
+
+@app.get("/incoming-signatures/backfill", response_model=BackfillStatusOut)
+async def get_incoming_signature_backfill(
+    x_dms_principal: str = Header(default=""),
+) -> BackfillStatusOut:
+    await _require_signature_config_permission(x_dms_principal)
+    return BackfillStatusOut(
+        **app.state.incoming.backfill_status.as_dict(),
+        queue_pending=app.state.incoming.worker.pending(),
+    )
+
+
+@app.get("/incoming-signatures/reports/{run_id}")
+async def get_incoming_signature_report(
+    run_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """The ETSI TS 119 102-2 validation report of one run (XML), the
+    evidence behind the result. Needs `document.read` on the document."""
+    try:
+        row = await incoming_repository.get_run(session, run_id)
+    except incoming_repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await _require_document_read_permission(x_dms_principal, row.document_id)
+    if row.report_key is None:
+        raise HTTPException(status_code=404, detail="Für diesen Prüflauf liegt kein Bericht vor")
+    data = await app.state.storage.download(row.report_key)
+    filename = f"pruefbericht-{row.document_id}-v{row.version_number}-{run_id[:8]}.xml"
+    return Response(
+        content=data,
+        media_type="application/xml",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/incoming-signatures/trusted-lists", response_model=TrustedListsOut)
+async def get_trusted_lists(
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> TrustedListsOut:
+    """Stored EU trusted lists with sequence numbers and dates, and the
+    latest fetch or import."""
+    await _require_signature_config_permission(x_dms_principal)
+    lists = await incoming_repository.list_trusted_lists(session)
+    last = await incoming_repository.last_fetch(session)
+    return TrustedListsOut(
+        lists=[TrustedListOut.model_validate(item) for item in lists],
+        last_fetch=(
+            {
+                "started_at": last.started_at,
+                "finished_at": last.finished_at,
+                "source": last.source,
+                "lists_stored": last.lists_stored,
+                "errors": last.errors,
+                "triggered_by": last.triggered_by,
+            }
+            if last
+            else None
+        ),
+        poll_interval_seconds=settings.trusted_list_poll_interval_seconds,
+        territories=settings.trusted_list_territories,
+    )
+
+
+@app.post("/incoming-signatures/trusted-lists/refresh", status_code=status.HTTP_202_ACCEPTED)
+async def refresh_trusted_lists(x_dms_principal: str = Header(default="")) -> dict:
+    """Starts a fetch now, in the background (it takes a while)."""
+    await _require_signature_config_permission(x_dms_principal)
+    task = asyncio.create_task(
+        app.state.incoming.refresh_trusted_lists(triggered_by=x_dms_principal)
+    )
+    app.state.background_tasks.add(task)
+    task.add_done_callback(app.state.background_tasks.discard)
+    return {"started": True}
+
+
+@app.post("/incoming-signatures/trusted-lists/import", response_model=TrustedListOut)
+async def import_trusted_list(
+    file: UploadFile = File(...),
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> TrustedListOut:
+    """Offline import of one list (XML): the EU list of the lists first,
+    then national lists. The same signature checks as a fetch."""
+    await _require_signature_config_permission(x_dms_principal)
+    data = await file.read(settings.trusted_list_max_bytes + 1)
+    if len(data) > settings.trusted_list_max_bytes:
+        raise HTTPException(status_code=413, detail="Datei zu groß")
+    try:
+        xml = data.decode("utf-8")
+        info = await app.state.incoming.import_trusted_list(xml, triggered_by=x_dms_principal)
+    except (UnicodeDecodeError, TrustedListError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    lists = await incoming_repository.list_trusted_lists(session)
+    stored = next(i for i in lists if i.kind == info.kind and i.territory == info.territory)
+    return TrustedListOut.model_validate(stored)

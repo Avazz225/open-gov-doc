@@ -45,6 +45,31 @@ class DocumentServiceClient:
         response.raise_for_status()
         return response.json()
 
+    async def list_versions(
+        self,
+        *,
+        created_from=None,
+        created_to=None,
+        folder_id: str | None = None,
+        content_type: str | None = None,
+        after_id: int = 0,
+        limit: int = 500,
+    ) -> list[dict]:
+        """`GET /document-versions` (service principals only) - the backfill's
+        source (P92-S2)."""
+        params: dict = {"after_id": after_id, "limit": limit}
+        if created_from is not None:
+            params["created_from"] = created_from.isoformat()
+        if created_to is not None:
+            params["created_to"] = created_to.isoformat()
+        if folder_id is not None:
+            params["folder_id"] = folder_id
+        if content_type is not None:
+            params["content_type"] = content_type
+        response = await self._client.get("/document-versions", params=params)
+        response.raise_for_status()
+        return response.json()
+
     async def get_version_content(
         self, document_id: str, version_number: int
     ) -> tuple[str | None, bytes]:

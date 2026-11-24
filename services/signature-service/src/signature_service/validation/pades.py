@@ -24,6 +24,7 @@ import io
 import logging
 from datetime import datetime
 
+from pyhanko.generated.etsi import ts_11910202
 from pyhanko.pdf_utils.misc import PdfReadError
 from pyhanko.pdf_utils.reader import PdfFileReader
 from pyhanko.sign.diff_analysis import ModificationLevel
@@ -39,6 +40,8 @@ from pyhanko.sign.validation.policy_decl import (
     RevocationInfoGatheringSpec,
     SignatureValidationSpec,
 )
+from pyhanko.sign.validation.qualified.q_status import QcPrivateKeyManagementType
+from pyhanko.sign.validation.report import tools as report_tools
 from pyhanko.sign.validation.status import SignatureCoverageLevel
 from pyhanko_certvalidator import ValidationContext
 from pyhanko_certvalidator.context import CertValidationPolicySpec
@@ -52,7 +55,7 @@ from signature_service.validation.interface import (
     ValidationOutcome,
     ValidationPolicy,
 )
-from signature_service.validation.trust import build_trust_manager, fingerprint_sha256
+from signature_service.validation.trust import EU_SOURCE, build_trust_manager, fingerprint_sha256
 
 logger = logging.getLogger(__name__)
 
@@ -137,16 +140,72 @@ def _name(cert) -> str | None:
         return None
 
 
-def _trust_source(status, sources: dict[str, str]) -> str | None:
+def _trust_source(status, sources: dict[str, str], *, eu_lists: bool) -> str | None:
+    """Where the trusted path ended: an anchor of our own (by fingerprint),
+    otherwise - if the EU lists took part - one of their qualified CAs."""
     if not getattr(status, "trusted", False):
         return None
     path = getattr(status, "validation_path", None)
     if path is None:
         return None
     anchor_cert = getattr(path.trust_anchor, "certificate", None)
-    if anchor_cert is None:
+    if anchor_cert is not None:
+        own = sources.get(fingerprint_sha256(anchor_cert.dump()))
+        if own is not None:
+            return own
+    return EU_SOURCE if eu_lists else None
+
+
+_QC_TYPES = {"qct_esign": "esign", "qct_eseal": "eseal", "qct_web": "web"}
+
+
+def _qualification(status, passed: bool) -> tuple[str, str | None]:
+    """`qes` for a qualified certificate whose key is on a QSCD, `adesqc` for
+    a qualified certificate without that, `ades` for any other pass. Only
+    the EU trusted lists can establish "qualified" (pyHanko's assessment)."""
+    if not passed:
+        return "unknown", None
+    result = getattr(status, "qualification_result", None)
+    if result is None or not result.status.qualified:
+        return "ades", None
+    qc_type = _QC_TYPES.get(result.status.qc_type.value)
+    if result.status.qc_key_security != QcPrivateKeyManagementType.UNKNOWN:
+        return "qes", qc_type
+    return "adesqc", qc_type
+
+
+def _build_report(pairs: list) -> str | None:
+    """One ETSI TS 119 102-2 report for every AdES-validated signature of
+    the run. Document timestamps are validated through pyHanko's older API
+    and aren't part of it. pyHanko's public `generate_report` covers one
+    signature; this joins several (its internal builders, deduplicating the
+    shared validation objects)."""
+    if not pairs:
         return None
-    return sources.get(fingerprint_sha256(anchor_cert.dump()))
+    try:
+        objects = {}
+        for _embedded, result in pairs:
+            for vo in result.validation_objects:
+                packaged = report_tools._package_validation_object(vo)  # noqa: SLF001
+                objects.setdefault(packaged.id, packaged)
+        report = ts_11910202.ValidationReport(
+            signature_validation_report=tuple(
+                report_tools._generate_report(embedded, result)  # noqa: SLF001
+                for embedded, result in pairs
+            ),
+            signature_validation_objects=ts_11910202.ValidationObjectListType(
+                tuple(objects.values())
+            ),
+        )
+        from xsdata.formats.dataclass.serializers import XmlSerializer
+        from xsdata.formats.dataclass.serializers.config import SerializerConfig
+
+        return XmlSerializer(config=SerializerConfig(indent="  ")).render(
+            report, ns_map=report_tools.NAMESPACES
+        )
+    except Exception:  # noqa: BLE001 - the report is evidence, not the result
+        logger.warning("incoming_signature_report_failed", exc_info=True)
+        return None
 
 
 def _has_signature_timestamp(embedded: EmbeddedPdfSignature) -> bool:
@@ -198,7 +257,9 @@ class PadesValidator:
             return ValidationOutcome(findings=[])
 
         trust_manager, sources = build_trust_manager(
-            policy.anchors, max_path_length=policy.max_path_length
+            policy.anchors,
+            max_path_length=policy.max_path_length,
+            tsp_registry=policy.tsp_registry,
         )
         session = build_fenced_session(policy.fetch) if policy.outbound_fetching else None
         try:
@@ -225,17 +286,20 @@ class PadesValidator:
                 cert_validation_policy=cert_policy, revinfo_gathering_policy=gathering
             )
             findings = []
+            pairs: list = []  # (embedded, AdES result) for the report
             for embedded in signatures:
                 findings.append(
-                    await self._one(embedded, spec, policy, trust_manager, sources, backend)
+                    await self._one(embedded, spec, policy, trust_manager, sources, backend, pairs)
                 )
-            return ValidationOutcome(findings=findings, truncated=truncated)
+            return ValidationOutcome(
+                findings=findings, truncated=truncated, report_xml=_build_report(pairs)
+            )
         finally:
             if session is not None:
                 await session.close()
 
     async def _one(
-        self, embedded, spec, policy, trust_manager, sources, backend
+        self, embedded, spec, policy, trust_manager, sources, backend, pairs
     ) -> SignatureFinding:
         position = None
         try:
@@ -244,7 +308,9 @@ class PadesValidator:
                 return await self._doc_timestamp(
                     embedded, policy, trust_manager, sources, backend, position
                 )
-            return await self._signature(embedded, spec, sources, position)
+            return await self._signature(
+                embedded, spec, sources, position, pairs, eu_lists=policy.tsp_registry is not None
+            )
         except (SignatureValidationError, PdfReadError, ValueError, KeyError) as exc:
             logger.info("incoming_signature_validation_error", exc_info=True)
             return SignatureFinding(
@@ -257,7 +323,9 @@ class PadesValidator:
                 technical_detail=f"{type(exc).__name__}: {exc}"[:2000],
             )
 
-    async def _signature(self, embedded, spec, sources, position) -> SignatureFinding:
+    async def _signature(
+        self, embedded, spec, sources, position, pairs, *, eu_lists: bool
+    ) -> SignatureFinding:
         kind = "certification" if embedded.docmdp_level is not None else "signature"
         if _has_signature_timestamp(embedded):
             result = await ades.ades_lta_validation(embedded, PdfSignatureValidationSpec(spec))
@@ -272,6 +340,7 @@ class PadesValidator:
                 embedded.signed_data, spec, raw_digest=embedded.compute_digest()
             )
             best_time = None
+        pairs.append((embedded, result))
         status = result.api_status
         indication = _indication(result.ades_subindic.status.name)
         sub = result.ades_subindic.name
@@ -280,16 +349,16 @@ class PadesValidator:
             indication, sub = "TOTAL-FAILED", "MODIFIED_AFTER_SIGNING"
         signer = embedded.signer_cert
         passed = indication == "TOTAL-PASSED"
-        trust_source = _trust_source(status, sources) if passed else None
+        trust_source = _trust_source(status, sources, eu_lists=eu_lists) if passed else None
+        qualification, qc_type = _qualification(status, passed)
         return SignatureFinding(
             format=FORMAT,
             position=position,
             kind=kind,
             indication=indication,
             sub_indication=sub,
-            # "ades" = an advanced signature proven against an installation or
-            # internal anchor; "qes"/"adesqc" need the EU trusted lists (S2).
-            qualification="ades" if passed else "unknown",
+            qualification=qualification,
+            qc_type=qc_type,
             trust_source=trust_source,
             signer_subject=_name(signer),
             signer_issuer=signer.issuer.human_friendly,
@@ -329,7 +398,11 @@ class PadesValidator:
             kind="document_timestamp",
             indication=indication,
             sub_indication=sub,
-            trust_source=_trust_source(status, sources) if passed else None,
+            trust_source=(
+                _trust_source(status, sources, eu_lists=policy.tsp_registry is not None)
+                if passed
+                else None
+            ),
             signer_subject=_name(tsa),
             signer_issuer=tsa.issuer.human_friendly,
             signer_serial=str(tsa.serial_number),
