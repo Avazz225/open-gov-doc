@@ -3813,3 +3813,47 @@ export async function listChildFolders(token: string, folderId: string): Promise
   );
   return response.json();
 }
+
+
+// --- Licence extensions (P91-S6) ---
+
+export type LicensableComponentStatus = "licensed" | "demo" | "unlicensed";
+
+export interface LicensableComponent {
+  service_type: string;
+  // What happens without a licence for it: "demo" (read-only) or "lock".
+  policy: string;
+  status: LicensableComponentStatus;
+}
+
+export async function getLicenseComponents(token: string): Promise<LicensableComponent[]> {
+  const response = await request("registry-service", "license-components", {}, token);
+  return response.json();
+}
+
+export interface LicenseDisplayConfig {
+  show_upgrade_hints: boolean;
+  updated_at: string;
+}
+
+export async function getLicenseDisplayConfig(token: string): Promise<LicenseDisplayConfig> {
+  const response = await request("license-service", "license/display-config", {}, token);
+  return response.json();
+}
+
+export async function putLicenseDisplayConfig(
+  token: string,
+  showUpgradeHints: boolean
+): Promise<LicenseDisplayConfig> {
+  const response = await request(
+    "license-service",
+    "license/display-config",
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ show_upgrade_hints: showUpgradeHints }),
+    },
+    token
+  );
+  return response.json();
+}

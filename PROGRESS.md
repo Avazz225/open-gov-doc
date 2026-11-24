@@ -2,6 +2,65 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P91-S6, licence limits in the admin UI, and **Phase 91 closed** (full regression).
+
+**What changed:**
+- **Licence page** (admin-ui, `/license/`):
+  - `LicenseUsageBars`: a bar per dimension with "current / limit · noch n frei", amber from 80 %, red at
+    the limit ("Grenze erreicht – Neuanlage gesperrt"), "unbegrenzt" without a bar.
+  - `LicenseUpgradeHints` (`#erweiterung`): licensable components the licence doesn't cover, with a
+    status badge and a one-line benefit from i18n (`license.component.*`), and the installation-wide
+    switch for hints.
+- **Sidebar:** a muted group "Mit Lizenzerweiterung" below the regular groups. Licence admins get links,
+  everyone else plain text; it is hidden when switched off. `lib/license-hints.ts` keeps a 60 s cache,
+  and the switch makes every mounted sidebar reload at once.
+- **Backend:**
+  - registry-service `GET /license-components` (policy and status per licensable component);
+  - license-service `GET`/`PUT /license/display-config` (singleton `license_display_config`, default
+    on; `PUT` gated like `POST /license`).
+- **Not built:** hints on individual buttons. The admin UI calls none of the licensable services; user-UI
+  hints weren't in scope.
+- **Found:** the dev stack configures no licensable components (`REGISTRY_SERVICE_LICENSABLE_COMPONENTS`
+  defaults to `{}`). There the section says "keine lizenzpflichtigen Zusatzkomponenten", and the e2e
+  only checks that. It was verified with a registry-service temporarily started with two components,
+  then reset. The usage bars need an installed licence; the dev stack has no signing key, so they are
+  covered by vitest only.
+- **Phase 91 regression:**
+  - **mail-connector hung for 42 minutes** in lifespan shutdown, the same hang as document-service's.
+    The dump came via `kill -ABRT`: the event loop was idle and no worker busy. The step isn't
+    identifiable.
+  - **workflow-service hung once more**, then passed. 8 reruns of both with a task-dumping watchdog
+    (scratchpad `diag/teardown_watchdog.py`) didn't hang; one run took 50 s longer.
+  - **Guard rails:**
+    - `dms_common.shutdown.bounded_shutdown_step`, moved from document-service and applied to
+      mail-connector and workflow-service; the remaining services follow in P94-S3;
+    - `run-tests.sh` stops a suite after 20 min (`SERVICE_TEST_TIMEOUT`, status `TIMEOUT`);
+    - `faulthandler_timeout = 300` makes pytest dump stacks into the log.
+  - **workflow-service: 2 federation tests failed (`401` from the hub). My own fault:** P91-S5's cleanup
+    had revoked the persistent federation identity of workflow-service's tests along with the real
+    leftovers. The revocation of that one id was undone, and both tests pass. Corrected in P94-S3.
+- **Docs:** admin-ui, license-service, registry-service, ADR 0259 (update on the hang), plan (P91-S6
+  result, P94-S3), "Tooling & Testing".
+
+**Checks:**
+- **Full regression** (`scripts/run-tests.sh`): 30/32 green on the first run, plus ruff.
+  - mail-connector (hang) and workflow-service (federation identity) passed on rerun: 89 and 244 tests.
+  - After the shutdown change, document-service 447 passed. Its two P91-S4 shutdown tests moved to
+    `libs/dms-common/tests/test_shutdown.py` (3 tests).
+  - license-service 40, registry-service 84.
+- admin-ui vitest 397 (+5: `license-upgrade-hints.test.tsx`, extended `license-status-view.test.tsx`);
+  tsc and eslint clean.
+- **admin-ui e2e 22/22** (new: `license-hints.spec.ts`, which grants `users-admin` `domain-admin-license`
+  for its duration). With licensable components it passed on its own, including the switch round trip
+  and the reload.
+- **Screenshots:** the licence page with the sidebar group at 1400/768/390.
+- **Containers rebuilt:** admin-ui, registry-service, license-service, document-service, mail-connector,
+  workflow-service. mail-connector shuts down cleanly.
+
+**Next session:** P92-S1 (PAdES validation backend, ADR 0248).
+
+---
+
 **Last completed:** P91-S5, long lists in the admin UI.
 
 **What changed:**
@@ -16227,6 +16286,7 @@ deliberately deferred — Phase 32 has five sessions total, not a phase completi
 - **pytest `--import-mode=importlib`**: identically named test modules (`test_repository.py`) across multiple services otherwise collide. Consequence: no test helpers via `from conftest import x` (doesn't work with importlib mode) — define as fixtures instead.
 - **Pattern lesson `session.delete()` without `session.flush()`**: a subsequent `session.get()` on the same primary key still returns the object despite `delete()`, if no flush happened in between (identity-map fast path) — check this for future repository functions with delete+re-read in the same test.
 - **Recurring NATS hang on `uv run pytest` after Docker Compose restarts**: observed across several sessions (P3-S3, P4-S1, P4-S3) — a full test run occasionally hangs indefinitely. Reliable fix: kill the hanging process, then `docker compose restart nats` (drops active client bindings, JetStream state on the named volume is preserved), after which the test run proceeds normally. Not a root-cause fix, but an established, repeatedly successful procedure.
+- **Lifespan-shutdown hangs in test teardown, and the guard rails since P91-S6**: a suite sometimes hangs forever in `TestClient.__exit__` (seen in document-service, mail-connector, workflow-service), with the event loop idle; probably the same family as the NATS hang above. `scripts/run-tests.sh` now stops a service's suite after `SERVICE_TEST_TIMEOUT` seconds (default 1200, status `TIMEOUT`), and pytest dumps every thread's stack into the service log after 5 minutes (`faulthandler_timeout` in `pyproject.toml`). For a manual dump of a hung run: `kill -ABRT <pytest pid>` (the dump lands in `.test-results/<service>.log`; py-spy needs ptrace rights this machine doesn't grant). Shutdown steps are bounded with `dms_common.shutdown.bounded_shutdown_step` (logs `shutdown_step_timeout: <step>`).
 - **Related but different NATS trap (newly observed at P4-S4)**: if the full `uv run pytest` runs while the Docker Compose stack is running (e.g. for parallel curl verification), `permission-service` and `audit-service` consumer tests fail with `nats: JetStream.Error consumer is already bound to a subscription` — the respective container already holds the same durable consumer name that the local test run also claims at its own app lifespan start. Not a bug in the services themselves (isolated per-service, the tests run green, see P4-S4 verification of `document-service`/`folder-service`/`object-type-service`) — workaround: stop the affected containers before the full test run, or only test the actually changed services specifically.
 - **NATS is shared infrastructure across all services/test runs — independent of `TEST_POSTGRES_DSN` isolation** (discovered at P6-S4): every test run connects to the same real NATS server (`localhost:4222`) as the running Docker Compose stack, even when the associated Postgres database is cleanly isolated. A test run that actually publishes an event (not just feeds it to a handler in a simulated way) publishes it **for real** — any other live-running container at that time that consumes the same subject actually processes it, with test data/payloads that aren't necessarily sensible for the live container. Concretely at P6-S4: `permission-service`'s own API test for the generic approval endpoint (`action_type="document.force_unlock"`, test payload `{"x": 1}`) published a real `permission.approval.approved`, which the concurrently running `document-service` container consumed and crashed on with a `KeyError` at a naive `payload["document_id"]` access — the NATS message thereby stayed unacknowledged and would have been redelivered endlessly. **Rule from now on**: (a) every event consumer must read its payload defensively with `.get(...)` instead of `[...]` and log missing/malformed fields instead of throwing an exception (otherwise the message stays stuck in the retry loop forever); (b) when testing a service that publishes real events on a subject that another *live-running* service consumes, either temporarily stop that consumer container or explicitly plan for the result of the cross-effect — the same caution as with the already known Postgres data-loss case above, just for the event bus instead of the database.
 - **Keycloak is also shared infrastructure across all services/test runs — just like NATS above, but with an additional side-effect chain** (discovered at P6-S5): there's no separate test realm; every test run of `auth-service`/`permission-service` talks to the same real Keycloak realm `dms` as the running Docker Compose stack. A test that plays through a real break-glass approval (`permission-service`'s `test_break_glass_activation_via_api_with_two_group_members`) thereby publishes a real `permission.approval.approved` (same NATS trap as above) — the concurrently running `auth-service` container consumes it and thereby **actually** activates the real Keycloak superuser account, which in turn triggers **real** email notifications to `notification-service` and produces **real** `auth.>` entries in the audit trail. Ten real "superuser break-glass activated" notifications from previous test runs were found during this session's live verification run (account was already `enabled=true` before the actual smoke test had even started). **No correction needed** (no security gap, since the only prerequisite "two test principals equipped with `breakglass.approve`" only exists because of the test run itself and is deleted again afterward) — but the same rule as with NATS applies analogously: whoever tests an action type with real side effects (account activation, email sending) via the approval mechanism should be aware that this *really* happens, not just gets simulated, as soon as a live-running consumer is running along.

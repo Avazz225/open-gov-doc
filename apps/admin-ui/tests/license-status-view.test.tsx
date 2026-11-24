@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { LicenseStatusView } from "@/components/LicenseStatusView";
 import { I18nProvider } from "@/i18n";
@@ -13,10 +13,16 @@ function renderView() {
 
 const getLicenseStatusMock = vi.fn();
 const uploadLicenseMock = vi.fn();
+const getLicenseComponentsMock = vi.fn();
+const getLicenseDisplayConfigMock = vi.fn();
+const putLicenseDisplayConfigMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   getLicenseStatus: (...args: unknown[]) => getLicenseStatusMock(...args),
   uploadLicense: (...args: unknown[]) => uploadLicenseMock(...args),
+  getLicenseComponents: (...args: unknown[]) => getLicenseComponentsMock(...args),
+  getLicenseDisplayConfig: (...args: unknown[]) => getLicenseDisplayConfigMock(...args),
+  putLicenseDisplayConfig: (...args: unknown[]) => putLicenseDisplayConfigMock(...args),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {
@@ -45,6 +51,15 @@ describe("LicenseStatusView", () => {
   beforeEach(() => {
     getLicenseStatusMock.mockReset();
     uploadLicenseMock.mockReset();
+    getLicenseComponentsMock.mockReset().mockResolvedValue([
+      { service_type: "cmis-connector", policy: "demo", status: "demo" },
+      { service_type: "workflow-service", policy: "demo", status: "licensed" },
+    ]);
+    getLicenseDisplayConfigMock.mockReset().mockResolvedValue({
+      show_upgrade_hints: true,
+      updated_at: "2026-11-24T00:00:00Z",
+    });
+    putLicenseDisplayConfigMock.mockReset();
   });
 
   it("shows a not-installed hint when no license exists", async () => {
@@ -87,9 +102,15 @@ describe("LicenseStatusView", () => {
     renderView();
 
     expect(await screen.findByText("gültig")).toBeInTheDocument();
-    expect(screen.getByText("3 / 10")).toBeInTheDocument();
-    expect(screen.getByText("5.5 / ∞")).toBeInTheDocument();
-    expect(screen.getByText("34 / 5")).toBeInTheDocument();
+    // Usage bars (P91-S6): headroom below the limit, "reached" above it,
+    // and no bar at all for an unlimited dimension.
+    expect(screen.getByText("3 / 10 · noch 7 frei")).toBeInTheDocument();
+    expect(screen.getByText(/5,5 – unbegrenzt/)).toBeInTheDocument();
+    expect(screen.getByText("34 / 5 · Grenze erreicht – Neuanlage gesperrt")).toBeInTheDocument();
+    const bars = screen.getAllByRole("progressbar");
+    expect(bars).toHaveLength(2);
+    expect(bars[0]).toHaveAttribute("aria-valuenow", "3");
+    expect(bars[1].firstElementChild).toHaveClass("bg-[var(--dms-danger)]");
     expect(screen.getByText("document-service")).toBeInTheDocument();
     expect(screen.getAllByText("documents").length).toBeGreaterThan(0);
   });
@@ -135,5 +156,41 @@ describe("LicenseStatusView", () => {
     expect(await screen.findByText("Lizenz installiert.")).toBeInTheDocument();
     expect(uploadLicenseMock).toHaveBeenCalledWith("token-123", "eyJhbGciOi.test.token");
     expect(screen.getByText("named")).toBeInTheDocument();
+  });
+
+  it("lists components the licence doesn't cover and toggles the hints", async () => {
+    getLicenseStatusMock.mockResolvedValue({
+      installed: false,
+      valid: false,
+      invalid_reason: null,
+      issued_at: null,
+      expires_at: null,
+      days_remaining: null,
+      user_model: null,
+      users: null,
+      storage_gb: null,
+      documents: null,
+      licensed_components: null,
+      limits_exceeded: [],
+    });
+    putLicenseDisplayConfigMock.mockResolvedValue({
+      show_upgrade_hints: false,
+      updated_at: "2026-11-24T00:00:01Z",
+    });
+
+    renderView();
+
+    expect(await screen.findByText("CMIS-Schnittstelle")).toBeInTheDocument();
+    expect(screen.getByText("Demo-Modus (nur lesend)")).toBeInTheDocument();
+    expect(screen.getByText(/über den CMIS-Standard anbinden/)).toBeInTheDocument();
+    // Licensed components aren't advertised.
+    expect(screen.queryByText("Prozesse & Umlaufmappen")).not.toBeInTheDocument();
+
+    const toggle = screen.getByLabelText("Hinweise auf Lizenzerweiterungen in der Navigation anzeigen");
+    expect(toggle).toBeChecked();
+    fireEvent.click(toggle);
+
+    await waitFor(() => expect(toggle).not.toBeChecked());
+    expect(putLicenseDisplayConfigMock).toHaveBeenCalledWith("token-123", false);
   });
 });

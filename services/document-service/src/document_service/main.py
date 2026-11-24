@@ -16,6 +16,7 @@ from dms_common import (
     configure_logging,
     require_acting_identity,
 )
+from dms_common.shutdown import bounded_shutdown_step
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
 from dms_metrics_client import (
@@ -640,22 +641,6 @@ async def _folder_export_poll_loop(session_factory) -> None:
         await asyncio.sleep(settings.folder_export_poll_interval_seconds)
 
 
-_SHUTDOWN_STEP_TIMEOUT_SECONDS = 10.0
-
-
-async def _bounded_shutdown_step(name: str, awaitable) -> None:
-    """One shutdown step with a time limit (P91-S4): a timeout or an error
-    is logged with the step's name and doesn't stop the remaining steps."""
-    try:
-        await asyncio.wait_for(awaitable, timeout=_SHUTDOWN_STEP_TIMEOUT_SECONDS)
-    except asyncio.CancelledError:
-        pass  # a cancelled background task - the expected outcome
-    except TimeoutError:
-        logger.error("shutdown_step_timeout: %s after %ss", name, _SHUTDOWN_STEP_TIMEOUT_SECONDS)
-    except Exception:
-        logger.exception("shutdown_step_failed: %s", name)
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     startup_start = time.time()
@@ -1058,13 +1043,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         sensor_sampler_task,
     ):
         task.cancel()
-        await _bounded_shutdown_step(f"task {task.get_coro().__qualname__}", task)
+        await bounded_shutdown_step(f"task {task.get_coro().__qualname__}", task)
     sensor_config_proxy.unbind()
-    await _bounded_shutdown_step("sensor_config_client.stop", app.state.sensor_config_client.stop())
+    await bounded_shutdown_step("sensor_config_client.stop", app.state.sensor_config_client.stop())
     if registration:
-        await _bounded_shutdown_step("registration.stop", registration.stop())
-    await _bounded_shutdown_step("consumer_bus.close", consumer_bus.close())
-    await _bounded_shutdown_step("event_bus.close", event_bus.close())
+        await bounded_shutdown_step("registration.stop", registration.stop())
+    await bounded_shutdown_step("consumer_bus.close", consumer_bus.close())
+    await bounded_shutdown_step("event_bus.close", event_bus.close())
     for name in (
         "storage",
         "folder_client",
@@ -1077,8 +1062,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         "rendering_client",
         "audit_client",
     ):
-        await _bounded_shutdown_step(f"{name}.close", getattr(app.state, name).close())
-    await _bounded_shutdown_step("engine.dispose", engine.dispose())
+        await bounded_shutdown_step(f"{name}.close", getattr(app.state, name).close())
+    await bounded_shutdown_step("engine.dispose", engine.dispose())
 
 
 app = FastAPI(title=settings.service_name, lifespan=lifespan)

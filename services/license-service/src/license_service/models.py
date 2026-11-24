@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from dms_db_base import make_declarative_base
-from sqlalchemy import JSON, DateTime, Text
+from sqlalchemy import JSON, Boolean, DateTime, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 Base = make_declarative_base("license")
@@ -27,3 +27,19 @@ class InstalledLicense(Base):
     issued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     last_status_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+LICENSE_DISPLAY_CONFIG_ID = 1
+
+
+class LicenseDisplayConfig(Base):
+    """How the admin UI presents the licence (P91-S6) - a singleton.
+    `show_upgrade_hints`: show what a licence extension would add (the
+    licence page's component list, muted sidebar entries). On by default;
+    some operators don't want such hints, so it can be switched off."""
+
+    __tablename__ = "license_display_config"
+
+    id: Mapped[int] = mapped_column(primary_key=True, default=LICENSE_DISPLAY_CONFIG_ID)
+    show_upgrade_hints: Mapped[bool] = mapped_column(Boolean, default=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

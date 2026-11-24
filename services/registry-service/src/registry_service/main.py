@@ -29,6 +29,7 @@ from registry_service.schemas import (
     BrandingConfigUpdate,
     ExpectedReplicasUpdate,
     InstanceOut,
+    LicensableComponentOut,
     LicenseStatusForServiceOut,
     RegisterRequest,
     ReplicaSummaryOut,
@@ -566,6 +567,22 @@ async def list_active_instances(
 async def get_license_status(service_type: str) -> LicenseStatusForServiceOut:
     status_value = await app.state.license_cache.status_for(service_type)
     return LicenseStatusForServiceOut(service_type=service_type, status=status_value)
+
+
+@app.get("/license-components", response_model=list[LicensableComponentOut])
+async def list_license_components() -> list[LicensableComponentOut]:
+    """Every separately licensable component with its current status
+    (P91-S6) - the admin UI shows what a licence extension would add. Same
+    source as `/license-status/{service_type}`, so the two never disagree;
+    ungated like it."""
+    return [
+        LicensableComponentOut(
+            service_type=service_type,
+            policy=policy,
+            status=await app.state.license_cache.status_for(service_type),
+        )
+        for service_type, policy in sorted(settings.licensable_components.items())
+    ]
 
 
 async def _require_monitoring_admin(x_dms_principal: str) -> None:

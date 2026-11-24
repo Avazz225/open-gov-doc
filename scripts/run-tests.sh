@@ -21,6 +21,13 @@
 #   scripts/run-tests.sh --build             # Images vor dem Lauf neu bauen
 #   scripts/run-tests.sh --no-ruff           # nur pytest, kein ruff
 #   scripts/run-tests.sh --down              # Stack am Ende stoppen (docker compose down)
+#   SERVICE_TEST_TIMEOUT=1800 scripts/run-tests.sh   # per-service limit in seconds
+#
+# Per-service limit (P91-S6): a service's suite is stopped after
+# SERVICE_TEST_TIMEOUT seconds (default 1200) and counted as failed, so one
+# hanging test can no longer block the whole regression. pytest's
+# `faulthandler_timeout` (pyproject.toml) has dumped the hanging test's stacks
+# into its log by then.
 
 set -uo pipefail
 
@@ -205,8 +212,15 @@ for service in "${SERVICES[@]}"; do
   echo "==> Teste $service"
   LOG_FILE="$LOG_DIR/${service}.log"
   START_TS=$(date +%s)
-  if uv run pytest "services/$service/tests" -q --tb=short >"$LOG_FILE" 2>&1; then
+  timeout -k 30 "${SERVICE_TEST_TIMEOUT:-1200}" \
+    uv run pytest "services/$service/tests" -q --tb=short >"$LOG_FILE" 2>&1
+  RC=$?
+  if [ "$RC" -eq 0 ]; then
     STATUS="OK"
+  elif [ "$RC" -eq 124 ] || [ "$RC" -eq 137 ]; then
+    STATUS="TIMEOUT"
+    OVERALL_OK=1
+    echo "Zeitlimit (${SERVICE_TEST_TIMEOUT:-1200}s) überschritten - Stacks siehe Log" >>"$LOG_FILE"
   else
     STATUS="FAIL"
     OVERALL_OK=1
@@ -215,6 +229,7 @@ for service in "${SERVICES[@]}"; do
   RESULT_DURATION[$service]=$((END_TS - START_TS))
 
   SUMMARY_LINE=$(grep -E "^[0-9]+ (passed|failed|error)|passed|failed|error" "$LOG_FILE" | tail -1)
+  [ "$STATUS" = "TIMEOUT" ] && SUMMARY_LINE="Zeitlimit ${SERVICE_TEST_TIMEOUT:-1200}s überschritten"
   RESULT_STATUS[$service]="$STATUS"
   RESULT_SUMMARY[$service]="${SUMMARY_LINE:-"(keine Zusammenfassung - siehe $LOG_FILE)"}"
 

@@ -110,6 +110,11 @@ run back to back as one user. That is expected behaviour, not a bug. One run per
   - A pod's shutdown or a test teardown can no longer hang on one step.
   - The next occurrence names the step in the log.
   - The diagnostic plugin is in the session scratchpad (`diag/teardown_watchdog.py`).
+- **Update P91-S6:** the same hang hit mail-connector (42 minutes) and workflow-service in the Phase 91
+  regression, so it isn't specific to document-service. A thread dump showed the event loop idle and
+  no worker busy. The bounded step moved to `dms_common.shutdown.bounded_shutdown_step` and now
+  covers those two services as well; the rest follow in P94-S3. `scripts/run-tests.sh` stops a suite
+  after 20 minutes, and pytest dumps a test's stacks after 5 (`faulthandler_timeout`).
 
 ## Upload by right-click
 

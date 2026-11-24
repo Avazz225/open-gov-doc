@@ -27,9 +27,16 @@
 | `POST` | `/license` `{license_token}` | Install a signed license file — `400` on invalid signature, otherwise `201` even for an expired license. Requires `admin.license`, an activated superuser, or since P13-S2 a valid `Authorization: Bearer <DMS_FLEET_AGENT_API_KEY>` (fleet-management-service, not a principal of this installation, see [ADR 0037](../adr/0037-fleet-management-service-agent-key-and-gateway-public-routes.md)). |
 | `GET` | `/license/status` | Current license status + usage per dimension (`installed`/`valid`/`invalid_reason`/`issued_at`/`expires_at`/`days_remaining`/`user_model`/`users`/`storage_gb`/`documents`/`licensed_components`/`limits_exceeded`). Ungated. |
 
+| `GET` | `/license/display-config` | Whether the admin UI shows "mit Lizenzerweiterung verfügbar" hints (`show_upgrade_hints`, default `true`; P91-S6). Ungated — the sidebar asks for every admin. |
+| `PUT` | `/license/display-config` `{show_upgrade_hints}` | Switch the hints on or off installation-wide. Same gate as `POST /license`. |
+
 ## Data Model
 
 `license.installed_license` — singleton (`id=1`): `raw_token`, `installed_at`, `installed_by`, `issued_at`, `expires_at`, `last_status_snapshot` (JSON, edge detection).
+
+- `license_display_config` (P91-S6): a singleton (`id = 1`, created on first read) with
+  `show_upgrade_hints` and `updated_at`. Some operators don't want upsell hints in their admin UI;
+  this is their switch. It isn't part of the licence token.
 
 ## Events
 

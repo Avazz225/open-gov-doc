@@ -32,6 +32,7 @@ async def _clean_tables():
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS license"))
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text("TRUNCATE license.installed_license"))
+        await conn.execute(text("TRUNCATE license.license_display_config"))
     await eng.dispose()
     yield
 

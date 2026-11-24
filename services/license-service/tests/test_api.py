@@ -177,3 +177,25 @@ def test_status_shows_exceeded_dimension(client):
     body = response.json()
     assert body["users"]["exceeded"] is True
     assert "users" in body["limits_exceeded"]
+
+
+def test_display_config_defaults_to_showing_hints_and_is_gated(client):
+    """P91-S6: whether the admin UI shows what a licence extension would add."""
+    assert client.get("/license/display-config").json()["show_upgrade_hints"] is True
+
+    app.state.permission_client.has_permission.return_value = False
+    denied = client.put(
+        "/license/display-config",
+        json={"show_upgrade_hints": False},
+        headers={"X-DMS-Principal": "someone"},
+    )
+    assert denied.status_code == 403
+
+    app.state.permission_client.has_permission.return_value = True
+    saved = client.put(
+        "/license/display-config",
+        json={"show_upgrade_hints": False},
+        headers={"X-DMS-Principal": "license-admin"},
+    )
+    assert saved.status_code == 200
+    assert client.get("/license/display-config").json()["show_upgrade_hints"] is False

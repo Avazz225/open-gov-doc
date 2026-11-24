@@ -15,7 +15,8 @@
     "yes": "Yes",
     "no": "No",
     "actionError": "Action failed",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "saveError": "Saving failed"
   },
   "theme": {
     "label": "Theme",
@@ -87,7 +88,8 @@
     "closeMenu": "Close navigation",
     "sensors": "Monitoring sensors",
     "mailboxes": "Mailboxes",
-    "structure": "Filing structure"
+    "structure": "Filing structure",
+    "groupUpgrade": "With a licence extension"
   },
   "home": {
     "title": "OG Doc Admin",
@@ -1320,7 +1322,39 @@
     "bannerNotInstalled": "No license installed - restricted operation (demo mode/lock per component).",
     "bannerInvalid": "Installed license invalid or expired.",
     "bannerLimitExceeded": "License usage limit exceeded: {dimensions}.",
-    "bannerExpiringSoon": "License expires in {count} days."
+    "bannerExpiringSoon": "License expires in {count} days.",
+    "usageHeading": "Usage of licence limits",
+    "usageUnknown": "not available",
+    "unlimited": "unlimited",
+    "limitReached": "Limit reached – new items blocked",
+    "headroom": "{remaining} left",
+    "upgradeHeading": "Available with a licence extension",
+    "allLicensed": "All add-on components are licensed.",
+    "showHints": "Show licence extension hints in the navigation",
+    "componentStatus": {
+      "licensed": "licensed",
+      "demo": "Demo mode (read-only)",
+      "unlicensed": "blocked"
+    },
+    "component": {
+      "workflow-service": {
+        "name": "Processes & routing folders",
+        "benefit": "Approvals, circulations and deadlines as guided processes instead of e-mail."
+      },
+      "webdav-connector": {
+        "name": "Direct Office editing & network drive",
+        "benefit": "Open and save documents directly in Word/Excel, mount the repository as a network drive."
+      },
+      "migration-service": {
+        "name": "Migration & transfer",
+        "benefit": "Take over holdings from legacy systems and file shares, verified and logged."
+      },
+      "cmis-connector": {
+        "name": "CMIS interface",
+        "benefit": "Connect line-of-business and third-party systems via the CMIS standard."
+      }
+    },
+    "noLicensableComponents": "This installation has no licensable add-on components."
   },
   "installations": {
     "pageTitle": "Installation management",

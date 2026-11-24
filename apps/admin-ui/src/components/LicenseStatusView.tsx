@@ -4,14 +4,9 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useI18n } from "@/i18n";
 import { ApiError, getLicenseStatus, uploadLicense, type LicenseStatus } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-
-function formatDimension(
-  value: { limit: number | null; current: number | null; exceeded: boolean } | null
-): string {
-  if (value === null) return "-";
-  const limit = value.limit === null ? "∞" : value.limit;
-  return `${value.current ?? "-"} / ${limit}`;
-}
+import { invalidateLicenseHints } from "@/lib/license-hints";
+import { LicenseUpgradeHints } from "./LicenseUpgradeHints";
+import { LicenseUsageBars } from "./LicenseUsageBars";
 
 // License status overview (concept 9.3, P9-S2): "viewable at any time,
 // including remaining term and usage per dimension" + upload form, since
@@ -53,6 +48,7 @@ export function LicenseStatusView() {
       setStatus(result);
       setLicenseToken("");
       setUploadedAt(Date.now());
+      invalidateLicenseHints();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("common.loadError"));
     } finally {
@@ -99,18 +95,6 @@ export function LicenseStatusView() {
                 <td>{status.user_model ?? "-"}</td>
               </tr>
               <tr>
-                <th>{t("license.users")}</th>
-                <td>{formatDimension(status.users)}</td>
-              </tr>
-              <tr>
-                <th>{t("license.storage")}</th>
-                <td>{formatDimension(status.storage_gb)}</td>
-              </tr>
-              <tr>
-                <th>{t("license.documents")}</th>
-                <td>{formatDimension(status.documents)}</td>
-              </tr>
-              <tr>
                 <th>{t("license.licensedComponents")}</th>
                 <td>
                   {status.licensed_components === null
@@ -128,8 +112,11 @@ export function LicenseStatusView() {
               )}
             </tbody>
           </table>
+          <LicenseUsageBars status={status} />
         </div>
       ) : null}
+
+      <LicenseUpgradeHints reloadKey={uploadedAt ?? 0} />
 
       <form onSubmit={handleUpload}>
         <label htmlFor="license-token">{t("license.uploadLabel")}</label>

@@ -4516,6 +4516,19 @@ The user's goals:
       "mit Lizenzerweiterung verfügbar" instead of nothing, configurable (some operators won't want
       upsell hints).
     - The texts live in the product, not in the licence token.
+  - **Result:**
+    - **Licence page:** a usage bar per dimension with the remaining headroom (amber from 80 %, red at
+      the limit, "unbegrenzt" without a bar). A section "Mit Lizenzerweiterung verfügbar" lists every
+      licensable component that isn't fully licensed, with a status badge and a one-line benefit
+      (i18n, not the token), plus the installation-wide switch.
+    - **Sidebar:** a muted group "Mit Lizenzerweiterung" below the regular groups; links to the
+      licence page for licence admins, plain text for everyone else; hidden when switched off.
+    - **Backend:** registry-service `GET /license-components` (policy and status per licensable
+      component); license-service `GET`/`PUT /license/display-config` (singleton, default on).
+    - **Not built:** hints on individual buttons. The admin UI calls none of the licensable services,
+      so there are no such buttons; user-UI hints weren't in scope.
+    - **Found:** the dev stack configures no licensable components (`{}`), so there the section says
+      "nothing to extend"; the e2e needs a registry-service started with some.
 
 ## Phase 92 — Validating Incoming Signatures (user decision 2026-11-23, ADR 0248)
 
@@ -4625,9 +4638,19 @@ explain lanes and route changes. Design and reasons: [ADR 0249](docs/adr/0249-ch
     budget of P89-S4 (2 + 3) five concurrent logins deadlocked for 30 s. Audit every service for the
     same pattern (a request-scoped session plus `session_factory()` in the same call path) and pass the
     session down instead.
-  - **workflow-service tests leave federation-hub registrations (found in P91-S5):** like auth-service's
-    did (fixed there), with the placeholder callback `8.8.8.8`. Deregister on teardown the same way. On
-    the dev stack, 131 such registrations were marked revoked.
+  - **workflow-service tests and federation-hub registrations (found in P91-S5, corrected in P91-S6):**
+    workflow-service's tests keep one federation identity in `dms_test` and re-register it on every
+    start, with the placeholder callback `8.8.8.8`. P91-S5's cleanup revoked that identity along with
+    the real leftovers, which made two federation tests fail (`401` from the hub) in the Phase 91
+    regression; the revocation was undone. Distinguish such a persistent test identity from per-run
+    leftovers (for example a recognisable display name) before any further cleanup.
+  - **Bounded shutdown for every service (found in P91-S6):** the lifespan-shutdown hang first seen in
+    document-service also hit mail-connector (42 min) and workflow-service in the Phase 91 regression:
+    `TestClient.__exit__` waits, the event loop is idle, no thread busy, the step not identifiable
+    from a thread dump (8 reruns with a task-dumping watchdog didn't hang; one took 50 s longer).
+    `dms_common.shutdown.bounded_shutdown_step` now bounds and names each step in document-service,
+    mail-connector and workflow-service. Apply it to the remaining services' lifespans, and once a
+    `shutdown_step_timeout` names a step, fix that step at its root.
   - **Objects with deleted types (found in P91-S2b):** the conformity report shows 52 folders and 23
     documents on the dev stack whose object type was deleted by a test after use. Tests that delete
     their types should delete their folders and documents first. A one-off cleanup goes with the other

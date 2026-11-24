@@ -680,6 +680,40 @@ now wraps.
   - folder-service's refusal is shown with the offending node's path.
 - **Errors:** `detail.errors` lists are shown as text, not JSON (`extractErrorMessage`).
 
+## Licence Limits and Extension Hints (P91-S6)
+
+**Licence page** (`/license/`, `admin.license`):
+- **Usage bars** (`LicenseUsageBars`): one per dimension (users, storage, documents) with
+  "current / limit · noch n frei". Amber from 80 % (`WARN_RATIO`), red at the limit with "Grenze
+  erreicht – Neuanlage gesperrt" (existing data stays usable, ADR on usage-limit blocking). An
+  unlimited dimension shows "unbegrenzt" without a bar. The bars are `role="progressbar"` with
+  `aria-valuenow`/`aria-valuemax`. They replace the former "current / limit" table rows.
+- **"Mit Lizenzerweiterung verfügbar"** (`LicenseUpgradeHints`, anchor `#erweiterung`): every
+  licensable component that isn't fully licensed, from registry-service `GET /license-components`,
+  with a status badge (Demo-Modus (nur lesend) / gesperrt) and a one-line benefit. Names and benefits
+  live in i18n (`license.component.<service_type>.name|benefit`), not in the licence token; an unknown
+  `service_type` falls back to its raw name. Without licensable components (dev stack) the section
+  says so and the switch is left out.
+- **Switch** "Hinweise auf Lizenzerweiterungen in der Navigation anzeigen": license-service
+  `PUT /license/display-config`, installation-wide.
+
+**Sidebar** (`AdminSidebar` → `UpgradeHintsGroup`):
+- Below the regular groups, a muted (`opacity-70`, smaller type) group "Mit Lizenzerweiterung" naming
+  the components the licence doesn't cover. Licence admins get links to `/license/#erweiterung`,
+  everyone else plain text.
+- Hidden when the switch is off, when nothing is missing, or when the lookup fails.
+- `lib/license-hints.ts` shares one answer for 60 s across pages; `invalidateLicenseHints()` (after the
+  switch or a licence upload) drops it and makes every mounted sidebar reload at once.
+- **Not built:** muted hints on individual buttons. The admin UI calls none of the licensable
+  services (workflow, WebDAV, migration, CMIS) directly, so it has no such buttons; hints in the user
+  UI weren't part of this session.
+
+**Tests:** `license-status-view.test.tsx` (bars, list, switch), `license-upgrade-hints.test.tsx`
+(sidebar: plain text vs. link, switch off and live reaction, lookup failure); e2e
+`license-hints.spec.ts` grants `users-admin` `domain-admin-license` for its duration and needs a
+registry-service started with licensable components (otherwise it only checks the "nothing to
+extend" note).
+
 ## Long Lists (P91-S5)
 
 **One shared pattern** (`components/BoundedList.tsx`):

@@ -26,9 +26,15 @@ from license_service.clients import (
     StorageClient,
 )
 from license_service.license_verifier import InvalidLicenseError, decode
-from license_service.models import Base
+from license_service.models import LICENSE_DISPLAY_CONFIG_ID, Base, LicenseDisplayConfig
 from license_service.poll_loop import UsageClients, poll_loop
-from license_service.schemas import DimensionUsageOut, LicenseStatusOut, LicenseUploadRequest
+from license_service.schemas import (
+    DimensionUsageOut,
+    LicenseDisplayConfigIn,
+    LicenseDisplayConfigOut,
+    LicenseStatusOut,
+    LicenseUploadRequest,
+)
 from license_service.settings import Settings
 
 settings = Settings()
@@ -268,6 +274,44 @@ async def upload_license(
 
     await publish_event("license.installed", None, {}, actor=x_dms_principal)
     return await _status_out(claims)
+
+
+async def _display_config(session: AsyncSession) -> LicenseDisplayConfig:
+    config = await session.get(LicenseDisplayConfig, LICENSE_DISPLAY_CONFIG_ID)
+    if config is None:
+        config = LicenseDisplayConfig(
+            id=LICENSE_DISPLAY_CONFIG_ID, show_upgrade_hints=True, updated_at=datetime.now(UTC)
+        )
+        session.add(config)
+        await session.flush()
+    return config
+
+
+@app.get("/license/display-config", response_model=LicenseDisplayConfigOut)
+async def get_display_config(
+    session: AsyncSession = Depends(get_session),
+) -> LicenseDisplayConfigOut:
+    """Whether the admin UI shows what a licence extension would add
+    (P91-S6). Ungated like `/license/status`: the sidebar reads it for every
+    admin."""
+    config = await _display_config(session)
+    await session.commit()
+    return config
+
+
+@app.put("/license/display-config", response_model=LicenseDisplayConfigOut)
+async def put_display_config(
+    body: LicenseDisplayConfigIn,
+    x_dms_principal: str = Header(default=""),
+    authorization: str | None = Header(default=None),
+    session: AsyncSession = Depends(get_session),
+) -> LicenseDisplayConfigOut:
+    await _require_license_permission(x_dms_principal, authorization)
+    config = await _display_config(session)
+    config.show_upgrade_hints = body.show_upgrade_hints
+    config.updated_at = datetime.now(UTC)
+    await session.commit()
+    return config
 
 
 @app.get("/license/status", response_model=LicenseStatusOut)

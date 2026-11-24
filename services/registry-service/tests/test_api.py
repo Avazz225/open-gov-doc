@@ -302,6 +302,31 @@ def test_license_status_endpoint_for_licensable_component_uses_configured_policy
     assert response.json() == {"service_type": "workflow-service", "status": "demo"}
 
 
+def test_license_components_lists_every_licensable_component(client):
+    """P91-S6: one list for the admin UI, from the same cache as the
+    per-service endpoint."""
+
+    class FakeCache:
+        async def status_for(self, service_type: str) -> str:
+            return "licensed" if service_type == "workflow-service" else "demo"
+
+        async def close(self) -> None:
+            pass
+
+    app.state.license_cache = FakeCache()
+    response = client.get("/license-components")
+    assert response.status_code == 200
+    body = {c["service_type"]: (c["status"], c["policy"]) for c in response.json()}
+    assert body["workflow-service"] == ("licensed", "demo")
+    assert body["cmis-connector"] == ("demo", "demo")
+    assert set(body) == {
+        "workflow-service",
+        "webdav-connector",
+        "migration-service",
+        "cmis-connector",
+    }
+
+
 def test_heartbeat_response_includes_license_status(client):
     payload = make_payload()
     client.post("/instances", json=payload)

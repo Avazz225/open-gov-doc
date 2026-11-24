@@ -66,6 +66,13 @@ class LicenseStatusForServiceOut(BaseModel):
     status: LicenseComponentStatus
 
 
+class LicensableComponentOut(LicenseStatusForServiceOut):
+    """A separately licensable component (9.1) and what happens without a
+    licence for it: `policy` "demo" (read-only) or "lock" (P91-S6)."""
+
+    policy: str
+
+
 class BrandingConfigOut(BaseModel):
     """Installation-level branding (7.3/8, P69-S2, ADR 0201) - `None` for
     any field means "use this build's static default," not "no branding

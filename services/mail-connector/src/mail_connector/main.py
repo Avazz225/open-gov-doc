@@ -1,5 +1,4 @@
 import asyncio
-import contextlib
 import email
 import logging
 import os
@@ -14,6 +13,7 @@ from email.utils import parsedate_to_datetime
 
 import aiosmtplib
 from dms_common import configure_logging
+from dms_common.shutdown import bounded_shutdown_step
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
 from dms_metrics_client import (
@@ -563,20 +563,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     yield
 
+    # Every step bounded and named (dms_common.shutdown, P91-S6): one step
+    # that never completes once hung this service's test teardown for 42 min.
     poll_task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await poll_task
+    await bounded_shutdown_step("poll_task", poll_task)
     if registration:
-        await registration.stop()
+        await bounded_shutdown_step("registration.stop", registration.stop())
     sensor_config_proxy.unbind()
-    await app.state.sensor_config_client.stop()
-    await event_bus.close()
-    await app.state.storage.close()
-    await app.state.virus_scan.close()
-    await app.state.documents.close()
-    await app.state.cases.close()
-    await app.state.permission_client.close()
-    await engine.dispose()
+    await bounded_shutdown_step("sensor_config_client.stop", app.state.sensor_config_client.stop())
+    await bounded_shutdown_step("event_bus.close", event_bus.close())
+    for name in ("storage", "virus_scan", "documents", "cases", "permission_client"):
+        await bounded_shutdown_step(f"{name}.close", getattr(app.state, name).close())
+    await bounded_shutdown_step("engine.dispose", engine.dispose())
 
 
 app = FastAPI(title=settings.service_name, lifespan=lifespan)

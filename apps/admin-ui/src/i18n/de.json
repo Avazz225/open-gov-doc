@@ -15,7 +15,8 @@
     "yes": "Ja",
     "no": "Nein",
     "actionError": "Aktion fehlgeschlagen",
-    "cancel": "Abbrechen"
+    "cancel": "Abbrechen",
+    "saveError": "Speichern fehlgeschlagen"
   },
   "theme": {
     "label": "Design",
@@ -87,7 +88,8 @@
     "closeMenu": "Navigation schließen",
     "sensors": "Monitoring-Sensoren",
     "mailboxes": "Postfächer",
-    "structure": "Ablagestruktur"
+    "structure": "Ablagestruktur",
+    "groupUpgrade": "Mit Lizenzerweiterung"
   },
   "home": {
     "title": "OG Doc Admin",
@@ -1320,7 +1322,39 @@
     "bannerNotInstalled": "Keine Lizenz installiert - eingeschränkter Betrieb (Demo-Modus/Sperre je Komponente).",
     "bannerInvalid": "Installierte Lizenz ungültig oder abgelaufen.",
     "bannerLimitExceeded": "Lizenz-Nutzungsgrenze überschritten: {dimensions}.",
-    "bannerExpiringSoon": "Lizenz läuft in {count} Tagen ab."
+    "bannerExpiringSoon": "Lizenz läuft in {count} Tagen ab.",
+    "usageHeading": "Auslastung der Lizenzgrenzen",
+    "usageUnknown": "nicht ermittelbar",
+    "unlimited": "unbegrenzt",
+    "limitReached": "Grenze erreicht – Neuanlage gesperrt",
+    "headroom": "noch {remaining} frei",
+    "upgradeHeading": "Mit Lizenzerweiterung verfügbar",
+    "allLicensed": "Alle Zusatzkomponenten sind lizenziert.",
+    "showHints": "Hinweise auf Lizenzerweiterungen in der Navigation anzeigen",
+    "componentStatus": {
+      "licensed": "lizenziert",
+      "demo": "Demo-Modus (nur lesend)",
+      "unlicensed": "gesperrt"
+    },
+    "component": {
+      "workflow-service": {
+        "name": "Prozesse & Umlaufmappen",
+        "benefit": "Freigaben, Umläufe und Fristen als geführte Abläufe statt per E-Mail."
+      },
+      "webdav-connector": {
+        "name": "Office-Direktbearbeitung & Netzlaufwerk",
+        "benefit": "Dokumente direkt in Word/Excel öffnen und speichern, Ablage als Netzlaufwerk einbinden."
+      },
+      "migration-service": {
+        "name": "Migration & Übertragung",
+        "benefit": "Bestände aus Altsystemen und Dateiablagen geprüft und mit Protokoll übernehmen."
+      },
+      "cmis-connector": {
+        "name": "CMIS-Schnittstelle",
+        "benefit": "Fachverfahren und Drittsysteme über den CMIS-Standard anbinden."
+      }
+    },
+    "noLicensableComponents": "Diese Installation hat keine lizenzpflichtigen Zusatzkomponenten."
   },
   "installations": {
     "pageTitle": "Installationsverwaltung",

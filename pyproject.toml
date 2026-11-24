@@ -45,3 +45,8 @@ asyncio_mode = "auto"
 # verschiedene Services hinweg, da keines der tests/-Verzeichnisse ein
 # __init__.py hat (siehe pytest-Doku zu "import mode").
 addopts = "--import-mode=importlib"
+# A test (setup, call and teardown) still running after 5 minutes gets every
+# thread's stack dumped into the run's log - it doesn't fail or stop it. Added
+# in P91-S6 after lifespan-shutdown hangs that left no trace (see
+# scripts/run-tests.sh's per-service limit).
+faulthandler_timeout = 300

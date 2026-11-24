@@ -6,7 +6,7 @@ import logging
 import time
 import uuid
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
@@ -17,6 +17,7 @@ from dms_common import (
     configure_logging,
     require_acting_identity,
 )
+from dms_common.shutdown import bounded_shutdown_step
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
 from dms_metrics_client import (
@@ -558,29 +559,31 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     yield
 
-    sla_poll_task.cancel()
-    with suppress(asyncio.CancelledError):
-        await sla_poll_task
-    task_claim_expiry_poll_task.cancel()
-    with suppress(asyncio.CancelledError):
-        await task_claim_expiry_poll_task
+    # Every step bounded and named (dms_common.shutdown, P91-S6): one step
+    # that never completes once hung this service's test teardown.
+    for task in (sla_poll_task, task_claim_expiry_poll_task):
+        task.cancel()
+        await bounded_shutdown_step(f"task {task.get_coro().__qualname__}", task)
     sensor_config_proxy.unbind()
-    await app.state.sensor_config_client.stop()
+    await bounded_shutdown_step("sensor_config_client.stop", app.state.sensor_config_client.stop())
     if registration:
-        await registration.stop()
-    await event_bus.close()
-    await approval_consumer_bus.close()
-    await app.state.approval_client.close()
-    await app.state.permission_client.close()
-    await app.state.auth_client.close()
-    await app.state.signature_client.close()
-    await app.state.case_client.close()
-    await app.state.document_client.close()
-    await app.state.archival_client.close()
-    await app.state.license_client.close()
+        await bounded_shutdown_step("registration.stop", registration.stop())
+    await bounded_shutdown_step("event_bus.close", event_bus.close())
+    await bounded_shutdown_step("approval_consumer_bus.close", approval_consumer_bus.close())
+    for name in (
+        "approval_client",
+        "permission_client",
+        "auth_client",
+        "signature_client",
+        "case_client",
+        "document_client",
+        "archival_client",
+        "license_client",
+    ):
+        await bounded_shutdown_step(f"{name}.close", getattr(app.state, name).close())
     if app.state.federation_client is not None:
-        await app.state.federation_client.close()
-    await engine.dispose()
+        await bounded_shutdown_step("federation_client.close", app.state.federation_client.close())
+    await bounded_shutdown_step("engine.dispose", engine.dispose())
 
 
 app = FastAPI(title=settings.service_name, lifespan=lifespan)

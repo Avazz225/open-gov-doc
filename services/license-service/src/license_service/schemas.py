@@ -26,3 +26,13 @@ class LicenseStatusOut(BaseModel):
     documents: DimensionUsageOut | None = None
     licensed_components: list[str] | None = None
     limits_exceeded: list[str] = []
+
+
+class LicenseDisplayConfigIn(BaseModel):
+    show_upgrade_hints: bool
+
+
+class LicenseDisplayConfigOut(LicenseDisplayConfigIn):
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}

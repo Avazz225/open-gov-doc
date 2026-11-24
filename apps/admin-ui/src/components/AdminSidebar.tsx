@@ -5,6 +5,8 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useI18n } from "@/i18n";
 import { useAuth } from "@/lib/auth-context";
+import { notFullyLicensed, useLicenseHints, type LicenseHints } from "@/lib/license-hints";
+import { componentName } from "./LicenseUpgradeHints";
 
 export interface NavItem {
   href: string;
@@ -236,7 +238,8 @@ function loadCollapsedGroups(): Record<string, boolean> {
 export function AdminSidebar({ variant = "column" }: { variant?: "column" | "drawer" }) {
   const { t } = useI18n();
   const pathname = usePathname();
-  const { permissions } = useAuth();
+  const { permissions, accessToken } = useAuth();
+  const hints = useLicenseHints(accessToken);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
@@ -293,6 +296,51 @@ export function AdminSidebar({ variant = "column" }: { variant?: "column" | "dra
           </div>
         );
       })}
+      <UpgradeHintsGroup
+        hints={hints}
+        canOpenLicense={permissions.includes("admin.license")}
+        rowSize={rowSize}
+      />
     </nav>
+  );
+}
+
+// Muted "available with a licence extension" group (P91-S6): components the
+// licence doesn't cover, by name only. It links to the licence page's
+// extension section for licence admins and is plain text for everyone else.
+// The installation can switch it off (license-service display config).
+function UpgradeHintsGroup({
+  hints,
+  canOpenLicense,
+  rowSize,
+}: {
+  hints: LicenseHints | null;
+  canOpenLicense: boolean;
+  rowSize: string;
+}) {
+  const { t } = useI18n();
+  if (!hints || !hints.showHints) return null;
+  const missing = notFullyLicensed(hints.components);
+  if (missing.length === 0) return null;
+  return (
+    <div className="mt-4 border-t border-border pt-2 text-sm opacity-70" data-testid="license-upgrade-hints">
+      <p className="m-0 px-1 py-2 font-semibold">{t("nav.groupUpgrade")}</p>
+      <ul className="m-0 list-none py-0 pr-0 pl-4">
+        {missing.map((c) => (
+          <li className="my-[0.15rem]" key={c.service_type}>
+            {canOpenLicense ? (
+              <Link
+                href="/license/#erweiterung"
+                className={`${rowSize} rounded-sm text-inherit no-underline hover:bg-hover-bg`}
+              >
+                {componentName(t, c.service_type)}
+              </Link>
+            ) : (
+              <span className={rowSize}>{componentName(t, c.service_type)}</span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
