@@ -1,5 +1,6 @@
 import uuid
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import func, select, update
@@ -639,6 +640,185 @@ async def complete_task(
                 "Anfrage geändert - bitte erneut versuchen"
             ) from exc
     return instance
+
+
+# --- Administrative instance operations (P93-S2, ADR 0249 Part A c) -------
+
+
+@dataclass
+class ReleasedClaim:
+    principal_id: str
+    task_id: str
+    task_name: str
+    delegation_ids: list[str]
+
+
+@dataclass
+class InstanceModification:
+    """Outcome of skip / send back / migrate, for the event and the response."""
+
+    instance: ProcessInstance
+    target_name: str
+    tasks_before: list[str]
+    tasks_after: list[str]
+    released_claims: list[ReleasedClaim] = field(default_factory=list)
+
+
+async def _modify_instance(
+    session: AsyncSession,
+    instance_id: str,
+    expected_version: int | None,
+    apply: Callable[[object], str],
+) -> InstanceModification:
+    """Shared read-modify-write for the three operations: `apply` changes the
+    deserialized workflow (or raises `InstanceOperationRefused`) and returns
+    the name to report. Afterwards automatic steps run, the state is saved
+    under the optimistic-concurrency check, and claims on tasks that are no
+    longer ready are deleted (their grants are revoked by the caller)."""
+    instance = await get_instance(session, instance_id)
+    if instance.status != "running":
+        raise InstanceNotRunningError(f"instance_id {instance_id!r} ist nicht 'running'")
+    if expected_version is not None and instance.workflow_version != expected_version:
+        raise ConcurrentModificationError(
+            f"instance_id {instance_id!r} wurde inzwischen geändert - bitte neu laden"
+        )
+    wf = spiff_adapter.deserialize(instance.workflow_state)
+    before = spiff_adapter.ready_manual_tasks(wf)
+    target_name = apply(wf)
+    try:
+        spiff_adapter.run_ready_steps(wf)
+    finally:
+        completed = spiff_adapter.is_completed(wf)
+        now = datetime.now(UTC)
+        instance.workflow_state = spiff_adapter.serialize(wf)
+        instance.status = "completed" if completed else "running"
+        instance.updated_at = now
+        if completed:
+            instance.completed_at = now
+    after = spiff_adapter.ready_manual_tasks(wf)
+
+    after_ids = {t.id for t in after}
+    names = {t.id: t.name for t in before}
+    released: list[ReleasedClaim] = []
+    for claim in await get_task_claims_for_instance(session, instance_id):
+        if claim.task_id in after_ids:
+            continue
+        released.append(
+            ReleasedClaim(
+                principal_id=claim.principal_id,
+                task_id=claim.task_id,
+                task_name=names.get(claim.task_id, "?"),
+                delegation_ids=list(claim.granted_delegation_ids or []),
+            )
+        )
+        await session.delete(claim)
+    try:
+        await session.flush()
+    except StaleDataError as exc:
+        raise ConcurrentModificationError(
+            f"instance_id {instance_id!r} wurde gleichzeitig von einer anderen "
+            "Anfrage geändert - bitte erneut versuchen"
+        ) from exc
+    return InstanceModification(
+        instance=instance,
+        target_name=target_name,
+        tasks_before=[t.name for t in before],
+        tasks_after=[t.name for t in after],
+        released_claims=released,
+    )
+
+
+async def skip_task(
+    session: AsyncSession,
+    instance_id: str,
+    task_id: str,
+    *,
+    actor: str,
+    reason: str,
+    expected_version: int | None,
+) -> InstanceModification:
+    marker = {"by": actor, "reason": reason, "at": datetime.now(UTC).isoformat()}
+    return await _modify_instance(
+        session,
+        instance_id,
+        expected_version,
+        lambda wf: spiff_adapter.skip_task(wf, task_id, marker),
+    )
+
+
+async def completed_tasks(
+    session: AsyncSession, instance_id: str
+) -> list[spiff_adapter.CompletedTaskInfo]:
+    instance = await get_instance(session, instance_id)
+    return spiff_adapter.completed_manual_tasks(spiff_adapter.deserialize(instance.workflow_state))
+
+
+async def send_back(
+    session: AsyncSession, instance_id: str, target_task_id: str, *, expected_version: int | None
+) -> InstanceModification:
+    return await _modify_instance(
+        session,
+        instance_id,
+        expected_version,
+        lambda wf: spiff_adapter.send_back(wf, target_task_id)[0],
+    )
+
+
+async def _migration_target(
+    session: AsyncSession, instance: ProcessInstance, target_definition_id: int
+) -> tuple[ProcessDefinition, object]:
+    """The target must be a newer version of the instance's own process
+    family; returns it with its parsed spec."""
+    current = await get_process_definition(session, instance.process_definition_id)
+    target = await get_process_definition(session, target_definition_id)
+    if target.name != current.name or target.version <= current.version:
+        raise spiff_adapter.InstanceOperationRefused(
+            f"Ziel muss eine neuere Version von {current.name!r} sein "
+            f"(aktuell Version {current.version})"
+        )
+    dmn_xmls = await list_latest_dmn_xml(session)
+    try:
+        spec, _ = spiff_adapter.parse_bpmn(
+            target.bpmn_xml, target.bpmn_process_id, dmn_definitions=dmn_xmls
+        )
+    except spiff_adapter.BpmnParseError as exc:
+        raise InvalidBpmnError(str(exc)) from exc
+    return target, spec
+
+
+async def migration_preview(
+    session: AsyncSession, instance_id: str, target_definition_id: int
+) -> spiff_adapter.MigrationReport:
+    instance = await get_instance(session, instance_id)
+    if instance.status != "running":
+        raise InstanceNotRunningError(f"instance_id {instance_id!r} ist nicht 'running'")
+    _target, spec = await _migration_target(session, instance, target_definition_id)
+    return spiff_adapter.migration_report(spiff_adapter.deserialize(instance.workflow_state), spec)
+
+
+async def migrate_instance(
+    session: AsyncSession,
+    instance_id: str,
+    target_definition_id: int,
+    *,
+    expected_version: int | None,
+) -> InstanceModification:
+    instance = await get_instance(session, instance_id)
+    target, spec = await _migration_target(session, instance, target_definition_id)
+
+    def apply(wf) -> str:
+        # Re-checked on the state actually being changed, not trusted from
+        # an earlier preview.
+        report = spiff_adapter.migration_report(wf, spec)
+        if not report.possible:
+            raise spiff_adapter.InstanceOperationRefused("; ".join(report.reasons))
+        spiff_adapter.migrate(wf, spec)
+        # Same identity-mapped row `_modify_instance` saves - one flush, one
+        # version bump.
+        instance.process_definition_id = target.id
+        return f"{target.name} v{target.version}"
+
+    return await _modify_instance(session, instance_id, expected_version, apply)
 
 
 async def get_task_claim(session: AsyncSession, instance_id: str, task_id: str) -> TaskClaim | None:

@@ -202,6 +202,14 @@ None yet - follows in Phase 11.
 notice to each member instead of one notice addressed to the lane name; the optional `escalation_email`
 is unchanged. Test: `test_escalation_in_a_bound_lane_notifies_each_member`.
 
+## Administrative Instance Changes (P93-S2)
+
+`workflow.instance.modified` (own durable `notification-service-instance-modified` on the `workflow`
+stream): each entry of `affected_claimants` - people whose claim a skip, send back or migration released -
+gets one in-app notice with the operation, the task and the reason (template use case
+`workflow.instance.modified`). Without affected claimants nothing is sent. Tests:
+`test_instance_modified_notifies_each_affected_claimant`, `.._without_claimants_sends_nothing`.
+
 ## Tests
 
 `uv run pytest services/notification-service/tests` (**100 tests since Phase 61 Session 1**, +4:

@@ -687,6 +687,62 @@ async def test_task_claim_abandoned_event_creates_in_app_notification_for_the_cl
     assert len(published) == 1
 
 
+async def test_instance_modified_notifies_each_affected_claimant(engine, settings, rate_limiter):
+    """P93-S2 (ADR 0249 Part A c): an administrative skip / send back /
+    migrate released claims - every affected claimant gets one in-app
+    notice carrying the mandatory reason."""
+    published = []
+
+    async def fake_publish(event_type, subject, payload, actor=None):
+        published.append((event_type, subject, payload))
+
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
+    event = Event(
+        event_type="workflow.instance.modified",
+        service_name="workflow-service",
+        subject="instance-93",
+        payload={
+            "operation": "send_back",
+            "reason": "Unterlagen unvollständig",
+            "business_key": "case-93",
+            "affected_claimants": [
+                {"principal_id": "bob", "task_id": "t1", "task_name": "Freigeben"},
+                {"principal_id": "carol", "task_id": "t2", "task_name": "Gegenzeichnen"},
+            ],
+        },
+    )
+
+    await handler(event.to_bytes())
+
+    session_factory = _session_factory(engine)
+    async with session_factory() as session:
+        notifications = await repository.list_notifications(session)
+    assert sorted(n.recipient for n in notifications) == ["bob", "carol"]
+    assert all(n.channel == "in_app" for n in notifications)
+    assert all("Unterlagen unvollständig" in n.body for n in notifications)
+    assert all("zurückgesendet" in n.body for n in notifications)
+    assert len(published) == 2
+
+
+async def test_instance_modified_without_claimants_sends_nothing(engine, settings, rate_limiter):
+    async def fake_publish(event_type, subject, payload, actor=None):
+        pass
+
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
+    event = Event(
+        event_type="workflow.instance.modified",
+        service_name="workflow-service",
+        subject="instance-94",
+        payload={"operation": "skip", "reason": "erledigt", "affected_claimants": []},
+    )
+
+    await handler(event.to_bytes())
+
+    session_factory = _session_factory(engine)
+    async with session_factory() as session:
+        assert await repository.list_notifications(session) == []
+
+
 async def test_task_claim_abandoned_includes_a_direct_link_when_configured(
     engine, settings, rate_limiter
 ):

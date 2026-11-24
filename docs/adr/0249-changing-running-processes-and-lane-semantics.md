@@ -1,6 +1,6 @@
 # 0249 — Changing running processes, and what a BPMN lane means (scoping)
 
-**Status:** accepted (scoping in P90-S7; built in Phase 93, scheduled 2026-11-23; lanes in P93-S1)
+**Status:** accepted (scoping in P90-S7; built in Phase 93, scheduled 2026-11-23; lanes in P93-S1, engine operations in P93-S2)
 **Context:** P90-S7 (Phase 90, user-selected from the comparison with an external reference system).
 
 Two related gaps in workflow-service:
@@ -183,3 +183,18 @@ routes use one membership check.
   the members, and notification-service notifies each.
 - **Open:** a deputy's "Meine Aufgaben" doesn't yet include the delegator's lane tasks.
 
+## Implementation notes (P93-S2)
+
+- **One read-modify-write for all three operations** (`repository._modify_instance`): running check,
+  `expected_version`, apply, automatic steps, save under the version column, then delete the claims of
+  tasks no longer ready. Grants are revoked and the event published after the commit.
+- **"Parallel" is detected, not modelled:** more than one ready user task, or a gateway waiting for its
+  other branches. A multi-instance task is recognised by a `LoopTask` ancestor.
+- **Skip leaves a trace in the task data** (`dms_skipped: {by, reason, at}`), so the history shows who
+  skipped and why, beyond the audit event.
+- **The migration dry run is repeated on the live state** inside `migrate`; a preview isn't trusted.
+  Alignment is structural (SpiffWorkflow's `diff_workflow`), so a renamed task id still aligns. Instances
+  with running subprocesses aren't migrated yet.
+- **Target versions:** only a newer version of the same family. The process-definition overview lists
+  only the newest version per family, so admin-ui reads the family's history by name.
+- **Notices** go to the claimants whose claim was released, not to the administrator acting.

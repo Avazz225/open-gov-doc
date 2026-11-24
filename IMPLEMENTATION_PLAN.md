@@ -4665,6 +4665,17 @@ explain lanes and route changes. Design and reasons: [ADR 0249](docs/adr/0249-ch
     branches. Claims and grants of removed tasks released.
   - `workflow.instance.modified` to the audit ledger; notices to affected claimants.
   - admin-ui: instance detail with the three actions and the diff report.
+  - **Result:**
+    - workflow-service: `POST …/tasks/{id}/skip`, `GET …/completed-tasks`, `POST …/send-back`,
+      `POST …/migration-preview`, `POST …/migrate`; capability `workflow.instance_modify`, mandatory
+      reason, `expected_version` (`workflow_version` now on `ProcessInstanceOut`), `503` in maintenance;
+      guards as planned plus "no running subprocesses" and "target is a newer version of the same family";
+      released claims and grants; `workflow.instance.modified`.
+    - permission-service: seeded role `domain-admin-workflow-instances`.
+    - notification-service: in-app notice to each affected claimant.
+    - admin-ui: "Prozessinstanzen" (list, detail with skip / send back / migrate and the diff preview).
+    - **Tests:** workflow-service 260 (+11, `test_instance_operations.py`), permission-service 212,
+      notification-service 122 (+2), admin-ui vitest 409 (+6) + e2e `workflow-instances.spec.ts`.
 - **P93-S3 — Circulation template with an editable route.**
   - The shipped "Umlauf" template (seeded definition): one user task, cursor advance, "weitere
     Schritte?" gateway; route entries `{kind, assignee (principal or group), note}`.

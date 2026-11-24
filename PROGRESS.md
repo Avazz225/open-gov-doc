@@ -2,6 +2,48 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P93-S2, engine operations for running instances (skip, send back, migrate)
+([ADR 0249](docs/adr/0249-changing-running-processes-and-lane-semantics.md), implementation notes added).
+
+**What changed:**
+- **workflow-service:**
+  - `POST /instances/{id}/tasks/{task_id}/skip`, `GET /instances/{id}/completed-tasks`,
+    `POST /instances/{id}/send-back`, `POST /instances/{id}/migration-preview`,
+    `POST /instances/{id}/migrate`.
+  - Capability `workflow.instance_modify`; mandatory `reason`; optional `expected_version`
+    (`workflow_version` is now on `ProcessInstanceOut`), stale is `409`; `503` in maintenance mode.
+  - **Guards** (`422` with the reason): no signature task, no waiting federated step, no multi-instance
+    task or parallel branches; migration only to a newer version of the same family, without running
+    subprocesses, and only if every READY/WAITING task aligns. The dry run is repeated on the live state.
+  - Claims of tasks no longer ready are deleted and their grants revoked. Skip records
+    `dms_skipped: {by, reason, at}` in the task data.
+  - Event `workflow.instance.modified` (audit via `workflow.>`), with `affected_claimants`.
+- **permission-service:** seeded role `domain-admin-workflow-instances`.
+- **notification-service:** in-app notice to each affected claimant (own durable, template use case).
+- **admin-ui:** new page "Prozessinstanzen" (group "Verarbeitung"): running instances with a case
+  filter; detail with one mandatory reason, "Überspringen" per open task, "Zurücksenden", "Migrieren" with
+  "Vorschau" (Neu / Entfällt / Geändert, active tasks and their counterparts).
+- **Found while testing:**
+  - The case filter didn't apply: the load callback kept the first value. Now applied on "Suchen".
+  - The process-definition overview only lists each family's newest version, so an instance on v1 had
+    no process name and no migration target. Older versions are now resolved by id, and the family
+    history is read by name.
+  - BPMN element ids `Start`/`End` collide with SpiffWorkflow's own spec names (fixture renamed).
+- **Docs:** workflow-, notification-, permission-service, admin-ui, ADR 0249 notes, plan.
+
+**Checks:**
+- **Backend:**
+  - workflow-service 260 (+11, `test_instance_operations.py` against the real permission-service);
+  - permission-service 212, notification-service 122 (+2), ruff clean.
+- **admin-ui:** vitest 409 (+6), tsc and eslint clean; e2e `workflow-instances.spec.ts` green (two
+  versions, migrate after a positive preview, send back, skip; no overflow at 1400/768/390).
+- **Screenshots:** the detail with the diff preview (1400/768/390) and after the skip.
+- **Containers rebuilt:** permission-service, workflow-service, notification-service, admin-ui.
+
+**Next session:** P93-S3 (circulation template with an editable route, Phase 93 close regression).
+
+---
+
 **Last completed:** P93-S1, lanes as an opt-in authorization boundary
 ([ADR 0249](docs/adr/0249-changing-running-processes-and-lane-semantics.md), implementation notes added).
 

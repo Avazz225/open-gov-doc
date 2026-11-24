@@ -331,6 +331,42 @@ A failed `connector_call` (e.g. target unreachable) puts SpiffWorkflow's task in
   supervisor reassign to a member only, a deputy completing for a member, the "Meine Aufgaben" filter and
   the flag.
 
+## Changing a Running Instance (P93-S2, [ADR 0249](../adr/0249-changing-running-processes-and-lane-semantics.md))
+
+Three administrative interventions, capability `workflow.instance_modify` (seeded role
+`domain-admin-workflow-instances`, not part of `workflow.write`). Each takes a mandatory `reason`
+(3-2000 characters) and an optional `expected_version` (`ProcessInstanceOut.workflow_version`, ADR 0185:
+a stale one is `409`, as is a concurrent write); each is refused in maintenance mode (`503`) and for an
+instance that isn't `running` (`409`). A guard that refuses is `422` with the reason in plain German.
+
+| Endpoint | Effect |
+|---|---|
+| `POST /instances/{id}/tasks/{task_id}/skip` | Completes a ready user task without its work. The task data gets `dms_skipped: {by, reason, at}`. |
+| `GET /instances/{id}/completed-tasks` | Completed user tasks, oldest first - the targets for send back. |
+| `POST /instances/{id}/send-back` `{target_task_id}` | `reset_from_task_id`: the target is ready again, everything after it is undone. |
+| `POST /instances/{id}/migration-preview` `{target_definition_id}` | Dry run (`SpecDiff` + `diff_workflow`): `{possible, reasons, removed, added, changed, active_tasks: [{name, state, aligned_to}]}`. Changes nothing. |
+| `POST /instances/{id}/migrate` `{target_definition_id}` | `migrate_workflow`, after repeating the dry run on the live state; the instance then points at the target definition. |
+
+- **Guards** (`spiff_adapter`, `InstanceOperationRefused`): never a signature task (skip), never while a
+  federated step is waiting (its counterpart would be orphaned), never inside a multi-instance task or
+  while the instance runs in parallel branches (more than one ready user task, or a gateway waiting for
+  its other branches). A migration target must be a newer version of the same process family; instances
+  with running subprocesses aren't migrated; every READY/WAITING task must align with a task of the new
+  version.
+- **Claims:** after the change, claims on tasks that are no longer ready are deleted and their
+  org-hierarchy grants revoked (`_modify_instance` in `repository.py`, one read-modify-write with the
+  version check).
+- **Event** `workflow.instance.modified` (audit ledger via `workflow.>`), actor = the administrator:
+  `{operation: skip|send_back|migrate, reason, target, business_key, tasks_before, tasks_after,
+  affected_claimants: [{principal_id, task_id, task_name}], task_id | target_task_id |
+  target_definition_id}`. notification-service notifies each affected claimant (not the administrator
+  themself). `workflow.instance.completed` follows if a skip finished the instance.
+- **UI:** admin-ui "Prozessinstanzen".
+- **Tests:** `test_instance_operations.py` (11) with `fixtures/instance_ops.bpmn` (three sequential steps;
+  the tests derive a version with an added and one with a removed step): capability and reason, skip with
+  a claim released and the event, signature and parallel guards, stale version, maintenance, send back,
+  preview and migration possible and refused, wrong target family.
+
 ## Events
 
 **Published** (stream `workflow`, `ensure_stream=True`):
@@ -341,6 +377,7 @@ A failed `connector_call` (e.g. target unreachable) puts SpiffWorkflow's task in
 | `workflow.instance.completed` | `{business_key}` |
 | `workflow.task.completed` | `{task_id, completed_by}` — since P14-S11 additionally the envelope field `on_behalf_of` set when completion used a delegation (4.4a); `workflow.instance.completed` also carries this field in the same call when status `completed` is reached |
 | `workflow.task.escalated` | `{process_definition_id, business_key, task_name, lane, escalation_email}`, since **P93-S1** also `{lane_binding, lane_members}` (the bound lane's members, resolved through permission-service, at most 200) (P6-S2, fired by the SLA poll loop on a triggered boundary timer; `escalation_email` is an opaque process datum from `initial_data`, see SLA poll loop section) |
+| `workflow.instance.modified` | since **P93-S2**: `{operation, reason, target, business_key, tasks_before, tasks_after, affected_claimants, …}` - see "Changing a Running Instance" |
 | `workflow.federation.inbound_received` | `{business_key, from_installation_id, process_type, notify_email}` (P6-S9, fired by `POST /federation/inbound` after a successful instance start; `notify_email` is an opaque process datum from the sender side's payload, same pattern as `escalation_email`) |
 
 **Consumed:** none — pure producer. `notification-service` (P6-S2) is the first consumer of `workflow.task.escalated` (since P6-S9 also of `workflow.federation.inbound_received`), `case-service` (P6-S3) the first consumer of `workflow.instance.completed` (triggers the completion snapshot of a circulation folder there, see `docs/services/case-service.md`), see per service. No other existing service currently emits anything that workflow-service would need to react to (e.g. the `needs_review` flag from `ocr.completed`, see `docs/services/ocr-service.md` "Open Points") — this integration remains deferred to a later Phase 6 session, presumably together with the generic approval mechanism (P6-S4).

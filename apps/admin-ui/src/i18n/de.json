@@ -89,7 +89,8 @@
     "sensors": "Monitoring-Sensoren",
     "mailboxes": "Postfächer",
     "structure": "Ablagestruktur",
-    "groupUpgrade": "Mit Lizenzerweiterung"
+    "groupUpgrade": "Mit Lizenzerweiterung",
+    "workflowInstances": "Prozessinstanzen"
   },
   "home": {
     "title": "OG Doc Admin",
@@ -1698,5 +1699,56 @@
       "done": "Fertig: {scanned} Versionen gesichtet, {queued} eingereiht, {skipped} bereits geprüft; {pending} Prüfungen stehen noch aus.",
       "failed": "Abgebrochen nach {scanned} Versionen."
     }
+  },
+  "workflowInstances": {
+    "pageTitle": "Prozessinstanzen",
+    "intro": "Laufende Vorgänge administrativ korrigieren: eine offene Aufgabe überspringen, an einen erledigten Schritt zurücksenden oder auf eine neuere Prozessversion migrieren. Jeder Eingriff braucht eine Begründung und wird im Audit-Protokoll festgehalten.",
+    "businessKey": "Vorgang",
+    "search": "Suchen",
+    "process": "Prozess",
+    "startedBy": "Gestartet von",
+    "updatedAt": "Zuletzt geändert",
+    "empty": "Keine laufenden Instanzen.",
+    "loadError": "Instanzen konnten nicht geladen werden.",
+    "actionError": "Der Eingriff ist fehlgeschlagen.",
+    "detailHeading": "Instanzdetails",
+    "reason": "Begründung",
+    "reasonPlaceholder": "Warum wird in den Ablauf eingegriffen?",
+    "reasonHint": "Pflichtfeld (mindestens 3 Zeichen) – gilt für den nächsten Eingriff.",
+    "notRunning": "Die Instanz läuft nicht mehr.",
+    "openTasks": "Offene Aufgaben",
+    "noOpenTasks": "Keine offenen Benutzeraufgaben.",
+    "lane": "Lane",
+    "claimedBy": "beansprucht von",
+    "unclaimed": "nicht beansprucht",
+    "skip": "Überspringen",
+    "sendBackHeading": "Zurücksenden",
+    "noCompleted": "Noch keine erledigte Aufgabe, an die zurückgesendet werden könnte.",
+    "sendBackTarget": "An Aufgabe",
+    "sendBack": "Zurücksenden",
+    "migrateHeading": "Migrieren",
+    "noNewerVersion": "Es gibt keine neuere Version dieses Prozesses.",
+    "migrationTarget": "Zielversion",
+    "preview": "Vorschau",
+    "migrate": "Migrieren",
+    "reportHeading": "Migrationsvorschau",
+    "reportPossible": "Migration möglich – jede aktive Aufgabe hat eine Entsprechung.",
+    "reportImpossible": "Migration nicht möglich.",
+    "diff": {
+      "added": "Neu",
+      "removed": "Entfällt",
+      "changed": "Geändert"
+    },
+    "activeTask": "Aktive Aufgabe",
+    "alignedTo": "Entspricht in neuer Version",
+    "noCounterpart": "keine Entsprechung",
+    "done": {
+      "skip": "„{target}“ übersprungen.",
+      "send_back": "Zurückgesendet an „{target}“.",
+      "migrate": "Migriert auf {target}."
+    },
+    "nowOpen": "Jetzt offen: {tasks}.",
+    "nowCompleted": "Die Instanz ist damit abgeschlossen.",
+    "claimsReleased": "{count} Beanspruchung(en) aufgehoben, Betroffene wurden benachrichtigt."
   }
 }

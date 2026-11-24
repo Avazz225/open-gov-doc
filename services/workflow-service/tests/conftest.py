@@ -118,6 +118,41 @@ async def _grant_users_admin_permission():
         response.raise_for_status()
 
 
+# Administrative instance operations (P93-S2, ADR 0249 Part A c): capability
+# `workflow.instance_modify` from the seeded role
+# `domain-admin-workflow-instances`.
+INSTANCE_ADMIN_PRINCIPAL_ID = "workflow-test-instance-admin"
+
+
+@pytest.fixture
+def instance_admin_headers() -> dict[str, str]:
+    return {"X-DMS-Principal": INSTANCE_ADMIN_PRINCIPAL_ID}
+
+
+@pytest.fixture(scope="session", autouse=True)
+async def _grant_instance_admin_permission():
+    async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL) as client:
+        roles = (await client.get("/roles")).json()
+        role_id = next(r["id"] for r in roles if r["name"] == "domain-admin-workflow-instances")
+        existing = (
+            await client.get(
+                "/role-assignments", params={"principal_id": INSTANCE_ADMIN_PRINCIPAL_ID}
+            )
+        ).json()
+        if any(a["role_id"] == role_id for a in existing):
+            return
+        response = await client.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": INSTANCE_ADMIN_PRINCIPAL_ID,
+                "role_id": role_id,
+                "resource_id": "root",
+            },
+        )
+        response.raise_for_status()
+
+
 @pytest.fixture(autouse=True)
 def _default_licensed(monkeypatch):
     """Demo-Modus/Sperrverhalten (Konzept 9.3, P9-S2) greift real gegen den

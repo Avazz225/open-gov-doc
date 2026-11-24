@@ -95,6 +95,12 @@ export const GROUPS: NavGroup[] = [
         requiresCapability: "admin.document_config",
       },
       { href: "/processing-failures/", labelKey: "nav.processingFailures" },
+      // P93-S2 (ADR 0249): skip / send back / migrate running instances.
+      {
+        href: "/workflow-instances/",
+        labelKey: "nav.workflowInstances",
+        requiresCapability: "workflow.instance_modify",
+      },
       // P88-S4b (ADR 0244): mail-connector's mailboxes, formerly an env list.
       { href: "/mailboxes/", labelKey: "nav.mailboxes", requiresCapability: "admin.mail_config" },
       {

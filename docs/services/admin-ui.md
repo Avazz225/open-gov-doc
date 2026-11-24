@@ -697,6 +697,23 @@ now wraps.
 - **Tests:** `incoming-signature-settings.test.tsx` (6); e2e `incoming-signature-settings.spec.ts`
   (read-only, grants `domain-admin-signature` for its duration; no overflow at 1400/768/390).
 
+## Process Instances (P93-S2, [ADR 0249](../adr/0249-changing-running-processes-and-lane-semantics.md))
+
+`/workflow-instances/` ("Prozessinstanzen", group "Verarbeitung"), visible with
+`workflow.instance_modify`:
+- **List:** running instances, filter by case (business key) applied on "Suchen", with process and
+  version. The overview of process definitions only has each family's newest version; an instance still
+  on an older one is resolved by id.
+- **Detail:** one mandatory "Begründung" for the next intervention; open tasks (lane, claimed by) with
+  "Überspringen"; "Zurücksenden" to a completed task; "Migrieren" to a newer version of the same family
+  (from the family's history, `?name=`) - "Vorschau" shows the diff (Neu / Entfällt / Geändert, each
+  active task and its counterpart) and "Migrieren" stays disabled until the preview says possible.
+- Every call sends `expected_version`; on a `409` the detail reloads. The result line names the target,
+  what is open now and how many claims were released.
+- **Tests:** `workflow-instances.test.tsx` (6); e2e `workflow-instances.spec.ts` (two versions uploaded,
+  migrate after a positive preview, send back, skip; grants `domain-admin-workflow-instances` and
+  `domain-admin-config` for its duration; no overflow at 1400/768/390).
+
 ## Licence Limits and Extension Hints (P91-S6)
 
 **Licence page** (`/license/`, `admin.license`):

@@ -500,6 +500,14 @@ DOMAIN_ADMIN_ROLES: list[tuple[str, str, list[str]]] = [
         "Ordnerdienst-Konfiguration",
         ["admin.folder_config"],
     ),
+    # P93-S2 (ADR 0249): skipping a step, sending back, or moving a running
+    # process instance to a newer definition version - an intervention in
+    # running work, separate from defining processes ("admin.object_config").
+    (
+        "domain-admin-workflow-instances",
+        "Laufende Prozessinstanzen ändern",
+        ["workflow.instance_modify"],
+    ),
 ]
 
 

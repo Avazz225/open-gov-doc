@@ -56,10 +56,15 @@ from workflow_service.schemas import (
     BusinessCalendarCreate,
     BusinessCalendarOut,
     BusinessCalendarUpdate,
+    CompletedTaskOut,
     DmnDefinitionDetailOut,
     DmnDefinitionOut,
     FederationConfigOut,
     FederationConfigUpdate,
+    InstanceModificationOut,
+    MigrateRequest,
+    MigrationPreviewRequest,
+    MigrationReportOut,
     OrgHierarchyGrantRequest,
     OrgHierarchyGrantResultOut,
     ProcessDefinitionDetailOut,
@@ -69,6 +74,8 @@ from workflow_service.schemas import (
     ProcessInstanceOut,
     ReadyTaskOut,
     ReadyTaskWithInstanceOut,
+    SendBackRequest,
+    SkipTaskRequest,
     TaskClaimCreate,
     TaskClaimOut,
     TaskCompleteRequest,
@@ -2181,6 +2188,237 @@ async def complete_task(
         await session.commit()
     await _revoke_claim_grants(delegation_ids)
     return instance
+
+
+# --- Administrative instance operations (P93-S2, ADR 0249 Part A c) -------
+
+
+async def _require_instance_modify(x_dms_principal: str) -> None:
+    """Changing a running instance's course is an administrative act - its
+    own capability (seeded role `domain-admin-workflow-instances`), not
+    `workflow.write`, which every user holds."""
+    allowed = bool(x_dms_principal) and await app.state.permission_client.has_permission(
+        x_dms_principal, "workflow.instance_modify"
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Fehlende Berechtigung 'workflow.instance_modify'",
+        )
+
+
+async def _run_instance_operation(
+    session: AsyncSession,
+    instance_id: str,
+    operation: str,
+    reason: str,
+    actor: str,
+    call,
+    extra: dict | None = None,
+) -> InstanceModificationOut:
+    """Shared error mapping, commit, grant cleanup and events for skip /
+    send back / migrate."""
+    try:
+        result: repository.InstanceModification = await call()
+    except repository.NotFoundError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (repository.InstanceNotRunningError, repository.ConcurrentModificationError) as exc:
+        await session.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (spiff_adapter.InstanceOperationRefused, repository.InvalidBpmnError) as exc:
+        await session.rollback()
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception:
+        # Same resumability rule as `complete_task`: an automatic step that
+        # fails after the change leaves a retryable ERROR state worth keeping.
+        await session.commit()
+        raise
+    await session.commit()
+    for released in result.released_claims:
+        await _revoke_claim_grants(released.delegation_ids)
+    instance = result.instance
+    await publish_event(
+        "workflow.instance.modified",
+        subject=instance_id,
+        payload={
+            "operation": operation,
+            "reason": reason,
+            "target": result.target_name,
+            "business_key": instance.business_key,
+            "tasks_before": result.tasks_before,
+            "tasks_after": result.tasks_after,
+            "affected_claimants": [
+                {"principal_id": c.principal_id, "task_id": c.task_id, "task_name": c.task_name}
+                for c in result.released_claims
+                if c.principal_id != actor
+            ],
+            **(extra or {}),
+        },
+        actor=actor,
+    )
+    if instance.status == "completed":
+        await publish_event(
+            "workflow.instance.completed",
+            subject=instance_id,
+            payload={"business_key": instance.business_key},
+            actor=actor,
+        )
+    await _dispatch_pending_federation_tasks(session, instance_id)
+    await session.commit()
+    return InstanceModificationOut(
+        instance=ProcessInstanceOut.model_validate(instance),
+        operation=operation,
+        target=result.target_name,
+        tasks_before=result.tasks_before,
+        tasks_after=result.tasks_after,
+        released_claims=[c.principal_id for c in result.released_claims],
+    )
+
+
+@app.post(
+    "/instances/{instance_id}/tasks/{task_id}/skip",
+    response_model=InstanceModificationOut,
+    dependencies=[Depends(_license_gate("write"))],
+)
+async def skip_task(
+    instance_id: str,
+    task_id: str,
+    payload: SkipTaskRequest,
+    x_dms_maintenance_active: str = Header(default="false"),
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> InstanceModificationOut:
+    """Completes a ready user task administratively (never a signature task,
+    a federated step or one inside a parallel/multi-instance section)."""
+    await _reject_during_maintenance(x_dms_maintenance_active)
+    await _require_instance_modify(x_dms_principal)
+    return await _run_instance_operation(
+        session,
+        instance_id,
+        "skip",
+        payload.reason,
+        x_dms_principal,
+        lambda: repository.skip_task(
+            session,
+            instance_id,
+            task_id,
+            actor=x_dms_principal,
+            reason=payload.reason,
+            expected_version=payload.expected_version,
+        ),
+        extra={"task_id": task_id},
+    )
+
+
+@app.get(
+    "/instances/{instance_id}/completed-tasks",
+    response_model=list[CompletedTaskOut],
+    dependencies=[Depends(_license_gate("read"))],
+)
+async def list_completed_tasks(
+    instance_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> list[CompletedTaskOut]:
+    """Targets for "send back"."""
+    await _require_instance_modify(x_dms_principal)
+    try:
+        tasks = await repository.completed_tasks(session, instance_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return [CompletedTaskOut(**t.__dict__) for t in tasks]
+
+
+@app.post(
+    "/instances/{instance_id}/send-back",
+    response_model=InstanceModificationOut,
+    dependencies=[Depends(_license_gate("write"))],
+)
+async def send_back_instance(
+    instance_id: str,
+    payload: SendBackRequest,
+    x_dms_maintenance_active: str = Header(default="false"),
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> InstanceModificationOut:
+    """Resets the instance to a completed user task; later steps are undone
+    and their claims released."""
+    await _reject_during_maintenance(x_dms_maintenance_active)
+    await _require_instance_modify(x_dms_principal)
+    return await _run_instance_operation(
+        session,
+        instance_id,
+        "send_back",
+        payload.reason,
+        x_dms_principal,
+        lambda: repository.send_back(
+            session,
+            instance_id,
+            payload.target_task_id,
+            expected_version=payload.expected_version,
+        ),
+        extra={"target_task_id": payload.target_task_id},
+    )
+
+
+@app.post(
+    "/instances/{instance_id}/migration-preview",
+    response_model=MigrationReportOut,
+    dependencies=[Depends(_license_gate("read"))],
+)
+async def preview_migration(
+    instance_id: str,
+    payload: MigrationPreviewRequest,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> MigrationReportOut:
+    """Dry run of a migration: what is removed/added/changed and whether
+    every active task finds its counterpart. Changes nothing."""
+    await _require_instance_modify(x_dms_principal)
+    try:
+        report = await repository.migration_preview(
+            session, instance_id, payload.target_definition_id
+        )
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except repository.InstanceNotRunningError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (spiff_adapter.InstanceOperationRefused, repository.InvalidBpmnError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return MigrationReportOut(**report.__dict__)
+
+
+@app.post(
+    "/instances/{instance_id}/migrate",
+    response_model=InstanceModificationOut,
+    dependencies=[Depends(_license_gate("write"))],
+)
+async def migrate_instance(
+    instance_id: str,
+    payload: MigrateRequest,
+    x_dms_maintenance_active: str = Header(default="false"),
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> InstanceModificationOut:
+    """Moves the instance to a newer version of its process; the dry run is
+    repeated on the live state and must pass."""
+    await _reject_during_maintenance(x_dms_maintenance_active)
+    await _require_instance_modify(x_dms_principal)
+    return await _run_instance_operation(
+        session,
+        instance_id,
+        "migrate",
+        payload.reason,
+        x_dms_principal,
+        lambda: repository.migrate_instance(
+            session,
+            instance_id,
+            payload.target_definition_id,
+            expected_version=payload.expected_version,
+        ),
+        extra={"target_definition_id": payload.target_definition_id},
+    )
 
 
 @app.post(

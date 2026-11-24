@@ -587,3 +587,213 @@ def parse_lane_bindings(bpmn_xml: str) -> dict[str, dict[str, str]]:
             raise BpmnParseError(f"Lane {name!r} ist mehrfach unterschiedlich gebunden")
         bindings[name] = binding
     return bindings
+
+
+# --- Operations on running instances (P93-S2, ADR 0249 Part A, c) ----------
+#
+# Three supported SpiffWorkflow operations, each behind guards that keep them
+# explainable: skip a READY manual task, send an instance back to a completed
+# manual task (`reset_from_task_id`), and move it to a newer definition
+# version (`migrate_workflow`, only after a diff that aligns every active
+# task). Each raises `InstanceOperationRefused` with a reason in plain German.
+
+FEDERATED_TASK_TYPES = ("federated", "federated_return")
+
+
+class InstanceOperationRefused(Exception):
+    pass
+
+
+@dataclass
+class CompletedTaskInfo:
+    id: str
+    name: str
+    lane: str | None
+    completed_at: datetime | None
+
+
+def _task_name(task: Task) -> str:
+    return task.task_spec.bpmn_name or task.task_spec.name
+
+
+def _active_manual_tasks(wf: BpmnWorkflow) -> list[Task]:
+    return list(wf.get_tasks(state=TaskState.READY | TaskState.STARTED, manual=True))
+
+
+def _in_multi_instance(task: Task) -> bool:
+    from SpiffWorkflow.bpmn.specs.mixins.multiinstance_task import LoopTask
+
+    current = task.parent
+    while current is not None:
+        if isinstance(current.task_spec, LoopTask):
+            return True
+        current = current.parent
+    return False
+
+
+def _waiting_join(wf: BpmnWorkflow) -> bool:
+    """A gateway still waiting for its other branches - the instance is in a
+    parallel section. Boundary timers wait too, but they aren't gateways."""
+    return any(
+        "Gateway" in type(t.task_spec).__name__ for t in wf.get_tasks(state=TaskState.WAITING)
+    )
+
+
+def _refuse_parallel(wf: BpmnWorkflow, task: Task | None) -> None:
+    if task is not None and _in_multi_instance(task):
+        raise InstanceOperationRefused(
+            "Die Aufgabe gehört zu einer Mehrfachinstanz - dafür gibt es keine eindeutige "
+            "Einzelaufgaben-Bedeutung"
+        )
+    if len(_active_manual_tasks(wf)) > 1 or _waiting_join(wf):
+        raise InstanceOperationRefused(
+            "Die Instanz läuft gerade in parallelen Zweigen - dort ist der Eingriff nicht eindeutig"
+        )
+
+
+def _refuse_federated(tasks: list[Task]) -> None:
+    for task in tasks:
+        extensions = getattr(task.task_spec, "extensions", None) or {}
+        if extensions.get("taskType") in FEDERATED_TASK_TYPES:
+            raise InstanceOperationRefused(
+                f"Föderierter Schritt {_task_name(task)!r} wartet auf eine andere Installation - "
+                "die Gegenseite würde verwaist"
+            )
+
+
+def skip_task(wf: BpmnWorkflow, task_id: str, marker: dict[str, Any]) -> str:
+    """Completes a READY manual task administratively. `marker` is stored in
+    the task data under `dms_skipped` (who, why) so the history shows it.
+    Returns the skipped task's name. Never for a signature task (a required
+    signature isn't an admin's to waive), a federated step, or inside a
+    multi-instance/parallel section."""
+    task = find_ready_task(wf, task_id)
+    if task is None:
+        raise InstanceOperationRefused("Diese Aufgabe ist nicht (mehr) offen")
+    extensions = getattr(task.task_spec, "extensions", None) or {}
+    if extensions.get("taskType") == "signature":
+        raise InstanceOperationRefused(
+            "Eine Signaturaufgabe kann nicht übersprungen werden - die Signatur ist Pflicht"
+        )
+    _refuse_federated([task])
+    _refuse_parallel(wf, task)
+    task.set_data(dms_skipped=marker)
+    task.run()
+    return _task_name(task)
+
+
+def completed_manual_tasks(wf: BpmnWorkflow) -> list[CompletedTaskInfo]:
+    """Completed manual tasks, oldest first - the targets for "send back"."""
+    tasks = [
+        t
+        for t in wf.get_tasks(state=TaskState.COMPLETED, manual=True)
+        if (getattr(t.task_spec, "extensions", None) or {}).get("taskType")
+        not in FEDERATED_TASK_TYPES
+    ]
+    tasks.sort(key=lambda t: t.last_state_change or 0)
+    return [
+        CompletedTaskInfo(
+            id=str(t.id),
+            name=_task_name(t),
+            lane=getattr(t.task_spec, "lane", None),
+            completed_at=(
+                datetime.fromtimestamp(t.last_state_change, UTC) if t.last_state_change else None
+            ),
+        )
+        for t in tasks
+    ]
+
+
+def send_back(wf: BpmnWorkflow, target_task_id: str) -> tuple[str, list[str]]:
+    """Resets the instance to a completed manual task: it is READY again and
+    everything after it is removed. Returns the target's name and the ids of
+    the active tasks that were removed (their claims must be released)."""
+    target = next(
+        (
+            t
+            for t in wf.get_tasks(state=TaskState.COMPLETED, manual=True)
+            if str(t.id) == target_task_id
+        ),
+        None,
+    )
+    if target is None:
+        raise InstanceOperationRefused("Ziel ist keine abgeschlossene Aufgabe dieser Instanz")
+    active = _active_manual_tasks(wf)
+    _refuse_federated(active + list(wf.get_tasks(state=TaskState.WAITING)))
+    _refuse_parallel(wf, target)
+    removed = [str(t.id) for t in active]
+    wf.reset_from_task_id(target.id)
+    return _task_name(target), removed
+
+
+@dataclass
+class MigrationReport:
+    """What moving an instance to another spec would do."""
+
+    possible: bool
+    reasons: list[str] = field(default_factory=list)
+    removed: list[str] = field(default_factory=list)  # task names gone in the new version
+    added: list[str] = field(default_factory=list)  # new task names
+    changed: list[str] = field(default_factory=list)  # task names with changed attributes
+    active_tasks: list[dict[str, Any]] = field(default_factory=list)  # name, aligned_to
+
+
+def _spec_label(spec: Any) -> str:
+    return getattr(spec, "bpmn_name", None) or spec.name
+
+
+def _diff(wf: BpmnWorkflow, new_spec: Any):
+    from SpiffWorkflow.bpmn.util.diff import diff_workflow
+
+    return diff_workflow(_SERIALIZER.registry, wf, new_spec, {})
+
+
+def _named(specs) -> list[str]:
+    """Labels of the modelled elements among `specs` (skips the engine's own
+    helper specs such as `Start`/`End`, which have no BPMN id)."""
+    return sorted(_spec_label(s) for s in specs if getattr(s, "bpmn_id", None))
+
+
+def migration_report(wf: BpmnWorkflow, new_spec: Any) -> MigrationReport:
+    """Dry run: every READY/WAITING task must align with a task of the new
+    version, and subprocesses aren't supported."""
+    from SpiffWorkflow.bpmn.util.diff import SpecDiff
+
+    if wf.subprocesses:
+        return MigrationReport(
+            possible=False, reasons=["Instanzen mit laufenden Unterprozessen werden nicht migriert"]
+        )
+    top_diff, _sub = _diff(wf, new_spec)
+    spec_diff = SpecDiff(_SERIALIZER.registry, wf.spec, new_spec)
+    report = MigrationReport(
+        possible=True,
+        removed=_named(spec_diff.removed),
+        added=_named(spec_diff.added),
+        changed=_named(spec_diff.changed),
+    )
+    for task in wf.get_tasks(state=TaskState.READY | TaskState.WAITING, skip_subprocesses=True):
+        if not getattr(task.task_spec, "bpmn_id", None):
+            continue
+        aligned = top_diff.alignment.get(task)
+        report.active_tasks.append(
+            {
+                "name": _task_name(task),
+                "state": TaskState.get_name(task.state),
+                "aligned_to": _spec_label(aligned) if aligned is not None else None,
+            }
+        )
+        if aligned is None:
+            report.possible = False
+            report.reasons.append(
+                f"Aktive Aufgabe {_task_name(task)!r} hat in der neuen Version keine Entsprechung"
+            )
+    return report
+
+
+def migrate(wf: BpmnWorkflow, new_spec: Any) -> None:
+    """Moves the instance to `new_spec`; only call after `migration_report`
+    said it is possible. Active tasks are re-predicted."""
+    from SpiffWorkflow.bpmn.util.diff import migrate_workflow
+
+    top_diff, _sub = _diff(wf, new_spec)
+    migrate_workflow(top_diff, wf, new_spec)

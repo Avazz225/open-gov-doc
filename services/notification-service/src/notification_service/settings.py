@@ -66,6 +66,10 @@ class Settings(BaseServiceSettings):
         # name (see `_SHARED_STREAM_DURABLE_OVERRIDES`), same reasoning as
         # `workflow.federation.inbound_received` above.
         "workflow.task_claim.abandoned",
+        # P93-S2 (ADR 0249 Part A c): administrative instance changes
+        # (skip / send back / migrate) - notice to each affected claimant.
+        # Own durable name, see `_SHARED_STREAM_DURABLE_OVERRIDES`.
+        "workflow.instance.modified",
         # Virus-hit notification to the uploader (10.3, Post-Roadmap Phase
         # 44 Session 4) - `virus-scan-service` already published this
         # unconditionally (both "clean" and "infected") since it was

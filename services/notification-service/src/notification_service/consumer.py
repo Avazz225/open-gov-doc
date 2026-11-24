@@ -30,6 +30,8 @@ _SHARED_STREAM_DURABLE_OVERRIDES: dict[str, str] = {
     # and `workflow.federation.inbound_received`), Post-Roadmap Phase 35
     # Session 3 (ADR 0145) - same reasoning as those two above.
     "workflow.task_claim.abandoned": "notification-service-task-claim-abandoned",
+    # P93-S2 (ADR 0249 Part A c): administrative instance changes.
+    "workflow.instance.modified": "notification-service-instance-modified",
     # P71-S1: third/fourth subjects on the "document" stream.
     "document.lock.force_released": "notification-service-lock-force-released",
     "document.force_unlock.failed": "notification-service-force-unlock-failed",
@@ -117,6 +119,11 @@ def make_handler(
             return
         if event.event_type == "workflow.task_claim.abandoned":
             await _handle_task_claim_abandoned(
+                session_factory, settings, publish_event, rate_limiter, event
+            )
+            return
+        if event.event_type == "workflow.instance.modified":
+            await _handle_instance_modified(
                 session_factory, settings, publish_event, rate_limiter, event
             )
             return
@@ -880,6 +887,75 @@ async def _handle_task_claim_abandoned(
         )
         await session.commit()
         await publish_notification_result(publish_event, notification)
+
+
+_INSTANCE_OPERATION_LABELS = {
+    "skip": "übersprungen",
+    "send_back": "zurückgesendet",
+    "migrate": "auf eine neue Prozessversion migriert",
+}
+
+
+async def _handle_instance_modified(
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    publish_event: Callable[[str, str, dict], Awaitable[None]],
+    rate_limiter: RecipientRateLimiter,
+    event: Event,
+) -> None:
+    """Administrative instance change (P93-S2, ADR 0249 Part A c): an
+    administrator skipped a step, sent the instance back or migrated it.
+    Everyone whose claim was released by the change gets one in-app notice
+    (same shape as `_handle_task_claim_abandoned`); without affected
+    claimants there is nobody to tell - the audit ledger keeps the record."""
+    data = event.payload
+    claimants = data.get("affected_claimants") or []
+    if not claimants:
+        return
+    operation = data.get("operation", "?")
+    label = _INSTANCE_OPERATION_LABELS.get(operation, operation)
+    reason = data.get("reason", "")
+    business_key = data.get("business_key")
+    link = build_resource_link(settings.reviewer_ui_public_base_url, "instance", event.subject)
+
+    for claimant in claimants:
+        principal_id = claimant.get("principal_id")
+        if not principal_id:
+            continue
+        task_name = claimant.get("task_name", "?")
+        fallback_subject = f"Vorgang geändert: {task_name}"
+        fallback_body = (
+            f"Der Vorgang {event.subject} (business_key={business_key!r}) wurde "
+            f"administrativ {label}. Ihre Beanspruchung des Tasks {task_name!r} "
+            f"wurde dabei aufgehoben.\n\nBegründung: {reason}"
+        )
+        if link:
+            fallback_body += f"\n\nVorgang öffnen: {link}"
+        async with session_factory() as session:
+            subject, body = await _render_or_fallback(
+                session,
+                use_case="workflow.instance.modified",
+                recipient=principal_id,
+                fallback_subject=fallback_subject,
+                fallback_body=fallback_body,
+                task_name=task_name,
+                instance_id=event.subject,
+                business_key=business_key,
+                operation=operation,
+                reason=reason,
+                link=link or "",
+            )
+            notification = await repository.create_and_send(
+                session,
+                settings,
+                channel="in_app",
+                recipient=principal_id,
+                subject=subject,
+                body=body,
+                rate_limiter=rate_limiter,
+            )
+            await session.commit()
+            await publish_notification_result(publish_event, notification)
 
 
 async def _handle_superuser_activated(

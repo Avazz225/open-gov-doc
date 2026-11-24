@@ -426,6 +426,11 @@ Two read-only endpoints for workflow-service's lanes:
   holders (direct user assignments plus members of assigned groups; "everyone" has no member list).
   `404` unknown group/role, `422` unless exactly one is given.
 
+## Instance Operations Role (P93-S2)
+
+Seeded domain-admin role `domain-admin-workflow-instances` ("Laufende Prozessinstanzen ändern") with the
+capability `workflow.instance_modify` - workflow-service's skip / send back / migrate (ADR 0249).
+
 ## Open Points
 
 - ~~Real, custom group membership continues to go unresolved~~ — **admin-defined groups with real membership resolution added in Post-Roadmap Phase 22 Session 2**, see "Admin-Creatable Groups" above. **Reworded during Phase 65+'s gap-analysis round** (the "planned as a standalone Phase 24 Session 2" framing was stale — that phase shipped long ago and was extended twice more, ADR 0153/ADR 0171): AD group → internal **role** mapping is real and live (since **P24-S2**, [ADR 0093](../adr/0093-ad-group-role-mapping-simple-1to1-scope-cut.md), extended by ADR 0153/0171), but it maps straight to roles, bypassing this service's own `Group`/`GroupMembership` model entirely — an AD group membership change does NOT automatically populate/sync an admin-defined `Group`'s membership here. That narrower gap remains genuinely open, no concrete trigger identified.

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ProcessDefinitionOut(BaseModel):
@@ -69,6 +69,9 @@ class ProcessInstanceOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None
+    # Optimistic-concurrency token (ADR 0185); the admin instance operations
+    # (P93-S2) take it back as `expected_version`.
+    workflow_version: int | None = None
 
     model_config = {"from_attributes": True}
 
@@ -222,3 +225,52 @@ class BusinessCalendarUpdate(BaseModel):
     name: str
     non_working_dates: list[str] = []
     is_default: bool = False
+
+
+# --- Administrative instance operations (P93-S2, ADR 0249 Part A c) -------
+
+
+class _InstanceOperationBase(BaseModel):
+    reason: str = Field(min_length=3, max_length=2000)
+    expected_version: int | None = None
+
+
+class SkipTaskRequest(_InstanceOperationBase):
+    pass
+
+
+class SendBackRequest(_InstanceOperationBase):
+    target_task_id: str = Field(min_length=1)
+
+
+class MigrateRequest(_InstanceOperationBase):
+    target_definition_id: int
+
+
+class MigrationPreviewRequest(BaseModel):
+    target_definition_id: int
+
+
+class CompletedTaskOut(BaseModel):
+    id: str
+    name: str
+    lane: str | None
+    completed_at: datetime | None
+
+
+class MigrationReportOut(BaseModel):
+    possible: bool
+    reasons: list[str]
+    removed: list[str]
+    added: list[str]
+    changed: list[str]
+    active_tasks: list[dict]
+
+
+class InstanceModificationOut(BaseModel):
+    instance: ProcessInstanceOut
+    operation: str
+    target: str
+    tasks_before: list[str]
+    tasks_after: list[str]
+    released_claims: list[str]

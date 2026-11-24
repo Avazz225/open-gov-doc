@@ -106,6 +106,11 @@ EMAIL_TEMPLATE_USE_CASES: list[dict[str, object]] = [
         "placeholders": ["task_name", "instance_id", "business_key", "principal_id", "link"],
     },
     {
+        "use_case": "workflow.instance.modified",
+        "description": "Vorgang administrativ geändert, Beanspruchung aufgehoben (seit P93-S2)",
+        "placeholders": ["task_name", "instance_id", "business_key", "operation", "reason", "link"],
+    },
+    {
         "use_case": "document.lock.force_released",
         "description": "Zwangsweise Sperrenfreigabe durchgeführt (4.2/4.3, neu seit P71-S1)",
         "placeholders": ["document_id", "original_locked_by", "released_by", "reason", "link"],

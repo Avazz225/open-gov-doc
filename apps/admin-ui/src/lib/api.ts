@@ -4019,3 +4019,190 @@ export async function startBackfill(
   );
   return response.json();
 }
+
+// Administrative instance operations (P93-S2, ADR 0249 Part A c): skip a
+// ready task, send an instance back to a completed task, migrate it to a
+// newer version of its process. All need `workflow.instance_modify`.
+
+export interface WorkflowInstance {
+  id: string;
+  process_definition_id: number;
+  business_key: string | null;
+  status: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+  workflow_version: number | null;
+}
+
+export interface WorkflowProcessDefinition {
+  id: number;
+  name: string;
+  version: number;
+}
+
+export interface WorkflowReadyTask {
+  id: string;
+  name: string;
+  lane: string | null;
+  extensions: Record<string, string>;
+  claimed_by: string | null;
+}
+
+export interface WorkflowCompletedTask {
+  id: string;
+  name: string;
+  lane: string | null;
+  completed_at: string | null;
+}
+
+export interface MigrationReport {
+  possible: boolean;
+  reasons: string[];
+  removed: string[];
+  added: string[];
+  changed: string[];
+  active_tasks: { name: string; state: string; aligned_to: string | null }[];
+}
+
+export interface InstanceModification {
+  instance: WorkflowInstance;
+  operation: "skip" | "send_back" | "migrate";
+  target: string;
+  tasks_before: string[];
+  tasks_after: string[];
+  released_claims: string[];
+}
+
+const jsonPost = (body: unknown): RequestInit => ({
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(body),
+});
+
+export async function listWorkflowInstances(
+  token: string,
+  params: { status?: string; businessKey?: string; limit?: number } = {}
+): Promise<WorkflowInstance[]> {
+  const query = new URLSearchParams();
+  if (params.status) query.set("status", params.status);
+  if (params.businessKey) query.set("business_key", params.businessKey);
+  query.set("limit", String(params.limit ?? 100));
+  const response = await request("workflow-service", `instances?${query}`, {}, token);
+  return response.json();
+}
+
+export async function getWorkflowInstance(token: string, id: string): Promise<WorkflowInstance> {
+  const response = await request("workflow-service", `instances/${id}`, {}, token);
+  return response.json();
+}
+
+// Without `name`: only the newest version per process family. With `name`:
+// that family's whole history, newest first.
+export async function listWorkflowProcessDefinitions(
+  token: string,
+  name?: string
+): Promise<WorkflowProcessDefinition[]> {
+  const path = name
+    ? `process-definitions?name=${encodeURIComponent(name)}`
+    : "process-definitions";
+  const response = await request("workflow-service", path, {}, token);
+  return response.json();
+}
+
+export async function getWorkflowProcessDefinition(
+  token: string,
+  id: number
+): Promise<WorkflowProcessDefinition> {
+  const response = await request("workflow-service", `process-definitions/${id}`, {}, token);
+  const { id: defId, name, version } = await response.json();
+  return { id: defId, name, version };
+}
+
+export async function listWorkflowInstanceTasks(
+  token: string,
+  instanceId: string
+): Promise<WorkflowReadyTask[]> {
+  const response = await request("workflow-service", `instances/${instanceId}/tasks`, {}, token);
+  return response.json();
+}
+
+export async function listWorkflowCompletedTasks(
+  token: string,
+  instanceId: string
+): Promise<WorkflowCompletedTask[]> {
+  const response = await request(
+    "workflow-service",
+    `instances/${instanceId}/completed-tasks`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function skipWorkflowTask(
+  token: string,
+  instanceId: string,
+  taskId: string,
+  reason: string,
+  expectedVersion: number | null
+): Promise<InstanceModification> {
+  const response = await request(
+    "workflow-service",
+    `instances/${instanceId}/tasks/${taskId}/skip`,
+    jsonPost({ reason, expected_version: expectedVersion }),
+    token
+  );
+  return response.json();
+}
+
+export async function sendBackWorkflowInstance(
+  token: string,
+  instanceId: string,
+  targetTaskId: string,
+  reason: string,
+  expectedVersion: number | null
+): Promise<InstanceModification> {
+  const response = await request(
+    "workflow-service",
+    `instances/${instanceId}/send-back`,
+    jsonPost({ target_task_id: targetTaskId, reason, expected_version: expectedVersion }),
+    token
+  );
+  return response.json();
+}
+
+export async function previewWorkflowMigration(
+  token: string,
+  instanceId: string,
+  targetDefinitionId: number
+): Promise<MigrationReport> {
+  const response = await request(
+    "workflow-service",
+    `instances/${instanceId}/migration-preview`,
+    jsonPost({ target_definition_id: targetDefinitionId }),
+    token
+  );
+  return response.json();
+}
+
+export async function migrateWorkflowInstance(
+  token: string,
+  instanceId: string,
+  targetDefinitionId: number,
+  reason: string,
+  expectedVersion: number | null
+): Promise<InstanceModification> {
+  const response = await request(
+    "workflow-service",
+    `instances/${instanceId}/migrate`,
+    jsonPost({
+      target_definition_id: targetDefinitionId,
+      reason,
+      expected_version: expectedVersion,
+    }),
+    token
+  );
+  return response.json();
+}

@@ -89,7 +89,8 @@
     "sensors": "Monitoring sensors",
     "mailboxes": "Mailboxes",
     "structure": "Filing structure",
-    "groupUpgrade": "With a licence extension"
+    "groupUpgrade": "With a licence extension",
+    "workflowInstances": "Process instances"
   },
   "home": {
     "title": "OG Doc Admin",
@@ -1698,5 +1699,56 @@
       "done": "Done: {scanned} versions seen, {queued} queued, {skipped} already checked; {pending} checks still pending.",
       "failed": "Stopped after {scanned} versions."
     }
+  },
+  "workflowInstances": {
+    "pageTitle": "Process instances",
+    "intro": "Correct running cases administratively: skip an open task, send the case back to a completed step, or migrate it to a newer process version. Every intervention needs a reason and is recorded in the audit log.",
+    "businessKey": "Case",
+    "search": "Search",
+    "process": "Process",
+    "startedBy": "Started by",
+    "updatedAt": "Last changed",
+    "empty": "No running instances.",
+    "loadError": "Instances could not be loaded.",
+    "actionError": "The intervention failed.",
+    "detailHeading": "Instance details",
+    "reason": "Reason",
+    "reasonPlaceholder": "Why are you intervening in this case?",
+    "reasonHint": "Required (at least 3 characters) – applies to the next intervention.",
+    "notRunning": "The instance is no longer running.",
+    "openTasks": "Open tasks",
+    "noOpenTasks": "No open user tasks.",
+    "lane": "Lane",
+    "claimedBy": "claimed by",
+    "unclaimed": "unclaimed",
+    "skip": "Skip",
+    "sendBackHeading": "Send back",
+    "noCompleted": "No completed task to send the case back to yet.",
+    "sendBackTarget": "To task",
+    "sendBack": "Send back",
+    "migrateHeading": "Migrate",
+    "noNewerVersion": "There is no newer version of this process.",
+    "migrationTarget": "Target version",
+    "preview": "Preview",
+    "migrate": "Migrate",
+    "reportHeading": "Migration preview",
+    "reportPossible": "Migration possible – every active task has a counterpart.",
+    "reportImpossible": "Migration not possible.",
+    "diff": {
+      "added": "Added",
+      "removed": "Removed",
+      "changed": "Changed"
+    },
+    "activeTask": "Active task",
+    "alignedTo": "Counterpart in new version",
+    "noCounterpart": "no counterpart",
+    "done": {
+      "skip": "Skipped “{target}”.",
+      "send_back": "Sent back to “{target}”.",
+      "migrate": "Migrated to {target}."
+    },
+    "nowOpen": "Now open: {tasks}.",
+    "nowCompleted": "The instance is now completed.",
+    "claimsReleased": "{count} claim(s) released, the people affected were notified."
   }
 }
