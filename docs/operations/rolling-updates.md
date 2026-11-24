@@ -105,12 +105,25 @@ without a database schema/storage format change. For schema changes, the
   additional idempotent `ALTER TABLE` line in the respective `main.py`.
 - **Contract**: a second, *downstream* migration step removes
   the no-longer-needed old structures, but **only after all
-  instances have been updated and the old ones are fully drained**. So far
-  no table in this project has needed a contract step
-  (every additive column is still in use to date) — should a column
-  genuinely become superfluous in the future, removing it belongs as its own,
-  named step in the respective session, not in the same step
-  as the expansion.
+  instances have been updated and the old ones are fully drained**.
+  ~~So far no table in this project has needed a contract step~~ — **out of
+  date (found in P94-S4, [ADR 0260](../adr/0260-database-schema-migrations-scoping.md))**:
+  seven contract steps exist (three `DROP COLUMN`, three `DROP CONSTRAINT`,
+  one `DROP INDEX`, e.g. `workflow.federation_identity.api_key`). They ran in
+  the same release that stopped using the structure, on the new version's
+  first start - harmless only because the structures were already unused in
+  the release before. **Rule until ADR 0260's runner exists:** a drop,
+  `NOT NULL` or type change goes into a *later* release than the one that
+  stopped using it, named in that session and here; new columns stay
+  nullable or get a constant default; backfills are guarded (run only when
+  the column was just added).
+- **Measured lock cost (P94-S4, ADR 0260):** PostgreSQL takes `ACCESS
+  EXCLUSIVE` before checking `IF NOT EXISTS`, so every start's no-op
+  `ADD COLUMN IF NOT EXISTS` waits behind any open transaction on that
+  table, and every request after it queues behind the waiting ALTER (3 s
+  wait and a 4 s `SELECT` in the test). Avoid starting new instances while
+  long transactions (exports, reports) run; ADR 0260 proposes a journal so
+  applied steps aren't re-issued at all.
 - The same principle applies analogously to storage format changes (3.6) —
   not yet encountered in practice.
 - No claim is made that *every* structural change is

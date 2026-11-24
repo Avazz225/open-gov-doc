@@ -4827,6 +4827,20 @@ explain lanes and route changes. Design and reasons: [ADR 0249](docs/adr/0249-ch
   formalizing the current pattern, or accepting it, judged against fleet rolling updates and the
   Helm upgrade path. No code. Phase-close regression for Phase 94. (`graphify update .` moved to the end
   of Phase 96.)
+  - **Result** ([ADR 0260](docs/adr/0260-database-schema-migrations-scoping.md)):
+    - Inventory: 28 services run 153 statements at every start (103 `ADD COLUMN IF NOT EXISTS`, 7 drops
+      = contract steps, 3 `ALTER COLUMN`, 4 guarded backfills); nothing records what ran.
+    - **Measured:** a no-op `ADD COLUMN IF NOT EXISTS` takes `ACCESS EXCLUSIVE` before the check - it waits
+      behind an open transaction, and a plain `SELECT` queues behind it (3 s / 4 s in the test). Every
+      pod start risks that on the busiest tables.
+    - **Decision: B** - formalise in `dms-db-base` (ordered named steps, journal table, advisory lock,
+      `lock_timeout` with retry, a contract gate, the same runner at startup or as a Helm pre-upgrade
+      Job, the schema step reported for fleet `verify` steps), not Alembic (baseline problem across
+      differently aged installations, keeps version-skipping). Interim rules in
+      `docs/operations/rolling-updates.md` (its "no contract step so far" corrected).
+    - Proposed build sessions: the runner; then the conversion, starting with the five services holding
+      76 of the 153 statements. Placement is the user's call at the next planning round.
+    - Phase 94 close regression: see PROGRESS.
 
 ## Phase 95 — Performance Measurement and a Rust Pilot (user request 2026-11-22)
 
