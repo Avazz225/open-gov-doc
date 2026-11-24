@@ -233,7 +233,8 @@
       "recipient_role": "Chosen role",
       "required_permission": "Holders of the required permission",
       "approval_notify": "Default: role \"Freigabe-Benachrichtigung\""
-    }
+    },
+    "listLabel": "Approval action types"
   },
   "emailTemplates": {
     "pageTitle": "Email templates",
@@ -1589,5 +1590,12 @@
     "defaultsHint": "The defaults apply when something is created without an object type, e.g. via WebDAV, CMIS or the mailroom. Required attributes aren't demanded then; the report lists them until they are filled in.",
     "defaultFolderNotListed": "The subfolder default \"{name}\" isn't selected in the list.",
     "defaultDocumentNotListed": "The document default \"{name}\" isn't selected in the list."
+  },
+  "boundedList": {
+    "filterLabel": "Filter {label}",
+    "filterPlaceholder": "Filter …",
+    "count": "{shown} of {total}",
+    "noMatch": "No matches.",
+    "scrollLabel": "{label} – list"
   }
 }

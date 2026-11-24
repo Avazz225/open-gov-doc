@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "@/i18n";
 import { ApiError, listAllDelegations, revokeDelegationAsAdmin, type Delegation } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { BoundedList } from "@/components/BoundedList";
 
 function isActive(delegation: Delegation): boolean {
   if (delegation.revoked_at !== null) return false;
@@ -125,7 +126,7 @@ export function DelegationsAdmin() {
       {visibleDelegations.length === 0 ? (
         <p className="italic opacity-70">{t("delegationsAdmin.empty")}</p>
       ) : (
-        <div className="dms-scroll-x">
+        <BoundedList label={t("nav.delegations")} total={visibleDelegations.length}>
           <table className="data-table">
             <thead>
               <tr>
@@ -171,7 +172,7 @@ export function DelegationsAdmin() {
               ))}
             </tbody>
           </table>
-        </div>
+        </BoundedList>
       )}
     </div>
   );

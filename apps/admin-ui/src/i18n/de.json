@@ -233,7 +233,8 @@
       "recipient_role": "Gewählte Rolle",
       "required_permission": "Inhaber der erforderlichen Berechtigung",
       "approval_notify": "Standard: Rolle „Freigabe-Benachrichtigung“"
-    }
+    },
+    "listLabel": "Freigabepflichtige Aktionen"
   },
   "emailTemplates": {
     "pageTitle": "E-Mail-Vorlagen",
@@ -1589,5 +1590,12 @@
     "defaultsHint": "Die Vorgaben gelten, wenn etwas ohne Objekttyp angelegt wird, etwa per WebDAV, CMIS oder aus der Poststelle. Pflichtangaben werden dann nicht verlangt; der Bericht listet sie, bis sie ergänzt sind.",
     "defaultFolderNotListed": "Die Vorgabe für Unterordner „{name}“ ist in der Liste nicht ausgewählt.",
     "defaultDocumentNotListed": "Die Vorgabe für Dokumente „{name}“ ist in der Liste nicht ausgewählt."
+  },
+  "boundedList": {
+    "filterLabel": "{label} filtern",
+    "filterPlaceholder": "Filtern …",
+    "count": "{shown} von {total}",
+    "noMatch": "Keine Treffer.",
+    "scrollLabel": "{label} – Liste"
   }
 }

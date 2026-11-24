@@ -23,6 +23,7 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { PrincipalName } from "./PrincipalName";
+import { BoundedList } from "@/components/BoundedList";
 
 const primaryBtn =
   "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap";
@@ -169,7 +170,7 @@ function DocumentVolumeSection({ token }: { token: string }) {
       ) : entries.length === 0 ? (
         <p className="italic opacity-70">{t("reports.empty")}</p>
       ) : (
-        <div className="dms-scroll-x">
+        <BoundedList label={t("reports.documentVolumeHeading")} total={entries.length}>
           <table className="data-table">
             <thead>
               <tr>
@@ -198,7 +199,7 @@ function DocumentVolumeSection({ token }: { token: string }) {
               ))}
             </tbody>
           </table>
-        </div>
+        </BoundedList>
       )}
     </section>
   );
@@ -246,7 +247,7 @@ function OpenWorkflowTasksSection({ token }: { token: string }) {
       ) : entries.length === 0 ? (
         <p className="italic opacity-70">{t("reports.empty")}</p>
       ) : (
-        <div className="dms-scroll-x">
+        <BoundedList label={t("reports.openWorkflowTasksHeading")} total={entries.length}>
           <table className="data-table">
             <thead>
               <tr>
@@ -267,7 +268,7 @@ function OpenWorkflowTasksSection({ token }: { token: string }) {
               ))}
             </tbody>
           </table>
-        </div>
+        </BoundedList>
       )}
     </section>
   );
@@ -315,7 +316,7 @@ function StorageUsageSection({ token }: { token: string }) {
       ) : entries.length === 0 ? (
         <p className="italic opacity-70">{t("reports.empty")}</p>
       ) : (
-        <div className="dms-scroll-x">
+        <BoundedList label={t("reports.storageUsageHeading")} total={entries.length}>
           <table className="data-table">
             <thead>
               <tr>
@@ -334,7 +335,7 @@ function StorageUsageSection({ token }: { token: string }) {
               ))}
             </tbody>
           </table>
-        </div>
+        </BoundedList>
       )}
     </section>
   );
@@ -395,7 +396,7 @@ function UserActivitySection({ token }: { token: string }) {
       ) : entries.length === 0 ? (
         <p className="italic opacity-70">{t("reports.empty")}</p>
       ) : (
-        <div className="dms-scroll-x">
+        <BoundedList label={t("reports.userActivityHeading")} total={entries.length}>
           <table className="data-table">
             <thead>
               <tr>
@@ -416,7 +417,7 @@ function UserActivitySection({ token }: { token: string }) {
               ))}
             </tbody>
           </table>
-        </div>
+        </BoundedList>
       )}
     </section>
   );
@@ -530,7 +531,7 @@ function ReportScheduleSection({ token }: { token: string }) {
       ) : schedules.length === 0 ? (
         <p className="italic opacity-70">{t("reports.schedulesEmpty")}</p>
       ) : (
-        <div className="dms-scroll-x">
+        <BoundedList label={t("reports.schedulesHeading")} total={schedules.length}>
           <table className="data-table">
             <thead>
               <tr>
@@ -575,7 +576,7 @@ function ReportScheduleSection({ token }: { token: string }) {
               ))}
             </tbody>
           </table>
-        </div>
+        </BoundedList>
       )}
     </section>
   );

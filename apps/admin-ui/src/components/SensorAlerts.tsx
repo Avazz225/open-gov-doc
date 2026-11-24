@@ -457,7 +457,8 @@ export function ActiveAlerts({ rules }: { rules: AlertRule[] }) {
           {rules.length === 0 ? t("alerts.active.noRules") : t("alerts.active.none", { count: rules.length })}
         </p>
       ) : (
-        <ul className="m-0 flex list-none flex-col gap-2 p-0">
+        // P91-S5: many rules can fire at once (an outage) - bounded.
+        <ul className="m-0 flex max-h-[24rem] list-none flex-col gap-2 overflow-y-auto p-0">
           {active.map((rule) => (
             <li key={rule.id} className="flex flex-wrap items-center gap-2 text-sm">
               <LevelBadge level={rule.level} />
@@ -610,7 +611,7 @@ export function DowntimeWindows({
       {windows.length === 0 ? (
         <p className="text-sm italic opacity-70">{t("alerts.windows.empty")}</p>
       ) : (
-        <ul className="m-0 mb-3 flex list-none flex-col gap-2 p-0">
+        <ul className="m-0 mb-3 flex max-h-[24rem] list-none flex-col gap-2 overflow-y-auto p-0">
           {windows.map((w) => (
             <li key={w.id} className="flex flex-wrap items-center gap-2 text-sm">
               <span className={`badge ${w.active ? "warn" : "neutral"}`}>
@@ -727,7 +728,7 @@ export function DowntimeWindows({
               {t("alerts.windows.allRules")}
             </label>
             {!draft.allRules && (
-              <div className="mt-1 flex flex-wrap gap-3">
+              <div className="mt-1 flex max-h-48 flex-wrap gap-3 overflow-y-auto">
                 {rules.map((rule) => (
                   <label key={rule.id} className="flex items-center gap-1 text-sm">
                     <input

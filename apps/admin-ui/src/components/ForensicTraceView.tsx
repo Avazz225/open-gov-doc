@@ -12,6 +12,7 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { PrincipalName, resolveActorFilter } from "./PrincipalName";
+import { BoundedList } from "@/components/BoundedList";
 
 function triggerBrowserDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
@@ -212,7 +213,7 @@ export function ForensicTraceView() {
         ) : entries.length === 0 ? (
           <p className="italic opacity-70">{t("forensicTrace.empty")}</p>
         ) : (
-          <div className="dms-scroll-x">
+          <BoundedList label={t("nav.forensicTrace")} total={entries.length}>
             <table className="data-table">
               <thead>
                 <tr>
@@ -239,7 +240,7 @@ export function ForensicTraceView() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </BoundedList>
         )}
       </section>
     </div>

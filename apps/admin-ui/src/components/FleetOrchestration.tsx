@@ -31,6 +31,7 @@ import {
   type FleetRunAction,
   type ManagedInstallation,
 } from "@/lib/api";
+import { BoundedList } from "@/components/BoundedList";
 
 // Fleet update orchestration in admin-ui (P88-S1): groups (waves), update
 // plans, rollouts with each installation's run, and operator management.
@@ -223,7 +224,7 @@ function GroupsSection({
       {groups.length === 0 ? (
         <p className="italic opacity-70">{t("fleetOrchestration.groups.empty")}</p>
       ) : (
-        <div className="dms-scroll-x">
+        <BoundedList label={t("fleetOrchestration.groups.heading")} total={groups.length}>
           <table className="data-table">
             <thead>
               <tr>
@@ -309,7 +310,7 @@ function GroupsSection({
               })}
             </tbody>
           </table>
-        </div>
+        </BoundedList>
       )}
     </section>
   );
@@ -987,7 +988,7 @@ function OperatorsSection({
           </button>
         </form>
       )}
-      <div className="dms-scroll-x">
+      <BoundedList label={t("fleetOrchestration.operators.heading")} total={operators.length}>
         <table className="data-table">
           <thead>
             <tr>
@@ -1035,7 +1036,7 @@ function OperatorsSection({
             ))}
           </tbody>
         </table>
-      </div>
+      </BoundedList>
     </section>
   );
 }

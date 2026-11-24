@@ -680,6 +680,38 @@ now wraps.
   - folder-service's refusal is shown with the offending node's path.
 - **Errors:** `detail.errors` lists are shown as text, not JSON (`extractErrorMessage`).
 
+## Long Lists (P91-S5)
+
+**One shared pattern** (`components/BoundedList.tsx`):
+- A list keeps its natural height up to `max-h-[32rem]`, then scrolls inside its own box. Table headers
+  stay in view (`.bounded-list thead th` is sticky).
+- Above 12 entries a filter field appears with "x von y" (`useListFilter`: contains, ignoring case and
+  accents).
+- The scroll box is a named group ("… – Liste") and focusable, so it can be scrolled by keyboard.
+- **Tables inside it lose their `dms-scroll-x` wrapper.** A second scroll box between them would catch
+  the sticky header.
+
+**With filter:**
+- Users, roles, groups and role assignments (`UserManagement`; the dev stack has about 2,160 roles);
+- approval action types (72); object types; teamspaces; the deletion register (id, reason, actor).
+
+**Height only:**
+- registry, sensors (which already had a filter), AD-group mappings and composite rules, audit-trace
+  overrides, delegations, email templates, fleet installations, groups and operators, forensic trace,
+  installations, mailboxes;
+- the four processing-failure tables, the query console's events and pending approvals, the five report
+  tables, signatures due for re-timestamping, user-tracking sessions;
+- the three archival-transfer tables;
+- active alerts, downtime windows and their rule selection.
+
+**Already bounded before:** the realm roles (P88-S4b) and the structure report (P91-S3).
+
+**Left as they are:** small tables of fixed size (licence, signature providers, storage guard, import
+result, config comparison).
+
+**Collapsible groups weren't needed.** Every long list was served by filter plus height, so no group
+component was added.
+
 ## Embedded-Metadata Mappings (P90-S5, [ADR 0258](../adr/0258-embedded-metadata-mappings-on-upload.md))
 
 `ObjectTypeMetadataMappings.tsx`, in `ObjectTypeEditor` after the rules and for document types only,

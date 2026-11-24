@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 
@@ -60,11 +61,17 @@ def eligible_peers(installations: list[dict], own_installation_id: str) -> list[
 async def search_all_peers(
     installations: list[dict], identity: FederationIdentity, query: str
 ) -> list[dict]:
-    """Queries each eligible peer installation individually (2.5) - a single
+    """Queries each eligible peer installation (2.5) - a single
     unreachable/rejecting peer does not block the others (`PeerQueryError`
-    is logged and skipped, no overall abort)."""
-    results: list[dict] = []
-    for installation in eligible_peers(installations, identity.installation_id):
+    is logged and skipped, no overall abort).
+
+    Concurrently since P91-S5: one after another, every unreachable peer cost
+    its full 10 s timeout, so N dead peers made a search take N x 10 s (the
+    test suite's 98 leftover registrations took 21 minutes). Now the slowest
+    peer bounds the whole search. Results keep the hub's peer order."""
+    peers = eligible_peers(installations, identity.installation_id)
+
+    async def one(installation: dict) -> list[dict]:
         try:
             entries = await query_peer(installation, identity, query)
         except PeerQueryError:
@@ -72,9 +79,13 @@ async def search_all_peers(
                 "federated_directory_peer_query_failed",
                 extra={"installation_id": installation["id"]},
             )
-            continue
+            return []
         for entry in entries:
             entry["installation_id"] = installation["id"]
             entry["installation_display_name"] = installation["display_name"]
+        return entries
+
+    results: list[dict] = []
+    for entries in await asyncio.gather(*(one(peer) for peer in peers)):
         results.extend(entries)
     return results

@@ -363,3 +363,12 @@
   gap: var(--dms-space-1);
   font-size: var(--dms-font-size-sm);
 }
+
+/* Long lists (P91-S5): inside a BoundedList the table header stays in view
+   while the rows scroll. */
+.bounded-list thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--dms-bg);
+}

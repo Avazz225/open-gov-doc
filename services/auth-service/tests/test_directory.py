@@ -140,6 +140,24 @@ def federation_enabled(monkeypatch):
     )
     with TestClient(main_module.app) as c:
         yield c
+        # Deregister again (P91-S5): every run used to leave its registration
+        # behind with the unreachable placeholder callback, and the federated
+        # search waited for each - 98 of them made this file take 21 minutes.
+        c.portal.call(_deregister_from_hub, main_module)
+
+
+async def _deregister_from_hub(main_module) -> None:
+    from auth_service.models import FederationIdentity
+
+    hub_client = main_module.app.state.federation_hub_client
+    if hub_client is None:
+        return
+    async with main_module.app.state.session_factory() as session:
+        identity = await session.get(FederationIdentity, main_module._FEDERATION_IDENTITY_ID)
+    if identity is not None:
+        await hub_client.deregister(
+            installation_id=identity.installation_id, private_key_pem=identity.private_key_pem
+        )
 
 
 async def _fetch_identity() -> FederationIdentity:

@@ -34,6 +34,7 @@ import {
   type RulesDraft,
 } from "@/components/ObjectTypeRules";
 import { ObjectTypeMetadataMappings, mappingsError } from "@/components/ObjectTypeMetadataMappings";
+import { BoundedList, useListFilter } from "@/components/BoundedList";
 
 const ATTRIBUTE_TYPES: AttributeType[] = [
   "string",
@@ -141,10 +142,14 @@ function iconLabel(t: (path: string) => string, value: string): string {
   return translated === `objectTypes.icons.${value}` ? value : translated;
 }
 
+const objectTypeText = (ot: ObjectType) => `${ot.name} ${ot.applies_to}`;
+
 export function ObjectTypeEditor() {
   const { accessToken } = useAuth();
   const { t } = useI18n();
   const [objectTypes, setObjectTypes] = useState<ObjectType[]>([]);
+  // P91-S5: test and package types add up - filter by name.
+  const typeFilter = useListFilter(objectTypes, objectTypeText);
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [name, setName] = useState("");
@@ -827,7 +832,7 @@ export function ObjectTypeEditor() {
         </form>
       </section>
 
-      <div className="dms-scroll-x">
+      <BoundedList label={t("nav.objectTypes")} total={objectTypes.length} shown={typeFilter.filtered.length} query={typeFilter.query} onQueryChange={typeFilter.setQuery}>
         <table className="data-table">
           <thead>
             <tr>
@@ -839,7 +844,7 @@ export function ObjectTypeEditor() {
             </tr>
           </thead>
           <tbody>
-            {objectTypes.map((ot) => (
+            {typeFilter.filtered.map((ot) => (
               <tr key={ot.id}>
                 <td>{ot.name}</td>
                 <td>{ot.applies_to}</td>
@@ -857,7 +862,7 @@ export function ObjectTypeEditor() {
             ))}
           </tbody>
         </table>
-      </div>
+      </BoundedList>
       {objectTypes.length === 0 && <p className="italic opacity-70">{t("objectTypes.empty")}</p>}
     </>
   );

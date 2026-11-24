@@ -13,6 +13,7 @@ import {
   type AuditTraceRoleOverride,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { BoundedList } from "@/components/BoundedList";
 
 type TriState = "default" | "on" | "off";
 
@@ -219,7 +220,7 @@ export function AuditTraceSettings() {
         ) : overrides.length === 0 ? (
           <p className="italic opacity-70">{t("auditTraceSettings.overridesEmpty")}</p>
         ) : (
-          <div className="dms-scroll-x">
+          <BoundedList label={t("auditTraceSettings.overridesHeading")} total={overrides.length}>
             <table className="data-table">
               <thead>
                 <tr>
@@ -250,7 +251,7 @@ export function AuditTraceSettings() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </BoundedList>
         )}
       </section>
     </div>

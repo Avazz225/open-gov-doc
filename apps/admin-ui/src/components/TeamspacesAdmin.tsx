@@ -5,6 +5,7 @@ import { useI18n } from "@/i18n";
 import { ApiError, listAllTeamspaces, type TeamspaceAdmin } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { PrincipalName } from "./PrincipalName";
+import { BoundedList, useListFilter } from "@/components/BoundedList";
 
 // Teamspaces admin overview (Post-Roadmap Phase 22 Session 5) - a plain
 // status table against the new `teamspace-service` endpoint
@@ -12,10 +13,14 @@ import { PrincipalName } from "./PrincipalName";
 // membership like `GET /teamspaces`). Creation/deletion/member management
 // deliberately remains self-service (2.5) - no administrative actions here,
 // visibility only.
+const teamspaceText = (ts: TeamspaceAdmin) => `${ts.name} ${ts.description}`;
+
 export function TeamspacesAdmin() {
   const { accessToken } = useAuth();
   const { t } = useI18n();
   const [teamspaces, setTeamspaces] = useState<TeamspaceAdmin[]>([]);
+  // P91-S5: filter by name.
+  const teamspaceFilter = useListFilter(teamspaces, teamspaceText);
   const [unreachable, setUnreachable] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -58,7 +63,7 @@ export function TeamspacesAdmin() {
       {teamspaces.length === 0 ? (
         <p className="italic opacity-70">{t("teamspacesAdmin.empty")}</p>
       ) : (
-        <div className="dms-scroll-x">
+        <BoundedList label={t("nav.teamspacesAdmin")} total={teamspaces.length} shown={teamspaceFilter.filtered.length} query={teamspaceFilter.query} onQueryChange={teamspaceFilter.setQuery}>
           <table className="data-table">
             <thead>
               <tr>
@@ -70,7 +75,7 @@ export function TeamspacesAdmin() {
               </tr>
             </thead>
             <tbody>
-              {teamspaces.map((teamspace) => (
+              {teamspaceFilter.filtered.map((teamspace) => (
                 <tr key={teamspace.id}>
                   <td>{teamspace.name}</td>
                   <td>{teamspace.description || "—"}</td>
@@ -83,7 +88,7 @@ export function TeamspacesAdmin() {
               ))}
             </tbody>
           </table>
-        </div>
+        </BoundedList>
       )}
     </div>
   );

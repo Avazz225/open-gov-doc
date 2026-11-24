@@ -20,6 +20,7 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { usePrincipalName } from "./PrincipalName";
+import { BoundedList } from "@/components/BoundedList";
 
 // AD group -> role mapping admin UI (Phase 50 Session 5) - the backend
 // (1:1 mappings since P24-S2/ADR 0093, composite AND-rules + default role
@@ -235,7 +236,7 @@ export function AdGroupMappings() {
         </form>
         {mappingPending && <p className="text-sm opacity-80">{t("adGroupMappings.pendingApproval")}</p>}
 
-        <div className="dms-scroll-x">
+        <BoundedList label={t("adGroupMappings.mappingsSectionTitle")} total={mappings.length}>
           <table className="data-table">
             <thead>
               <tr>
@@ -258,7 +259,7 @@ export function AdGroupMappings() {
               ))}
             </tbody>
           </table>
-        </div>
+        </BoundedList>
         {mappings.length === 0 && <p className="italic opacity-70">{t("adGroupMappings.mappingsEmpty")}</p>}
       </section>
 
@@ -308,7 +309,7 @@ export function AdGroupMappings() {
         </form>
         {compositeRulePending && <p className="text-sm opacity-80">{t("adGroupMappings.pendingApproval")}</p>}
 
-        <div className="dms-scroll-x">
+        <BoundedList label={t("adGroupMappings.compositeRulesSectionTitle")} total={compositeRules.length}>
           <table className="data-table">
             <thead>
               <tr>
@@ -335,7 +336,7 @@ export function AdGroupMappings() {
               ))}
             </tbody>
           </table>
-        </div>
+        </BoundedList>
         {compositeRules.length === 0 && (
           <p className="italic opacity-70">{t("adGroupMappings.compositeRulesEmpty")}</p>
         )}

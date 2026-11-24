@@ -13,6 +13,7 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { PrincipalName } from "./PrincipalName";
+import { BoundedList, useListFilter } from "@/components/BoundedList";
 
 type Trigger =
   | "forced_deletion"
@@ -102,10 +103,18 @@ export function mergeEntries(
 // missing separate backup policy, phase 11). Since P89-S2 also case-service's
 // register of destroyed case binders; if only that one is unreachable, the
 // documents and folders are still shown, with a note.
+function entryText(entry: MergedEntry): string {
+  return [entry.objectId, entry.reason, entry.triggeredBy, entry.trigger, "label" in entry ? entry.label : ""]
+    .filter(Boolean)
+    .join(" ");
+}
+
 export function DeletionRegister() {
   const { accessToken } = useAuth();
   const { t } = useI18n();
   const [entries, setEntries] = useState<MergedEntry[]>([]);
+  // P91-S5: the register only grows - filter by id, reason or actor.
+  const { query, setQuery, filtered: filteredEntries } = useListFilter(entries, entryText);
   const [unreachable, setUnreachable] = useState(false);
   const [casesUnreachable, setCasesUnreachable] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -156,7 +165,7 @@ export function DeletionRegister() {
       {entries.length === 0 ? (
         <p className="italic opacity-70">{t("deletionRegister.empty")}</p>
       ) : (
-        <div className="dms-scroll-x">
+        <BoundedList label={t("deletionRegister.pageTitle")} total={entries.length} shown={filteredEntries.length} query={query} onQueryChange={setQuery}>
           <table className="data-table">
             <thead>
               <tr>
@@ -169,7 +178,7 @@ export function DeletionRegister() {
               </tr>
             </thead>
             <tbody>
-              {entries.map((entry) => (
+              {filteredEntries.map((entry) => (
                 <tr key={entry.key}>
                   <td>{t(TYPE_KEYS[entry.type])}</td>
                   <td>
@@ -200,7 +209,7 @@ export function DeletionRegister() {
               ))}
             </tbody>
           </table>
-        </div>
+        </BoundedList>
       )}
     </div>
   );

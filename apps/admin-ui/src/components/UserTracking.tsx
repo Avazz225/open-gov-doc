@@ -15,6 +15,7 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { usePrincipalName } from "./PrincipalName";
+import { BoundedList } from "@/components/BoundedList";
 
 // Fine-grained user tracking (5.5, ADR 0157, Phase 52 Session 1) - has
 // always been API-only until this session. Unlike every other admin page
@@ -238,7 +239,7 @@ export function UserTracking() {
             </button>
           </form>
 
-          <div className="dms-scroll-x">
+          <BoundedList label={t("userTracking.sessionsSectionTitle")} total={sessions.length}>
             <table className="data-table">
               <thead>
                 <tr>
@@ -265,7 +266,7 @@ export function UserTracking() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </BoundedList>
           {sessions.length === 0 && (
             <p className="italic opacity-70">{t("userTracking.sessionsEmpty")}</p>
           )}

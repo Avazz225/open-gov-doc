@@ -18,6 +18,7 @@ import {
   type Rendition,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { BoundedList } from "@/components/BoundedList";
 
 const FAILED_PERMANENT = "failed_permanent";
 
@@ -132,7 +133,7 @@ function NotificationFailuresSection() {
       {items.length === 0 ? (
         <p className="italic opacity-70">{t("processingFailures.notificationEmpty")}</p>
       ) : (
-        <div className="dms-scroll-x">
+        <BoundedList label={t("processingFailures.notificationHeading")} total={items.length}>
           <table className="data-table">
             <thead>
               <tr>
@@ -166,7 +167,7 @@ function NotificationFailuresSection() {
               ))}
             </tbody>
           </table>
-        </div>
+        </BoundedList>
       )}
     </div>
   );
@@ -234,7 +235,7 @@ function RenditionFailuresSection() {
       {items.length === 0 ? (
         <p className="italic opacity-70">{t("processingFailures.renditionEmpty")}</p>
       ) : (
-        <div className="dms-scroll-x">
+        <BoundedList label={t("processingFailures.renditionHeading")} total={items.length}>
           <table className="data-table">
             <thead>
               <tr>
@@ -270,7 +271,7 @@ function RenditionFailuresSection() {
               ))}
             </tbody>
           </table>
-        </div>
+        </BoundedList>
       )}
     </div>
   );
@@ -338,7 +339,7 @@ function OcrResultFailuresSection() {
       {items.length === 0 ? (
         <p className="italic opacity-70">{t("processingFailures.ocrEmpty")}</p>
       ) : (
-        <div className="dms-scroll-x">
+        <BoundedList label={t("processingFailures.ocrHeading")} total={items.length}>
           <table className="data-table">
             <thead>
               <tr>
@@ -372,7 +373,7 @@ function OcrResultFailuresSection() {
               ))}
             </tbody>
           </table>
-        </div>
+        </BoundedList>
       )}
     </div>
   );
@@ -462,7 +463,7 @@ function HandoverFailuresSection() {
       {items.length === 0 ? (
         <p className="italic opacity-70">{t("processingFailures.handoverEmpty")}</p>
       ) : (
-        <div className="dms-scroll-x">
+        <BoundedList label={t("processingFailures.handoverHeading")} total={items.length}>
           <table className="data-table">
             <thead>
               <tr>
@@ -505,7 +506,7 @@ function HandoverFailuresSection() {
               })}
             </tbody>
           </table>
-        </div>
+        </BoundedList>
       )}
     </div>
   );

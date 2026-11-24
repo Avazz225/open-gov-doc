@@ -23,6 +23,7 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { PrincipalName, resolveActorFilter } from "./PrincipalName";
+import { BoundedList } from "@/components/BoundedList";
 
 const primaryBtn =
   "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap";
@@ -175,7 +176,7 @@ function QueryEventsSection() {
         ) : events.length === 0 ? (
           <p className="italic opacity-70">{t("queryConsole.empty")}</p>
         ) : (
-          <div className="dms-scroll-x">
+          <BoundedList label={t("nav.queryConsole")} total={events.length}>
             <table className="data-table">
               <thead>
                 <tr>
@@ -200,7 +201,7 @@ function QueryEventsSection() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </BoundedList>
         )}
       </section>
     </div>
@@ -595,7 +596,7 @@ function ManipulationSection() {
         {pendingApprovals.length === 0 ? (
           <p className="italic opacity-70">{t("queryConsole.pendingApprovalsEmpty")}</p>
         ) : (
-          <div className="dms-scroll-x">
+          <BoundedList label={t("queryConsole.pendingApprovalsTitle")} total={pendingApprovals.length}>
             <table className="data-table">
               <thead>
                 <tr>
@@ -670,7 +671,7 @@ function ManipulationSection() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </BoundedList>
         )}
       </section>
     </div>

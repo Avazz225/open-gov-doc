@@ -12,6 +12,7 @@ import {
   type EmailTemplateUseCase,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { BoundedList } from "@/components/BoundedList";
 
 // Configurable email templates (post-roadmap phase 30, ADR 0111) - mirrors
 // `ApprovalSettings`' load/toggle/create structure, but `use_case` is a
@@ -144,7 +145,7 @@ export function EmailTemplates() {
           {templates.length === 0 ? (
             <p className="italic opacity-70">{t("emailTemplates.empty")}</p>
           ) : (
-            <div className="dms-scroll-x">
+            <BoundedList label={t("nav.emailTemplates")} total={templates.length}>
               <table className="data-table">
                 <thead>
                   <tr>
@@ -179,7 +180,7 @@ export function EmailTemplates() {
                   ))}
                 </tbody>
               </table>
-            </div>
+            </BoundedList>
           )}
         </>
       )}

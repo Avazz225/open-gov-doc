@@ -23,6 +23,7 @@ import {
   SensorAlertRules,
   worstLevel,
 } from "@/components/SensorAlerts";
+import { BoundedList } from "@/components/BoundedList";
 
 // Monitoring sensors (P88-S2, ADR 0243, concept 10.1): the global base
 // setting ("monitor everything"/"nothing"), switches per cost class and per
@@ -252,7 +253,7 @@ export function SensorSettings() {
         {sensors.length === 0 ? (
           <p className="italic opacity-70">{t("sensors.list.empty")}</p>
         ) : (
-          <div className="dms-scroll-x">
+          <BoundedList label={t("sensors.list.heading")} total={sensors.length}>
             <table className="data-table">
               <thead>
                 <tr>
@@ -375,7 +376,7 @@ export function SensorSettings() {
                 })}
               </tbody>
             </table>
-          </div>
+          </BoundedList>
         )}
       </section>
 

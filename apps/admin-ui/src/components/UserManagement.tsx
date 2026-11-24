@@ -33,8 +33,14 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { RealmRoleAssignments } from "@/components/RealmRoleAssignments";
+import { BoundedList, useListFilter } from "@/components/BoundedList";
 
 const ROOT_RESOURCE_ID = "root";
+
+const userText = (u: KeycloakUser) => [u.username, u.email, u.first_name, u.last_name].filter(Boolean).join(" ");
+const roleText = (r: Role) => `${r.name} ${r.description} ${r.permissions.join(" ")}`;
+const groupText = (g: Group) => `${g.name} ${g.description}`;
+const assignmentText = (a: RoleAssignment) => `${a.principal_id} ${a.role_id} ${a.resource_id}`;
 
 export function UserManagement() {
   const { accessToken } = useAuth();
@@ -43,6 +49,12 @@ export function UserManagement() {
   const [roles, setRoles] = useState<Role[]>([]);
   const [assignments, setAssignments] = useState<RoleAssignment[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
+  // Long lists (P91-S5): each table filters by its natural key; the
+  // dev stack carries ~1,500 roles alone.
+  const userFilter = useListFilter(users, userText);
+  const roleFilter = useListFilter(roles, roleText);
+  const groupFilter = useListFilter(groups, groupText);
+  const assignmentFilter = useListFilter(assignments, assignmentText);
   const [error, setError] = useState<string | null>(null);
   const [assignmentPending, setAssignmentPending] = useState(false);
   const [rolePending, setRolePending] = useState(false);
@@ -390,7 +402,7 @@ export function UserManagement() {
           </button>
         </form>
 
-        <div className="dms-scroll-x">
+        <BoundedList label={t("users.sectionTitle")} total={users.length} shown={userFilter.filtered.length} query={userFilter.query} onQueryChange={userFilter.setQuery}>
           <table className="data-table">
             <thead>
               <tr>
@@ -401,7 +413,7 @@ export function UserManagement() {
               </tr>
             </thead>
             <tbody>
-              {users.map((u) => (
+              {userFilter.filtered.map((u) => (
                 <tr key={u.id}>
                   <td>{u.username}</td>
                   <td>{u.email}</td>
@@ -415,7 +427,7 @@ export function UserManagement() {
               ))}
             </tbody>
           </table>
-        </div>
+        </BoundedList>
         {users.length === 0 && <p className="italic opacity-70">{t("users.empty")}</p>}
       </section>
 
@@ -458,7 +470,7 @@ export function UserManagement() {
         </form>
         {rolePending && <p className="text-sm opacity-80">{t("roles.pendingApproval")}</p>}
 
-        <div className="dms-scroll-x">
+        <BoundedList label={t("roles.sectionTitle")} total={roles.length} shown={roleFilter.filtered.length} query={roleFilter.query} onQueryChange={roleFilter.setQuery}>
           <table className="data-table">
             <thead>
               <tr>
@@ -467,7 +479,7 @@ export function UserManagement() {
               </tr>
             </thead>
             <tbody>
-              {roles.map((r) => (
+              {roleFilter.filtered.map((r) => (
                 <tr key={r.id}>
                   <td>{r.name}</td>
                   <td>{r.permissions.join(", ")}</td>
@@ -475,7 +487,7 @@ export function UserManagement() {
               ))}
             </tbody>
           </table>
-        </div>
+        </BoundedList>
         {roles.length === 0 && <p className="italic opacity-70">{t("roles.empty")}</p>}
       </section>
 
@@ -515,7 +527,7 @@ export function UserManagement() {
           </button>
         </form>
 
-        <div className="dms-scroll-x">
+        <BoundedList label={t("groups.sectionTitle")} total={groups.length} shown={groupFilter.filtered.length} query={groupFilter.query} onQueryChange={groupFilter.setQuery}>
           <table className="data-table">
             <thead>
               <tr>
@@ -526,7 +538,7 @@ export function UserManagement() {
               </tr>
             </thead>
             <tbody>
-              {groups.map((g) => (
+              {groupFilter.filtered.map((g) => (
                 <Fragment key={g.id}>
                   <tr>
                     <td>{g.name}</td>
@@ -605,7 +617,7 @@ export function UserManagement() {
               ))}
             </tbody>
           </table>
-        </div>
+        </BoundedList>
         {groups.length === 0 && <p className="italic opacity-70">{t("groups.empty")}</p>}
       </section>
 
@@ -650,7 +662,7 @@ export function UserManagement() {
           </button>
         </form>
 
-        <div className="dms-scroll-x">
+        <BoundedList label={t("orgHierarchy.sectionTitle")} total={supervisorAssignments.length}>
           <table className="data-table">
             <thead>
               <tr>
@@ -677,7 +689,7 @@ export function UserManagement() {
               ))}
             </tbody>
           </table>
-        </div>
+        </BoundedList>
         {supervisorAssignments.length === 0 && (
           <p className="italic opacity-70">{t("orgHierarchy.empty")}</p>
         )}
@@ -805,7 +817,7 @@ export function UserManagement() {
         </form>
         {assignmentPending && <p className="text-sm opacity-80">{t("roleAssignments.pendingApproval")}</p>}
 
-        <div className="dms-scroll-x">
+        <BoundedList label={t("roleAssignments.sectionTitle")} total={assignments.length} shown={assignmentFilter.filtered.length} query={assignmentFilter.query} onQueryChange={assignmentFilter.setQuery}>
           <table className="data-table">
             <thead>
               <tr>
@@ -817,7 +829,7 @@ export function UserManagement() {
               </tr>
             </thead>
             <tbody>
-              {assignments.map((a) => (
+              {assignmentFilter.filtered.map((a) => (
                 <tr key={a.id}>
                   <td>
                     {a.principal_type === "group"
@@ -840,7 +852,7 @@ export function UserManagement() {
               ))}
             </tbody>
           </table>
-        </div>
+        </BoundedList>
         {assignments.length === 0 && <p className="italic opacity-70">{t("roleAssignments.empty")}</p>}
       </section>
     </>

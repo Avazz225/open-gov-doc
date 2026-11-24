@@ -15,6 +15,7 @@ import {
   type FleetOperator,
 } from "@/lib/api";
 import { FleetOrchestration } from "@/components/FleetOrchestration";
+import { BoundedList } from "@/components/BoundedList";
 
 // Fleet Management (P67-S1) - wires up fleet-management-service, which had
 // fully existed since Phase 54 Session 1 with no admin-ui view at all. Every
@@ -233,7 +234,7 @@ export function FleetManagementView() {
           {installations.length === 0 ? (
             <p className="italic opacity-70">{t("fleetManagement.empty")}</p>
           ) : (
-            <div className="dms-scroll-x">
+            <BoundedList label={t("fleetManagement.registerHeading")} total={installations.length}>
               <table className="data-table">
                 <thead>
                   <tr>
@@ -312,7 +313,7 @@ export function FleetManagementView() {
                   })}
                 </tbody>
               </table>
-            </div>
+            </BoundedList>
           )}
         </>
       )}

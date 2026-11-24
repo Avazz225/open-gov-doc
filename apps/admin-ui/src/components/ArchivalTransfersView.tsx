@@ -20,6 +20,7 @@ import {
   type CaseDestruction,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { BoundedList } from "@/components/BoundedList";
 
 const primaryBtn =
   "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap";
@@ -258,7 +259,7 @@ function DocumentArchivalSection() {
       {transfers.length === 0 ? (
         <p className="italic opacity-70">{t("archivalTransfers.empty")}</p>
       ) : (
-        <div className="dms-scroll-x">
+        <BoundedList label={t("archivalTransfers.pageTitle")} total={transfers.length}>
           <table className="data-table">
             <thead>
               <tr>
@@ -322,7 +323,7 @@ function DocumentArchivalSection() {
               ))}
             </tbody>
           </table>
-        </div>
+        </BoundedList>
       )}
     </div>
   );
@@ -535,7 +536,7 @@ function CaseArchivalSection() {
       {transfers.length === 0 ? (
         <p className="italic opacity-70">{t("archivalTransfers.caseEmpty")}</p>
       ) : (
-        <div className="dms-scroll-x">
+        <BoundedList label={t("archivalTransfers.caseHeading")} total={transfers.length}>
           <table className="data-table">
             <thead>
               <tr>
@@ -593,7 +594,7 @@ function CaseArchivalSection() {
               ))}
             </tbody>
           </table>
-        </div>
+        </BoundedList>
       )}
     </div>
   );
@@ -707,7 +708,7 @@ function CaseDestructionSection() {
       {runs.length === 0 ? (
         <p className="italic opacity-70">{t("archivalTransfers.destructionEmpty")}</p>
       ) : (
-        <div className="dms-scroll-x">
+        <BoundedList label={t("archivalTransfers.destructionHeading")} total={runs.length}>
           <table className="data-table">
             <thead>
               <tr>
@@ -761,7 +762,7 @@ function CaseDestructionSection() {
               ))}
             </tbody>
           </table>
-        </div>
+        </BoundedList>
       )}
     </section>
   );

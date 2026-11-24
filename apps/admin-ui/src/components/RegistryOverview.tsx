@@ -14,6 +14,7 @@ import {
   setExpectedReplicas,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { BoundedList } from "@/components/BoundedList";
 
 // Registry overview grouped by service type (P87-S3, ADR 0241): per type the
 // reachable count against the expected range and where that range comes
@@ -145,7 +146,7 @@ export function RegistryOverview() {
       ) : types.length === 0 ? (
         <p className="italic opacity-70">{t("registry.empty")}</p>
       ) : (
-        <div className="dms-scroll-x">
+        <BoundedList label={t("nav.registry")} total={types.length}>
           <table className="data-table">
             <thead>
               <tr>
@@ -336,7 +337,7 @@ export function RegistryOverview() {
               })}
             </tbody>
           </table>
-        </div>
+        </BoundedList>
       )}
     </>
   );

@@ -15,6 +15,7 @@ import {
   type MailboxConfigInput,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { BoundedList } from "@/components/BoundedList";
 
 // mail-connector mailboxes (P88-S4b, ADR 0244). The table and API came in
 // P88-S4a; before, mailboxes were a JSON env variable changed by restart.
@@ -394,7 +395,7 @@ export function MailboxSettings() {
       ) : mailboxes.length === 0 ? (
         <p className="italic opacity-70">{t("mailboxes.empty")}</p>
       ) : (
-        <div className="dms-scroll-x">
+        <BoundedList label={t("nav.mailboxes")} total={mailboxes.length}>
           <table className="data-table">
             <thead>
               <tr>
@@ -472,7 +473,7 @@ export function MailboxSettings() {
               ))}
             </tbody>
           </table>
-        </div>
+        </BoundedList>
       )}
     </>
   );

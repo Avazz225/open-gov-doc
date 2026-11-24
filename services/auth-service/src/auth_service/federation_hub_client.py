@@ -63,6 +63,20 @@ class FederationHubClient:
         response.raise_for_status()
         return response.json()
 
+    async def deregister(self, *, installation_id: str, private_key_pem: bytes) -> None:
+        """Removes this installation from the hub (P91-S5) - signed over the
+        installation id itself, the hub's convention for a `DELETE` without a
+        body. Tests that register the installation use it on teardown, so their
+        registrations don't pile up in the shared hub."""
+        response = await self._client.delete(
+            f"/installations/{quote(installation_id, safe='')}",
+            headers=_signed_headers(
+                installation_id, private_key_pem, installation_id.encode("utf-8")
+            ),
+        )
+        if response.status_code != 404:
+            response.raise_for_status()
+
     async def get_installation(self, installation_id: str) -> dict | None:
         """One installation by id, ``None`` if the hub doesn't know it
         (P84-S2). Use this, not the list, to resolve a single known

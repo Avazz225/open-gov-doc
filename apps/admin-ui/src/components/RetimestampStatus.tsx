@@ -8,6 +8,7 @@ import {
   type SignatureDueForRetimestamp,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { BoundedList } from "@/components/BoundedList";
 
 // PAdES-B-LTA archive-timestamp-chain re-timestamping poll loop (3.10,
 // ADR 0155) - admin visibility only (P71-S4). Deliberately read-only: ADR
@@ -63,7 +64,7 @@ export function RetimestampStatus() {
       ) : signatures.length === 0 ? (
         <p className="italic opacity-70">{t("retimestampStatus.empty")}</p>
       ) : (
-        <div className="dms-scroll-x">
+        <BoundedList label={t("retimestampStatus.heading")} total={signatures.length}>
           <table className="data-table">
             <thead>
               <tr>
@@ -92,7 +93,7 @@ export function RetimestampStatus() {
               ))}
             </tbody>
           </table>
-        </div>
+        </BoundedList>
       )}
     </div>
   );

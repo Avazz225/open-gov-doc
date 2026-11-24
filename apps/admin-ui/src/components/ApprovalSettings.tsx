@@ -13,6 +13,7 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { PrincipalName } from "./PrincipalName";
+import { BoundedList, useListFilter } from "@/components/BoundedList";
 
 // Generic four-eyes-principle settings page (post-roadmap phase 22 session
 // 3) - `GET /approval-config` only returns action types that are already
@@ -21,6 +22,10 @@ import { PrincipalName } from "./PrincipalName";
 // the system. The form below therefore allows a not-yet-configured action
 // type to be created for the first time via free text, in addition to the
 // toggle for each already-existing row.
+function actionTypeText(config: { action_type: string }): string {
+  return config.action_type;
+}
+
 export function ApprovalSettings() {
   const { accessToken } = useAuth();
   const { t } = useI18n();
@@ -138,6 +143,9 @@ export function ApprovalSettings() {
     }
   }
 
+  // P91-S5: dozens of action types - filter by name, bounded height.
+  const { query, setQuery, filtered } = useListFilter(configs, actionTypeText);
+
   const primaryBtn =
     "rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap";
   const secondaryBtn =
@@ -159,7 +167,13 @@ export function ApprovalSettings() {
           {configs.length === 0 ? (
             <p className="italic opacity-70">{t("approvalSettings.empty")}</p>
           ) : (
-            <div className="dms-scroll-x">
+            <BoundedList
+              label={t("approvalSettings.listLabel")}
+              total={configs.length}
+              shown={filtered.length}
+              query={query}
+              onQueryChange={setQuery}
+            >
               <table className="data-table">
                 <thead>
                   <tr>
@@ -171,7 +185,7 @@ export function ApprovalSettings() {
                   </tr>
                 </thead>
                 <tbody>
-                  {configs.map((config) => (
+                  {filtered.map((config) => (
                     <Fragment key={config.action_type}>
                     <tr>
                       <td>{config.action_type}</td>
@@ -245,7 +259,7 @@ export function ApprovalSettings() {
                   ))}
                 </tbody>
               </table>
-            </div>
+            </BoundedList>
           )}
         </>
       )}

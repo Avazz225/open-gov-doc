@@ -4483,6 +4483,24 @@ The user's goals:
     collapsible groups, and pagination where the backend supports it.
   - Applied page by page, with screenshots at 1400/768/390.
 
+  - ✅ **Result:**
+    - **`BoundedList`/`useListFilter`:** max height with internal scrolling and a sticky table header,
+      a filter with "x von y" above 12 entries. Applied to about 40 lists on 20 pages, with filters on
+      the large ones (users, roles with about 2,160 on the dev stack, groups, assignments, approval
+      action types, object types, teamspaces, deletion register).
+    - Small fixed tables are unchanged; collapsible groups weren't needed.
+    - **e2e** `long-lists.spec.ts` (roles bounded and filterable, approval settings and object types
+      filterable, no horizontal overflow at 1400/768/390); admin-ui e2e 21/21.
+    - **On the way (user question):** the auth-service suite took 23 minutes because one test needed
+      21 of them.
+      - Every run registered the installation at the federation hub and never deregistered it, so 98
+        leftovers with an unreachable placeholder address piled up.
+      - The federated directory search queried partners one after another, so each dead partner cost
+        its full 10 s timeout.
+      - **Fixed:** partners are now queried concurrently (a product fix: one dead partner no longer
+        slows every search), and the test deregisters itself. That test file now takes 9 s; 131
+        leftovers marked revoked.
+
 - **P91-S6 — Show licence limits in the admin UI (user request 2026-11-22).**
   - **Goal:** an admin should see what the current licence doesn't cover and what an extension would
     add.
@@ -4607,6 +4625,9 @@ explain lanes and route changes. Design and reasons: [ADR 0249](docs/adr/0249-ch
     budget of P89-S4 (2 + 3) five concurrent logins deadlocked for 30 s. Audit every service for the
     same pattern (a request-scoped session plus `session_factory()` in the same call path) and pass the
     session down instead.
+  - **workflow-service tests leave federation-hub registrations (found in P91-S5):** like auth-service's
+    did (fixed there), with the placeholder callback `8.8.8.8`. Deregister on teardown the same way. On
+    the dev stack, 131 such registrations were marked revoked.
   - **Objects with deleted types (found in P91-S2b):** the conformity report shows 52 folders and 23
     documents on the dev stack whose object type was deleted by a test after use. Tests that delete
     their types should delete their folders and documents first. A one-off cleanup goes with the other

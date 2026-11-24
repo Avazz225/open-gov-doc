@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from "react";
 import { useI18n } from "@/i18n";
 import { useInstallation } from "@/lib/installation-context";
+import { BoundedList } from "@/components/BoundedList";
 
 // Management of the installation list (P4-S5, concept 3a/8) - purely
 // client-side in `localStorage` (see `lib/installations.ts`), no backend
@@ -79,7 +80,7 @@ export function InstallationManager() {
         </form>
       </section>
 
-      <div className="dms-scroll-x">
+      <BoundedList label={t("nav.installations")} total={installations.length}>
         <table className="data-table">
           <thead>
             <tr>
@@ -118,7 +119,7 @@ export function InstallationManager() {
             ))}
           </tbody>
         </table>
-      </div>
+      </BoundedList>
     </>
   );
 }
