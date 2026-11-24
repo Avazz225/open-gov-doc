@@ -6,10 +6,26 @@ import nats
 from nats.js import api
 from nats.js.client import JetStreamContext
 from nats.js.errors import NotFoundError
+from opentelemetry import propagate, trace
+from opentelemetry.trace import SpanKind
 
 from dms_eventbus_client.interface import EventBusClient, MessageHandler, SubjectNotFoundError
 
 logger = logging.getLogger(__name__)
+
+# Trace propagation through NATS headers (P94-S1, ADR 0250): a published
+# message carries the W3C `traceparent` of the span that published it, and the
+# consumer continues that trace. Uses only the OpenTelemetry API - without a
+# configured provider (tracing off) every call here is a no-op.
+_tracer = trace.get_tracer("dms_eventbus_client")
+
+
+def _messaging_attributes(subject: str, operation: str) -> dict[str, str]:
+    return {
+        "messaging.system": "nats",
+        "messaging.destination.name": subject,
+        "messaging.operation.type": operation,
+    }
 
 
 class NatsEventBusClient(EventBusClient):
@@ -44,7 +60,14 @@ class NatsEventBusClient(EventBusClient):
 
     async def publish(self, subject: str, payload: bytes) -> None:
         assert self._js is not None, "connect() muss vor publish() aufgerufen werden"
-        await self._js.publish(subject, payload)
+        with _tracer.start_as_current_span(
+            f"{subject} publish",
+            kind=SpanKind.PRODUCER,
+            attributes=_messaging_attributes(subject, "publish"),
+        ):
+            headers: dict[str, str] = {}
+            propagate.inject(headers)
+            await self._js.publish(subject, payload, headers=headers or None)
 
     async def subscribe(
         self,
@@ -70,10 +93,21 @@ class NatsEventBusClient(EventBusClient):
                 return await max_concurrency()
             return max_concurrency
 
+        async def _handle(msg) -> None:
+            # Continue the publisher's trace (if the message carries one).
+            context = propagate.extract(msg.headers or {})
+            with _tracer.start_as_current_span(
+                f"{msg.subject} process",
+                context=context,
+                kind=SpanKind.CONSUMER,
+                attributes=_messaging_attributes(msg.subject, "process"),
+            ):
+                await handler(msg.data)
+
         async def _run(msg) -> None:
             nonlocal in_flight
             try:
-                await handler(msg.data)
+                await _handle(msg)
             except Exception:
                 # As in the sequential path: on failure, the message is not
                 # acknowledged (redelivery by JetStream) - additionally
@@ -114,7 +148,7 @@ class NatsEventBusClient(EventBusClient):
             if limit <= 1:
                 # Exactly the previous behavior (no concurrency) - unchanged
                 # for any caller that doesn't set max_concurrency.
-                await handler(msg.data)
+                await _handle(msg)
                 await _ack(msg)
                 return
             async with slot_free:

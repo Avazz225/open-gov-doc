@@ -51,7 +51,8 @@ def test_bootstrapped_app_reports_runtime_values_and_startup_time():
     # Request finished: nothing in flight any more.
     assert float(_line(body, "http_requests_in_flight").split()[1]) == 0
     assert float(_line(body, "db_pool_in_use").split()[1]) == 0
-    assert float(_line(body, "db_pool_size").split()[1]) >= 5
+    # The connection budget of P89-S4 (ADR 0254): pool size 2 plus overflow 3.
+    assert float(_line(body, "db_pool_size").split()[1]) >= 2
     del engine
 
 

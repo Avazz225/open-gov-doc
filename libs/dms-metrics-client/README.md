@@ -22,3 +22,9 @@ The activation status comes from an `is_active(name) -> bool` function that the
 See `docs/operations/monitoring.md` for the overall picture (scrape proxy via `monitoring-service`,
 sensor registry, configuration management) and `services/registry-service`/`services/document-service`
 for the two pilots that use this lib.
+
+## Tracing sampling ratio (P94-S1, [ADR 0250](../../docs/adr/0250-distributed-tracing.md))
+
+`GET /sensor-config` also carries `tracing_sampling_ratio`. `SensorConfigClient` hands it to every
+listener registered with `config_client.register_tracing_ratio_listener()` -
+`dms_common.otel.setup_tracing` registers the process's sampler, so no service needs its own wiring.

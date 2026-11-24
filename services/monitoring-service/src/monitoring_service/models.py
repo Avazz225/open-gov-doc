@@ -23,6 +23,19 @@ class SensorConfigEntry(Base):
     enabled: Mapped[bool] = mapped_column(Boolean)
 
 
+class TracingConfig(Base):
+    """The tracing sampling ratio (P94-S1, ADR 0250): one row (`id=1`), handed
+    out with the sensor configuration that every service polls. Absent = the
+    monitoring-service's own `DMS_OTEL_SAMPLING_RATIO` (Helm/compose)."""
+
+    __tablename__ = "tracing_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    sampling_ratio: Mapped[float] = mapped_column(Float)
+    updated_by: Mapped[str] = mapped_column(String(128))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class AlertRule(Base):
     """A threshold rule on one sensor (P88-S5, ADR 0245 Decision 2)."""
 

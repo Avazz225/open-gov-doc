@@ -6,7 +6,10 @@ import {
   ApiError,
   type Sensor,
   type SensorConfig,
+  type TracingConfig,
   getSensorConfig,
+  getTracingConfig,
+  setTracingSamplingRatio,
   listAlertRules,
   listDowntimeWindows,
   type AlertRule,
@@ -24,6 +27,7 @@ import {
   worstLevel,
 } from "@/components/SensorAlerts";
 import { BoundedList } from "@/components/BoundedList";
+import { usePrincipalName } from "@/components/PrincipalName";
 
 // Monitoring sensors (P88-S2, ADR 0243, concept 10.1): the global base
 // setting ("monitor everything"/"nothing"), switches per cost class and per
@@ -238,6 +242,8 @@ export function SensorSettings() {
         </div>
       </section>
 
+      <TracingSection canManage={canManage} />
+
       <section className={card} aria-labelledby="sensors-list-heading">
         <h2 id="sensors-list-heading">{t("sensors.list.heading")}</h2>
         <p className="text-sm opacity-80">{t("sensors.list.hint")}</p>
@@ -424,5 +430,107 @@ function ErrorLine({ error }: { error: string | null }) {
     <p className="text-danger" role="alert">
       {error}
     </p>
+  );
+}
+
+// Distributed tracing (P94-S1, ADR 0250): what share of new requests is
+// traced across every service. 100 % suits a dev stack or a short
+// investigation; a production installation keeps a few per cent.
+function TracingSection({ canManage }: { canManage: boolean }) {
+  const { accessToken } = useAuth();
+  const { t, locale } = useI18n();
+  const [config, setConfig] = useState<TracingConfig | null>(null);
+  const [percent, setPercent] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [busy, setBusy] = useState(false);
+  // Since P85 the actor is a principal id; show the person's name.
+  const changedBy = usePrincipalName(config?.updated_by);
+
+  useEffect(() => {
+    if (!accessToken) return;
+    getTracingConfig(accessToken)
+      .then((loaded) => {
+        setConfig(loaded);
+        setPercent(String(Math.round(loaded.sampling_ratio * 1000) / 10));
+      })
+      .catch((err) => setError(err instanceof ApiError ? err.message : t("common.loadError")));
+  }, [accessToken, t]);
+
+  const value = Number(percent.replace(",", "."));
+  const valid = percent.trim() !== "" && Number.isFinite(value) && value >= 0 && value <= 100;
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    if (!accessToken || !valid) return;
+    setBusy(true);
+    setError(null);
+    setSaved(false);
+    try {
+      setConfig(await setTracingSamplingRatio(accessToken, value / 100));
+      setSaved(true);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t("common.actionError"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className={card} aria-labelledby="sensors-tracing-heading">
+      <h2 id="sensors-tracing-heading">{t("sensors.tracing.heading")}</h2>
+      <p className="text-sm opacity-80">{t("sensors.tracing.hint")}</p>
+      <ErrorLine error={error} />
+      {config && (
+        <>
+          {!config.tracing_enabled && (
+            <p className="text-sm italic opacity-80">{t("sensors.tracing.notConfigured")}</p>
+          )}
+          <form className="flex flex-wrap items-end gap-3" onSubmit={save}>
+            <div className="flex flex-col gap-1 text-sm">
+              <label htmlFor="tracing-ratio">{t("sensors.tracing.ratio")}</label>
+              <span className="flex items-center gap-1">
+                <input
+                  id="tracing-ratio"
+                  inputMode="decimal"
+                  className={`${fieldInput} w-24`}
+                  value={percent}
+                  disabled={!canManage || busy}
+                  onChange={(e) => {
+                    setPercent(e.target.value);
+                    setSaved(false);
+                  }}
+                  aria-invalid={!valid}
+                />
+                <span aria-hidden="true">%</span>
+              </span>
+            </div>
+            {canManage && (
+              <button
+                type="submit"
+                disabled={!valid || busy}
+                className="rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap"
+              >
+                {t("sensors.tracing.save")}
+              </button>
+            )}
+          </form>
+          {!valid && <p className="text-sm text-danger">{t("sensors.tracing.invalid")}</p>}
+          {saved && (
+            <p role="status" className="text-sm">
+              {t("sensors.tracing.saved")}
+            </p>
+          )}
+          {config.updated_at && (
+            <p className="text-xs opacity-70" title={changedBy.title}>
+              {t("sensors.tracing.lastChange", {
+                who: changedBy.name || "?",
+                when: new Date(config.updated_at).toLocaleString(locale),
+              })}
+            </p>
+          )}
+        </>
+      )}
+    </section>
   );
 }

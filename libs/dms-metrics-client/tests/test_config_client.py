@@ -168,3 +168,23 @@ def test_unbound_proxy_keeps_default_off_sensors_off():
     breakdown = registry.counter(SensorSpec("t.breakdown", "g", 5, "x", default_enabled=False))
     assert normal.is_active() is True
     assert breakdown.is_active() is False
+
+
+async def test_tracing_ratio_reaches_registered_listeners():
+    """P94-S1 (ADR 0250): the sampling ratio comes with the sensor config."""
+    from dms_metrics_client import config_client
+
+    received: list[float] = []
+    config_client.register_tracing_ratio_listener(received.append)
+    try:
+        client = SensorConfigClient(
+            "http://monitoring-service",
+            client=_client_with_response(
+                {"global_default": True, "overrides": {}, "tracing_sampling_ratio": 0.25}
+            ),
+        )
+        await client.start()
+        await client.stop()
+        assert received == [0.25]
+    finally:
+        config_client._tracing_ratio_listeners.remove(received.append)

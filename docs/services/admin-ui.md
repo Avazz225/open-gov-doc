@@ -804,6 +804,10 @@ activation config:
   description, cost badge, services (collapsed to "n Dienste" above three), state with its source
   ("über die Gruppe" …) and its own switch. A filter matches name, description and service.
 - **Einstellungen ohne laufenden Sensor:** overrides that no running service matches, each with a reset.
+- **Tracing** (P94-S1, [ADR 0250](../adr/0250-distributed-tracing.md)): "Aufgezeichneter Anteil neuer
+  Anfragen" in per cent (0–100, `PUT /tracing-config`), "Übernehmen", who changed it last, and a note when
+  monitoring-service has no trace collector configured. Read-only without `admin.monitoring`. Tests in
+  `sensor-settings.test.tsx` (+2).
 
 Every switch is Übernehmen/An/Aus: Übernehmen clears the override (`enabled: null`), so the next less
 specific level applies. Without `admin.monitoring` everything is disabled and a read-only hint is shown.

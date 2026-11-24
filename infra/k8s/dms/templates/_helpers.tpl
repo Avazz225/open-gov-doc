@@ -326,6 +326,27 @@ unverändert beim globalen Secret. */}}
   value: {{ printf "http://%s-registry-service:8000" (include "dms.fullname" .root) | quote }}
 - name: DMS_SELF_ADDRESS
   value: {{ printf "http://%s:8000" (include "dms.serviceFullname" .) | quote }}
+{{- if .root.Values.tracing.enabled }}
+{{/* Distributed tracing (P94-S1, ADR 0250): the bundled collector or an
+external one; the ratio is the start value until monitoring-service's
+configuration arrives. */}}
+- name: DMS_OTEL_EXPORTER_ENDPOINT
+  value: {{ include "dms.otelEndpoint" .root | quote }}
+- name: DMS_OTEL_SAMPLING_RATIO
+  value: {{ .root.Values.tracing.samplingRatio | quote }}
+{{- end }}
+{{- end -}}
+
+{{/*
+OTLP/HTTP endpoint for the services (P94-S1): the bundled collector's
+Service, or tracing.external.endpoint.
+*/}}
+{{- define "dms.otelEndpoint" -}}
+{{- if .Values.tracing.bundled.enabled -}}
+{{- printf "http://%s:4318" (include "dms.serviceFullname" (dict "root" . "name" "otel-collector")) -}}
+{{- else -}}
+{{- required "tracing.external.endpoint ist Pflicht, wenn tracing.enabled und tracing.bundled.enabled=false" .Values.tracing.external.endpoint -}}
+{{- end -}}
 {{- end -}}
 
 {{/*

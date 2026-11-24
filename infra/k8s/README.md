@@ -81,6 +81,12 @@ tar xzf helm.tar.gz
   `resources`, `autoscaling`, `podDisruptionBudget`, `dependsOnServices`,
   `env`). For field details/descriptions see the comment block at the
   top of `values.yaml`.
+- **`tracing`** (P94-S1, [ADR 0250](../../docs/adr/0250-distributed-tracing.md)): off by default.
+  `enabled: true` sets `DMS_OTEL_EXPORTER_ENDPOINT`/`DMS_OTEL_SAMPLING_RATIO` on every service
+  (`dms.baseEnv`). `bundled.enabled: true` (default) deploys an OpenTelemetry collector and a single-binary
+  Tempo with a PVC (`templates/tracing.yaml`) plus a Grafana datasource ConfigMap
+  (`grafana_datasource: "1"`); `bundled.enabled: false` needs `external.endpoint` (rendering fails
+  without it). `samplingRatio` (default 0.1) is the start value - admins change it at runtime.
 - **`resources.baseline`**: default requests/limits for all services
   without their own `resources` block. A service with its own (even
   partial) `resources` block selectively overrides it (deep merge in

@@ -1298,7 +1298,17 @@
     },
     "costLevel": "Kostenstufe {level} von 5: {name}",
     "defaultOff": "standardmäßig aus",
-    "costSetting": "Einstellung für Kostenstufe {level}"
+    "costSetting": "Einstellung für Kostenstufe {level}",
+    "tracing": {
+      "heading": "Tracing",
+      "hint": "Anteil der Anfragen, die über alle Dienste hinweg als Trace aufgezeichnet werden (Grafana → Tempo). Entscheidend ist der erste Dienst einer Anfrage, alle weiteren folgen ihm. Änderungen greifen innerhalb von 15 Sekunden.",
+      "ratio": "Aufgezeichneter Anteil neuer Anfragen",
+      "save": "Übernehmen",
+      "saved": "Gespeichert – die Dienste übernehmen den Wert mit ihrer nächsten Abfrage.",
+      "invalid": "Bitte einen Wert zwischen 0 und 100 eingeben.",
+      "notConfigured": "Für diesen monitoring-service ist kein Trace-Collector eingetragen (DMS_OTEL_EXPORTER_ENDPOINT) – der Wert wirkt erst, wenn Tracing eingeschaltet ist.",
+      "lastChange": "Zuletzt geändert von {who}, {when}"
+    }
   },
   "license": {
     "pageTitle": "Lizenzstatus",

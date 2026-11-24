@@ -13,6 +13,7 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 
 from dms_common import configure_logging
+from dms_common.otel import setup_tracing
 from dms_connector_sdk import (
     ConnectorDescriptor,
     DmsTreeClient,
@@ -475,6 +476,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title=settings.service_name, lifespan=lifespan)
+setup_tracing(app, settings)
 register_exception_handlers(app)
 
 # Sensor concept (10.1, full rollout): must run at module level, right

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class SensorOut(BaseModel):
@@ -28,6 +28,20 @@ class SensorOut(BaseModel):
 class SensorConfigOut(BaseModel):
     global_default: bool
     overrides: dict[str, bool]
+    # P94-S1 (ADR 0250): share of new traces that are recorded, 0..1.
+    tracing_sampling_ratio: float | None = None
+
+
+class TracingConfigOut(BaseModel):
+    sampling_ratio: float
+    updated_by: str | None = None
+    updated_at: datetime | None = None
+    # Whether this monitoring-service itself exports traces (endpoint set).
+    tracing_enabled: bool = False
+
+
+class TracingConfigIn(BaseModel):
+    sampling_ratio: float = Field(ge=0.0, le=1.0)
 
 
 class GlobalSensorConfigIn(BaseModel):

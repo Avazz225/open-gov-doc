@@ -38,6 +38,8 @@
 | `GET` | `/alert-rules/prometheus` | The rules as a Prometheus rule file (`promtool check rules` clean), for installations running Alertmanager |
 | `GET` | `/downtime-windows` | Windows with `active` now, ungated |
 | `POST`/`PUT`/`DELETE` | `/downtime-windows[/{id}]` | `admin.monitoring`; `422` without any range/weekday/time, half a daily range, a bad `HH:MM`, or an end before the start |
+| `GET` | `/tracing-config` | P94-S1 ([ADR 0250](../adr/0250-distributed-tracing.md)): the tracing sampling ratio (`sampling_ratio`, who/when, `tracing_enabled` for this service), ungated. The same ratio comes with `GET /sensor-config` as `tracing_sampling_ratio`, which every polling service applies to its sampler |
+| `PUT` | `/tracing-config` | Set the ratio 0..1 (`admin.monitoring`), table `tracing_config`; without a row the service's own `DMS_OTEL_SAMPLING_RATIO` applies |
 | `GET` | `/healthz` | Own health check |
 
 ## Events
@@ -45,6 +47,7 @@
 Published (stream `monitoring`, `dms-eventbus-client`, after commit):
 
 - `monitoring.sensor.config_changed` — `subject`=sensor name or `"__global__"`, `payload`={`enabled`, `actor`}
+- `monitoring.tracing.config_changed` — `subject`=`"tracing"`, `payload`={`sampling_ratio`, `actor`} (P94-S1)
 - Since P88-S5 (actor = the admin):
   - `monitoring.alert_rule.created`/`.updated`/`.deleted`;
   - `monitoring.downtime_window.saved`/`.deleted`.

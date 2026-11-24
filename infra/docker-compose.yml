@@ -44,6 +44,7 @@ volumes:
   # themselves come declaratively from infra/grafana/ (provisioning), this
   # volume only persists other Grafana-internal state across restarts.
   grafana-data:
+  tempo-data:
   # Deletion register ledger (10.4, P11-S4) - see audit-service comment above.
   deletion-ledger-data:
 
@@ -304,6 +305,8 @@ services:
     restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      # Distributed tracing (P94-S1, ADR 0250); empty = off.
+      DMS_OTEL_EXPORTER_ENDPOINT: ${DMS_OTEL_EXPORTER_ENDPOINT-http://otel-collector:4318}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://svc_registry:${POSTGRES_PASSWORD_REGISTRY:-registry_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
@@ -361,6 +364,8 @@ services:
     restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      # Distributed tracing (P94-S1, ADR 0250); empty = off.
+      DMS_OTEL_EXPORTER_ENDPOINT: ${DMS_OTEL_EXPORTER_ENDPOINT-http://otel-collector:4318}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       DMS_POSTGRES_DSN: postgresql+asyncpg://svc_audit:${POSTGRES_PASSWORD_AUDIT:-audit_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
@@ -397,6 +402,8 @@ services:
     restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      # Distributed tracing (P94-S1, ADR 0250); empty = off.
+      DMS_OTEL_EXPORTER_ENDPOINT: ${DMS_OTEL_EXPORTER_ENDPOINT-http://otel-collector:4318}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       DMS_KEYCLOAK_BASE_URL: http://keycloak:8080
@@ -454,6 +461,8 @@ services:
     restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      # Distributed tracing (P94-S1, ADR 0250); empty = off.
+      DMS_OTEL_EXPORTER_ENDPOINT: ${DMS_OTEL_EXPORTER_ENDPOINT-http://otel-collector:4318}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       DMS_POSTGRES_DSN: postgresql+asyncpg://svc_permission:${POSTGRES_PASSWORD_PERMISSION:-permission_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
@@ -485,6 +494,8 @@ services:
     restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      # Distributed tracing (P94-S1, ADR 0250); empty = off.
+      DMS_OTEL_EXPORTER_ENDPOINT: ${DMS_OTEL_EXPORTER_ENDPOINT-http://otel-collector:4318}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://svc_storage:${POSTGRES_PASSWORD_STORAGE:-storage_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       # Pool budget (P89-S4, ADR 0254): every upload and download.
@@ -559,6 +570,8 @@ services:
     restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      # Distributed tracing (P94-S1, ADR 0250); empty = off.
+      DMS_OTEL_EXPORTER_ENDPOINT: ${DMS_OTEL_EXPORTER_ENDPOINT-http://otel-collector:4318}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://svc_document:${POSTGRES_PASSWORD_DOCUMENT:-document_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       # Pool budget (P89-S4, ADR 0254): uploads, downloads and listings.
@@ -626,6 +639,8 @@ services:
     restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      # Distributed tracing (P94-S1, ADR 0250); empty = off.
+      DMS_OTEL_EXPORTER_ENDPOINT: ${DMS_OTEL_EXPORTER_ENDPOINT-http://otel-collector:4318}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       DMS_POSTGRES_DSN: postgresql+asyncpg://svc_virus_scan:${POSTGRES_PASSWORD_VIRUS_SCAN:-virus_scan_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
@@ -664,6 +679,8 @@ services:
     restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      # Distributed tracing (P94-S1, ADR 0250); empty = off.
+      DMS_OTEL_EXPORTER_ENDPOINT: ${DMS_OTEL_EXPORTER_ENDPOINT-http://otel-collector:4318}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       DMS_POSTGRES_DSN: postgresql+asyncpg://svc_rendering:${POSTGRES_PASSWORD_RENDERING:-rendering_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
@@ -707,6 +724,8 @@ services:
     profiles: ["ocr"]
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      # Distributed tracing (P94-S1, ADR 0250); empty = off.
+      DMS_OTEL_EXPORTER_ENDPOINT: ${DMS_OTEL_EXPORTER_ENDPOINT-http://otel-collector:4318}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://svc_ocr:${POSTGRES_PASSWORD_OCR:-ocr_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
@@ -746,6 +765,8 @@ services:
     restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      # Distributed tracing (P94-S1, ADR 0250); empty = off.
+      DMS_OTEL_EXPORTER_ENDPOINT: ${DMS_OTEL_EXPORTER_ENDPOINT-http://otel-collector:4318}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       DMS_POSTGRES_DSN: postgresql+asyncpg://svc_search:${POSTGRES_PASSWORD_SEARCH:-search_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
@@ -785,6 +806,8 @@ services:
     restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      # Distributed tracing (P94-S1, ADR 0250); empty = off.
+      DMS_OTEL_EXPORTER_ENDPOINT: ${DMS_OTEL_EXPORTER_ENDPOINT-http://otel-collector:4318}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       DMS_POSTGRES_DSN: postgresql+asyncpg://svc_workflow:${POSTGRES_PASSWORD_WORKFLOW:-workflow_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
@@ -849,6 +872,8 @@ services:
     restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      # Distributed tracing (P94-S1, ADR 0250); empty = off.
+      DMS_OTEL_EXPORTER_ENDPOINT: ${DMS_OTEL_EXPORTER_ENDPOINT-http://otel-collector:4318}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       DMS_POSTGRES_DSN: postgresql+asyncpg://svc_notification:${POSTGRES_PASSWORD_NOTIFICATION:-notification_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
@@ -894,6 +919,8 @@ services:
     restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      # Distributed tracing (P94-S1, ADR 0250); empty = off.
+      DMS_OTEL_EXPORTER_ENDPOINT: ${DMS_OTEL_EXPORTER_ENDPOINT-http://otel-collector:4318}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://svc_case:${POSTGRES_PASSWORD_CASE:-case_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
@@ -936,6 +963,8 @@ services:
     restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      # Distributed tracing (P94-S1, ADR 0250); empty = off.
+      DMS_OTEL_EXPORTER_ENDPOINT: ${DMS_OTEL_EXPORTER_ENDPOINT-http://otel-collector:4318}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       DMS_POSTGRES_DSN: postgresql+asyncpg://svc_signature:${POSTGRES_PASSWORD_SIGNATURE:-signature_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
@@ -984,6 +1013,8 @@ services:
     restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      # Distributed tracing (P94-S1, ADR 0250); empty = off.
+      DMS_OTEL_EXPORTER_ENDPOINT: ${DMS_OTEL_EXPORTER_ENDPOINT-http://otel-collector:4318}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://svc_federation:${POSTGRES_PASSWORD_FEDERATION:-federation_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       # Post-Roadmap Phase 44 Session 3 (ADR 0164) - optional, and set here
@@ -1008,6 +1039,8 @@ services:
     restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      # Distributed tracing (P94-S1, ADR 0250); empty = off.
+      DMS_OTEL_EXPORTER_ENDPOINT: ${DMS_OTEL_EXPORTER_ENDPOINT-http://otel-collector:4318}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       DMS_POSTGRES_DSN: postgresql+asyncpg://svc_favorite:${POSTGRES_PASSWORD_FAVORITE:-favorite_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
@@ -1033,6 +1066,8 @@ services:
     restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      # Distributed tracing (P94-S1, ADR 0250); empty = off.
+      DMS_OTEL_EXPORTER_ENDPOINT: ${DMS_OTEL_EXPORTER_ENDPOINT-http://otel-collector:4318}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       DMS_POSTGRES_DSN: postgresql+asyncpg://svc_reporting:${POSTGRES_PASSWORD_REPORTING:-reporting_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
@@ -1086,6 +1121,8 @@ services:
     restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      # Distributed tracing (P94-S1, ADR 0250); empty = off.
+      DMS_OTEL_EXPORTER_ENDPOINT: ${DMS_OTEL_EXPORTER_ENDPOINT-http://otel-collector:4318}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       DMS_POSTGRES_DSN: postgresql+asyncpg://svc_archival:${POSTGRES_PASSWORD_ARCHIVAL:-archival_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
@@ -1132,6 +1169,8 @@ services:
     restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      # Distributed tracing (P94-S1, ADR 0250); empty = off.
+      DMS_OTEL_EXPORTER_ENDPOINT: ${DMS_OTEL_EXPORTER_ENDPOINT-http://otel-collector:4318}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       DMS_POSTGRES_DSN: postgresql+asyncpg://svc_query:${POSTGRES_PASSWORD_QUERY:-query_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
@@ -1179,6 +1218,8 @@ services:
     restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      # Distributed tracing (P94-S1, ADR 0250); empty = off.
+      DMS_OTEL_EXPORTER_ENDPOINT: ${DMS_OTEL_EXPORTER_ENDPOINT-http://otel-collector:4318}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       DMS_POSTGRES_DSN: postgresql+asyncpg://svc_license:${POSTGRES_PASSWORD_LICENSE:-license_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
@@ -1229,6 +1270,8 @@ services:
     restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      # Distributed tracing (P94-S1, ADR 0250); empty = off.
+      DMS_OTEL_EXPORTER_ENDPOINT: ${DMS_OTEL_EXPORTER_ENDPOINT-http://otel-collector:4318}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       DMS_POSTGRES_DSN: postgresql+asyncpg://svc_orchestration:${POSTGRES_PASSWORD_ORCHESTRATION:-orchestration_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
@@ -1260,6 +1303,8 @@ services:
     restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      # Distributed tracing (P94-S1, ADR 0250); empty = off.
+      DMS_OTEL_EXPORTER_ENDPOINT: ${DMS_OTEL_EXPORTER_ENDPOINT-http://otel-collector:4318}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://svc_monitoring:${POSTGRES_PASSWORD_MONITORING:-monitoring_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
@@ -1293,6 +1338,8 @@ services:
     restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      # Distributed tracing (P94-S1, ADR 0250); empty = off.
+      DMS_OTEL_EXPORTER_ENDPOINT: ${DMS_OTEL_EXPORTER_ENDPOINT-http://otel-collector:4318}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       # No own Postgres/NATS schema (3.3, P12-S1): pure translator
@@ -1324,6 +1371,8 @@ services:
     restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      # Distributed tracing (P94-S1, ADR 0250); empty = off.
+      DMS_OTEL_EXPORTER_ENDPOINT: ${DMS_OTEL_EXPORTER_ENDPOINT-http://otel-collector:4318}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       # No own Postgres/NATS schema (3.3, P12-S4), same pattern as
       # webdav-connector: pure translator between the self-built
@@ -1359,6 +1408,8 @@ services:
     restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      # Distributed tracing (P94-S1, ADR 0250); empty = off.
+      DMS_OTEL_EXPORTER_ENDPOINT: ${DMS_OTEL_EXPORTER_ENDPOINT-http://otel-collector:4318}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://svc_mail_connector:${POSTGRES_PASSWORD_MAIL_CONNECTOR:-mail_connector_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
@@ -1445,6 +1496,8 @@ services:
     restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      # Distributed tracing (P94-S1, ADR 0250); empty = off.
+      DMS_OTEL_EXPORTER_ENDPOINT: ${DMS_OTEL_EXPORTER_ENDPOINT-http://otel-collector:4318}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       DMS_POSTGRES_DSN: postgresql+asyncpg://svc_migration:${POSTGRES_PASSWORD_MIGRATION:-migration_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
@@ -1487,6 +1540,8 @@ services:
     restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      # Distributed tracing (P94-S1, ADR 0250); empty = off.
+      DMS_OTEL_EXPORTER_ENDPOINT: ${DMS_OTEL_EXPORTER_ENDPOINT-http://otel-collector:4318}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       # No own Postgres/NATS schema (7.3, P12-S3): pure translator,
       # reads/writes exclusively at the respective owner services.
@@ -1546,6 +1601,8 @@ services:
       # only for local development/testing (analogous to
       # federation-hub-service, ADR 0028) - an operator would run it
       # separately.
+      # Distributed tracing (P94-S1, ADR 0250); empty = off.
+      DMS_OTEL_EXPORTER_ENDPOINT: ${DMS_OTEL_EXPORTER_ENDPOINT-http://otel-collector:4318}
       DMS_POSTGRES_DSN: postgresql+asyncpg://svc_fleet:${POSTGRES_PASSWORD_FLEET:-fleet_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       # Phase 79 Session 3: previously left unset entirely (fail-closed
       # default, `None`) - correct for a production posture where an
@@ -1571,6 +1628,8 @@ services:
     restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      # Distributed tracing (P94-S1, ADR 0250); empty = off.
+      DMS_OTEL_EXPORTER_ENDPOINT: ${DMS_OTEL_EXPORTER_ENDPOINT-http://otel-collector:4318}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       DMS_POSTGRES_DSN: postgresql+asyncpg://svc_teamspace:${POSTGRES_PASSWORD_TEAMSPACE:-teamspace_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
@@ -1640,6 +1699,37 @@ services:
     networks:
       - dms-net
 
+  otel-collector:
+    # Distributed tracing (P94-S1, ADR 0250): receives OTLP from every
+    # service and forwards it to Tempo.
+    image: otel/opentelemetry-collector-contrib:0.111.0
+    restart: "no"
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./tracing/otel-collector.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "127.0.0.1:${OTEL_COLLECTOR_HTTP_PORT:-4318}:4318"
+    depends_on:
+      tempo:
+        condition: service_started
+    networks:
+      - dms-net
+
+  tempo:
+    image: grafana/tempo:2.6.1
+    restart: "no"
+    command: ["-config.file=/etc/tempo.yaml"]
+    # The image runs as uid 10001, a fresh named volume belongs to root -
+    # dev stack only, same trust level as the other infra containers here.
+    user: "0"
+    volumes:
+      - ./tracing/tempo.yaml:/etc/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    ports:
+      - "${INFRA_UI_BIND_ADDRESS:-127.0.0.1}:${TEMPO_PORT:-3200}:3200"
+    networks:
+      - dms-net
+
   grafana:
     image: grafana/grafana:11.3.1
     restart: "no"
@@ -1662,6 +1752,8 @@ services:
     depends_on:
       prometheus:
         condition: service_started
+      tempo:
+        condition: service_started
     networks:
       - dms-net
 
@@ -1672,6 +1764,8 @@ services:
     restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      # Distributed tracing (P94-S1, ADR 0250); empty = off.
+      DMS_OTEL_EXPORTER_ENDPOINT: ${DMS_OTEL_EXPORTER_ENDPOINT-http://otel-collector:4318}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://svc_object_type:${POSTGRES_PASSWORD_OBJECT_TYPE:-object_type_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
@@ -1699,6 +1793,8 @@ services:
     restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      # Distributed tracing (P94-S1, ADR 0250); empty = off.
+      DMS_OTEL_EXPORTER_ENDPOINT: ${DMS_OTEL_EXPORTER_ENDPOINT-http://otel-collector:4318}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       DMS_POSTGRES_DSN: postgresql+asyncpg://svc_folder:${POSTGRES_PASSWORD_FOLDER:-folder_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
@@ -1745,6 +1841,8 @@ services:
     restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      # Distributed tracing (P94-S1, ADR 0250); empty = off.
+      DMS_OTEL_EXPORTER_ENDPOINT: ${DMS_OTEL_EXPORTER_ENDPOINT-http://otel-collector:4318}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       # Self-registration (10.1, full rollout), new for gateway-service:

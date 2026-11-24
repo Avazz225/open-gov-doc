@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from collections.abc import Callable
 
 import httpx
 
@@ -63,6 +64,27 @@ def resolve_active(
     return global_default, "global"
 
 
+# Tracing sampling ratio (P94-S1, ADR 0250): monitoring-service hands it out
+# with the sensor configuration. `dms_common.otel.setup_tracing` registers the
+# process's sampler here; without tracing nobody listens.
+_tracing_ratio_listeners: list[Callable[[float], None]] = []
+
+
+def register_tracing_ratio_listener(listener: Callable[[float], None]) -> None:
+    if listener not in _tracing_ratio_listeners:
+        _tracing_ratio_listeners.append(listener)
+
+
+def _notify_tracing_ratio(ratio) -> None:
+    if ratio is None:
+        return
+    for listener in list(_tracing_ratio_listeners):
+        try:
+            listener(float(ratio))
+        except Exception:
+            logger.warning("tracing_ratio_listener_failed", exc_info=True)
+
+
 class SensorConfigClient:
     """Polls the sensor activation configuration from `monitoring-service`
     (`GET /sensor-config`) - TTL poll instead of NATS invalidation (deliberate
@@ -115,6 +137,7 @@ class SensorConfigClient:
             body = response.json()
             self._global_default = body["global_default"]
             self._overrides = body["overrides"]
+            _notify_tracing_ratio(body.get("tracing_sampling_ratio"))
         except httpx.HTTPError:
             logger.warning("sensor_config_refresh_failed")
 

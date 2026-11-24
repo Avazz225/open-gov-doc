@@ -1514,6 +1514,53 @@ minio:
 # Bundled-only, no enabled/external toggle (an explicit user decision,
 # see ADR 0099). No password/secret needed — NATS runs here without auth,
 # analogous to infra/docker-compose.yml.
+# ---------------------------------------------------------------------------
+# Distributed tracing (P94-S1, ADR 0250). Off by default. When on, every
+# service exports OTLP/HTTP to the bundled OpenTelemetry collector (which
+# forwards to a bundled Tempo) or to an existing collector
+# (`bundled.enabled: false` + `external.endpoint`). `samplingRatio` is the
+# start value; admins change it at runtime on admin-ui's monitoring sensors
+# page (monitoring-service hands it out with the sensor configuration).
+# A ConfigMap with a Grafana datasource for Tempo (label
+# `grafana_datasource: "1"`, picked up by the Grafana sidecar of e.g.
+# kube-prometheus-stack) comes with the bundled variant.
+# ---------------------------------------------------------------------------
+tracing:
+  enabled: false
+  samplingRatio: 0.1
+  external:
+    endpoint: ""
+  bundled:
+    enabled: true
+    collector:
+      image:
+        repository: otel/opentelemetry-collector-contrib
+        tag: "0.111.0"
+      resources:
+        memory:
+          requests: 128Mi
+          limits: 384Mi
+        cpu:
+          requests: 50m
+          limits: 500m
+    tempo:
+      image:
+        repository: grafana/tempo
+        tag: "2.6.1"
+      retention: 72h
+      persistence:
+        size: 10Gi
+        storageClassName: ""
+      resources:
+        memory:
+          requests: 256Mi
+          limits: 1Gi
+        cpu:
+          requests: 100m
+          limits: "1"
+    grafanaDatasource:
+      enabled: true
+
 nats:
   image:
     repository: nats

@@ -4,7 +4,7 @@ Shared technical foundation for all DMS services (no business logic):
 
 - `settings.BaseServiceSettings` — pydantic-settings base (env prefix `DMS_`); each service derives from it and sets `service_name`. Since P13-S1 also `installation_id`/`installation_display_name` (3a) — a shared value for the entire installation (`DMS_INSTALLATION_ID`/`DMS_INSTALLATION_DISPLAY_NAME`), e.g. exposed by `registry-service`'s `GET /installation` and used by `license-service` for license binding.
 - `logging.configure_logging(settings)` — structured JSON logging to stdout, automatically enriches each entry with `service_name`/`environment`.
-- `otel.configure_tracing(settings, exporter)` — global TracerProvider; the exporter (console locally, OTLP from Phase 11 onward) is deliberately passed in by the caller.
+- `otel.setup_tracing(app, settings)` (P94-S1, [ADR 0250](../../docs/adr/0250-distributed-tracing.md)) — called by every service right after `app = FastAPI(...)`. A no-op without `DMS_OTEL_EXPORTER_ENDPOINT`; with it: OTLP/HTTP export, FastAPI/httpx/SQLAlchemy instrumentation, a parent-based ratio sampler (`DMS_OTEL_SAMPLING_RATIO`, then monitoring-service's value via `dms_metrics_client`) that starts traces only at entry points. `configure_tracing(settings, exporter)` is the provider part on its own (tests pass an in-memory exporter); `set_sampling_ratio(ratio)` changes the ratio at runtime.
 
 ## Usage
 

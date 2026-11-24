@@ -1,0 +1,258 @@
+{{/*
+Distributed tracing, bundled variant (P94-S1, ADR 0250): an OpenTelemetry
+collector that every service exports to (see dms.baseEnv), forwarding to a
+single-binary Tempo with a PVC. Off unless tracing.enabled and
+tracing.bundled.enabled. Same configuration as infra/tracing/ in compose.
+*/}}
+{{- if and .Values.tracing.enabled .Values.tracing.bundled.enabled }}
+{{- $collector := include "dms.serviceFullname" (dict "root" . "name" "otel-collector") }}
+{{- $tempo := include "dms.serviceFullname" (dict "root" . "name" "tempo") }}
+{{- $c := .Values.tracing.bundled.collector }}
+{{- $t := .Values.tracing.bundled.tempo }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $collector }}
+  labels:
+    {{- include "dms.serviceLabels" (dict "root" . "name" "otel-collector") | nindent 4 }}
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          http:
+            endpoint: 0.0.0.0:4318
+          grpc:
+            endpoint: 0.0.0.0:4317
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_percentage: 80
+        spike_limit_percentage: 20
+      batch:
+        timeout: 2s
+    exporters:
+      otlp/tempo:
+        endpoint: {{ printf "%s:4317" $tempo }}
+        tls:
+          insecure: true
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+    service:
+      extensions: [health_check]
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [otlp/tempo]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $collector }}
+  labels:
+    {{- include "dms.serviceLabels" (dict "root" . "name" "otel-collector") | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "dms.serviceSelectorLabels" (dict "root" . "name" "otel-collector") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "dms.serviceSelectorLabels" (dict "root" . "name" "otel-collector") | nindent 8 }}
+      annotations:
+        checksum/config: {{ $c | toJson | sha256sum | trunc 16 }}
+    spec:
+      containers:
+        - name: otel-collector
+          image: {{ printf "%s:%s" $c.image.repository $c.image.tag | quote }}
+          args: ["--config=/etc/otelcol/config.yaml"]
+          ports:
+            - name: otlp-http
+              containerPort: 4318
+            - name: otlp-grpc
+              containerPort: 4317
+            - name: health
+              containerPort: 13133
+          readinessProbe:
+            httpGet:
+              path: /
+              port: health
+          livenessProbe:
+            httpGet:
+              path: /
+              port: health
+          resources:
+            requests:
+              memory: {{ $c.resources.memory.requests | quote }}
+              cpu: {{ $c.resources.cpu.requests | quote }}
+            limits:
+              memory: {{ $c.resources.memory.limits | quote }}
+              cpu: {{ $c.resources.cpu.limits | quote }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/otelcol
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $collector }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $collector }}
+  labels:
+    {{- include "dms.serviceLabels" (dict "root" . "name" "otel-collector") | nindent 4 }}
+spec:
+  selector:
+    {{- include "dms.serviceSelectorLabels" (dict "root" . "name" "otel-collector") | nindent 4 }}
+  ports:
+    - name: otlp-http
+      port: 4318
+      targetPort: otlp-http
+    - name: otlp-grpc
+      port: 4317
+      targetPort: otlp-grpc
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $tempo }}
+  labels:
+    {{- include "dms.serviceLabels" (dict "root" . "name" "tempo") | nindent 4 }}
+data:
+  tempo.yaml: |
+    stream_over_http_enabled: true
+    server:
+      http_listen_port: 3200
+    distributor:
+      receivers:
+        otlp:
+          protocols:
+            grpc:
+              endpoint: 0.0.0.0:4317
+    ingester:
+      max_block_duration: 5m
+    compactor:
+      compaction:
+        block_retention: {{ $t.retention }}
+    storage:
+      trace:
+        backend: local
+        wal:
+          path: /var/tempo/wal
+        local:
+          path: /var/tempo/blocks
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $tempo }}-data
+  labels:
+    {{- include "dms.serviceLabels" (dict "root" . "name" "tempo") | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- if $t.persistence.storageClassName }}
+  storageClassName: {{ $t.persistence.storageClassName | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $t.persistence.size | quote }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $tempo }}
+  labels:
+    {{- include "dms.serviceLabels" (dict "root" . "name" "tempo") | nindent 4 }}
+spec:
+  replicas: 1
+  # RWO PVC + single binary, same rationale as templates/nats.yaml.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "dms.serviceSelectorLabels" (dict "root" . "name" "tempo") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "dms.serviceSelectorLabels" (dict "root" . "name" "tempo") | nindent 8 }}
+    spec:
+      securityContext:
+        # The image's user; fsGroup makes the fresh PVC writable for it.
+        runAsUser: 10001
+        fsGroup: 10001
+      containers:
+        - name: tempo
+          image: {{ printf "%s:%s" $t.image.repository $t.image.tag | quote }}
+          args: ["-config.file=/etc/tempo/tempo.yaml"]
+          ports:
+            - name: http
+              containerPort: 3200
+            - name: otlp-grpc
+              containerPort: 4317
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 10
+          resources:
+            requests:
+              memory: {{ $t.resources.memory.requests | quote }}
+              cpu: {{ $t.resources.cpu.requests | quote }}
+            limits:
+              memory: {{ $t.resources.memory.limits | quote }}
+              cpu: {{ $t.resources.cpu.limits | quote }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/tempo
+            - name: data
+              mountPath: /var/tempo
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $tempo }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ $tempo }}-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $tempo }}
+  labels:
+    {{- include "dms.serviceLabels" (dict "root" . "name" "tempo") | nindent 4 }}
+spec:
+  selector:
+    {{- include "dms.serviceSelectorLabels" (dict "root" . "name" "tempo") | nindent 4 }}
+  ports:
+    - name: http
+      port: 3200
+      targetPort: http
+    - name: otlp-grpc
+      port: 4317
+      targetPort: otlp-grpc
+{{- if .Values.tracing.bundled.grafanaDatasource.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $tempo }}-grafana-datasource
+  labels:
+    {{- include "dms.serviceLabels" (dict "root" . "name" "tempo") | nindent 4 }}
+    grafana_datasource: "1"
+data:
+  dms-tempo.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Tempo (OG Doc)
+        uid: tempo
+        type: tempo
+        access: proxy
+        url: {{ printf "http://%s:3200" $tempo }}
+        editable: false
+{{- end }}
+{{- end }}

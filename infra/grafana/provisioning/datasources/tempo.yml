@@ -1,0 +1,16 @@
+# Traces (P94-S1, ADR 0250): Tempo behind the OpenTelemetry collector. Fixed
+# uid like the Prometheus datasource, so dashboards can reference it.
+apiVersion: 1
+
+datasources:
+  - name: Tempo
+    uid: tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:3200
+    editable: false
+    jsonData:
+      serviceMap:
+        datasourceUid: prometheus
+      nodeGraph:
+        enabled: true

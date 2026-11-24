@@ -28,6 +28,9 @@ const mocks = vi.hoisted(() => ({
   previewAlertRule: vi.fn(),
   saveDowntimeWindow: vi.fn(),
   deleteDowntimeWindow: vi.fn(),
+  // P94-S1: the tracing section on the same page; not under test here.
+  getTracingConfig: vi.fn(),
+  setTracingSamplingRatio: vi.fn(),
   permissions: ["admin.monitoring"] as string[],
 }));
 
@@ -112,6 +115,12 @@ describe("alerting UI", () => {
     Object.entries(mocks).forEach(([k, m]) => k !== "permissions" && (m as ReturnType<typeof vi.fn>).mockReset());
     mocks.listSensors.mockResolvedValue([SENSOR]);
     mocks.getSensorConfig.mockResolvedValue({ global_default: true, overrides: {} });
+    mocks.getTracingConfig.mockResolvedValue({
+      sampling_ratio: 1,
+      updated_by: null,
+      updated_at: null,
+      tracing_enabled: true,
+    });
     mocks.listAlertRules.mockResolvedValue([rule()]);
     mocks.listDowntimeWindows.mockResolvedValue([]);
     mocks.createAlertRule.mockResolvedValue({});

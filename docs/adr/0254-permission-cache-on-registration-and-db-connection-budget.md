@@ -130,6 +130,11 @@ That is not the cache: it no longer invalidates and hits mostly.
 Telling them apart needs a per-hop breakdown. That is what distributed tracing (P94-S1) provides, so the
 question is recorded there instead of being guessed at here.
 
+**Answered in P94-S1** ([ADR 0250](0250-distributed-tracing.md), "Measured"): new synchronous hops, not a
+slower database. Listing and download each gained one permission check since August (+4.7 / +5.2 ms), and
+the upload gained four calls (folder lookup with its own check, write check, resource-node registration,
+virus-scan's check). Every hop costs 2.5–4 ms of the service's own request handling even for a cache hit.
+
 ## Consequences
 
 - permission-service: the startup invalidation; `create_resource` and the `*.resource.created` handler

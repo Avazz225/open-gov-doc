@@ -54,3 +54,10 @@ process by design and keeps collecting every new message: event tests with rando
 left 419 consumers with 1.2 million pending messages on the dev stack, which slowed JetStream. (P91-S2b took it for the cause of an intermittent shutdown hang
 in document-service's test suite; P91-S4 found the hang again with NATS clean, so it wasn't.) Services keep their fixed
 durable names.
+
+## Trace propagation (P94-S1, [ADR 0250](../../docs/adr/0250-distributed-tracing.md))
+
+`publish()` runs in a PRODUCER span and writes the W3C `traceparent` into the NATS message headers;
+`subscribe()` continues it in a CONSUMER span around the handler (`messaging.*` attributes). Only the
+OpenTelemetry API is used - without a configured provider (tracing off) both are no-ops. Test:
+`tests/test_tracing.py` (real NATS, in-memory exporter).

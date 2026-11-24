@@ -25,3 +25,20 @@ test("lists the running services' sensors by group and filters them", async ({ p
   await expect(list.getByText("registry.instances.active_total")).toBeVisible();
   await expect(list.getByText("http.requests", { exact: true })).toHaveCount(0);
 });
+
+// P94-S1 (ADR 0250): the tracing ratio, read-only here (users-admin has no
+// `admin.monitoring`), so the stack's ratio is never changed by this test.
+test("shows the tracing sampling ratio", async ({ page }) => {
+  await loginViaUi(page);
+  await page.goto("/sensors/");
+  const tracing = page.getByRole("region", { name: "Tracing" });
+  const ratio = tracing.getByLabel("Aufgezeichneter Anteil neuer Anfragen");
+  await expect(ratio).toHaveValue(/^\d+(\.\d)?$/, { timeout: 15_000 });
+  await expect(ratio).toBeDisabled();
+  // The dev stack has a collector, so no "not configured" note.
+  await expect(tracing.getByText(/kein Trace-Collector/)).toHaveCount(0);
+  if (process.env.E2E_SCREENSHOT_DIR) {
+    await tracing.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${process.env.E2E_SCREENSHOT_DIR}/admin-tracing-ratio-1400.png` });
+  }
+});

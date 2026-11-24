@@ -1,0 +1,36 @@
+# OpenTelemetry Collector (P94-S1, ADR 0250): every service exports OTLP/HTTP
+# here (DMS_OTEL_EXPORTER_ENDPOINT); the collector batches and forwards to
+# Tempo. Sampling is decided in the services (monitoring-service's ratio), so
+# the collector doesn't drop anything itself.
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 256
+  batch:
+    timeout: 2s
+
+exporters:
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlp/tempo]

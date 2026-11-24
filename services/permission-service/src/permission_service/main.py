@@ -9,6 +9,7 @@ from dms_common import (
     configure_logging,
     require_acting_identity,
 )
+from dms_common.otel import setup_tracing
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
 from dms_metrics_client import (
@@ -270,6 +271,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title=settings.service_name, lifespan=lifespan)
+setup_tracing(app, settings)
 
 # Sensor concept (10.1, full rollout): must run at module level, right
 # after `app` is constructed - see bootstrap_http_sensors's docstring

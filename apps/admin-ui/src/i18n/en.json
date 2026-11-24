@@ -1298,7 +1298,17 @@
     },
     "costLevel": "Cost level {level} of 5: {name}",
     "defaultOff": "off by default",
-    "costSetting": "Setting for cost level {level}"
+    "costSetting": "Setting for cost level {level}",
+    "tracing": {
+      "heading": "Tracing",
+      "hint": "Share of requests recorded as a trace across every service (Grafana → Tempo). The first service of a request decides, all others follow it. Changes apply within 15 seconds.",
+      "ratio": "Recorded share of new requests",
+      "save": "Apply",
+      "saved": "Saved – the services pick the value up with their next poll.",
+      "invalid": "Please enter a value between 0 and 100.",
+      "notConfigured": "No trace collector is configured for this monitoring-service (DMS_OTEL_EXPORTER_ENDPOINT) – the value takes effect once tracing is switched on.",
+      "lastChange": "Last changed by {who}, {when}"
+    }
   },
   "license": {
     "pageTitle": "License status",

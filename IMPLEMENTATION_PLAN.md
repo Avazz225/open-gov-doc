@@ -4714,6 +4714,22 @@ explain lanes and route changes. Design and reasons: [ADR 0249](docs/adr/0249-ch
     and download are still about 2× the August times (5 → 11 ms, 25 → 42 ms, 10 → 17 ms). Break one
     request of each down per hop (gateway, service, permission check, DB, storage) and name what grew
     since August.
+  - **Result** ([ADR 0250](docs/adr/0250-distributed-tracing.md)):
+    - `dms_common.otel.setup_tracing` in all 32 services: OTLP/HTTP, FastAPI/httpx/SQLAlchemy
+      instrumentation, `traceparent` through NATS headers (`dms_eventbus_client`). A parent-based ratio
+      sampler that starts traces only at entry points (request, consumed or published event).
+    - The ratio in monitoring-service (`GET/PUT /tracing-config`), distributed with `GET /sensor-config`
+      through `dms_metrics_client`; admin-ui "Tracing" on the sensors page.
+    - Compose: `otel-collector` → `tempo`, a Grafana datasource. Helm: `tracing.*` (bundled collector +
+      Tempo with a PVC, or an external endpoint; datasource ConfigMap).
+    - **The P89-S4 question, answered:** new synchronous hops, not the database. Since 2026-08-15 listing
+      and download each gained a permission check (+4.7 / +5.2 ms); the upload gained a folder lookup with
+      its own check, a write check, resource-node registration and virus-scan's check (~25 ms). Every hop
+      costs 2.5–4 ms of the service's own request handling; DB statements 0.3–0.4 ms; tracing itself
+      < 0.5 ms. Follow-ups (fewer synchronous hops, a middleware profile) noted for P95.
+    - **Tests:** dms-common 28 (+4), dms-eventbus-client 13 (+1), dms-metrics-client 30 (+1; one stale
+      pool-size assertion corrected), monitoring-service 48 (+2), admin-ui 411 (+2) + e2e
+      `sensors.spec.ts` 2/2.
 - **P94-S2 — Central log aggregation (§10.1).** Loki plus promtail (or Alloy) in compose and Helm, with
   the JSON logs that already exist and a Grafana datasource. Trace-id ↔ log correlation with S1.
 - **P94-S3 — Hygiene bundle.**
@@ -4795,6 +4811,14 @@ by the pilot's numbers, not a committed rewrite of all of them (see ADR 0257's c
     of a folder with ~1,000 children takes about 3 s (each cache miss is computed on its own; warm it is
     60-90 ms). Every new user, and every cache-generation change, pays it. Measure it in the profile and
     consider computing siblings together (one ancestor walk for the shared parent).
+  - **Per-hop fixed cost and synchronous hops (found in P94-S1, ADR 0250 "Measured"):** every service hop
+    costs 2.5–4 ms of the service's own request handling even for a cache hit (a permission check: 3–3.7 ms
+    in permission-service, 0.4 ms of it DB); listing and download each make one permission call, an
+    upload five synchronous calls. Profile one service's middleware stack (HTTP sensors, acting identity,
+    logging, serialisation), and weigh fewer synchronous hops (a cached grant in the calling service, the
+    upload's folder lookup and write check in one call, resource-node registration after the response,
+    virus-scan trusting the checked upload) against a faster implementation of the same hops - this
+    bears directly on which service a Rust pilot would actually speed up.
   - **Per service, from the existing sensors, cadvisor and P94-S1's traces:**
     - CPU-seconds per 1,000 requests;
     - RSS at rest and under load;

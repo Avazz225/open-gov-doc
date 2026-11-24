@@ -14,7 +14,11 @@ class BaseServiceSettings(BaseSettings):
 
     postgres_dsn: str | None = None
     nats_url: str = "nats://localhost:4222"
+    # Distributed tracing (P94-S1, ADR 0250): the OTLP/HTTP collector base URL
+    # (e.g. http://otel-collector:4318); unset = tracing off. The ratio is the
+    # start value until monitoring-service's configuration arrives.
     otel_exporter_endpoint: str | None = None
+    otel_sampling_ratio: float = 1.0
 
     # Self-registration with the registry (3.2a, since P4-S1). Both fields
     # remain empty by default - discovery is an added benefit for services

@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
   getSensorConfig: vi.fn(),
   setSensorGlobalDefault: vi.fn(),
   setSensorOverride: vi.fn(),
+  getTracingConfig: vi.fn(),
+  setTracingSamplingRatio: vi.fn(),
   permissions: [] as string[],
 }));
 
@@ -18,6 +20,8 @@ vi.mock("@/lib/api", () => ({
   getSensorConfig: (...a: unknown[]) => mocks.getSensorConfig(...a),
   setSensorGlobalDefault: (...a: unknown[]) => mocks.setSensorGlobalDefault(...a),
   setSensorOverride: (...a: unknown[]) => mocks.setSensorOverride(...a),
+  getTracingConfig: (...a: unknown[]) => mocks.getTracingConfig(...a),
+  setTracingSamplingRatio: (...a: unknown[]) => mocks.setTracingSamplingRatio(...a),
   // P88-S6: alerting has its own test file; here nothing is configured.
   listAlertRules: async () => [],
   listDowntimeWindows: async () => [],
@@ -96,6 +100,51 @@ describe("SensorSettings", () => {
     });
     mocks.setSensorGlobalDefault.mockReset().mockResolvedValue({});
     mocks.setSensorOverride.mockReset().mockResolvedValue({});
+    mocks.getTracingConfig.mockReset().mockResolvedValue({
+      sampling_ratio: 1,
+      updated_by: null,
+      updated_at: null,
+      tracing_enabled: true,
+    });
+    mocks.setTracingSamplingRatio.mockReset();
+  });
+
+  it("sets the tracing sampling ratio in per cent (P94-S1)", async () => {
+    mocks.setTracingSamplingRatio.mockResolvedValue({
+      sampling_ratio: 0.05,
+      updated_by: "admin",
+      updated_at: "2026-11-24T10:00:00Z",
+      tracing_enabled: true,
+    });
+    renderPage();
+    const tracing = await screen.findByRole("region", { name: "Tracing" });
+    const input = await within(tracing).findByLabelText("Aufgezeichneter Anteil neuer Anfragen");
+    await waitFor(() => expect(input).toHaveValue("100"));
+
+    fireEvent.change(input, { target: { value: "150" } });
+    expect(within(tracing).getByText(/zwischen 0 und 100/)).toBeInTheDocument();
+    expect(within(tracing).getByRole("button", { name: "Übernehmen" })).toBeDisabled();
+
+    fireEvent.change(input, { target: { value: "5" } });
+    fireEvent.click(within(tracing).getByRole("button", { name: "Übernehmen" }));
+    expect(await within(tracing).findByRole("status")).toHaveTextContent("Gespeichert");
+    expect(mocks.setTracingSamplingRatio).toHaveBeenCalledWith("tok", 0.05);
+    expect(within(tracing).getByText(/Zuletzt geändert von admin/)).toBeInTheDocument();
+  });
+
+  it("shows the ratio read-only and says when no collector is configured", async () => {
+    mocks.permissions = [];
+    mocks.getTracingConfig.mockResolvedValue({
+      sampling_ratio: 0.1,
+      updated_by: null,
+      updated_at: null,
+      tracing_enabled: false,
+    });
+    renderPage();
+    const tracing = await screen.findByRole("region", { name: "Tracing" });
+    expect(await within(tracing).findByText(/kein Trace-Collector/)).toBeInTheDocument();
+    expect(within(tracing).getByLabelText("Aufgezeichneter Anteil neuer Anfragen")).toBeDisabled();
+    expect(within(tracing).queryByRole("button", { name: "Übernehmen" })).toBeNull();
   });
 
   it("shows the catalog grouped, with cost, state and where the state comes from", async () => {

@@ -190,7 +190,7 @@ scrapes, and report `result="failed"` instead of raising. Alerting on sensors: s
 - **Static Prometheus target** (`infra/prometheus.yml`, a single entry `monitoring-service:8000`) instead of scrape configuration automatically derived from the registry — Concept 10.1 names the latter as an option, not a requirement; with only one scrape target, automation does not yet add value.
 - **No integration with 7.3** (configuration import/export) — the service only exists from P12-S3 on (the same backward-dependency pattern as the P10-S0 finding on 10.1). Until then, sensor configuration is persisted and audited independently in `monitoring-service`.
 - ~~**No admin UI control surface** for sensor on/off toggling~~ — **closed in P88-S2**: admin-ui `/sensors/`, with group and cost-class switches (ADR 0243).
-- **No OpenTelemetry tracing connected** — `libs/dms-common.configure_tracing()` already exists (prepared but not called by any service), but per Concept 10.1 is a standalone, complementary topic ("distributed tracing... complements the sensor metrics") and not part of this session.
+- ~~**No OpenTelemetry tracing connected**~~ — **built in P94-S1** ([ADR 0250](../adr/0250-distributed-tracing.md)), see "Distributed tracing" below.
 - **The plugin orchestration service (P10-S1) does not switch to this sensor layer** — its `psutil` sampler remains in place. In the actually existing Docker Compose environment there is only one host anyway; a switch would provide no benefit ahead of real multi-node infrastructure (see P11-S0 finding).
 
 ## Grafana (Concept 10.1, P11-S2)
@@ -230,6 +230,23 @@ point, not mandatory use)." Implemented as:
   a different data source (cadvisor, not the sensor concept) but complements
   the two dashboards above: correlate a service's request volume with its
   actual resource cost.
+
+## Distributed tracing (P94-S1, [ADR 0250](../adr/0250-distributed-tracing.md))
+
+- **Path:** every service → OpenTelemetry collector (`otel-collector`, OTLP/HTTP 4318) → Tempo (`tempo`,
+  3200) → Grafana datasource "Tempo" (Explore → Tempo; search by service, by trace id, or by TraceQL such
+  as `{resource.service.name="document-service" && duration > 50ms}`).
+- **On/off:** `DMS_OTEL_EXPORTER_ENDPOINT` (compose sets the collector for all 32 services; empty = off).
+  Helm: `tracing.enabled`, bundled collector + Tempo or `tracing.external.endpoint`.
+- **What is a span:** each incoming request, each outgoing httpx call, each database statement, each NATS
+  publish and the handler that consumes it - one upload with its processing chain is one trace.
+- **Sampling ratio:** admin-ui → Monitoring-Sensoren → "Tracing" (or `PUT /tracing-config` on
+  monitoring-service, `admin.monitoring`). It reaches the services with their sensor-config poll within
+  15 s. The first service of a request decides; traces start only at entry points (request, consumed or
+  published event), not at a poll loop's query.
+- **Finding one request:** send a `traceparent` header yourself (`00-<32 hex>-<16 hex>-01`) and open that
+  trace id in Grafana - it is recorded regardless of the ratio.
+- **Overhead:** under 0.5 ms per request at ratio 1 (measured in P94-S1).
 
 ## CheckMK — deliberately not part of this build-out stage (P11-S2)
 

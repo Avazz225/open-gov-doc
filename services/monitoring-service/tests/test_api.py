@@ -196,3 +196,32 @@ def test_cost_levels_legacy_keys_and_default_off_sensors(client):
     finally:
         for key in ("cost:4", "cost:5"):
             _put(client, key, None)
+
+
+def test_tracing_ratio_is_set_and_handed_out_with_the_sensor_config(client):
+    """P94-S1 (ADR 0250): admins set the ratio; every service gets it with
+    `GET /sensor-config`, which it already polls."""
+    assert client.get("/tracing-config").json()["sampling_ratio"] == 1.0
+    assert client.get("/sensor-config").json()["tracing_sampling_ratio"] == 1.0
+
+    response = client.put(
+        "/tracing-config", json={"sampling_ratio": 0.1}, headers={"x-dms-principal": "alice"}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["sampling_ratio"] == 0.1
+    assert response.json()["updated_by"] == "alice"
+    assert client.get("/sensor-config").json()["tracing_sampling_ratio"] == 0.1
+
+
+def test_tracing_ratio_needs_permission_and_a_valid_value(client):
+    app.state.permission_client.has_permission.return_value = False
+    forbidden = client.put(
+        "/tracing-config", json={"sampling_ratio": 0.5}, headers={"x-dms-principal": "bob"}
+    )
+    assert forbidden.status_code == 403
+    app.state.permission_client.has_permission.return_value = True
+    invalid = client.put(
+        "/tracing-config", json={"sampling_ratio": 1.5}, headers={"x-dms-principal": "alice"}
+    )
+    assert invalid.status_code == 422

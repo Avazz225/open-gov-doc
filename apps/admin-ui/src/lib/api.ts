@@ -1850,6 +1850,36 @@ export interface Sensor {
 export interface SensorConfig {
   global_default: boolean;
   overrides: Record<string, boolean>;
+  // P94-S1 (ADR 0250): share of new traces that are recorded.
+  tracing_sampling_ratio?: number | null;
+}
+
+// Distributed tracing (P94-S1, ADR 0250): the sampling ratio every service
+// picks up with its sensor-configuration poll. Writes need `admin.monitoring`.
+export interface TracingConfig {
+  sampling_ratio: number;
+  updated_by: string | null;
+  updated_at: string | null;
+  tracing_enabled: boolean;
+}
+
+export async function getTracingConfig(token: string): Promise<TracingConfig> {
+  const response = await request("monitoring-service", "tracing-config", {}, token);
+  return response.json();
+}
+
+export async function setTracingSamplingRatio(token: string, ratio: number): Promise<TracingConfig> {
+  const response = await request(
+    "monitoring-service",
+    "tracing-config",
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sampling_ratio: ratio }),
+    },
+    token
+  );
+  return response.json();
 }
 
 export async function listSensors(token: string): Promise<Sensor[]> {

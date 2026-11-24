@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 
 import httpx
 from dms_common import configure_logging
+from dms_common.otel import set_sampling_ratio, setup_tracing
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
 from dms_registry_client import maybe_start_registration
@@ -26,6 +27,8 @@ from monitoring_service.schemas import (
     SensorConfigOut,
     SensorOut,
     SensorOverrideIn,
+    TracingConfigIn,
+    TracingConfigOut,
 )
 from monitoring_service.settings import Settings
 from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, Counter, generate_latest
@@ -36,6 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 settings = Settings()
 configure_logging(settings)
 logger = logging.getLogger(__name__)
+repository.default_tracing_ratio = settings.otel_sampling_ratio
 
 
 async def publish_event(
@@ -100,6 +104,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await repository.ensure_global_default_seeded(session)
         await repository.migrate_legacy_cost_keys(session)
         await session.commit()
+        # This service hands the ratio out and doesn't poll itself (P94-S1).
+        set_sampling_ratio((await repository.get_tracing_config(session)).sampling_ratio)
 
     app.state.auth_client = AuthServiceClient(settings.auth_service_base_url)
     app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
@@ -197,6 +203,7 @@ async def _alert_loop() -> None:
 
 
 app = FastAPI(title=settings.service_name, lifespan=lifespan)
+setup_tracing(app, settings)
 
 
 class _StaticMetricsCollector:
@@ -288,6 +295,36 @@ async def get_sensor_config(session: AsyncSession = Depends(get_session)) -> Sen
     pure read access to information already publicly visible via
     `GET /sensors`, no role check needed."""
     return await repository.get_sensor_config(session)
+
+
+@app.get("/tracing-config", response_model=TracingConfigOut)
+async def get_tracing_config(session: AsyncSession = Depends(get_session)) -> TracingConfigOut:
+    """The tracing sampling ratio (P94-S1, ADR 0250) - ungated like
+    `GET /sensor-config`, which carries the same value to every service."""
+    config = await repository.get_tracing_config(session)
+    config.tracing_enabled = bool(settings.otel_exporter_endpoint)
+    return config
+
+
+@app.put("/tracing-config", response_model=TracingConfigOut)
+async def set_tracing_config(
+    payload: TracingConfigIn,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> TracingConfigOut:
+    """Share of new traces that are recorded, 0..1. The services pick it up
+    with their next sensor-configuration poll (15 s)."""
+    await _require_monitoring_permission(x_dms_principal)
+    config = await repository.set_tracing_ratio(session, payload.sampling_ratio, x_dms_principal)
+    await session.commit()
+    set_sampling_ratio(payload.sampling_ratio)
+    await publish_event(
+        "monitoring.tracing.config_changed",
+        subject="tracing",
+        payload={"sampling_ratio": payload.sampling_ratio, "actor": x_dms_principal},
+    )
+    config.tracing_enabled = bool(settings.otel_exporter_endpoint)
+    return config
 
 
 @app.put("/sensor-config/global", response_model=SensorConfigOut)

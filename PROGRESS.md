@@ -2,6 +2,68 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P94-S1, distributed tracing ([ADR 0250](docs/adr/0250-distributed-tracing.md)), and
+the answer to ADR 0254's open latency question.
+
+**What changed:**
+- **dms-common:**
+  - `setup_tracing(app, settings)`, called right after `app = FastAPI(...)` in all 32 services; a no-op
+    without `DMS_OTEL_EXPORTER_ENDPOINT`.
+  - With it: OTLP/HTTP in batches, FastAPI instrumentation (without health/metrics and without the
+    per-chunk send/receive spans), httpx, and SQLAlchemy where the service has a database.
+  - A parent-based, runtime-adjustable ratio sampler. Traces start only at entry points (request,
+    consumed or published event), so poll loops don't produce one-span traces.
+- **dms-eventbus-client:** `traceparent` in the NATS headers on publish, a CONSUMER span around the
+  handler - an upload and its OCR/rendering/search chain are one trace.
+- **dms-metrics-client:** hands `tracing_sampling_ratio` from `GET /sensor-config` to the sampler, so the
+  ratio needs no per-service wiring.
+- **monitoring-service:** `tracing_config`, `GET/PUT /tracing-config` (`admin.monitoring`, audited event).
+- **admin-ui:** a "Tracing" section on the sensors page (share in per cent, who changed it last, a note
+  without a collector).
+- **Compose:** `otel-collector` (0.111.0) → `tempo` (2.6.1, 72 h), Grafana datasource "Tempo", the
+  endpoint on all 32 services (empty in `.env` = off).
+- **Helm:** `tracing.enabled` (off by default, ratio 0.1), bundled collector + Tempo with a PVC or
+  `external.endpoint` (required, rendering fails without it), a datasource ConfigMap for a Grafana
+  sidecar. `helm lint` and `helm template` were checked for all three variants.
+- **Found on the way:**
+  - The four services without a database crashed at startup (the SQLAlchemy instrumentation imports
+    SQLAlchemy) - now optional.
+  - The first live run was full of `connect` traces from poll loops, hence the entry-point rule.
+  - admin-ui first showed the raw principal id as "last changed by".
+  - `dms-metrics-client`'s runtime test still expected a pool size >= 5 (it has been 2 since P89-S4;
+    lib tests aren't part of `run-tests.sh`).
+- **Measured (ADR 0250 "Measured", 60 requests each through the gateway, one trace each):**
+
+  | Action | Client median | Breakdown |
+  |---|---|---|
+  | `list_folder` | 13.8 ms | +4.7 ms for a permission check that didn't exist on 2026-08-15 |
+  | `download` | 21.3 ms | +5.2 ms for a permission check that didn't exist on 2026-08-15 |
+  | `upload` | 53.4 ms | five synchronous calls instead of two: a folder lookup with its own check, a write check, resource-node registration, virus-scan's check; together about 25 ms |
+
+  - DB statements cost 0.3–0.4 ms each; every hop costs 2.5–4 ms of the service's own handling.
+  - Tracing itself costs < 0.5 ms: the client medians are the same at ratio 0.
+  - Follow-ups noted in P95-S1.
+- **Live:** ratio 0 → 0 gateway traces for 20 requests, ratio 1 → 20 of 20 (picked up within one 15-s
+  poll). The ratio is back at 1.0. The temporary `domain-admin-monitoring` grant on `users-admin` is
+  revoked.
+- **Docs:** ADR 0250 (new), ADR 0254 (answer pointer), operations/monitoring, monitoring-service,
+  admin-ui, dms-common/-eventbus-client/-metrics-client READMEs, infra/k8s README, plan (P94-S1 result,
+  P95-S1 follow-up).
+
+**Checks:**
+- **Libs:** dms-common 28 (+4), dms-eventbus-client 13 (+1, real NATS), dms-metrics-client 30 (+1).
+- **Services (targeted, the full regression follows at phase close):** monitoring-service 48 (+2),
+  gateway-service 31, permission-service 212, folder-service 195, document-service 454, audit-service 38,
+  notification-service 123, workflow-service 270, search-service 78, ruff green.
+- **admin-ui:** vitest 411 (+2), tsc and eslint clean; e2e `sensors.spec.ts` 2/2.
+- **Screenshot:** the tracing section.
+- **Containers rebuilt:** all 32 services, admin-ui; new: otel-collector, tempo; grafana restarted with the
+  datasource.
+
+**Next session:** P94-S2 (central log aggregation, trace ↔ log correlation).
+
+---
+
 **Last completed:** P93-S3, circulation template with an editable route, and **Phase 93 closed**
 (full regression). ([ADR 0249](docs/adr/0249-changing-running-processes-and-lane-semantics.md),
 implementation notes added.)

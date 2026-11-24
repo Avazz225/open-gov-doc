@@ -1,9 +1,10 @@
 import logging
+from datetime import UTC, datetime
 
 from dms_metrics_client import COST_LEVELS, LEGACY_KEY_LEVELS, normalize_cost, resolve_active
 from monitoring_service.clients import RegistryInstance
-from monitoring_service.models import GLOBAL_DEFAULT_KEY, SensorConfigEntry
-from monitoring_service.schemas import SensorConfigOut, SensorOut
+from monitoring_service.models import GLOBAL_DEFAULT_KEY, SensorConfigEntry, TracingConfig
+from monitoring_service.schemas import SensorConfigOut, SensorOut, TracingConfigOut
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,11 +16,43 @@ async def ensure_global_default_seeded(session: AsyncSession) -> None:
         await session.flush()
 
 
+# Fallback ratio while no one has set one (P94-S1) - main.py sets it from the
+# service's own `DMS_OTEL_SAMPLING_RATIO`.
+default_tracing_ratio: float = 1.0
+
+
 async def get_sensor_config(session: AsyncSession) -> SensorConfigOut:
     result = await session.execute(select(SensorConfigEntry))
     entries = {e.key: e.enabled for e in result.scalars().all()}
     global_default = entries.pop(GLOBAL_DEFAULT_KEY, True)
-    return SensorConfigOut(global_default=global_default, overrides=entries)
+    tracing = await get_tracing_config(session)
+    return SensorConfigOut(
+        global_default=global_default,
+        overrides=entries,
+        tracing_sampling_ratio=tracing.sampling_ratio,
+    )
+
+
+async def get_tracing_config(session: AsyncSession) -> TracingConfigOut:
+    row = await session.get(TracingConfig, 1)
+    if row is None:
+        return TracingConfigOut(sampling_ratio=default_tracing_ratio)
+    return TracingConfigOut(
+        sampling_ratio=row.sampling_ratio, updated_by=row.updated_by, updated_at=row.updated_at
+    )
+
+
+async def set_tracing_ratio(session: AsyncSession, ratio: float, actor: str) -> TracingConfigOut:
+    row = await session.get(TracingConfig, 1)
+    now = datetime.now(UTC)
+    if row is None:
+        session.add(TracingConfig(id=1, sampling_ratio=ratio, updated_by=actor, updated_at=now))
+    else:
+        row.sampling_ratio = ratio
+        row.updated_by = actor
+        row.updated_at = now
+    await session.flush()
+    return await get_tracing_config(session)
 
 
 logger = logging.getLogger(__name__)
