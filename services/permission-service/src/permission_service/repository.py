@@ -3,7 +3,7 @@ import time
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import and_, delete, or_, select
+from sqlalchemy import and_, delete, or_, select, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +16,7 @@ from permission_service.models import (
     Group,
     GroupMembership,
     PermissionCacheGeneration,
+    PrincipalCacheGeneration,
     ResourceNode,
     Role,
     RoleAssignment,
@@ -83,6 +84,80 @@ async def invalidate_cache(session: AsyncSession) -> None:
         )
     )
     await session.execute(delete(EffectivePermissionCache))
+
+
+async def invalidate_principals(session: AsyncSession, principal_ids: set[str]) -> None:
+    """Scoped invalidation (P95-S1d, ADR 0263): bumps the generation of just
+    these principals and drops their cache rows; everyone else's entries
+    stay valid. The race argument is the global one (ADR 0239) per
+    principal: a recompute that read the old principal generation writes a
+    row that never counts as a hit. Ids are bumped in sorted order, so two
+    concurrent invalidations lock the counter rows in the same order."""
+    ids = sorted(principal_ids)
+    if not ids:
+        return
+    metrics.count_invalidation("principal", len(ids))
+    stmt = pg_insert(PrincipalCacheGeneration).values(
+        [{"principal_id": principal_id, "generation": 1} for principal_id in ids]
+    )
+    await session.execute(
+        stmt.on_conflict_do_update(
+            index_elements=["principal_id"],
+            set_={"generation": PrincipalCacheGeneration.generation + 1},
+        )
+    )
+    await session.execute(
+        delete(EffectivePermissionCache).where(EffectivePermissionCache.principal_id.in_(ids))
+    )
+
+
+async def _lock_group_members(session: AsyncSession, group_id: str) -> set[str] | None:
+    """Locks the group row (FOR UPDATE) and returns its members, or `None`
+    for an unknown group. Every change to a group's members or to its role
+    assignments takes this lock first (P95-S1d), so the member set an
+    assignment change invalidates can't change under it: a member added
+    concurrently is invalidated by its own membership change, after."""
+    group = await session.get(Group, group_id, with_for_update=True, populate_existing=True)
+    if group is None:
+        return None
+    result = await session.execute(
+        select(GroupMembership.principal_id).where(GroupMembership.group_id == group_id)
+    )
+    return set(result.scalars().all())
+
+
+async def invalidate_for_assignment(
+    session: AsyncSession, principal_type: str, principal_id: str
+) -> None:
+    """Who a role assignment can affect (P95-S1d): the "everyone" group -
+    everyone, so the global generation; another group - its members; a user
+    or service - that principal. Lookups match assignments by
+    `principal_id` regardless of type (`_collect_effective_roles`), so the
+    id itself is always included."""
+    if principal_type == EVERYONE_PRINCIPAL_TYPE and principal_id == EVERYONE_PRINCIPAL_ID:
+        await invalidate_cache(session)
+        return
+    affected = {principal_id}
+    if principal_type == "group":
+        affected |= await _lock_group_members(session, principal_id) or set()
+    await invalidate_principals(session, affected)
+
+
+async def _cache_generations(session: AsyncSession, principal_id: str) -> tuple[int, int]:
+    """The global and the principal's generation, in one round trip."""
+    row = (
+        await session.execute(
+            select(
+                select(PermissionCacheGeneration.generation)
+                .where(PermissionCacheGeneration.id == CACHE_GENERATION_ROW_ID)
+                .scalar_subquery(),
+                select(PrincipalCacheGeneration.generation)
+                .where(PrincipalCacheGeneration.principal_id == principal_id)
+                .scalar_subquery(),
+            )
+        )
+    ).one()
+    return row[0] or 0, row[1] or 0
 
 
 async def current_cache_generation(session: AsyncSession) -> int:
@@ -749,19 +824,20 @@ async def delete_group(session: AsyncSession, group_id: str) -> None:
     principal afterward (empty member list), the same behavior as a group
     that never had any members assigned. Consistent with `Role`, which
     likewise has no delete endpoint/reference check."""
-    group = await session.get(Group, group_id)
-    if group is None:
+    members = await _lock_group_members(session, group_id)
+    if members is None:
         raise NotFoundError(f"group_id {group_id!r} unbekannt")
+    group = await session.get(Group, group_id)
     await session.execute(delete(GroupMembership).where(GroupMembership.group_id == group_id))
     await session.delete(group)
-    await invalidate_cache(session)
+    # Only its members lose what the group gave them (P95-S1d).
+    await invalidate_principals(session, members | {group_id})
 
 
 async def add_group_member(
     session: AsyncSession, group_id: str, principal_id: str
 ) -> GroupMembership:
-    group = await session.get(Group, group_id)
-    if group is None:
+    if await _lock_group_members(session, group_id) is None:
         raise NotFoundError(f"group_id {group_id!r} unbekannt")
     existing = await session.execute(
         select(GroupMembership).where(
@@ -774,7 +850,8 @@ async def add_group_member(
     membership = GroupMembership(group_id=group_id, principal_id=principal_id)
     session.add(membership)
     await session.flush()
-    await invalidate_cache(session)
+    # Only the new member's rights change (P95-S1d).
+    await invalidate_principals(session, {principal_id})
     return membership
 
 
@@ -786,6 +863,8 @@ async def list_group_members(session: AsyncSession, group_id: str) -> list[Group
 
 
 async def remove_group_member(session: AsyncSession, group_id: str, principal_id: str) -> None:
+    # The group lock first, as for every membership change (P95-S1d).
+    await _lock_group_members(session, group_id)
     result = await session.execute(
         select(GroupMembership).where(
             GroupMembership.group_id == group_id, GroupMembership.principal_id == principal_id
@@ -795,7 +874,7 @@ async def remove_group_member(session: AsyncSession, group_id: str, principal_id
     if membership is None:
         raise NotFoundError(f"{principal_id!r} ist kein Mitglied von Gruppe {group_id!r}")
     await session.delete(membership)
-    await invalidate_cache(session)
+    await invalidate_principals(session, {principal_id})
 
 
 async def create_supervisor_assignment(
@@ -956,7 +1035,7 @@ async def create_role_assignment(
         )
     )
     assert assignment is not None
-    await invalidate_cache(session)
+    await invalidate_for_assignment(session, principal_type, principal_id)
     return assignment
 
 
@@ -990,7 +1069,7 @@ async def delete_role_assignment(session: AsyncSession, assignment_id: int) -> R
         resource_id=assignment.resource_id,
     )
     await session.delete(assignment)
-    await invalidate_cache(session)
+    await invalidate_for_assignment(session, deleted.principal_type, deleted.principal_id)
     return deleted
 
 
@@ -1080,11 +1159,17 @@ async def get_effective_permissions(
     # written below carries the old generation and is ignored from then on.
     # `populate_existing` because an earlier lookup in the same session may
     # already hold a now-outdated row in the identity map.
-    generation = await current_cache_generation(session)
+    # Since P95-S1d (ADR 0263) the principal's own generation too: both are
+    # read first, and an entry counts only while both still match.
+    generation, principal_generation = await _cache_generations(session, principal_id)
     cached = await session.get(
         EffectivePermissionCache, (principal_id, resource_id), populate_existing=True
     )
-    if cached is not None and cached.generation == generation:
+    if (
+        cached is not None
+        and cached.generation == generation
+        and cached.principal_generation == principal_generation
+    ):
         metrics.count_lookup(hit=True)
         return cached
 
@@ -1112,6 +1197,7 @@ async def get_effective_permissions(
             permissions=permissions,
             computed_at=computed_at,
             generation=generation,
+            principal_generation=principal_generation,
         )
     # Concurrency-safe cache population (found live during post-roadmap
     # phase 31 session 4's browser verification, ADR 0115 - two of the new
@@ -1139,6 +1225,7 @@ async def get_effective_permissions(
         permissions=permissions,
         computed_at=computed_at,
         generation=generation,
+        principal_generation=principal_generation,
     )
     insert_stmt = insert_stmt.on_conflict_do_update(
         index_elements=["principal_id", "resource_id"],
@@ -1147,8 +1234,13 @@ async def get_effective_permissions(
             "permissions": insert_stmt.excluded.permissions,
             "computed_at": insert_stmt.excluded.computed_at,
             "generation": insert_stmt.excluded.generation,
+            "principal_generation": insert_stmt.excluded.principal_generation,
         },
-        where=EffectivePermissionCache.generation < insert_stmt.excluded.generation,
+        # Forward only, in both generations together (row comparison).
+        where=tuple_(
+            EffectivePermissionCache.generation, EffectivePermissionCache.principal_generation
+        )
+        < tuple_(insert_stmt.excluded.generation, insert_stmt.excluded.principal_generation),
     )
     await session.execute(insert_stmt)
     await session.flush()
@@ -1161,6 +1253,7 @@ async def get_effective_permissions(
         permissions=permissions,
         computed_at=computed_at,
         generation=generation,
+        principal_generation=principal_generation,
     )
 
 
@@ -1224,25 +1317,194 @@ async def get_effective_permissions_batch(
     folders take a second."""
     if not resource_ids:
         return {}
-    generation = await current_cache_generation(session)
+    generation, principal_generation = await _cache_generations(session, principal_id)
     result = await session.execute(
         select(EffectivePermissionCache)
         .where(
             EffectivePermissionCache.principal_id == principal_id,
             EffectivePermissionCache.resource_id.in_(resource_ids),
             EffectivePermissionCache.generation == generation,
+            EffectivePermissionCache.principal_generation == principal_generation,
         )
         .execution_options(populate_existing=True)
     )
     entries = {entry.resource_id: entry for entry in result.scalars().all()}
     for _ in entries:
         metrics.count_lookup(hit=True)
-    for resource_id in resource_ids:
-        if resource_id not in entries:
-            entries[resource_id] = await get_effective_permissions(
-                session, principal_id, resource_id
-            )
+    misses = [resource_id for resource_id in resource_ids if resource_id not in entries]
+    if misses:
+        entries.update(
+            await _compute_batch(session, principal_id, misses, generation, principal_generation)
+        )
     return entries
+
+
+async def _collect_effective_roles_many(
+    session: AsyncSession, principal_id: str, resource_ids: list[str]
+) -> dict[str, tuple[list[Role], bool]]:
+    """`_collect_effective_roles` for many resources at once (P95-S1d, ADR
+    0263) - same rules (own assignments, then upward while `inherit`, the
+    principal's groups and "everyone"), but every node's contribution is
+    computed once and shared: siblings in a listing share their parent's
+    whole ancestor chain. Before, a cold listing of 1,000 children walked
+    the same chain 1,000 times (3.7 s in P95-S1)."""
+    member_group_ids = await _group_ids_for_principal(session, principal_id)
+    principal_match = [
+        RoleAssignment.principal_id == principal_id,
+        and_(
+            RoleAssignment.principal_type == EVERYONE_PRINCIPAL_TYPE,
+            RoleAssignment.principal_id == EVERYONE_PRINCIPAL_ID,
+        ),
+    ]
+    if member_group_ids:
+        principal_match.append(
+            and_(
+                RoleAssignment.principal_type == "group",
+                RoleAssignment.principal_id.in_(member_group_ids),
+            )
+        )
+    nodes: dict[str, ResourceNode | None] = {}
+    own_role_ids: dict[str, set[int]] = {}
+
+    async def load(node_ids: list[str]) -> None:
+        wanted = [n for n in node_ids if n not in nodes]
+        if not wanted:
+            return
+        found = await session.execute(
+            select(ResourceNode).where(ResourceNode.resource_id.in_(wanted))
+        )
+        for node in found.scalars().all():
+            nodes[node.resource_id] = node
+        for node_id in wanted:
+            nodes.setdefault(node_id, None)
+            own_role_ids.setdefault(node_id, set())
+        assignments = await session.execute(
+            select(RoleAssignment.resource_id, RoleAssignment.role_id).where(
+                RoleAssignment.resource_id.in_(wanted), or_(*principal_match)
+            )
+        )
+        for node_id, role_id in assignments.all():
+            own_role_ids[node_id].add(role_id)
+
+    # Level by level: the targets, then the parents of those that inherit,
+    # and so on - one query pair per level, not per node.
+    level = list(dict.fromkeys(resource_ids))
+    while level:
+        await load(level)
+        level = list(
+            dict.fromkeys(
+                node.parent_id
+                for node_id in level
+                if (node := nodes.get(node_id)) is not None
+                and node.inherit
+                and node.parent_id is not None
+                and node.parent_id not in nodes
+            )
+        )
+
+    chain_roles: dict[str, frozenset[int]] = {}
+
+    def roles_from(node_id: str) -> frozenset[int]:
+        # A node's own roles plus, while it inherits, its parent's chain.
+        # Iterative, so a deep tree can't hit the recursion limit.
+        path: list[str] = []
+        current: str | None = node_id
+        while current is not None and current not in chain_roles:
+            node = nodes.get(current)
+            if node is None:
+                chain_roles[current] = frozenset()
+                break
+            path.append(current)
+            current = node.parent_id if node.inherit else None
+        inherited = chain_roles.get(current, frozenset()) if current is not None else frozenset()
+        for step in reversed(path):
+            inherited = frozenset(own_role_ids.get(step, set())) | inherited
+            chain_roles[step] = inherited
+        return chain_roles.get(node_id, frozenset())
+
+    per_resource = {resource_id: roles_from(resource_id) for resource_id in resource_ids}
+    all_role_ids = set().union(*per_resource.values()) if per_resource else set()
+    roles_by_id: dict[int, Role] = {}
+    if all_role_ids:
+        found = await session.execute(select(Role).where(Role.id.in_(all_role_ids)))
+        roles_by_id = {role.id: role for role in found.scalars().all()}
+    return {
+        resource_id: (
+            [roles_by_id[r] for r in role_ids if r in roles_by_id],
+            nodes.get(resource_id) is not None,
+        )
+        for resource_id, role_ids in per_resource.items()
+    }
+
+
+async def _compute_batch(
+    session: AsyncSession,
+    principal_id: str,
+    resource_ids: list[str],
+    generation: int,
+    principal_generation: int,
+) -> dict[str, EffectivePermissionCache]:
+    """Computes the misses of a batch together and caches the registered
+    ones in one upsert, under the generations read before anything else
+    (ADR 0239's rule, unchanged). Unregistered resources aren't cached
+    (ADR 0254)."""
+    started = time.monotonic() if metrics.rebuild_timing_active() else None
+    computed_at = datetime.now(UTC)
+    computed: dict[str, EffectivePermissionCache] = {}
+    rows = []
+    for resource_id, (roles, registered) in (
+        await _collect_effective_roles_many(session, principal_id, resource_ids)
+    ).items():
+        metrics.count_lookup(hit=False)
+        entry = EffectivePermissionCache(
+            principal_id=principal_id,
+            resource_id=resource_id,
+            roles=sorted(role.name for role in roles),
+            permissions=sorted({p for role in roles for p in role.permissions}),
+            computed_at=computed_at,
+            generation=generation,
+            principal_generation=principal_generation,
+        )
+        computed[resource_id] = entry
+        if registered:
+            rows.append(
+                {
+                    "principal_id": principal_id,
+                    "resource_id": resource_id,
+                    "roles": entry.roles,
+                    "permissions": entry.permissions,
+                    "computed_at": computed_at,
+                    "generation": generation,
+                    "principal_generation": principal_generation,
+                }
+            )
+    # Chunked: asyncpg allows at most 32,767 bind parameters per statement.
+    for start in range(0, len(rows), 1000):
+        insert_stmt = pg_insert(EffectivePermissionCache).values(rows[start : start + 1000])
+        await session.execute(
+            insert_stmt.on_conflict_do_update(
+                index_elements=["principal_id", "resource_id"],
+                set_={
+                    "roles": insert_stmt.excluded.roles,
+                    "permissions": insert_stmt.excluded.permissions,
+                    "computed_at": insert_stmt.excluded.computed_at,
+                    "generation": insert_stmt.excluded.generation,
+                    "principal_generation": insert_stmt.excluded.principal_generation,
+                },
+                where=tuple_(
+                    EffectivePermissionCache.generation,
+                    EffectivePermissionCache.principal_generation,
+                )
+                < tuple_(
+                    insert_stmt.excluded.generation, insert_stmt.excluded.principal_generation
+                ),
+            )
+        )
+    if rows:
+        await session.flush()
+    if started is not None and resource_ids:
+        metrics.observe_rebuild((time.monotonic() - started) / len(resource_ids))
+    return computed
 
 
 async def list_active_scope_locks(session: AsyncSession) -> list[ScopeLock]:

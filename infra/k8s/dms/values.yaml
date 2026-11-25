@@ -237,8 +237,9 @@ services:
   # Second pure baseline-fallback case (no own resources block). ---
     env:
       # Pool budget per replica (P89-S4, ADR 0254), see postgresql.maxConnections.
-      DMS_DB_POOL_SIZE: "8"
-      DMS_DB_MAX_OVERFLOW: "12"
+      # P95-S1d (ADR 0263): same total, more kept open.
+      DMS_DB_POOL_SIZE: "12"
+      DMS_DB_MAX_OVERFLOW: "8"
 
   storage-service:
     enabled: true
@@ -376,8 +377,9 @@ services:
   # env line needed.
     env:
       # Pool budget per replica (P89-S4, ADR 0254), see postgresql.maxConnections.
-      DMS_DB_POOL_SIZE: "10"
-      DMS_DB_MAX_OVERFLOW: "20"
+      # P95-S1d (ADR 0263): same total, more kept open.
+      DMS_DB_POOL_SIZE: "20"
+      DMS_DB_MAX_OVERFLOW: "10"
 
   virus-scan-service:
     enabled: true
@@ -1102,8 +1104,9 @@ services:
   # ---------------------------------------------------------------------
     env:
       # Pool budget per replica (P89-S4, ADR 0254), see postgresql.maxConnections.
-      DMS_DB_POOL_SIZE: "8"
-      DMS_DB_MAX_OVERFLOW: "12"
+      # P95-S1d (ADR 0263): same total, more kept open.
+      DMS_DB_POOL_SIZE: "12"
+      DMS_DB_MAX_OVERFLOW: "8"
 
   user-ui:
     enabled: true
@@ -1336,7 +1339,7 @@ services:
 postgresql:
   # Connection budget (P89-S4, ADR 0254). Every service process may hold up
   # to DMS_DB_POOL_SIZE + DMS_DB_MAX_OVERFLOW connections (default 2 + 3;
-  # permission 10 + 20, document and folder 8 + 12, storage 4 + 6 per
+  # permission 20 + 10, document and folder 12 + 8 (P95-S1d), storage 4 + 6 per
   # replica, see their `env`). Formula: sum over services of maxReplicas (or
   # replicas without autoscaling) x pool budget, plus Keycloak's own pool and
   # a reserve. With these values: about 370 for the services at full

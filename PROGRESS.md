@@ -2,6 +2,54 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P95-S1d, permission cache and DB pool
+([ADR 0263](docs/adr/0263-scoped-permission-cache-and-pool-sizing.md)).
+
+**What changed:**
+- **Invalidation per principal:**
+  - `permission.principal_cache_generation` next to the global counter, and `principal_generation` on
+    every cache row. A hit needs both to match; writes move forward only, comparing the pair.
+  - **Per principal:** role assignments to users or services invalidate that principal; to groups, its
+    members. Membership changes invalidate the member, and deleting a group invalidates its members.
+  - **Still global:** "everyone", role definitions, moves, deletes, `inherit`.
+  - **Groups:** member and assignment changes take the group row lock (`FOR UPDATE`), so a member added
+    during an assignment change can't keep a stale entry.
+  - **Sensor:** `permission.cache.invalidations` is labelled `scope`.
+- **Batch:** `/check/batch` computes its misses together (`_collect_effective_roles_many`): level by
+  level up the tree, every node's role chain once, one role query, one upsert.
+- **Pool:** permission-service 20 + 10 (before 10 + 20), document/folder 12 + 8 (before 8 + 12). Same
+  totals, more kept open, in compose and Helm; `rolling-updates.md` updated.
+  - **Correction:** the P95-S1 report had named "2 + 3" for permission-service, which is the default for
+    the other services. The report and ADR are corrected.
+- **`loadtest/cold_cache.py`:** the second round is now labelled as what it is, an unrelated grant.
+- **`run-tests.sh`:** waits for the `/healthz` of restarted services before the debris cleanup. 14
+  folder trashes had failed because document-service was still starting.
+
+**Checks:**
+- **permission-service:** 223 tests (+8, `test_scoped_cache.py`):
+  - scope per change type, and "everyone"/roles staying global;
+  - the group lock (an uncommitted group assignment blocks adding a member);
+  - a revoke racing a recompute on the principal generation alone;
+  - batch equals single on a tree with `inherit=False`, groups, "everyone" and an own assignment;
+  - a cold batch of 300 in ≤ 10 statements.
+  
+  All earlier race tests stay green.
+- **folder-service:** 195, against the rebuilt permission-service.
+- **document-service:** 455, against the rebuilt permission-service.
+- **Live:**
+  - cold 1,000-child listing 192 ms (P95-S1: 3,744 ms);
+  - after an unrelated assignment it stays warm, 49 ms (before 3,506 ms);
+  - `/check` burst: about 5 new Postgres sessions instead of 15–26 (net), latency unchanged at that
+    load;
+  - the sensor shows `scope="principal"` for assignments.
+- **Containers rebuilt or restarted:** permission-service (rebuilt), document-service and folder-service
+  (new pool).
+
+**Next session:** P95-S1e (measure again: both k6 scenarios, cold cache, py-spy; report before/after;
+full regression).
+
+---
+
 **Last completed:** P95-S1c: mail inbox paging, cases without a process instance, instance debris.
 
 **What changed:**

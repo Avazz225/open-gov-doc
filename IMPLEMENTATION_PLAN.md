@@ -4986,6 +4986,24 @@ by the pilot's numbers, not a committed rewrite of all of them (see ADR 0257's c
   - The pool budget of ADR 0254 revisited for the hot services: overflow connections are closed after
     use and reopened (SCRAM handshakes in the profile) - a larger base pool or keeping overflow alive,
     within the Postgres connection budget.
+  - **Result** ([ADR 0263](docs/adr/0263-scoped-permission-cache-and-pool-sizing.md)):
+    - **Per-principal generation:** a `principal_cache_generation` sits next to the global one.
+      - Assignments to users, services and groups, membership changes and group deletion invalidate only
+        the affected principals.
+      - Group changes serialize on the group row.
+      - "everyone", roles and structure stay global.
+      - Subtree scope was weighed and not built.
+    - **Batch misses computed together:** level by level, shared role chains, one upsert.
+    - **Pool:** permission 20 + 10, document/folder 12 + 8, same totals.
+    - **Tests:** permission-service +8 (scope per change type, group lock, per-principal race, batch
+      equals single, ≤ 10 statements for a cold batch of 300).
+    - **Live:**
+      - 1,000-child listing cold 192 ms (before 3,744 ms), and warm after an unrelated assignment, 49 ms
+        (before 3,506 ms);
+      - new Postgres sessions in a `/check` burst about 5 instead of 15–26 (net of the idle baseline),
+        latency in that test unchanged.
+    - **Found on the way:** `run-tests.sh` ran the debris cleanup while restarted services were still
+      starting (14 folder trashes failed after document-service). It now waits for their `/healthz`.
 - **P95-S1e — Measure again.** Both k6 scenarios, the cold-cache measurement and the py-spy profiles with
   the same tools and settings as P95-S1; the ranking report updated with before/after per fix. Phase-close
   style full regression. This is the basis for P95-S2.

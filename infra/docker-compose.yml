@@ -469,8 +469,10 @@ services:
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       DMS_POSTGRES_DSN: postgresql+asyncpg://svc_permission:${POSTGRES_PASSWORD_PERMISSION:-permission_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       # Pool budget (P89-S4, ADR 0254): every request of every service is checked here.
-      DMS_DB_POOL_SIZE: "10"
-      DMS_DB_MAX_OVERFLOW: "20"
+      # P95-S1d (ADR 0263): the same 30 at most, but 20 kept open - overflow
+      # connections are closed after use and reopened under load.
+      DMS_DB_POOL_SIZE: "20"
+      DMS_DB_MAX_OVERFLOW: "10"
       DMS_NATS_URL: nats://nats:4222
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://permission-service:8000
@@ -577,8 +579,9 @@ services:
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://svc_document:${POSTGRES_PASSWORD_DOCUMENT:-document_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       # Pool budget (P89-S4, ADR 0254): uploads, downloads and listings.
-      DMS_DB_POOL_SIZE: "8"
-      DMS_DB_MAX_OVERFLOW: "12"
+      # P95-S1d (ADR 0263): 20 at most as before, 12 kept open.
+      DMS_DB_POOL_SIZE: "12"
+      DMS_DB_MAX_OVERFLOW: "8"
       DMS_NATS_URL: nats://nats:4222
       DMS_STORAGE_SERVICE_BASE_URL: http://storage-service:8000
       DMS_FOLDER_SERVICE_BASE_URL: http://folder-service:8000
@@ -1840,8 +1843,9 @@ services:
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       DMS_POSTGRES_DSN: postgresql+asyncpg://svc_folder:${POSTGRES_PASSWORD_FOLDER:-folder_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       # Pool budget (P89-S4, ADR 0254): listings and the folder checks of every upload.
-      DMS_DB_POOL_SIZE: "8"
-      DMS_DB_MAX_OVERFLOW: "12"
+      # P95-S1d (ADR 0263): 20 at most as before, 12 kept open.
+      DMS_DB_POOL_SIZE: "12"
+      DMS_DB_MAX_OVERFLOW: "8"
       DMS_NATS_URL: nats://nats:4222
       DMS_OBJECT_TYPE_SERVICE_BASE_URL: http://object-type-service:8000
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000

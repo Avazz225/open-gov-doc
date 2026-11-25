@@ -16,7 +16,10 @@ INVALIDATIONS = SensorSpec(
     name="permission.cache.invalidations",
     group="security",
     cost=1,
-    description="Komplette Invalidierungen des Rechte-Caches (jede Rechteaenderung)",
+    description=(
+        "Invalidierungen des Rechte-Caches je Reichweite (global: alles, "
+        "principal: einzelne Principals)"
+    ),
 )
 REBUILD_DURATION = SensorSpec(
     name="permission.cache.rebuild.duration_seconds",
@@ -33,7 +36,7 @@ _rebuild: GuardedHistogram | None = None
 def build_sensors(registry: SensorRegistry, app=None) -> None:
     global _lookups, _invalidations, _rebuild
     _lookups = registry.counter(LOOKUPS, labelnames=("result",))
-    _invalidations = registry.counter(INVALIDATIONS)
+    _invalidations = registry.counter(INVALIDATIONS, labelnames=("scope",))
     _rebuild = registry.histogram(REBUILD_DURATION)
 
 
@@ -42,9 +45,9 @@ def count_lookup(hit: bool) -> None:
         _lookups.inc(result="hit" if hit else "miss")
 
 
-def count_invalidation() -> None:
-    if _invalidations is not None:
-        _invalidations.inc()
+def count_invalidation(scope: str = "global", n: int = 1) -> None:
+    if _invalidations is not None and n:
+        _invalidations.inc(n, scope=scope)
 
 
 def rebuild_timing_active() -> bool:

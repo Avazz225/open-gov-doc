@@ -2,8 +2,10 @@
 
 A folder with N children; for fresh principals the first filtered listing
 (folder-service -> permission-service `POST /check/batch` over every child)
-is measured against the second one, and again after a permission change that
-bumps the cache generation (any role assignment does). Talks to the services
+is measured against the second one, and again after a role assignment to an
+unrelated principal. Until P95-S1d that bumped the global cache generation and
+made every principal cold; since then (ADR 0263) it only touches that
+principal, so the second round should stay warm. Talks to the services
 directly (local ports), not through the gateway. Cleans up after itself.
 
 Usage: uv run python loadtest/cold_cache.py [--children 1000] [--principals 5]
@@ -64,8 +66,8 @@ def main() -> None:
             )
 
         round_for("fresh principals")
-        # A permission change bumps the cache generation for everyone - the
-        # same, now warm principals are measured again.
+        # A role assignment to someone else - the same, now warm principals
+        # are measured again.
         roles = http.get(f"{PERMISSION}/roles").json()
         role_id = next(r["id"] for r in roles if r["name"] == "domain-admin-monitoring")
         grant = http.post(
@@ -78,7 +80,7 @@ def main() -> None:
             },
         ).json()["role_assignment"]["id"]
         http.delete(f"{PERMISSION}/role-assignments/{grant}", headers=ADMIN)
-        round_for("after generation bump")
+        round_for("after unrelated grant")
     finally:
         http.post(f"{FOLDER}/folders/{parent['id']}/trash", headers=ADMIN, json={})
 

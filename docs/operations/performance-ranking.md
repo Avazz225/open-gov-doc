@@ -91,8 +91,9 @@ and 195 MB and barely grows under load. Only rendering-service doubles, to 310 M
 - **The middleware is not the per-hop cost** that P94-S1 asked about; the cost is request handling,
   serialisation and the drivers.
 - **permission-service spends 3–4 % in HMAC.** That is SCRAM authentication of fresh database
-  connections: with the pool budget of ADR 0254 (2 + 3 overflow), the overflow connections are closed
-  after use and reopened under concurrency.
+  connections: with the pool budget of ADR 0254 (10 + 20 for permission-service; an earlier version of
+  this report said 2 + 3, the default for the other services), the overflow connections are closed after
+  use and reopened under concurrency. P95-S1d (ADR 0263) keeps more connections open.
 
 ## Extended run: collapse, and why
 

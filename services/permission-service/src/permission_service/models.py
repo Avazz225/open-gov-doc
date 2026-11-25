@@ -141,11 +141,12 @@ class ApprovalRequest(Base):
 
 
 class EffectivePermissionCache(Base):
-    """Materialized cache (4.1) - fully cleared on every permission/structure
-    change (see repository.invalidate_cache) instead of being invalidated
-    granularly per affected subtree. A deliberate simplification for the
-    initial version; the result stays correct, only the rebuild after a
-    change is somewhat broader than strictly necessary.
+    """Materialized cache (4.1). Since P95-S1d (ADR 0263) invalidated per
+    principal where a change can only affect certain principals (role
+    assignments to users or groups, group membership - see
+    repository.invalidate_principals); role definitions, the "everyone"
+    group and structure changes (move, delete, `inherit`) still clear
+    everything (repository.invalidate_cache).
 
     ``generation`` (P84-S1, ADR 0239): the cache generation the entry was
     computed under. An entry only counts as a hit while it equals the
@@ -163,6 +164,10 @@ class EffectivePermissionCache(Base):
     permissions: Mapped[list[str]] = mapped_column(JSON)
     computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     generation: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    # P95-S1d (ADR 0263): the principal's own generation the entry was
+    # computed under, see `PrincipalCacheGeneration`. A hit needs both to
+    # match.
+    principal_generation: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
 
 
 class PermissionCacheGeneration(Base):
@@ -174,6 +179,21 @@ class PermissionCacheGeneration(Base):
     __tablename__ = "permission_cache_generation"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    generation: Mapped[int] = mapped_column(BigInteger, default=0)
+
+
+class PrincipalCacheGeneration(Base):
+    """Per-principal counter (P95-S1d, ADR 0263) next to the global one: a
+    change that can only affect certain principals - a role assignment to a
+    user, a group's assignments or members - bumps theirs instead of the
+    global generation, so every other principal's cache stays warm. Same
+    race argument as the global counter (ADR 0239): a reader reads both
+    before computing, a cache entry counts only while both still match.
+    No row means generation 0."""
+
+    __tablename__ = "principal_cache_generation"
+
+    principal_id: Mapped[str] = mapped_column(String(128), primary_key=True)
     generation: Mapped[int] = mapped_column(BigInteger, default=0)
 
 

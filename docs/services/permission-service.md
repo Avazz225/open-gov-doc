@@ -3,7 +3,7 @@
 **Responsibility:** RBAC — roles, assignments to principals (users/groups) on resources, inheritance along a resource hierarchy, a materialized event-driven permissions cache (Concept 4.1). Since P3-S4, additionally scope locks (4.7): temporary, RBAC-overriding locking of entire resource subtrees. Since P6-S4, additionally the generic four-eyes approval mechanism (4.3), also used by other services (e.g. Document Service). Since P6-S5, additionally home of the system's own, domain-separated admin roles (4.6) — completely separate from Keycloak realm roles, see [ADR 0023](../adr/0023-superuser-breakglass-and-domain-admin-accounts.md). Since P6-S6, additionally home of the system-wide maintenance-mode state (emergency shutdown, 4.8) — see [ADR 0024](../adr/0024-not-shutdown-gateway-enforced.md).
 
 **Concept reference:** 4.1, 4.3, 4.6, 4.7, 4.8, 4.4a (deputizing during absence, since P14-S11), 14.2 (org-hierarchy foundation, Post-Roadmap Phase 31 Session 9)
-**Own Postgres schema:** `permission` (tables `role`, `role_assignment`, `resource_node`, `effective_permission_cache`, `permission_cache_generation`, `scope_lock`, `approval_action_config`, `approval_request`, `system_maintenance_mode`, `delegation`, `group`, `group_membership`, `supervisor_assignment`)
+**Own Postgres schema:** `permission` (tables `role`, `role_assignment`, `resource_node`, `effective_permission_cache`, `permission_cache_generation`, `principal_cache_generation`, `scope_lock`, `approval_action_config`, `approval_request`, `system_maintenance_mode`, `delegation`, `group`, `group_membership`, `supervisor_assignment`)
 
 ## API
 
@@ -72,8 +72,17 @@
   - A deny for a not-yet-registered resource is no longer cached, so no stale answer for it can exist
     when it registers.
   - One invalidation at startup drops such rows left from before the upgrade.
-- Moves, deletes, assignments, roles, groups, memberships and inheritance still clear the whole cache;
-  they are real permission changes and rare.
+- **Invalidation per principal, since P95-S1d** ([ADR 0263](../adr/0263-scoped-permission-cache-and-pool-sizing.md)):
+  - **Assignments and memberships:** a role assignment to a user, service or group, a group membership
+    change or a group deletion bumps only the affected principals' counters
+    (`principal_cache_generation`, `invalidate_principals`). Every cache row carries `principal_generation`
+    as well, and a hit needs both generations to match.
+  - **Groups:** a group's member and assignment changes serialize on the group row (`FOR UPDATE`), so
+    nothing slips between them.
+  - **Still global:** "everyone" assignments, role definitions, moves, deletes and `inherit` changes.
+  - **Effect:** after an unrelated role assignment, a 1,000-child listing stays warm (49 ms instead of
+    3,506 ms).
+  - **Sensor:** `permission.cache.invalidations` has a `scope` label (`global`/`principal`).
 - `scope_lock`: `id` (PK), `resource_id` (FK), `locked_by`, `reason`, `blocks_read` (bool, default `false`), `expires_at` (nullable), `created_at`, `released_at`/`released_by` (nullable) — never hard-deleted; the lifting is documented rather than removing the row (the audit trail remains complete).
 - `approval_action_config` (4.3, since P6-S4): `action_type` (PK, free-form string), `requires_approval` (bool, default `false`), `required_permission` (nullable string, since **P6-S5**, 4.6), `updated_at`. If a row is missing for an action type, `requires_approval=false`/`required_permission=null` applies implicitly (a transient default object, not persisted).
 - `approval_request` (4.3, since P6-S4): `id` (UUID str), `action_type`, `initiated_by`, `payload` (JSON — enough information to execute the action later), `status` (`pending`|`approved`|`rejected`), `approved_by`/`rejected_by`/`reason` (nullable), `created_at`, `decided_at` (nullable).
@@ -263,10 +272,10 @@ principal, no own data row), every group created via `POST /groups` needs explic
   `principal_id` is a free-form string there) — an orphaned assignment simply no longer matches any
   principal afterward, the same behavior as a group that was never assigned any members. Consistent with
   `Role`, which likewise has no delete endpoint/reference check.
-- **Every membership/deletion change invalidates the entire `effective_permission_cache`** (the same
-  coarse-grained strategy as every other permission-changing operation in this service) — a removed
-  member thereby immediately loses the permissions held via the group, not only at the
-  next independent cache clear.
+- **Every membership/deletion change invalidates the cache of the principals it affects** (since
+  P95-S1d the member, or the members of a deleted group, not the entire cache; see ADR 0263). A removed
+  member thereby immediately loses the permissions held via the group, not only at the next independent
+  cache clear.
 - **Admin UI integration**: `apps/admin-ui`'s `UserManagement` page got a new section
   "Groups" (see `docs/services/admin-ui.md`).
 - **`is_org_unit` marker** (Post-Roadmap Phase 35 Session 1, [ADR 0143](../adr/0143-org-unit-marker-and-org-hierarchy-grant-admin-visibility.md)):
@@ -415,6 +424,13 @@ loaded once, and the per-resource ancestor walk only runs when any lock is activ
 - **Before:** two cache queries plus two queries per ancestor level, per id. A root listing of 810
   folders took about 1 s.
 - **Now:** 48 ms.
+- **Since P95-S1d** ([ADR 0263](../adr/0263-scoped-permission-cache-and-pool-sizing.md)), the misses are
+  computed together as well (`_collect_effective_roles_many`):
+  - level by level up the tree, one query for nodes and one for assignments per level;
+  - every node's role chain once, shared by its siblings;
+  - one role query and one upsert.
+  
+  A cold listing of 1,000 children: 192 ms instead of 3,744 ms.
 
 ## Lane Bindings (P93-S1, [ADR 0249](../adr/0249-changing-running-processes-and-lane-semantics.md))
 
@@ -434,7 +450,7 @@ capability `workflow.instance_modify` - workflow-service's skip / send back / mi
 ## Open Points
 
 - ~~Real, custom group membership continues to go unresolved~~ — **admin-defined groups with real membership resolution added in Post-Roadmap Phase 22 Session 2**, see "Admin-Creatable Groups" above. **Reworded during Phase 65+'s gap-analysis round** (the "planned as a standalone Phase 24 Session 2" framing was stale — that phase shipped long ago and was extended twice more, ADR 0153/ADR 0171): AD group → internal **role** mapping is real and live (since **P24-S2**, [ADR 0093](../adr/0093-ad-group-role-mapping-simple-1to1-scope-cut.md), extended by ADR 0153/0171), but it maps straight to roles, bypassing this service's own `Group`/`GroupMembership` model entirely — an AD group membership change does NOT automatically populate/sync an admin-defined `Group`'s membership here. That narrower gap remains genuinely open, no concrete trigger identified.
-- More granular cache invalidation (only the affected subtree instead of the entire cache) is possible as a later optimization, without changing the API.
+- More granular cache invalidation: per principal since P95-S1d (ADR 0263). Subtree-scoped invalidation for structure changes (move, delete, `inherit`) remains possible as a later optimization, without changing the API.
 - ~~`PUT /approval-config/{action_type}` remains deliberately ungated~~ — **fixed in Post-Roadmap Phase 32 Session 1** ([ADR 0130](../adr/0130-approval-config-self-gated-role-creation-four-eyes.md), supersedes [ADR 0089](../adr/0089-approval-settings-ui-config-endpoint-stays-ungated.md)): self-gated behind `admin.user_management`, same helper as `POST`/`PUT /roles`. The full call-site mapping (rather than the earlier estimate) found the actual blast radius smaller than expected — see ADR 0130 for the per-service breakdown.
 - **The four-eyes principle (4.3) has been generically available since P6-S4, since P6-S5 also with optional role binding (`required_permission`)** — wired up for scope locks, Document Service force unlock, superuser break-glass (`auth.superuser.activate`), role assignments (`POST /role-assignments`, since P17-S3) and, since **Post-Roadmap Phase 32 Session 1** ([ADR 0130](../adr/0130-approval-config-self-gated-role-creation-four-eyes.md)), role creation (`POST /roles`, `permission.role.create`) and, since **Post-Roadmap Phase 39 Session 2**
 ([ADR 0151](../adr/0151-role-update-four-eyes-and-access-type-validation.md)), role update

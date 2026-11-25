@@ -192,6 +192,7 @@ declare -A RESULT_SUMMARY
 declare -A RESULT_DURATION
 OVERALL_OK=0
 
+RESTARTED=()
 for service in "${SERVICES[@]}"; do
   if [ ! -d "$REPO_ROOT/services/$service/tests" ]; then
     echo "-- $service: kein tests/-Verzeichnis, übersprungen"
@@ -246,7 +247,27 @@ for service in "${SERVICES[@]}"; do
   if [ "$STOPPED" -eq 1 ]; then
     echo "==> Starte Container '$service' wieder"
     docker compose -f "$COMPOSE_FILE" start "$service" >/dev/null
+    RESTARTED+=("$service")
   fi
+done
+
+# `docker compose start` returns before the app is up, and the containers have
+# no healthcheck. The debris cleanup below calls the services (a folder's trash
+# goes through document-service too), so wait for every restarted service's
+# /healthz first - P95-S1d: right after a run that ended with document-service,
+# 14 folder trashes failed this way.
+wait_ready() {
+  local port
+  port="$(docker compose -f "$COMPOSE_FILE" port "$1" 8000 2>/dev/null | head -1 | cut -d: -f2)"
+  [ -z "$port" ] && return 0
+  for _ in $(seq 1 120); do
+    curl -sf -o /dev/null "http://localhost:${port}/healthz" && return 0
+    sleep 1
+  done
+  echo "-- $1: nach 120 s noch nicht bereit"
+}
+for service in "${RESTARTED[@]}"; do
+  wait_ready "$service"
 done
 
 RUFF_STATUS="übersprungen"

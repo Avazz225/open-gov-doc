@@ -46,10 +46,17 @@ async def _clean_tables():
                 "ADD COLUMN IF NOT EXISTS generation BIGINT NOT NULL DEFAULT 0"
             )
         )
+        # P95-S1d (ADR 0263), the same way.
+        await conn.execute(
+            text(
+                "ALTER TABLE permission.effective_permission_cache "
+                "ADD COLUMN IF NOT EXISTS principal_generation BIGINT NOT NULL DEFAULT 0"
+            )
+        )
         await conn.execute(
             text(
                 "TRUNCATE permission.role_assignment, permission.effective_permission_cache, "
-                "permission.permission_cache_generation, "
+                "permission.permission_cache_generation, permission.principal_cache_generation, "
                 "permission.role, permission.scope_lock, permission.resource_node, "
                 "permission.approval_request, permission.approval_action_config, "
                 "permission.system_maintenance_mode, permission.delegation, "

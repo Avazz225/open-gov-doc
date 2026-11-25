@@ -109,6 +109,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ADD COLUMN IF NOT EXISTS generation BIGINT NOT NULL DEFAULT 0"
             )
         )
+        # P95-S1d (ADR 0263) - the principal's generation per cache entry,
+        # same ad-hoc pattern. Existing rows get 0, which matches a principal
+        # without a counter row, so they stay valid.
+        await conn.execute(
+            text(
+                "ALTER TABLE permission.effective_permission_cache "
+                "ADD COLUMN IF NOT EXISTS principal_generation BIGINT NOT NULL DEFAULT 0"
+            )
+        )
         # Post-Roadmap Phase 35 Session 1 (ADR 0143) - same ad-hoc pattern.
         await conn.execute(
             text(

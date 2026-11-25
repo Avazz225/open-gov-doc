@@ -147,9 +147,18 @@ installation.
 Every service process keeps a connection pool that never shrinks by itself. Each process can therefore
 hold `DMS_DB_POOL_SIZE + DMS_DB_MAX_OVERFLOW` connections:
 - **Default:** 2 + 3.
-- **permission-service:** 10 + 20.
-- **document-service and folder-service:** 8 + 12.
+- **permission-service:** 20 + 10.
+- **document-service and folder-service:** 12 + 8.
 - **storage-service:** 4 + 6.
+
+**Since P95-S1d** ([ADR 0263](../adr/0263-scoped-permission-cache-and-pool-sizing.md)), the hot services keep
+more connections open (`pool_size`) and need less overflow. The totals and the budget are unchanged.
+
+**Why:** SQLAlchemy closes an overflow connection as soon as it is returned to a full pool, so every
+burst above the base size reopens connections, each with a SCRAM handshake (3–4 % of permission-service's
+CPU in P95-S1).
+
+**The cost:** at rest, up to 18 more idle connections in compose.
 
 **The rule:** Postgres' `max_connections` must cover the sum over all services of maximum replicas
 (`maxReplicas` with autoscaling) × pool budget, plus Keycloak's own pool and a reserve for admin
