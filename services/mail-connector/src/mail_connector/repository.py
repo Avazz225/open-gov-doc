@@ -120,6 +120,24 @@ async def list_attachments(session: AsyncSession, message_id: str) -> list[Inbou
     return list(result.scalars().all())
 
 
+async def attachments_by_message(
+    session: AsyncSession, message_ids: list[str]
+) -> dict[str, list[InboundAttachment]]:
+    """The attachments of a whole page of messages in one query (P95-S1c) -
+    `list_attachments` per message made a listing cost two queries per row."""
+    grouped: dict[str, list[InboundAttachment]] = {m: [] for m in message_ids}
+    if not message_ids:
+        return grouped
+    result = await session.execute(
+        select(InboundAttachment)
+        .where(InboundAttachment.message_id.in_(message_ids))
+        .order_by(InboundAttachment.id)
+    )
+    for attachment in result.scalars().all():
+        grouped[attachment.message_id].append(attachment)
+    return grouped
+
+
 async def route_message(
     session: AsyncSession,
     message_id: str,
@@ -179,6 +197,23 @@ async def list_routing_log(session: AsyncSession, message_id: str) -> list[MailR
     return list(result.scalars().all())
 
 
+async def routing_log_by_message(
+    session: AsyncSession, message_ids: list[str]
+) -> dict[str, list[MailRoutingLogEntry]]:
+    """The routing hops of a whole page of messages in one query (P95-S1c)."""
+    grouped: dict[str, list[MailRoutingLogEntry]] = {m: [] for m in message_ids}
+    if not message_ids:
+        return grouped
+    result = await session.execute(
+        select(MailRoutingLogEntry)
+        .where(MailRoutingLogEntry.message_id.in_(message_ids))
+        .order_by(MailRoutingLogEntry.routed_at)
+    )
+    for entry in result.scalars().all():
+        grouped[entry.message_id].append(entry)
+    return grouped
+
+
 async def search_routing_log(
     session: AsyncSession,
     *,
@@ -189,6 +224,7 @@ async def search_routing_log(
     until: datetime | None = None,
     q: str | None = None,
     limit: int = 200,
+    offset: int = 0,
 ) -> list[tuple[MailRoutingLogEntry, InboundMessage]]:
     """The searchable, standalone cross-message "Postbuch" register (14.2,
     Post-Roadmap Phase 31 Session 12c) - unlike `list_routing_log` (scoped
@@ -234,7 +270,11 @@ async def search_routing_log(
         query = query.where(MailRoutingLogEntry.routed_at <= until)
     if q is not None:
         query = query.where(InboundMessage.subject.ilike(f"%{q}%"))
-    query = query.order_by(MailRoutingLogEntry.routed_at.desc()).limit(limit)
+    query = (
+        query.order_by(MailRoutingLogEntry.routed_at.desc(), MailRoutingLogEntry.id.desc())
+        .limit(limit)
+        .offset(offset)
+    )
     result = await session.execute(query)
     return [(entry, message) for entry, message in result.all()]
 
@@ -245,8 +285,11 @@ async def list_messages(
     status: str | None = None,
     mailbox_id: str | None = None,
     mailbox_ids: set[str] | None = None,
+    limit: int = 100,
+    offset: int = 0,
 ) -> list[InboundMessage]:
-    """`mailbox_id` narrows to exactly one mailbox (caller has already
+    """Newest first, one page (`limit`/`offset`, since P95-S1c - before, the
+    whole inbox). `mailbox_id` narrows to exactly one mailbox (caller has already
     checked access, see `main.py::_require_mailbox_access`); `mailbox_ids`
     (P32-S3, ADR 0132) narrows to a caller's whole accessible set for the
     unfiltered listing - the two are mutually exclusive in practice
@@ -259,7 +302,12 @@ async def list_messages(
         query = query.where(InboundMessage.mailbox_id == mailbox_id)
     elif mailbox_ids is not None:
         query = query.where(InboundMessage.mailbox_id.in_(mailbox_ids))
-    result = await session.execute(query.order_by(InboundMessage.received_at.desc()))
+    query = (
+        query.order_by(InboundMessage.received_at.desc(), InboundMessage.id)
+        .limit(limit)
+        .offset(offset)
+    )
+    result = await session.execute(query)
     return list(result.scalars().all())
 
 
@@ -325,6 +373,14 @@ async def create_outbound_message(
     return message
 
 
-async def list_outbound_messages(session: AsyncSession) -> list[OutboundMessage]:
-    result = await session.execute(select(OutboundMessage).order_by(OutboundMessage.sent_at.desc()))
+async def list_outbound_messages(
+    session: AsyncSession, *, limit: int = 100, offset: int = 0
+) -> list[OutboundMessage]:
+    """Newest first, one page (since P95-S1c)."""
+    result = await session.execute(
+        select(OutboundMessage)
+        .order_by(OutboundMessage.sent_at.desc(), OutboundMessage.id)
+        .limit(limit)
+        .offset(offset)
+    )
     return list(result.scalars().all())

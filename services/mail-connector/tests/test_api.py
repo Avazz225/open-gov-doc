@@ -1272,3 +1272,54 @@ async def test_assign_files_a_detached_signature_as_derived_from_its_file(client
     assert signature["derivation_type"] == "signature"
     assert signature["derived_from_document_id"] == ids["bescheid.txt"]
     assert signature["derived_from_version_number"] == 1
+
+
+# --- Paging (P95-S1c) --------------------------------------------------------
+
+
+def _count_statements(client, path: str, params: dict) -> tuple[list[dict], int]:
+    from sqlalchemy import event
+
+    statements = []
+
+    def on_execute(*_args):
+        statements.append(1)
+
+    sync_engine = app.state.engine.sync_engine
+    event.listen(sync_engine, "before_cursor_execute", on_execute)
+    try:
+        response = client.get(path, params=params, headers=ADMIN_HEADERS)
+    finally:
+        event.remove(sync_engine, "before_cursor_execute", on_execute)
+    assert response.status_code == 200, response.text
+    return response.json(), len(statements)
+
+
+async def test_inbound_pages_are_disjoint_and_cost_the_same(client, session):
+    tag = uuid.uuid4().hex[:6]
+    for n in range(7):
+        await _ingest(session, uid=f"uid-page-{tag}-{n}", subject=f"Seite {tag} {n}")
+    seen: list[str] = []
+    counts = []
+    for offset in (0, 3, 6):
+        page, statements = _count_statements(
+            client, "/inbound", {"limit": 3, "offset": offset, "mailbox_id": "central"}
+        )
+        seen += [m["id"] for m in page]
+        counts.append(statements)
+    everything, all_statements = _count_statements(
+        client, "/inbound", {"limit": 500, "mailbox_id": "central"}
+    )
+    assert seen == [m["id"] for m in everything][:9]
+    assert len(set(seen)) == len(seen)
+    # Attachments and routing log come with the page in one query each, so
+    # a page of 3 costs as many statements as the whole inbox.
+    assert counts[0] == counts[1] == all_statements
+
+
+def test_page_limits_are_bounded(client):
+    for path in ("/inbound", "/outbound", "/routing-log"):
+        assert client.get(path, params={"limit": 501}, headers=ADMIN_HEADERS).status_code == 422
+        assert client.get(path, params={"offset": -1}, headers=ADMIN_HEADERS).status_code == 422
+        response = client.get(path, params={"limit": 1}, headers=ADMIN_HEADERS)
+        assert response.status_code == 200 and len(response.json()) <= 1

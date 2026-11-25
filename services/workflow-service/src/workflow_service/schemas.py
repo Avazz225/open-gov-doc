@@ -247,6 +247,10 @@ class SkipTaskRequest(_InstanceOperationBase):
     pass
 
 
+class TerminateInstanceRequest(_InstanceOperationBase):
+    pass
+
+
 class SendBackRequest(_InstanceOperationBase):
     target_task_id: str = Field(min_length=1)
 

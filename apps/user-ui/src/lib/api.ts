@@ -1124,13 +1124,27 @@ export interface OutboundMessage {
   error_message: string | null;
 }
 
+// Mail lists are paged since P95-S1c (newest first, 100 per page by default).
+export const MAIL_PAGE_SIZE = 100;
+
+interface MailPage {
+  limit?: number;
+  offset?: number;
+}
+
+function setPage(query: URLSearchParams, page?: MailPage) {
+  query.set("limit", String(page?.limit ?? MAIL_PAGE_SIZE));
+  if (page?.offset) query.set("offset", String(page.offset));
+}
+
 export async function listInboundMessages(
   token: string,
-  params?: { statusFilter?: string; mailboxId?: string }
+  params?: { statusFilter?: string; mailboxId?: string } & MailPage
 ): Promise<InboundMessage[]> {
   const query = new URLSearchParams();
   if (params?.statusFilter) query.set("status_filter", params.statusFilter);
   if (params?.mailboxId) query.set("mailbox_id", params.mailboxId);
+  setPage(query, params);
   const queryString = query.toString();
   const response = await request(
     "mail-connector",
@@ -1169,12 +1183,13 @@ export async function routeInboundMessage(
 
 export async function searchRoutingLog(
   token: string,
-  params?: { mailboxId?: string; routedBy?: string; q?: string }
+  params?: { mailboxId?: string; routedBy?: string; q?: string } & MailPage
 ): Promise<RoutingLogEntryWithMessage[]> {
   const query = new URLSearchParams();
   if (params?.mailboxId) query.set("mailbox_id", params.mailboxId);
   if (params?.routedBy) query.set("routed_by", params.routedBy);
   if (params?.q) query.set("q", params.q);
+  setPage(query, params);
   const queryString = query.toString();
   const response = await request(
     "mail-connector",
@@ -1272,8 +1287,13 @@ export async function sendOutboundMessage(
   return response.json();
 }
 
-export async function listOutboundMessages(token: string): Promise<OutboundMessage[]> {
-  const response = await request("mail-connector", "outbound", {}, token);
+export async function listOutboundMessages(
+  token: string,
+  page?: MailPage
+): Promise<OutboundMessage[]> {
+  const query = new URLSearchParams();
+  setPage(query, page);
+  const response = await request("mail-connector", `outbound?${query.toString()}`, {}, token);
   return response.json();
 }
 

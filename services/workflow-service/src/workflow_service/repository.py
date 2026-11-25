@@ -747,6 +747,51 @@ async def _modify_instance(
     )
 
 
+async def terminate_instance(
+    session: AsyncSession, instance_id: str, *, expected_version: int | None
+) -> InstanceModification:
+    """Ends a running instance administratively (P95-S1c): every unfinished
+    task is cancelled, the status becomes `terminated`, the ready-task index
+    empties and every claim is released (the caller revokes its grants)."""
+    instance = await get_instance(session, instance_id)
+    if instance.status != "running":
+        raise InstanceNotRunningError(f"instance_id {instance_id!r} ist nicht 'running'")
+    if expected_version is not None and instance.workflow_version != expected_version:
+        raise ConcurrentModificationError(
+            f"instance_id {instance_id!r} wurde inzwischen geändert - bitte neu laden"
+        )
+    wf = spiff_adapter.deserialize(instance.workflow_state)
+    before = spiff_adapter.ready_manual_tasks(wf)
+    spiff_adapter.terminate(wf)
+    try:
+        await _save_state(session, instance, wf, terminated=True)
+    except StaleDataError as exc:
+        raise ConcurrentModificationError(
+            f"instance_id {instance_id!r} wurde gleichzeitig von einer anderen "
+            "Anfrage geändert - bitte erneut versuchen"
+        ) from exc
+    names = {t.id: t.name for t in before}
+    released: list[ReleasedClaim] = []
+    for claim in await get_task_claims_for_instance(session, instance_id):
+        released.append(
+            ReleasedClaim(
+                principal_id=claim.principal_id,
+                task_id=claim.task_id,
+                task_name=names.get(claim.task_id, "?"),
+                delegation_ids=list(claim.granted_delegation_ids or []),
+            )
+        )
+        await session.delete(claim)
+    await session.flush()
+    return InstanceModification(
+        instance=instance,
+        target_name="beendet",
+        tasks_before=[t.name for t in before],
+        tasks_after=[],
+        released_claims=released,
+    )
+
+
 async def skip_task(
     session: AsyncSession,
     instance_id: str,
@@ -1363,7 +1408,9 @@ def _json_safe(value: dict) -> dict:
     return json.loads(json.dumps(value, default=_json_default))
 
 
-async def _save_state(session: AsyncSession, instance: ProcessInstance, wf) -> bool:
+async def _save_state(
+    session: AsyncSession, instance: ProcessInstance, wf, *, terminated: bool = False
+) -> bool:
     """The one place an instance's engine state is written back (P95-S1b):
     serializes the workflow, sets status and timestamps, records whether a
     timer waits, flushes (the optimistic-concurrency check of ADR 0185
@@ -1371,10 +1418,12 @@ async def _save_state(session: AsyncSession, instance: ProcessInstance, wf) -> b
     `ReadyTask` rows in line with the engine's ready user tasks. Returns
     whether the instance completed. Raises `StaleDataError` on a conflict -
     the callers translate it as before."""
-    completed = spiff_adapter.is_completed(wf)
+    # `terminated` (P95-S1c): ended administratively, not by reaching an end
+    # event - its own status, so it never counts as a completed process.
+    completed = terminated or spiff_adapter.is_completed(wf)
     now = datetime.now(UTC)
     instance.workflow_state = spiff_adapter.serialize(wf)
-    instance.status = "completed" if completed else "running"
+    instance.status = "terminated" if terminated else "completed" if completed else "running"
     instance.updated_at = now
     if completed:
         instance.completed_at = now

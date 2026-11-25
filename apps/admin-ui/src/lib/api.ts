@@ -4203,6 +4203,23 @@ export async function sendBackWorkflowInstance(
   return response.json();
 }
 
+// Ends a running instance administratively (P95-S1c): status `terminated`,
+// every claim released.
+export async function terminateWorkflowInstance(
+  token: string,
+  instanceId: string,
+  reason: string,
+  expectedVersion: number | null
+): Promise<InstanceModification> {
+  const response = await request(
+    "workflow-service",
+    `instances/${instanceId}/terminate`,
+    jsonPost({ reason, expected_version: expectedVersion }),
+    token
+  );
+  return response.json();
+}
+
 export async function previewWorkflowMigration(
   token: string,
   instanceId: string,

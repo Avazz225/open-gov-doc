@@ -504,6 +504,15 @@ def ready_manual_tasks(wf: BpmnWorkflow) -> list[TaskInfo]:
     ]
 
 
+def terminate(wf: BpmnWorkflow) -> None:
+    """Cancels every unfinished task, subprocesses included (P95-S1c) - the
+    engine side of the administrative "terminate instance". Refused while a
+    federated step is open, like the other operations: the other
+    installation would be left with a handover nobody answers."""
+    _refuse_federated(list(wf.get_tasks(state=TaskState.READY | TaskState.WAITING)))
+    wf.cancel()
+
+
 def _is_timer(event_definition) -> bool:
     if isinstance(event_definition, TimerEventDefinition):
         return True

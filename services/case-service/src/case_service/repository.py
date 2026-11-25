@@ -104,6 +104,32 @@ async def delete_unstarted_case(session: AsyncSession, case_id: str) -> None:
     await session.flush()
 
 
+async def list_unstarted_cases(
+    session: AsyncSession, *, created_before: datetime, limit: int = 200
+) -> list[Case]:
+    """Open cases without a process instance, older than `created_before`
+    (P95-S1c) - a start whose outcome was unknown, see
+    `main._reconcile_unstarted_cases`. Locked with SKIP LOCKED so replicas
+    reconciling at the same time take different cases."""
+    result = await session.execute(
+        select(Case)
+        .where(Case.process_instance_id.is_(None))
+        .where(Case.status == "open")
+        .where(Case.created_at < created_before)
+        .order_by(Case.created_at)
+        .limit(limit)
+        .with_for_update(skip_locked=True)
+    )
+    return list(result.scalars().all())
+
+
+async def has_document_references(session: AsyncSession, case_id: str) -> bool:
+    result = await session.execute(
+        select(CaseDocumentReference.id).where(CaseDocumentReference.case_id == case_id).limit(1)
+    )
+    return result.first() is not None
+
+
 async def register_case(session: AsyncSession, case_id: str, *, vorgangsnummer: str) -> Case:
     """Draft -> registered transition (post-roadmap phase 31 session 2, ADR
     0113) - the counterpart to the at-creation-time assignment in

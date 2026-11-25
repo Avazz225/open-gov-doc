@@ -324,3 +324,42 @@ def test_migration_target_must_be_newer_version_of_same_family(
         )
         assert response.status_code == 422
         assert "neuere Version" in response.json()["detail"]
+
+
+# --- Terminate (P95-S1c) -----------------------------------------------------
+
+
+def test_terminate_ends_the_instance_releases_claims_and_notifies(
+    client, ops, instance_admin_headers, events
+):
+    instance_id = _start(client, ops[1])
+    [task] = _tasks(client, instance_id)
+    url = f"/instances/{instance_id}/terminate"
+    assert client.post(url, json={"reason": "Testrest"}, headers=_as("carla")).status_code == 403
+    assert client.post(url, json={"reason": ""}, headers=instance_admin_headers).status_code == 422
+    claim = client.post(
+        f"/instances/{instance_id}/tasks/{task['id']}/claim", json={}, headers=_as("bob")
+    )
+    assert claim.status_code == 200, claim.text
+
+    response = client.post(url, json={"reason": "Testrest"}, headers=instance_admin_headers)
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["instance"]["status"] == "terminated"
+    assert body["instance"]["completed_at"]
+    assert body["tasks_before"] == ["Prüfen"] and body["tasks_after"] == []
+    assert body["released_claims"] == ["bob"]
+    assert _tasks(client, instance_id) == []
+    assert all(t["instance_id"] != instance_id for t in client.get("/tasks").json())
+    [modified] = [e for e in events if e.event_type == "workflow.instance.modified"]
+    assert modified.payload["operation"] == "terminate"
+    assert modified.payload["reason"] == "Testrest"
+    assert modified.payload["affected_claimants"][0]["principal_id"] == "bob"
+    # Not a completion: a case waiting for the process must not close.
+    assert not [e for e in events if e.event_type == "workflow.instance.completed"]
+    # A terminated instance is final.
+    again = client.post(url, json={"reason": "nochmal"}, headers=instance_admin_headers)
+    assert again.status_code == 409
+    listed = client.get("/instances", params={"status": "terminated"}).json()
+    assert instance_id in {i["id"] for i in listed}

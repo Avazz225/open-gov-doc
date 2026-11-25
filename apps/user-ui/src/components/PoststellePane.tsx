@@ -9,6 +9,7 @@ import {
   listInboundMessages,
   listMailboxes,
   listOutboundMessages,
+  MAIL_PAGE_SIZE,
   rejectInboundMessage,
   routeInboundMessage,
   searchRoutingLog,
@@ -67,6 +68,9 @@ export function PoststellePane({ token }: { token: string }) {
   ]);
   const [postbuchMailboxFilter, setPostbuchMailboxFilter] = useState("");
   const [postbuchQuery, setPostbuchQuery] = useState("");
+  // Paging (P95-S1c): a full page means there may be more.
+  const [hasMore, setHasMore] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
 
   useEffect(() => {
     if (!token) return;
@@ -79,24 +83,57 @@ export function PoststellePane({ token }: { token: string }) {
     return mailboxes.find((m) => m.id === mailboxId)?.name ?? mailboxId;
   }
 
+  // One page of the current tab, starting at `offset`.
+  const fetchPage = useCallback(
+    async (offset: number, postbuchQueryOverride?: string) => {
+      if (tab === "inbox") {
+        return listInboundMessages(token, { mailboxId: mailboxFilter || undefined, offset });
+      }
+      if (tab === "outbox") return listOutboundMessages(token, { offset });
+      return searchRoutingLog(token, {
+        mailboxId: postbuchMailboxFilter || undefined,
+        q: (postbuchQueryOverride ?? postbuchQuery).trim() || undefined,
+        offset,
+      });
+    },
+    // `postbuchQuery`: see `reload` below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [token, tab, mailboxFilter, postbuchMailboxFilter]
+  );
+
+  function applyPage(rows: unknown[], append: boolean) {
+    setHasMore(rows.length >= MAIL_PAGE_SIZE);
+    if (tab === "inbox") {
+      setInbound((prev) => [...(append ? prev : []), ...(rows as InboundMessage[])]);
+    } else if (tab === "outbox") {
+      setOutbound((prev) => [...(append ? prev : []), ...(rows as OutboundMessage[])]);
+    } else {
+      setPostbuch((prev) => [...(append ? prev : []), ...(rows as RoutingLogEntryWithMessage[])]);
+    }
+  }
+
+  const currentCount =
+    tab === "inbox" ? inbound.length : tab === "outbox" ? outbound.length : postbuch.length;
+
+  async function loadMore() {
+    setIsLoadingMore(true);
+    setError(null);
+    try {
+      applyPage(await fetchPage(currentCount), true);
+    } catch {
+      setError(tab === "postbuch" ? t("poststelle.postbuchLoadError") : t("poststelle.loadError"));
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }
+
   const reload = useCallback(
     async (postbuchQueryOverride?: string) => {
       if (!token) return;
       setIsLoading(true);
       setError(null);
       try {
-        if (tab === "inbox") {
-          setInbound(await listInboundMessages(token, { mailboxId: mailboxFilter || undefined }));
-        } else if (tab === "outbox") {
-          setOutbound(await listOutboundMessages(token));
-        } else {
-          setPostbuch(
-            await searchRoutingLog(token, {
-              mailboxId: postbuchMailboxFilter || undefined,
-              q: (postbuchQueryOverride ?? postbuchQuery).trim() || undefined,
-            })
-          );
-        }
+        applyPage(await fetchPage(0, postbuchQueryOverride), false);
       } catch {
         setError(tab === "postbuch" ? t("poststelle.postbuchLoadError") : t("poststelle.loadError"));
       } finally {
@@ -107,7 +144,7 @@ export function PoststellePane({ token }: { token: string }) {
     // applied on explicit form submit (`runPostbuchSearch`), not on every
     // keystroke (same pattern as `AussonderungPane`'s `query`/`runSearch`).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [token, tab, mailboxFilter, postbuchMailboxFilter, t]
+    [token, tab, fetchPage, t]
   );
 
   useEffect(() => {
@@ -571,6 +608,13 @@ export function PoststellePane({ token }: { token: string }) {
             </li>
           ))}
         </ul>
+      )}
+      {!isLoading && hasMore && (
+        <p>
+          <button type="button" className={secondaryBtn} disabled={isLoadingMore} onClick={loadMore}>
+            {isLoadingMore ? t("common.loading") : t("poststelle.loadMore")}
+          </button>
+        </p>
       )}
     </section>
   );

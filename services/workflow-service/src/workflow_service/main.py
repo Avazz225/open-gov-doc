@@ -87,6 +87,7 @@ from workflow_service.schemas import (
     TaskClaimOut,
     TaskCompleteRequest,
     TaskReassignRequest,
+    TerminateInstanceRequest,
     XdomeaHandoffInboundResultOut,
 )
 from workflow_service.settings import Settings
@@ -2416,6 +2417,38 @@ async def _run_instance_operation(
         tasks_before=result.tasks_before,
         tasks_after=result.tasks_after,
         released_claims=[c.principal_id for c in result.released_claims],
+    )
+
+
+@app.post(
+    "/instances/{instance_id}/terminate",
+    response_model=InstanceModificationOut,
+    dependencies=[Depends(_license_gate("write"))],
+)
+async def terminate_instance(
+    instance_id: str,
+    payload: TerminateInstanceRequest,
+    x_dms_maintenance_active: str = Header(default="false"),
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> InstanceModificationOut:
+    """Ends a running instance administratively (P95-S1c): cancels its
+    unfinished tasks, sets the status `terminated`, releases every claim
+    (grants revoked, claimants notified). Same capability, reason and
+    `workflow.instance.modified` event (operation `terminate`, audited) as
+    skip / send back / migrate. Not `workflow.instance.completed`: the
+    process did not reach its end, so a case waiting for it stays open."""
+    await _reject_during_maintenance(x_dms_maintenance_active)
+    await _require_instance_modify(x_dms_principal)
+    return await _run_instance_operation(
+        session,
+        instance_id,
+        "terminate",
+        payload.reason,
+        x_dms_principal,
+        lambda: repository.terminate_instance(
+            session, instance_id, expected_version=payload.expected_version
+        ),
     )
 
 

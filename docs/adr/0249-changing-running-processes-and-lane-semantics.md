@@ -218,3 +218,16 @@ routes use one membership check.
   open circulation's route. Narrowing a case's role assignments narrows who may edit it.
 - **The admin operations of P93-S2 refuse circulation tasks;** the route editor is the way to change a
   circulation.
+
+## Addendum (P95-S1c): terminate
+
+A fourth administrative intervention, added because test runs and a load test had left about 2,250
+running instances behind that nobody would ever finish: `POST /instances/{id}/terminate`.
+- **Same frame as the other three:** capability `workflow.instance_modify`, a reason, `expected_version`,
+  maintenance mode, the `workflow.instance.modified` event (`operation: terminate`), released claims.
+- **Its own status, `terminated`:** not `completed`, and no `workflow.instance.completed` event, so a
+  case waiting for the process isn't closed as if the process had run through.
+- **Final:** every further operation answers `409`.
+- **Refused while a federated step is open,** for the same reason as the other operations.
+- **Not deleted:** the history (the blob and the audit events) stays. Deleting instances remains out of
+  scope.

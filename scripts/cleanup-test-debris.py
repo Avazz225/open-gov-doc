@@ -8,7 +8,8 @@ realm roles, almost all of it test debris. This script finds such leftovers
 by name patterns that only tests produce (each with a random suffix, or an
 exact name together with the test principal that creates it) and removes
 them through the services' APIs - folders and documents go to the trash
-(restorable), the rest is deleted.
+(restorable), running process instances are terminated (P95-S1c: history
+kept), the rest is deleted.
 
 Dry run by default: it lists what it would remove. `--apply` acts.
 `scripts/run-tests.sh` calls it with `--apply --since <run start>` after a
@@ -35,10 +36,14 @@ FOLDER = os.environ.get("DEBRIS_FOLDER_SERVICE_URL", "http://localhost:8008")
 DOCUMENT = os.environ.get("DEBRIS_DOCUMENT_SERVICE_URL", "http://localhost:8006")
 PERMISSION = os.environ.get("DEBRIS_PERMISSION_SERVICE_URL", "http://localhost:8004")
 AUTH = os.environ.get("DEBRIS_AUTH_SERVICE_URL", "http://localhost:8003")
+WORKFLOW = os.environ.get("DEBRIS_WORKFLOW_SERVICE_URL", "http://localhost:8014")
 # users-admin (admin.user_management) for roles, groups, configs, realm roles;
 # a principal with admin.object_config for the conformity reports.
 ADMIN = os.environ.get("DEBRIS_ADMIN_PRINCIPAL", "2")
 CONFIG_ADMIN = os.environ.get("DEBRIS_CONFIG_ADMIN_PRINCIPAL", "workflow-test-config-admin")
+# workflow.instance_modify (seeded role `domain-admin-workflow-instances`) to
+# terminate instances (P95-S1c); granted on first use if missing.
+INSTANCE_ADMIN = os.environ.get("DEBRIS_INSTANCE_ADMIN_PRINCIPAL", "workflow-test-instance-admin")
 # Reads as a service principal see every folder (P94-S3, document-service
 # trusts service reads; folder-service lists everything readable).
 LISTER = "migration-service"
@@ -76,6 +81,18 @@ GROUP_RULES = [
     r"^(Sachbearbeitung|Kasse)-[0-9a-f]{6}$",
     r"^E2E-Lane-\d+$",
 ]
+# Running process instances (P95-S1c): definitions only tests upload (each
+# with a random suffix), circulations the case-service suite starts, and
+# OCR reviews of documents that no longer exist (the OCR suites start them
+# for documents of their own test database).
+INSTANCE_DEFINITION_RULES = [
+    rf"^case-service-(pseudonym-)?test-(no-tasks-)?{UUID}$",
+    rf"^mail-connector-test-{HEX8}$",
+    r"^E2E-Eingriff-\d+$",
+]
+INSTANCE_CREATOR_RULES = [("Umlauf", "case-service-tests")]
+OCR_REVIEW_DEFINITION = "ocr_review"
+
 APPROVAL_RULES = [r"^config\.import\.test\.", r"^delete\.test\.action$"]
 REALM_ROLE_RULES = [
     rf"^realm-role-test-{HEX8}$",
@@ -230,8 +247,89 @@ class Cleaner:
             REALM_ROLE_RULES,
         )
 
+    def _instance_admin(self) -> dict[str, str]:
+        """The terminating principal, given its role once if it lacks it."""
+        headers = {"X-DMS-Principal": INSTANCE_ADMIN}
+        assignments = self.http.get(
+            f"{PERMISSION}/role-assignments", params={"principal_id": INSTANCE_ADMIN}
+        ).json()
+        roles = self.http.get(f"{PERMISSION}/roles").json()
+        role_id = next(r["id"] for r in roles if r["name"] == "domain-admin-workflow-instances")
+        if self.apply and not any(a["role_id"] == role_id for a in assignments):
+            self.http.post(
+                f"{PERMISSION}/role-assignments",
+                json={
+                    "principal_type": "user",
+                    "principal_id": INSTANCE_ADMIN,
+                    "role_id": role_id,
+                    "resource_id": "root",
+                },
+            ).raise_for_status()
+        return headers
 
-STEPS = ("folders", "unknown_types", "roles", "groups", "approval_configs", "realm_roles")
+    def instances(self) -> None:
+        """Running process instances tests left behind - terminated through
+        workflow-service (status `terminated`, history kept, claims
+        released), not deleted."""
+        running: list[dict] = []
+        while True:
+            page = self.http.get(
+                f"{WORKFLOW}/instances",
+                params={"status": "running", "limit": 500, "offset": len(running)},
+            )
+            page.raise_for_status()
+            running += page.json()
+            if len(page.json()) < 500:
+                break
+        names: dict[int, str] = {}
+
+        def definition_name(definition_id: int) -> str:
+            if definition_id not in names:
+                response = self.http.get(f"{WORKFLOW}/process-definitions/{definition_id}")
+                names[definition_id] = response.json()["name"] if response.is_success else ""
+            return names[definition_id]
+
+        debris = []
+        for instance in running:
+            if not self.recent(instance.get("created_at")):
+                continue
+            name = definition_name(instance["process_definition_id"])
+            if matches(name, INSTANCE_DEFINITION_RULES) or any(
+                name == n and instance["created_by"] == who for n, who in INSTANCE_CREATOR_RULES
+            ):
+                debris.append((instance, name))
+            elif name == OCR_REVIEW_DEFINITION and instance.get("business_key"):
+                document = self.http.get(
+                    f"{DOCUMENT}/documents/{instance['business_key']}",
+                    headers={"X-DMS-Principal": LISTER},
+                )
+                if document.status_code == 404:
+                    debris.append((instance, f"{name} (document gone)"))
+        if not debris:
+            return
+        headers = self._instance_admin()
+        for instance, label in debris:
+            ok = True
+            if self.apply:
+                response = self.http.post(
+                    f"{WORKFLOW}/instances/{instance['id']}/terminate",
+                    json={"reason": "Testrest (scripts/cleanup-test-debris.py)"},
+                    headers=headers,
+                )
+                # 409: ended meanwhile (completed or terminated) - nothing left to do.
+                ok = response.is_success or response.status_code == 409
+            self.note("instance", f"{label} {instance['id']}", ok)
+
+
+STEPS = (
+    "folders",
+    "unknown_types",
+    "roles",
+    "groups",
+    "approval_configs",
+    "realm_roles",
+    "instances",
+)
 
 
 def main() -> int:
@@ -239,7 +337,9 @@ def main() -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("--apply", action="store_true", help="act instead of listing")
-    parser.add_argument("--since", help="folders: only those created at or after this ISO time")
+    parser.add_argument(
+        "--since", help="folders, instances: only those created at or after this ISO time"
+    )
     parser.add_argument("--only", help=f"comma-separated subset of: {', '.join(STEPS)}")
     parser.add_argument("--quiet", action="store_true", help="summary only")
     args = parser.parse_args()

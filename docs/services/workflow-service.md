@@ -370,6 +370,7 @@ instance that isn't `running` (`409`). A guard that refuses is `422` with the re
 | `POST /instances/{id}/send-back` `{target_task_id}` | `reset_from_task_id`: the target is ready again, everything after it is undone. |
 | `POST /instances/{id}/migration-preview` `{target_definition_id}` | Dry run (`SpecDiff` + `diff_workflow`): `{possible, reasons, removed, added, changed, active_tasks: [{name, state, aligned_to}]}`. Changes nothing. |
 | `POST /instances/{id}/migrate` `{target_definition_id}` | `migrate_workflow`, after repeating the dry run on the live state; the instance then points at the target definition. |
+| `POST /instances/{id}/terminate` (P95-S1c) | Cancels every unfinished task (`wf.cancel()`); the status becomes `terminated` (a status of its own, `completed_at` set), every claim is released, the ready-task index empties. |
 
 - **Guards** (`spiff_adapter`, `InstanceOperationRefused`): never a signature task (skip), never while a
   federated step is waiting (its counterpart would be orphaned), never inside a multi-instance task or
@@ -385,7 +386,16 @@ instance that isn't `running` (`409`). A guard that refuses is `422` with the re
   affected_claimants: [{principal_id, task_id, task_name}], task_id | target_task_id |
   target_definition_id}`. notification-service notifies each affected claimant (not the administrator
   themself). `workflow.instance.completed` follows if a skip finished the instance.
-- **UI:** admin-ui "Prozessinstanzen".
+- **Terminate (P95-S1c):**
+  - same event with `operation: terminate`;
+  - deliberately **no** `workflow.instance.completed`: the process didn't reach its end, so a case waiting
+    for it stays open;
+  - refused while a federated step is open;
+  - a terminated instance is final (`409` on every further operation).
+  
+  `scripts/cleanup-test-debris.py` uses it for instances that tests leave behind.
+- **UI:** admin-ui "Prozessinstanzen". Since P95-S1c it has a "Beenden" section (reason plus a
+  confirmation), and the detail stays open after an instance ends, so the outcome is visible.
 - **Tests:** `test_instance_operations.py` (11) with `fixtures/instance_ops.bpmn` (three sequential steps;
   the tests derive a version with an added and one with a removed step): capability and reason, skip with
   a claim released and the event, signature and parallel guards, stale version, maintenance, send back,

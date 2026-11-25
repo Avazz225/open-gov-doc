@@ -18,6 +18,13 @@ class Settings(BaseServiceSettings):
 
     monitoring_service_base_url: str = "http://localhost:8026"
 
+    # Cases whose workflow start ended without a known outcome (P95-S1c):
+    # after this grace period - longer than any start can take - the
+    # reconciliation adopts the instance if workflow-service has one, or
+    # removes the never-started case. Runs at startup and then periodically.
+    unstarted_case_grace_seconds: float = 300.0
+    unstarted_case_reconcile_interval_seconds: float = 600.0
+
     # Which subjects case-service consumes (2.3): only the completion of a
     # process instance triggers the completion snapshot of a circulation
     # folder - `workflow.instance.started`/`workflow.task.completed` are

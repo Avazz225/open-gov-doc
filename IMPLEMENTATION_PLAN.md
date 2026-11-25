@@ -4950,6 +4950,33 @@ by the pilot's numbers, not a committed rewrite of all of them (see ADR 0257's c
     audited, claims released) and its use in `scripts/cleanup-test-debris.py` for test-created instances:
     the ~1,200 case-test instances and the 1,046 open `ocr_review` instances of test documents in the dev
     stack. Tests that start instances end them.
+  - **Result:**
+    - **mail-connector:**
+      - `limit`/`offset` on `/inbound`, `/outbound` and `/routing-log` (default 100, at most 500);
+      - attachments and routing log in one query each per page;
+      - user-ui Poststelle loads in pages, with "Weitere laden".
+      
+      Live, a page takes 10–25 ms (1,643 messages). Before, the whole inbox came back at 343 ms CPU.
+    - **case-service:**
+      - On a timeout, connection error or `5xx` it looks the instance up and adopts it, or answers `503`
+        with the `case_id` without deleting at once.
+      - A reconciliation (startup plus every 10 min, grace 5 min) adopts or removes; cases with documents
+        are kept.
+      - Live: 436 adopted (closed, their instances had completed), 83 removed.
+    - **workflow-service terminate** (ADR 0249 addendum):
+      - status `terminated`, no `completed` event, claims released, refused while a federated step is
+        open;
+      - admin-ui "Beenden" (the detail now stays open after an instance ends);
+      - notification label.
+    - **Debris cleanup:** a new `instances` step in `scripts/cleanup-test-debris.py` covers test
+      definitions, test circulations and OCR reviews of documents that no longer exist.
+      - Live: 2,248 terminated, 17 running real-user circulations left.
+      - `run-tests.sh` runs it after every run (`--since`), which is how tests "end" their instances:
+        the first run terminated 42.
+    - **Tests:**
+      - workflow 279 (+1), case 102 (+5), mail 97 (+2), notification 123;
+      - admin-ui 412 (+1) and its e2e test (now ends with "Beenden");
+      - user-ui 346 (+1).
 - **P95-S1d — Permission cache and DB pool (ADR 0263).**
   - Scoped invalidation instead of one global generation bump: a change invalidates the principals and
     resources it can affect (a role assignment: its principal or group members, a resource subtree), so

@@ -492,6 +492,7 @@
     "postbuch": "Postbuch",
     "postbuchHint": "Searchable register of every forward between mailboxes - across all messages, not just one mailbox's own.",
     "postbuchEmpty": "No forwards yet.",
+    "loadMore": "Load more",
     "postbuchLoadError": "Postbuch could not be loaded",
     "postbuchMailboxLabel": "Mailbox",
     "postbuchMailboxAll": "All mailboxes",

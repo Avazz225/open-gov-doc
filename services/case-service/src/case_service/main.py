@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import json
 import logging
@@ -5,7 +6,7 @@ import time
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from dms_common import (
     ActingIdentity,
@@ -58,6 +59,7 @@ from case_service.workflow_client import (
     InstanceStartRejectedError,
     ProcessDefinitionUnknownError,
     WorkflowClient,
+    WorkflowUnavailableError,
 )
 
 settings = Settings()
@@ -173,6 +175,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.object_type_client,
     )
 
+    # Cases whose workflow start had no known outcome (P95-S1c) - settled
+    # in the background, at startup and then periodically.
+    reconcile_task = asyncio.create_task(_reconcile_unstarted_cases_loop())
+
     registration = await maybe_start_registration(
         registry_service_base_url=settings.registry_service_base_url,
         self_address=settings.self_address,
@@ -187,6 +193,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     yield
 
+    reconcile_task.cancel()
     sensor_config_proxy.unbind()
     await bounded_shutdown_step(
         "app.state.sensor_config_client.stop", app.state.sensor_config_client.stop()
@@ -462,13 +469,51 @@ async def create_case(
         await repository.delete_unstarted_case(session, case_id)
         await session.commit()
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except WorkflowUnavailableError as exc:
+        # P95-S1c: a timeout, connection error or `5xx` - the start may have
+        # gone through anyway (P95-S1's load test left 436 such instances
+        # behind, with their cases unlinked and the callers given a `500`).
+        # Look it up once; if it isn't there (yet), the case stays as it is
+        # and `_reconcile_unstarted_cases` settles it after the grace period:
+        # deleting it now could orphan an instance whose start is still
+        # running.
+        try:
+            instance = await app.state.workflow_client.find_instance(case_id)
+        except WorkflowUnavailableError:
+            instance = None
+        if instance is None:
+            logger.warning(
+                "case_workflow_start_unknown", extra={"case_id": case_id, "error": str(exc)}
+            )
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "message": (
+                        "Der Prozessstart für die Umlaufmappe ist fehlgeschlagen oder "
+                        "unbestätigt. Die Mappe wird automatisch nachgetragen oder wieder "
+                        "entfernt - bitte später prüfen bzw. erneut anlegen."
+                    ),
+                    "case_id": case_id,
+                },
+                headers={"Retry-After": "5"},
+            ) from exc
 
+    await _finish_case_creation(session, case, instance, actor_created_by)
+    return case
+
+
+async def _finish_case_creation(
+    session: AsyncSession, case, instance: dict, actor_created_by: str
+) -> None:
+    """Everything after a case has its instance - shared by `create_case` and
+    by `_reconcile_unstarted_cases` adopting an instance later (P95-S1c)."""
+    case_id = case.id
     case.process_instance_id = instance["id"]
     await session.commit()
     await publish_event(
         "case.created",
         subject=case_id,
-        payload={"name": payload.name, "created_by": actor_created_by},
+        payload={"name": case.name, "created_by": actor_created_by},
         actor=actor_created_by,
     )
     # Real per-case RBAC resource (Post-Roadmap Phase 35 Session 2, ADR
@@ -527,7 +572,58 @@ async def create_case(
                 payload={"process_instance_id": instance["id"]},
                 actor=actor_created_by,
             )
-    return case
+
+
+async def _reconcile_unstarted_cases() -> dict[str, int]:
+    """Settles open cases whose workflow start had no known outcome
+    (P95-S1c): past the grace period, a case whose instance exists in
+    workflow-service (found by `business_key = case_id`) is linked to it
+    and finished like a normal creation (resource node, `case.created`,
+    closed at once if the instance already completed); a case without one
+    is removed - it was never returned to the caller, who got `503`. A case
+    that meanwhile holds document references is kept and logged instead.
+    Stops at the first lookup workflow-service can't answer."""
+    counts = {"adopted": 0, "removed": 0, "kept": 0}
+    cutoff = datetime.now(UTC) - timedelta(seconds=settings.unstarted_case_grace_seconds)
+    while True:
+        async with app.state.session_factory() as session:
+            batch = await repository.list_unstarted_cases(session, created_before=cutoff)
+            if not batch:
+                return counts
+            progress = 0
+            for case in batch:
+                try:
+                    instance = await app.state.workflow_client.find_instance(case.id)
+                except WorkflowUnavailableError:
+                    await session.commit()
+                    logger.warning("unstarted_case_reconcile_paused", extra=counts)
+                    return counts
+                if instance is not None:
+                    await _finish_case_creation(session, case, instance, case.created_by)
+                    counts["adopted"] += 1
+                    progress += 1
+                elif await repository.has_document_references(session, case.id):
+                    logger.warning("unstarted_case_has_documents", extra={"case_id": case.id})
+                    counts["kept"] += 1
+                else:
+                    await repository.delete_unstarted_case(session, case.id)
+                    counts["removed"] += 1
+                    progress += 1
+            await session.commit()
+            if not progress:
+                # Only kept cases are left; they'd come back in every batch.
+                return counts
+
+
+async def _reconcile_unstarted_cases_loop() -> None:
+    while True:
+        try:
+            counts = await _reconcile_unstarted_cases()
+            if any(counts.values()):
+                logger.info("unstarted_cases_reconciled", extra=counts)
+        except Exception:
+            logger.exception("Abgleich nicht gestarteter Umlaufmappen fehlgeschlagen")
+        await asyncio.sleep(settings.unstarted_case_reconcile_interval_seconds)
 
 
 @app.post("/cases/{case_id}/register", response_model=CaseOut)

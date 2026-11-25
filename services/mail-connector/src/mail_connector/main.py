@@ -23,7 +23,7 @@ from dms_metrics_client import (
     metrics_payload,
 )
 from dms_registry_client import maybe_start_registration
-from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response, status
 from mail_connector import crypto, mailboxes, matching, repository
 from mail_connector.backends import RawIncomingMessage, build_backend
 from mail_connector.case_client import CaseClient
@@ -713,6 +713,31 @@ async def _to_message_out(session: AsyncSession, message) -> InboundMessageOut:
     )
 
 
+async def _to_messages_out(session: AsyncSession, messages: list) -> list[InboundMessageOut]:
+    """A page of messages with attachments and routing log: two queries for
+    the page, not two per message (P95-S1c)."""
+    ids = [m.id for m in messages]
+    attachments = await repository.attachments_by_message(session, ids)
+    routing_logs = await repository.routing_log_by_message(session, ids)
+    return [
+        InboundMessageOut.model_validate(m).model_copy(
+            update={
+                "attachments": [InboundAttachmentOut.model_validate(a) for a in attachments[m.id]],
+                "routing_log": [
+                    MailRoutingLogEntryOut.model_validate(r) for r in routing_logs[m.id]
+                ],
+            }
+        )
+        for m in messages
+    ]
+
+
+# Paging (P95-S1c): every list endpoint takes `limit`/`offset`; `limit` is
+# bounded so one request can't ask for the whole table again.
+_PAGE_LIMIT = Query(default=100, ge=1, le=500)
+_PAGE_OFFSET = Query(default=0, ge=0)
+
+
 @app.get("/mailboxes", response_model=list[MailboxOut])
 async def list_mailboxes(
     x_dms_principal: str = Header(default=""),
@@ -745,6 +770,8 @@ async def list_mailboxes(
 async def list_inbound(
     status_filter: str | None = None,
     mailbox_id: str | None = None,
+    limit: int = _PAGE_LIMIT,
+    offset: int = _PAGE_OFFSET,
     x_dms_principal: str = Header(default=""),
     x_dms_roles: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
@@ -752,19 +779,21 @@ async def list_inbound(
     """Since P32-S3 (ADR 0132): an explicit `mailbox_id` requires access to
     that one mailbox (`403` otherwise); without one, results are scoped to
     every mailbox the caller can access (central + departments they belong
-    to), not silently to everything."""
+    to), not silently to everything. Paged since P95-S1c (newest first,
+    `limit` default 100, at most 500): before, the whole inbox came back with
+    two follow-up queries per message."""
     _require_poststelle(x_dms_principal, x_dms_roles)
     if mailbox_id is not None:
         await _require_mailbox_access(mailbox_id, x_dms_principal, session)
         messages = await repository.list_messages(
-            session, status=status_filter, mailbox_id=mailbox_id
+            session, status=status_filter, mailbox_id=mailbox_id, limit=limit, offset=offset
         )
     else:
         accessible = await _accessible_mailbox_ids(x_dms_principal, session)
         messages = await repository.list_messages(
-            session, status=status_filter, mailbox_ids=accessible
+            session, status=status_filter, mailbox_ids=accessible, limit=limit, offset=offset
         )
-    return [await _to_message_out(session, m) for m in messages]
+    return await _to_messages_out(session, messages)
 
 
 @app.get("/inbound/{message_id}", response_model=InboundMessageOut)
@@ -855,7 +884,8 @@ async def search_routing_log(
     since: datetime | None = None,
     until: datetime | None = None,
     q: str | None = None,
-    limit: int = 200,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = _PAGE_OFFSET,
     x_dms_principal: str = Header(default=""),
     x_dms_roles: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
@@ -882,6 +912,7 @@ async def search_routing_log(
             until=until,
             q=q,
             limit=limit,
+            offset=offset,
         )
     else:
         accessible = await _accessible_mailbox_ids(x_dms_principal, session)
@@ -893,6 +924,7 @@ async def search_routing_log(
             until=until,
             q=q,
             limit=limit,
+            offset=offset,
         )
     return [
         MailRoutingLogEntryWithMessageOut(
@@ -1192,12 +1224,15 @@ async def send_outbound(
 
 @app.get("/outbound", response_model=list[OutboundMessageOut])
 async def list_outbound(
+    limit: int = _PAGE_LIMIT,
+    offset: int = _PAGE_OFFSET,
     x_dms_principal: str = Header(default=""),
     x_dms_roles: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> list[OutboundMessageOut]:
+    """Paged since P95-S1c (newest first, `limit` default 100, at most 500)."""
     _require_poststelle(x_dms_principal, x_dms_roles)
-    return await repository.list_outbound_messages(session)
+    return await repository.list_outbound_messages(session, limit=limit, offset=offset)
 
 
 # --- Mailbox administration (P88-S4a, ADR 0244) ----------------------------

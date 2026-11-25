@@ -893,6 +893,7 @@ _INSTANCE_OPERATION_LABELS = {
     "skip": "übersprungen",
     "send_back": "zurückgesendet",
     "migrate": "auf eine neue Prozessversion migriert",
+    "terminate": "beendet",
     # Circulation route edits (P93-S3).
     "route_add": "im Laufweg ergänzt",
     "route_remove": "im Laufweg gekürzt",

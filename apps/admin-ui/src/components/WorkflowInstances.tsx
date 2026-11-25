@@ -14,6 +14,7 @@ import {
   previewWorkflowMigration,
   sendBackWorkflowInstance,
   skipWorkflowTask,
+  terminateWorkflowInstance,
   type InstanceModification,
   type MigrationReport,
   type WorkflowCompletedTask,
@@ -169,12 +170,11 @@ export function WorkflowInstances() {
           key={selected.id}
           instance={selected}
           definition={definitions.get(selected.process_definition_id)}
+          // Updated in place even when the instance has ended, so the detail
+          // stays open and shows the outcome; the next search drops it from
+          // the running list (P95-S1c - before, the detail vanished at once).
           onChanged={(updated) =>
-            setInstances((list) =>
-              updated.status === "running"
-                ? list.map((i) => (i.id === updated.id ? updated : i))
-                : list.filter((i) => i.id !== updated.id)
-            )
+            setInstances((list) => list.map((i) => (i.id === updated.id ? updated : i)))
           }
         />
       )}
@@ -334,11 +334,13 @@ function InstanceDetail({
           {t(`workflowInstances.done.${result.operation}`, {
             target: result.target,
           })}{" "}
-          {result.instance.status === "completed"
-            ? t("workflowInstances.nowCompleted")
-            : t("workflowInstances.nowOpen", {
-                tasks: result.tasks_after.join(", ") || "—",
-              })}
+          {result.instance.status === "terminated"
+            ? t("workflowInstances.nowTerminated")
+            : result.instance.status === "completed"
+              ? t("workflowInstances.nowCompleted")
+              : t("workflowInstances.nowOpen", {
+                  tasks: result.tasks_after.join(", ") || "—",
+                })}
           {result.released_claims.length > 0 && (
             <>
               {" "}
@@ -485,6 +487,24 @@ function InstanceDetail({
                 {report && <MigrationReportView report={report} />}
               </>
             )}
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <h3 className="m-0 text-base">{t("workflowInstances.terminateHeading")}</h3>
+            <p className="m-0 text-sm opacity-80">{t("workflowInstances.terminateHint")}</p>
+            <div>
+              <button
+                type="button"
+                className={secondaryBtn}
+                disabled={!reasonOk || busy}
+                onClick={() => {
+                  if (!window.confirm(t("workflowInstances.terminateConfirm"))) return;
+                  run(() => terminateWorkflowInstance(token, instance.id, reason, version));
+                }}
+              >
+                {t("workflowInstances.terminate")}
+              </button>
+            </div>
           </div>
         </>
       )}

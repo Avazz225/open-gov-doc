@@ -301,6 +301,18 @@ signature-service validates the pair and shows the result on the file. An unpair
 plain document. Tests: `test_signature_pairing.py` (pure), and a filed message with
 `bescheid.txt` + `bescheid.txt.p7s` in `test_api.py`.
 
+## Paging (P95-S1c)
+
+- **Paged endpoints:** `GET /inbound`, `GET /outbound` and `GET /routing-log` take `limit` (default 100,
+  at most 500, more is `422`) and `offset`. They return newest first, with a stable tie-breaker on the id.
+  `/routing-log` had a cap of 200 before but no offset.
+- **Batched loading:** the attachments and routing log of an inbox page come in one query each
+  (`attachments_by_message`, `routing_log_by_message`). Before, the whole inbox came back with two
+  follow-up queries per message: 1,641 messages and 343 ms CPU per request in P95-S1. Now a page takes
+  10–25 ms.
+- **user-ui Poststelle:** loads 100 entries per tab; after a full page, "Weitere laden" appends the next
+  one.
+
 ## One session per request (P94-S3)
 
 `_mailbox_rows`, `_mailbox_by_id`, `_accessible_mailbox_ids` and `_require_mailbox_access` take the

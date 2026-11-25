@@ -214,6 +214,32 @@ request principal (`created_by`, `registered_by`, `added_by`, `removed_by`, `pse
 case as `mail-connector` on behalf of the mailbox's user (before: the non-service principal
 `system:mail-connector`, plus `added_by` in the body).
 
+## Workflow Start Without a Known Outcome (P95-S1c)
+
+Before, a timeout, connection error or `5xx` from workflow-service while creating a case gave the caller a
+`500`, and left the case in the database without a process instance. Often the start had gone through
+anyway: P95-S1's load test left 520 such cases, 436 of them with an instance.
+
+Now:
+- **Lookup first:** `WorkflowClient.start_instance` raises `WorkflowUnavailableError` for these failures,
+  and `create_case` looks the instance up (`GET /instances?business_key=<case_id>`). If it exists, the
+  case is adopted and the creation finishes normally (`201`).
+- **Otherwise `503`:** the response has `Retry-After: 5` and
+  `detail: {message, case_id}`. The case is **not** deleted at once, because a start that is still running
+  would then leave an instance without a case.
+- **Reconciliation** (`_reconcile_unstarted_cases`, at startup and every
+  `DMS_UNSTARTED_CASE_RECONCILE_INTERVAL_SECONDS`, default 600 s). It handles open cases without an
+  instance that are older than `DMS_UNSTARTED_CASE_GRACE_SECONDS` (default 300 s):
+  - **Instance found:** linked and finished like a normal creation (resource node, `case.created`, closed
+    at once if the instance already completed).
+  - **No instance:** the case is removed. It was never returned to anyone.
+  - **Documents added meanwhile:** the case is kept and logged.
+  - **workflow-service unreachable:** the reconciliation pauses until the next tick.
+  - **Replicas:** batches are taken with `FOR UPDATE SKIP LOCKED`.
+- **Live at the first start (2026-11-25):** 436 cases adopted (and closed, their load-test instances had
+  completed), 83 removed. One closed test case from P89 without an instance was left alone, because only
+  open cases are reconciled.
+
 ## Circulation Folders (P93-S3, [ADR 0249](../adr/0249-changing-running-processes-and-lane-semantics.md))
 
 A case created from a circulation definition (workflow-service's seeded "Umlauf" template) passes its route

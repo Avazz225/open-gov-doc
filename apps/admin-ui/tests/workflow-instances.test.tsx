@@ -14,6 +14,7 @@ const api = {
   sendBackWorkflowInstance: vi.fn(),
   previewWorkflowMigration: vi.fn(),
   migrateWorkflowInstance: vi.fn(),
+  terminateWorkflowInstance: vi.fn(),
 };
 
 vi.mock("@/lib/api", () => ({
@@ -29,6 +30,7 @@ vi.mock("@/lib/api", () => ({
       sendBackWorkflowInstance: 0,
       previewWorkflowMigration: 0,
       migrateWorkflowInstance: 0,
+      terminateWorkflowInstance: 0,
     }).map((name) => [
       name,
       (...args: unknown[]) => (api as Record<string, (...a: unknown[]) => unknown>)[name](...args),
@@ -179,6 +181,42 @@ describe("WorkflowInstances", () => {
       "Telefonisch geklärt",
       4
     );
+  });
+
+  it("terminates only after a reason and a confirmation", async () => {
+    const detail = await openDetail();
+    // Wait until the detail has loaded its tasks, as the skip test does.
+    await within(detail).findByRole("button", { name: "Überspringen" });
+    const terminate = within(detail).getByRole("button", { name: "Instanz beenden" });
+    expect(terminate).toBeDisabled();
+    fireEvent.change(within(detail).getByLabelText("Begründung"), {
+      target: { value: "Testrest aufräumen" },
+    });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false);
+    fireEvent.click(terminate);
+    expect(api.terminateWorkflowInstance).not.toHaveBeenCalled();
+
+    api.terminateWorkflowInstance.mockResolvedValue({
+      instance: { ...instance, status: "terminated" },
+      operation: "terminate",
+      target: "beendet",
+      tasks_before: ["Freigeben"],
+      tasks_after: [],
+      released_claims: [],
+    });
+    confirm.mockReturnValueOnce(true);
+    fireEvent.click(terminate);
+
+    expect(await within(detail).findByRole("status")).toHaveTextContent(
+      "Instanz beendet. Die Instanz ist beendet."
+    );
+    expect(api.terminateWorkflowInstance).toHaveBeenCalledWith(
+      "token-123",
+      "inst-1",
+      "Testrest aufräumen",
+      4
+    );
+    confirm.mockRestore();
   });
 
   it("sends back to the chosen completed task", async () => {

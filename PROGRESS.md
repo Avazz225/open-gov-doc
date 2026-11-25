@@ -2,6 +2,54 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P95-S1c: mail inbox paging, cases without a process instance, instance debris.
+
+**What changed:**
+- **mail-connector:**
+  - `GET /inbound`, `/outbound` and `/routing-log` are paged (`limit` default 100, at most 500, plus
+    `offset`; newest first);
+  - an inbox page loads attachments and routing log in one query each;
+  - user-ui Poststelle loads 100 per tab, with "Weitere laden".
+- **case-service:**
+  - A workflow start without a known outcome (timeout, connection error, `5xx`) now gets a lookup. If the
+    instance exists, it is adopted (`201`). If not, the answer is `503` with `case_id`, and the case stays
+    for now.
+  - `_reconcile_unstarted_cases` (startup, then every 600 s, grace 300 s) adopts the instance or removes
+    the never-started case. It keeps cases that have documents.
+- **workflow-service:**
+  - `POST /instances/{id}/terminate` (capability `workflow.instance_modify`, reason): status
+    `terminated`, claims released;
+  - event `workflow.instance.modified` with `operation: terminate`, no `workflow.instance.completed`;
+  - addendum to ADR 0249;
+  - admin-ui "Prozessinstanzen" gets a "Beenden" section with a confirmation. The detail now stays open
+    after an instance ends; before, it vanished, so "abgeschlossen" was never visible after a skip that
+    ended the instance.
+- **`scripts/cleanup-test-debris.py` step `instances`:** terminates instances of definitions only tests
+  upload, circulations started by `case-service-tests`, and OCR reviews of documents that no longer
+  exist. After each `run-tests.sh` run it covers what that run started.
+- **Dev stack cleaned up:**
+  - 2,248 instances terminated (1,046 `ocr_review`, 1,202 from test definitions); 17 running
+    circulations of real users remain;
+  - 436 orphaned cases adopted, 83 removed.
+
+**Checks:**
+- **Services:** workflow 279 (+1), case-service 102 (+5, `test_unstarted_cases.py`), mail-connector 97
+  (+2: disjoint pages with the same statement count, limits), notification 123. ruff OK.
+- **Frontends:**
+  - admin-ui: 412 component tests (+1), the e2e test `workflow-instances.spec.ts` with "Beenden" green;
+  - user-ui: 346 (+1);
+  - tsc and eslint clean in both.
+- **Live:** inbox page 10–25 ms; reconciliation and cleanup as above; no errors in the logs.
+- **Containers rebuilt:** workflow-service, case-service, mail-connector, notification-service, user-ui,
+  admin-ui.
+- **Found on the way:** Prettier has no config in the repo. With default settings it reformats whole
+  files; `--print-width 100 --trailing-comma es5` reproduces the components and tests exactly, while the
+  two `api.ts` files were never formatted with Prettier.
+
+**Next session:** P95-S1d (permission cache and DB pool, ADR 0263).
+
+---
+
 **Last completed:** P95-S1b, workflow-service ready-task index
 ([ADR 0019 addendum](docs/adr/0019-workflow-full-state-serialization.md#addendum-p95-s1b-the-projection-this-adr-anticipated)).
 

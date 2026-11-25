@@ -165,10 +165,17 @@ test("process instances: migrate, send back and skip", async ({ page, request })
         fullPage: true,
       });
 
+    // Terminate (P95-S1c): ends the instance for good.
+    await detail.getByLabel("Begründung").fill("Test beendet");
+    page.once("dialog", (dialog) => dialog.accept());
+    await detail.getByRole("button", { name: "Instanz beenden" }).click();
+    await expect(detail.getByText(/Instanz beendet\. Die Instanz ist beendet\./)).toBeVisible();
+
     const instance = await (
       await request.get(`${WORKFLOW}/instances/${instanceId}`, { headers: auth })
     ).json();
     expect(instance.process_definition_id).not.toBe(v1.id);
+    expect(instance.status).toBe("terminated");
   } finally {
     // Finish the instance so it doesn't linger in the running list.
     for (let i = 0; i < 6; i++) {

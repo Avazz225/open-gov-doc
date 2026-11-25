@@ -1755,10 +1755,16 @@
     "done": {
       "skip": "„{target}“ übersprungen.",
       "send_back": "Zurückgesendet an „{target}“.",
-      "migrate": "Migriert auf {target}."
+      "migrate": "Migriert auf {target}.",
+      "terminate": "Instanz beendet."
     },
     "nowOpen": "Jetzt offen: {tasks}.",
     "nowCompleted": "Die Instanz ist damit abgeschlossen.",
-    "claimsReleased": "{count} Beanspruchung(en) aufgehoben, Betroffene wurden benachrichtigt."
+    "claimsReleased": "{count} Beanspruchung(en) aufgehoben, Betroffene wurden benachrichtigt.",
+    "terminateHeading": "Beenden",
+    "terminateHint": "Bricht alle offenen Schritte ab und beendet die Instanz endgültig. Sie gilt nicht als abgeschlossen; eine wartende Umlaufmappe bleibt offen.",
+    "terminateConfirm": "Instanz wirklich beenden? Das lässt sich nicht rückgängig machen.",
+    "terminate": "Instanz beenden",
+    "nowTerminated": "Die Instanz ist beendet."
   }
 }

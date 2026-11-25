@@ -1755,10 +1755,16 @@
     "done": {
       "skip": "Skipped “{target}”.",
       "send_back": "Sent back to “{target}”.",
-      "migrate": "Migrated to {target}."
+      "migrate": "Migrated to {target}.",
+      "terminate": "Instance terminated."
     },
     "nowOpen": "Now open: {tasks}.",
     "nowCompleted": "The instance is now completed.",
-    "claimsReleased": "{count} claim(s) released, the people affected were notified."
+    "claimsReleased": "{count} claim(s) released, the people affected were notified.",
+    "terminateHeading": "Terminate",
+    "terminateHint": "Cancels every open step and ends the instance for good. It does not count as completed; a case waiting for it stays open.",
+    "terminateConfirm": "Really terminate this instance? This cannot be undone.",
+    "terminate": "Terminate instance",
+    "nowTerminated": "The instance is terminated."
   }
 }

@@ -492,6 +492,7 @@
     "postbuch": "Postbuch",
     "postbuchHint": "Durchsuchbares Register jeder Weiterleitung zwischen Postfächern - über alle Nachrichten hinweg, nicht nur die einer einzelnen.",
     "postbuchEmpty": "Noch keine Weiterleitungen.",
+    "loadMore": "Weitere laden",
     "postbuchLoadError": "Postbuch konnte nicht geladen werden",
     "postbuchMailboxLabel": "Postfach",
     "postbuchMailboxAll": "Alle Postfächer",

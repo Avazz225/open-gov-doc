@@ -89,6 +89,34 @@ describe("PoststellePane", () => {
     searchRoutingLogMock.mockResolvedValue([]);
   });
 
+  it("loads the inbox in pages and offers more only after a full page", async () => {
+    const page = (start: number, count: number) =>
+      Array.from({ length: count }, (_, n) => ({
+        ...unassignedMessage,
+        id: `msg-p${start + n}`,
+        subject: `Seite ${start + n}`,
+      }));
+    listInboundMessagesMock
+      .mockResolvedValueOnce(page(0, 100))
+      .mockResolvedValueOnce(page(100, 3));
+    renderPane();
+    const more = await screen.findByRole("button", { name: "Weitere laden" });
+    expect(listInboundMessagesMock).toHaveBeenLastCalledWith("token-123", {
+      mailboxId: undefined,
+      offset: 0,
+    });
+
+    await userEvent.click(more);
+
+    expect(await screen.findByText(/Seite 102/)).toBeInTheDocument();
+    expect(screen.getByText(/Seite 0 /)).toBeInTheDocument();
+    expect(listInboundMessagesMock).toHaveBeenLastCalledWith("token-123", {
+      mailboxId: undefined,
+      offset: 100,
+    });
+    expect(screen.queryByRole("button", { name: "Weitere laden" })).not.toBeInTheDocument();
+  });
+
   it("shows the empty state when the inbox has nothing unassigned", async () => {
     renderPane();
     expect(await screen.findByText("Kein ungesichteter Zulauf.")).toBeInTheDocument();
