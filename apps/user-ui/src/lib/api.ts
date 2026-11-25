@@ -2958,9 +2958,14 @@ export interface CaseDocumentReference {
   has_active_quarantine: boolean;
 }
 
-export async function listCases(token: string, status?: string): Promise<Case[]> {
-  const path = status ? `cases?status=${encodeURIComponent(status)}` : "cases";
-  const response = await request("case-service", path, {}, token);
+// Paged since P95-S1f (newest first, 100 per page).
+export const CASE_PAGE_SIZE = 100;
+
+export async function listCases(token: string, status?: string, offset = 0): Promise<Case[]> {
+  const query = new URLSearchParams({ limit: String(CASE_PAGE_SIZE) });
+  if (status) query.set("status", status);
+  if (offset) query.set("offset", String(offset));
+  const response = await request("case-service", `cases?${query.toString()}`, {}, token);
   return response.json();
 }
 

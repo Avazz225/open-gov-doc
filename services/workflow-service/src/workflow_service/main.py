@@ -538,6 +538,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ADD COLUMN IF NOT EXISTS waits_on_timer BOOLEAN"
             )
         )
+        # Who is responsible for an unclaimed task (P95-S1f).
+        for column in ("responsible_type VARCHAR(16)", "responsible VARCHAR(256)"):
+            await conn.execute(
+                text(f"ALTER TABLE workflow.ready_task ADD COLUMN IF NOT EXISTS {column}")
+            )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_ready_task_responsible "
+                "ON workflow.ready_task (responsible_type, responsible)"
+            )
+        )
         # `GET /tasks`' order, so a page is an index scan with a stop.
         await conn.execute(
             text(
@@ -563,6 +574,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     indexed = await repository.backfill_ready_task_index(app.state.session_factory)
     if indexed:
         logger.info("ready_task_index_backfilled", extra={"instances": indexed})
+    # P95-S1f: who is responsible for each ready task, for rows from before
+    # the columns existed (cheap: no engine state is read).
+    await repository.refresh_all_responsible(app.state.session_factory)
     app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
     app.state.auth_client = AuthServiceClient(settings.auth_service_base_url)
     app.state.signature_client = SignatureServiceClient(settings.signature_service_base_url)
@@ -1541,10 +1555,10 @@ async def list_ready_tasks(
     Since P95-S1b it reads the ready-task index (`models.ReadyTask`) instead
     of deserializing every running instance: one query per page, `limit`/
     `offset` in SQL, claims joined, circulation routes fetched once for the
-    page. `eligible=me` leaves to SQL what it can answer (unclaimed or
-    claimed by the caller) and checks lanes and routes here, reading the
-    index in chunks until the page is full - its cost grows with the tasks
-    the caller can't work on, not with the number of instances."""
+    page. Since P95-S1f `eligible=me` is answered in SQL as well: the index
+    carries who is responsible for each unclaimed task (route step or lane
+    binding), matched against the caller, their groups and roles - the cost
+    no longer grows with tasks assigned to others."""
     if eligible is not None and eligible != "me":
         raise HTTPException(status_code=422, detail="eligible kennt nur den Wert 'me'")
     if eligible == "me" and not x_dms_principal:
@@ -1553,40 +1567,23 @@ async def list_ready_tasks(
     offset = max(0, offset)
     binding_cache: dict = {}
     caller_memberships = await _memberships(x_dms_principal) if x_dms_principal else None
-    if eligible is None:
-        rows = await repository.list_indexed_ready_tasks(
-            session, exclude_task_types=_FEDERATED_TASK_TYPES, limit=limit, offset=offset
+    eligible_for = None
+    if eligible == "me":
+        eligible_for = (
+            x_dms_principal,
+            {g["name"] for g in caller_memberships["groups"]},
+            set(caller_memberships["roles"]),
         )
-        return await _task_list_entries(
-            session, rows, caller_memberships, x_dms_principal, binding_cache
-        )
-    chunk = min(max(2 * limit, 100), 500)
-    page: list[ReadyTaskWithInstanceOut] = []
-    to_skip = offset
-    cursor = 0
-    while len(page) < limit:
-        rows = await repository.list_indexed_ready_tasks(
-            session,
-            exclude_task_types=_FEDERATED_TASK_TYPES,
-            claimable_by=x_dms_principal,
-            limit=chunk,
-            offset=cursor,
-        )
-        cursor += len(rows)
-        for entry in await _task_list_entries(
-            session, rows, caller_memberships, x_dms_principal, binding_cache
-        ):
-            if not entry.eligible:
-                continue
-            if to_skip:
-                to_skip -= 1
-                continue
-            page.append(entry)
-            if len(page) == limit:
-                break
-        if len(rows) < chunk:
-            break
-    return page
+    rows = await repository.list_indexed_ready_tasks(
+        session,
+        exclude_task_types=_FEDERATED_TASK_TYPES,
+        eligible_for=eligible_for,
+        limit=limit,
+        offset=offset,
+    )
+    return await _task_list_entries(
+        session, rows, caller_memberships, x_dms_principal, binding_cache
+    )
 
 
 async def _task_list_entries(

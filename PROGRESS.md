@@ -2,6 +2,56 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P95-S1f, what the second measurement found
+([report, third measurement](docs/operations/performance-ranking.md#third-measurement-p95-s1f-2026-11-25)).
+
+**What changed:**
+- **workflow-service:**
+  - `ready_task` stores who is responsible for an unclaimed task: a circulation's current step,
+    otherwise the lane binding.
+  - `GET /tasks?eligible=me` filters entirely in SQL (caller, their group names, their roles; a claim
+    decides over responsibility).
+  - It is kept by `_sync_ready_tasks`, after route edits (`refresh_responsible` in `_change_route`), and
+    at startup (`refresh_all_responsible`).
+- **case-service:** `GET /cases` is paged (`limit` default 100, at most 500, `offset`), newest first, and
+  the permission filter fills the page. user-ui and reviewer-ui have "Weitere laden".
+- **rendering-service:**
+  - the `document.>` consumer processes 4 in parallel (`DMS_DOCUMENT_CONSUMER_CONCURRENCY`);
+  - Pillow and pypdf run in threads;
+  - LibreOffice profiles are reused (`DMS_LIBREOFFICE_PROFILES`, about 960 → 200–260 ms per small
+    conversion);
+  - new sensor `rendering.consumer.pending`.
+- **dms-eventbus-client:** `consumer_pending(stream, durable)`.
+- **k6 extended:** setup grants the admin `domain-admin-workflow-instances`. Teardown terminates every
+  running instance of the run's users and revokes the grant (`teardownTimeout` 10 min).
+
+**Checks:**
+- **Two extended runs back to back:** goodput 96.4 % and 95.5 % (P95-S1e: 79 %, and 54 % in a second
+  run), errors 0.00/0.01 %. Teardown terminated 4,592 and 4,456 instances.
+  - workflow and case p50 4–10× faster (my_tasks 1,240 → 105–122 ms).
+  - **New bottleneck: permission-service.** Own time 53–64 ms per call, pool at 30, latency share
+    28–33 %. The other paths are therefore slower at p50 than in P95-S1e (list_folder 27 → 60 ms), at
+    25 % more throughput.
+- **Rendering:** in the runs still 28,000–60,000 behind (before the profile pool). After it, live, 680–814
+  renditions/min instead of 3–10; backlog drained, 8,456 renditions, 0 failed. Not yet measured under a
+  full run.
+- **Cold-cache measurement:** 176 ms.
+- **Tests:**
+  - workflow 283 (+4: responsible per lane and route, claim over responsibility, refresh at startup,
+    3,000 foreign tasks with the same statement count);
+  - case 103 (+1);
+  - rendering 117 (+5: concurrency, no event-loop blocking, sensor, profile pool, real double
+    conversion);
+  - eventbus lib 9 (+1);
+  - user-ui 348 (+1), reviewer-ui 72;
+  - tsc and eslint clean.
+- **Containers rebuilt:** workflow-, case-, rendering-service, user-ui, reviewer-ui.
+
+**Next session:** P95-S2 (scoping the Rust pilot, ADR 0257). Its input is the report with all three
+measurements.
+
+---
+
 **Last completed:** P95-S1e, second measurement
 ([report](docs/operations/performance-ranking.md#second-measurement-p95-s1e-2026-11-25)).
 

@@ -6,7 +6,8 @@ different algorithm.
 
 > **Second measurement (P95-S1e, 2026-11-25):** after the fixes P95-S1a–d, see
 > [the section at the end](#second-measurement-p95-s1e-2026-11-25). The sections up to "What follows"
-> are the first measurement, unchanged except for one correction.
+> are the first measurement, unchanged except for one correction. **Third measurement (P95-S1f):** two
+> extended runs back to back, [at the very end](#third-measurement-p95-s1f-2026-11-25).
 
 ## How it was measured
 
@@ -307,3 +308,63 @@ throughput, the k6 teardown terminating its circulations, and two extended runs 
   Both are now measured without the queueing and the cache invalidation that inflated them before.
 - **The layers inside permission-service:** about half of the samples are in the database driver
   (SQLAlchemy/asyncpg). A rewrite would replace that layer as well.
+
+## Third measurement (P95-S1f, 2026-11-25)
+
+**Settings:** two extended runs back to back (1795601438–1795602761 and 1795602881–1795604199), same
+settings as before. Between them, only the k6 teardown, which since P95-S1f terminates the run's
+instances (4,592 and 4,456).
+
+**Fixed before the runs:**
+- `GET /tasks?eligible=me` filters in SQL, using who is responsible for each ready task.
+- `GET /cases` is paged.
+- rendering-service processes 4 renditions in parallel, with Pillow off the event loop.
+- workflow-service and case-service have the larger pools from P95-S1e.
+
+| | P95-S1e run 1 | P95-S1f run 1 | P95-S1f run 2 |
+|---|---|---|---|
+| Requests | 70,044 (58/s) | 89,678 (74/s) | 89,091 (74/s) |
+| Errors | 0.39 % | 0.00 % | 0.01 % |
+| Goodput | 79 % | 96.4 % | 95.5 % |
+
+| Action, p50 / p95 / p99 (ms) | P95-S1e run 1 | P95-S1f run 1 | P95-S1f run 2 |
+|---|---|---|---|
+| workflow_my_tasks | 1,240 / 2,902 / 3,502 | 122 / 628 / 988 | 105 / 693 / 1,502 |
+| workflow_start | 1,101 / 2,689 / 3,369 | 217 / 810 / 1,136 | 194 / 913 / 2,000 |
+| workflow_complete | 1,952 / 4,512 / 5,495 | 314 / 1,269 / 1,866 | 268 / 1,301 / 2,863 |
+| case_create | 1,370 / 2,773 / 3,610 | 343 / 1,339 / 2,231 | 333 / 1,584 / 3,439 |
+| case_list | 326 / 1,198 / 1,682 | 194 / 1,280 / 2,112 | 181 / 1,485 / 2,581 |
+| list_folder | 27 / 359 / 617 | 62 / 538 / 861 | 60 / 598 / 1,096 |
+| download | 36 / 361 / 571 | 82 / 553 / 898 | 78 / 617 / 1,168 |
+| search | 8 / 23 / 102 | 15 / 157 / 403 | 15 / 176 / 557 |
+| upload | 113 / 891 / 1,493 | 225 / 1,386 / 2,626 | 221 / 1,612 / 3,136 |
+| mail_inbound | 14 / 32 / 87 | 24 / 147 / 306 | 25 / 161 / 454 |
+
+**Reading:**
+- **The second run no longer degrades.** p50 is the same or better, p99 somewhat higher. In P95-S1e the
+  second run fell to 54 % goodput on the first run's leftovers.
+- **The workflow and case paths are 4–10× faster at p50.** "Meine Aufgaben" no longer reads other
+  people's tasks, and workflow-service no longer waits for its pool: its DB share of its own work is
+  27–29 %, against 81 % in P95-S1e.
+- **The bottleneck has moved to permission-service.** The run pushes about a quarter more requests through
+  (89,678 instead of 70,044, and three times as many completed circulations). Everything else now waits
+  on permission-service:
+  - its own time per call went from 12.8 to 53–64 ms;
+  - its latency share is 28–33 %;
+  - it reached the maximum of 30 pooled connections.
+  
+  So list_folder, download and search are slower at p50 than in P95-S1e, while still in the tens of
+  milliseconds. Its database time per call (19–36 ms) is part of it, but most is its own time in one busy
+  event loop.
+- **rendering-service still fell behind during the runs:** backlog 28,403 after run 1, 60,553 after run 2.
+  The four parallel conversions each built a fresh LibreOffice profile.
+  - **Fixed after the runs:** a pool of reused profiles. A conversion takes 200–260 ms instead of about
+    960 ms.
+  - **Effect, live:** 680–814 renditions per minute (before 3–10) while draining the backlog. That
+    covers the load test's upload rate.
+  - **Not yet measured under a full load run.**
+
+**For P95-S2:** the algorithmic and configuration problems the measurements found are fixed. They didn't
+come back in two consecutive runs. Under the full mixed load, **permission-service's own processing** is
+now the limiting factor, the candidate P95-S1 named. gateway-service follows at 7–9 % latency share
+(12.9–24.3 ms own time per call).

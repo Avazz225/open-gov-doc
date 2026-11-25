@@ -1201,3 +1201,27 @@ async def test_reconcile_after_restore_destroys_a_resurrected_case_again(
     assert len(client.get("/deletion-register", params={"case_id": case.id}).json()) == 1
     missing = "/cases/does-not-exist/reconcile-restore-deletion"
     assert client.post(missing, json=body, headers={"X-DMS-Roles": "dms-admin"}).status_code == 404
+
+
+def test_case_list_is_paged_newest_first(client, case_headers, process_definition_id):
+    """P95-S1f: `GET /cases` returns one page (`limit`/`offset`), newest
+    first - before, every case came back at once."""
+    created = []
+    for n in range(7):
+        response = client.post(
+            "/cases",
+            json={"name": f"Seite-{n}", "process_definition_id": process_definition_id},
+            headers=case_headers,
+        )
+        assert response.status_code == 201, response.text
+        created.append(response.json()["id"])
+
+    pages = [
+        client.get("/cases", params={"limit": 3, "offset": offset}, headers=case_headers).json()
+        for offset in (0, 3, 6)
+    ]
+    ids = [case["id"] for page in pages for case in page]
+    assert [len(page) for page in pages] == [3, 3, 1]
+    assert ids == list(reversed(created))
+    assert client.get("/cases", params={"limit": 501}, headers=case_headers).status_code == 422
+    assert client.get("/cases", params={"offset": -1}, headers=case_headers).status_code == 422

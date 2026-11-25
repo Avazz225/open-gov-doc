@@ -25,7 +25,7 @@ from dms_metrics_client import (
 )
 from dms_permission_client import PermissionServiceClient
 from dms_registry_client import maybe_start_registration
-from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -661,12 +661,35 @@ async def register_case(
 async def list_cases(
     status: str | None = None,
     object_type_id: int | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> list[CaseOut]:
+    """Paged since P95-S1f, newest first (`limit` default 100, at most 500):
+    before, every case came back - 5,822 open ones after two load-test runs.
+    `offset` counts cases the caller may read: the rows are read in chunks
+    and filtered by permission (ADR 0154) until the page is full."""
     await _require_case_permission(x_dms_principal, access_type="read")
-    cases = await repository.list_cases(session, status=status, object_type_id=object_type_id)
-    return await _filter_cases_by_permission(x_dms_principal, cases)
+    chunk = max(limit, 100)
+    page: list = []
+    to_skip = offset
+    cursor = 0
+    while len(page) < limit:
+        batch = await repository.list_cases(
+            session, status=status, object_type_id=object_type_id, limit=chunk, offset=cursor
+        )
+        cursor += len(batch)
+        for case in await _filter_cases_by_permission(x_dms_principal, batch):
+            if to_skip:
+                to_skip -= 1
+                continue
+            page.append(case)
+            if len(page) == limit:
+                break
+        if len(batch) < chunk:
+            break
+    return page
 
 
 @app.get("/cases/by-vorgangsnummer", response_model=list[CaseOut])

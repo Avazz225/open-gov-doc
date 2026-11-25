@@ -45,3 +45,11 @@ So the projection named above now exists, as a read accelerator. The blob stays 
 
 The drift risk named in the rationale above is contained by having one write path, and by tests that
 compare the index with a full scan after every kind of state change.
+
+**P95-S1f:** the index also records who is responsible for an unclaimed task: a circulation's current step,
+otherwise the lane binding. That lets `GET /tasks?eligible=me` filter in SQL. It is still derived:
+- written by the same `_save_state`;
+- refreshed after route edits;
+- recomputed at startup.
+
+Lane bindings belong to a definition version and never change.

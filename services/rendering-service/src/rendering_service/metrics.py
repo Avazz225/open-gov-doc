@@ -37,6 +37,14 @@ PROBE = SensorSpec(
     default_enabled=False,
 )
 PROBE_INTERVAL_SECONDS = 300.0
+# P95-S1f: how far the `document.>` consumer is behind. Under the load test
+# it fell 230,000 events behind without anything showing it.
+PENDING = SensorSpec(
+    name="rendering.consumer.pending",
+    group="capacity",
+    cost=2,
+    description="Noch nicht verarbeitete document-Ereignisse des Rendering-Konsumenten",
+)
 
 _STATE = {"failed": "retrying", "failed_permanent": "permanent"}
 _produced: GuardedCounter | None = None
@@ -56,6 +64,15 @@ def build_sensors(registry: SensorRegistry, app) -> None:
         return {(kind, _STATE[status]): float(n) for kind, status, n in rows.all()}
 
     registry.on_scrape_async(registry.gauge(FAILURES, labelnames=("kind", "state")), failures)
+
+    async def pending() -> float | None:
+        bus = getattr(app.state, "event_bus", None)
+        if bus is None or not hasattr(bus, "consumer_pending"):
+            return None
+        value = await bus.consumer_pending("document", "rendering-service")
+        return None if value is None else float(value)
+
+    registry.on_scrape_async(registry.gauge(PENDING), pending)
     registry.on_scrape_async(
         registry.gauge(PROBE, labelnames=("result",)),
         throttled(run_probe, min_interval_seconds=PROBE_INTERVAL_SECONDS),

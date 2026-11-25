@@ -61,3 +61,10 @@ durable names.
 `subscribe()` continues it in a CONSUMER span around the handler (`messaging.*` attributes). Only the
 OpenTelemetry API is used - without a configured provider (tracing off) both are no-ops. Test:
 `tests/test_tracing.py` (real NATS, in-memory exporter).
+
+## Consumer backlog (P95-S1f)
+
+`await bus.consumer_pending(stream, durable)` returns how many messages a durable consumer still has to see:
+JetStream's `num_pending` plus delivered but unacknowledged ones. It returns `None` when the consumer doesn't
+exist or NATS can't answer, so a sensor shows a gap, not a made-up zero. rendering-service exports it as
+`rendering.consumer.pending`.

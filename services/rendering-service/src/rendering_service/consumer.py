@@ -67,6 +67,7 @@ async def start_consuming(
     storage: StorageClient,
     publish_event: PublishEvent,
     max_attempts: int,
+    max_concurrency: int = 1,
 ) -> None:
     handler = make_handler(
         session_factory=session_factory,
@@ -77,7 +78,9 @@ async def start_consuming(
     )
     for subject in subjects:
         try:
-            await bus.subscribe(subject, handler, durable="rendering-service")
+            await bus.subscribe(
+                subject, handler, durable="rendering-service", max_concurrency=max_concurrency
+            )
         except SubjectNotFoundError:
             logger.warning(
                 "Kein Stream für Subject %r gefunden - noch kein Producer gestartet? "

@@ -154,6 +154,7 @@
     "rejectCancel": "Cancel"
   },
   "cases": {
+    "loadMore": "Load more",
     "paneLabel": "Cases",
     "heading": "Cases",
     "hint": "Overview of all case binders - selecting a row opens the detail view with its documents.",

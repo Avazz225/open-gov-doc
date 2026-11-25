@@ -16,6 +16,7 @@
 
 import http from "k6/http";
 import { check, sleep } from "k6";
+import encoding from "k6/encoding";
 import { Rate, Trend } from "k6/metrics";
 import { randomIntBetween, randomString } from "https://jslib.k6.io/k6-utils/1.6.0/index.js";
 
@@ -56,6 +57,9 @@ export const options = {
     goodput: ["rate>0.95"],
     http_req_failed: ["rate<0.05"],
   },
+  // The extended teardown terminates the run's circulations (P95-S1f) -
+  // a few thousand requests after a full run.
+  teardownTimeout: "10m",
 };
 
 function apiUrl(serviceType, path) {
@@ -203,6 +207,14 @@ export function setup() {
     }
   }
 
+  // P95-S1f: the circulations this run starts (directly and through cases)
+  // would outlive it and slow the next run down. The admin may terminate
+  // them for the run's duration (capability `workflow.instance_modify`).
+  let instanceAdminGrantId = null;
+  if (SCENARIO === "extended") {
+    instanceAdminGrantId = grantInstanceAdmin(adminToken);
+  }
+
   return {
     runId,
     circulationDefinitionId,
@@ -210,6 +222,7 @@ export function setup() {
     folderId,
     seedDocumentId: seedUpload.json().id,
     adminToken,
+    instanceAdminGrantId,
   };
 }
 
@@ -431,8 +444,79 @@ function newTeardownSession() {
   return { request };
 }
 
+function principalOf(token) {
+  return JSON.parse(encoding.b64decode(token.split(".")[1], "rawurl", "s")).sub;
+}
+
+function grantInstanceAdmin(adminToken) {
+  const roles = http.get(
+    apiUrl("permission-service", "roles"),
+    withName("setup_roles", authHeaders(adminToken))
+  );
+  const role = roles.json().find((r) => r.name === "domain-admin-workflow-instances");
+  const grant = http.post(
+    apiUrl("permission-service", "role-assignments"),
+    JSON.stringify({
+      principal_type: "user",
+      principal_id: principalOf(adminToken),
+      role_id: role.id,
+      resource_id: "root",
+    }),
+    withName("setup_grant_instance_admin", authHeaders(adminToken, { "Content-Type": "application/json" }))
+  );
+  if (grant.status !== 200 && grant.status !== 201) {
+    throw new Error(`setup: could not grant domain-admin-workflow-instances: ${grant.status} ${grant.body}`);
+  }
+  return grant.json().role_assignment.id;
+}
+
+// Terminates every running instance one of the run's users started
+// (P95-S1f) - circulations and the ones behind created cases. The cases
+// themselves stay: cases cannot be deleted.
+function terminateRunInstances(session, data) {
+  const runUsers = new Set(data.users.map((u) => u.id));
+  const ids = [];
+  for (let offset = 0; ; offset += 500) {
+    const page = session.request(
+      "GET",
+      apiUrl("workflow-service", `instances?status=running&limit=500&offset=${offset}`),
+      "teardown_list_instances",
+      null
+    );
+    if (!page || page.status !== 200) break;
+    const rows = page.json();
+    for (const row of rows) {
+      if (runUsers.has(row.created_by)) ids.push(row.id);
+    }
+    if (rows.length < 500) break;
+  }
+  let terminated = 0;
+  for (const id of ids) {
+    const res = session.request(
+      "POST",
+      apiUrl("workflow-service", `instances/${id}/terminate`),
+      "teardown_terminate_instance",
+      JSON.stringify({ reason: `Lasttest ${data.runId} beendet` })
+    );
+    // 409: ended meanwhile.
+    if (res && (res.status === 200 || res.status === 409)) terminated++;
+  }
+  return { found: ids.length, terminated };
+}
+
 export function teardown(data) {
   const session = newTeardownSession();
+
+  if (data.instanceAdminGrantId !== null && data.instanceAdminGrantId !== undefined) {
+    const result = terminateRunInstances(session, data);
+    console.log(`teardown: instances terminated=${result.terminated} of ${result.found}`);
+    session.request(
+      "DELETE",
+      apiUrl("permission-service", `role-assignments/${data.instanceAdminGrantId}`),
+      "teardown_revoke_instance_admin",
+      null
+    );
+  }
 
   // A single POST /folders/{id}/trash cascades over the folder's entire
   // active subtree (folder-service repository.soft_delete_folder calls

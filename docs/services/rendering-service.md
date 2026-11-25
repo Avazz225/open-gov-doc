@@ -33,6 +33,25 @@ The Rendering Service consumes `document.created` (first version, `version_numbe
 3. Every result is stored permanently via the **Storage Service** (`renditions/{document_id}/{version_number}/{rendition_type}`) — **no** cache/Redis/in-memory storage, as explicitly required by 2.4: resilience must not depend on the functioning of the very renderer it is meant to safeguard.
 4. Reprocessing the same version (e.g. NATS redelivery) overwrites the existing row (natural primary key) instead of accumulating duplicates.
 
+**Throughput (P95-S1f):** the consumer used to process one event at a time and fell 229,819 events
+behind under the load tests of P95-S1/S1e.
+- **Why it was slow:** a small `.txt` upload costs a `soffice` subprocess, about a second and a core.
+- **Parallel renditions:** the consumer now processes `DMS_DOCUMENT_CONSUMER_CONCURRENCY` renditions in
+  parallel (default 4).
+- **Pillow and pypdf work** (thumbnail, image to PDF, archive tagging) runs in a thread
+  (`asyncio.to_thread`), so it no longer blocks the event loop and with it the other renditions.
+- **Sensor `rendering.consumer.pending`:** how many `document` events the consumer still has to see (not
+  yet delivered plus unacknowledged), from `NatsEventBusClient.consumer_pending`.
+- **Reused LibreOffice profiles:** most of a small conversion's cost was building a fresh LibreOffice user
+  profile, about 960 ms against 200–260 ms with a reused one (measured in the container).
+  `convert_via_libreoffice` now takes a profile from a small pool (`_ProfilePool`,
+  `DMS_LIBREOFFICE_PROFILES`, default 4). Each profile serves one `soffice` at a time, and a failed or
+  timed-out conversion discards its profile.
+- **Effect, live:** 3–10 renditions per minute before (with the parallelism alone), 680–814 per minute
+  after, while draining a backlog of about 64,000 events.
+- **A second replica** would share the durable push consumer only with a queue group, which the client
+  doesn't set up today. Not done: parallelism inside one process uses the cores first.
+
 A single broad subject subscription (`document.>`, not two individual subscriptions) with in-handler dispatch by `event_type` — the same pattern as `permission-service/structure_consumer.py`, since a JetStream durable consumer name would be reserved per subscribed subject. Other `document.>` events (metadata update, deletion, force unlock) do not trigger rendering.
 
 ### Retry & Backoff (Post-Roadmap Phase 20 Session 4, [ADR 0080](../adr/0080-rendering-ocr-service-retry-backoff-failed-permanent.md))

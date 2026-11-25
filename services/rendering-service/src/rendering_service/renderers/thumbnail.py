@@ -1,3 +1,4 @@
+import asyncio
 import os
 from io import BytesIO
 
@@ -21,6 +22,11 @@ class ThumbnailRenderer(Renderer):
         return os.path.splitext(filename)[1].lower() in _IMAGE_EXTENSIONS
 
     async def render(self, data: bytes, *, filename: str, content_type: str | None) -> RenderOutput:
+        # Pillow in a thread (P95-S1f): it would block the event loop, and
+        # with parallel renditions the other ones with it.
+        return await asyncio.to_thread(self._render, data, filename)
+
+    def _render(self, data: bytes, filename: str) -> RenderOutput:
         image = Image.open(BytesIO(data))
         image.load()
         if image.mode not in ("RGB", "RGBA"):

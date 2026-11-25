@@ -190,6 +190,10 @@ async def _clean_tables():
                 "ADD COLUMN IF NOT EXISTS waits_on_timer BOOLEAN"
             )
         )
+        for column in ("responsible_type VARCHAR(16)", "responsible VARCHAR(256)"):
+            await conn.execute(
+                text(f"ALTER TABLE workflow.ready_task ADD COLUMN IF NOT EXISTS {column}")
+            )
         await conn.execute(
             text(
                 "TRUNCATE workflow.process_instance, workflow.process_definition, "

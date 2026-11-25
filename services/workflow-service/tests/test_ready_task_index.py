@@ -285,11 +285,33 @@ def test_task_list_cost_does_not_grow_with_running_instances(client, admin_heade
     assert not {t["instance_id"] for t in large} & {t["instance_id"] for t in page2}
 
     # "Meine Aufgaben" too: unbound lanes, so every task is the caller's.
-    mine, _, elapsed = _count_statements(
+    mine, mine_statements, elapsed = _count_statements(
         client, "/tasks?eligible=me&limit=50", headers={"X-DMS-Principal": "carla"}
     )
     assert len(mine) == 50 and all(t["eligible"] for t in mine)
     assert elapsed < 1.0
+
+    # P95-S1f: the 3,000 clones now belong to someone else. "Meine Aufgaben"
+    # finds carla's five without reading the others, at the same cost.
+    client.portal.call(_assign_clones_to, "someone-else")
+    mine, statements, elapsed = _count_statements(
+        client, "/tasks?eligible=me&limit=50", headers={"X-DMS-Principal": "carla"}
+    )
+    assert len(mine) == 5 and all(t["eligible"] for t in mine)
+    assert statements == mine_statements
+    assert elapsed < 1.0, f"eligible=me took {elapsed:.2f} s next to 3,000 foreign tasks"
+
+
+async def _assign_clones_to(principal: str) -> None:
+    async with app.state.engine.begin() as conn:
+        await conn.execute(
+            text(
+                "UPDATE workflow.ready_task r SET responsible_type = 'principal', "
+                "responsible = :who FROM workflow.process_instance p "
+                "WHERE p.id = r.instance_id AND p.business_key LIKE 'clone-%'"
+            ),
+            {"who": principal},
+        )
 
 
 async def _clone_coro(source_id: str, copies: int) -> None:
@@ -343,3 +365,97 @@ def test_claimed_tasks_of_others_are_not_mine(client, admin_headers):
     assert {t["instance_id"] for t in dora} == {taken, free}
     everyone = {t["instance_id"]: t for t in client.get("/tasks").json()}
     assert everyone[taken]["claimed_by"] == "dora"
+
+
+# --- Who is responsible, for "Meine Aufgaben" in SQL (P95-S1f) --------------
+
+LANES = (
+    _read("lane_bindings.bpmn")
+    .replace("__GROUP__", "Sachbearbeitung")
+    .replace("__ROLE__", "dms-freigabe")
+)
+
+
+async def _responsible(session, instance_id):
+    result = await session.execute(
+        select(ReadyTask.name, ReadyTask.responsible_type, ReadyTask.responsible).where(
+            ReadyTask.instance_id == instance_id
+        )
+    )
+    return [tuple(row) for row in result.all()]
+
+
+async def _mine(session, principal, groups=(), roles=()):
+    rows = await repository.list_indexed_ready_tasks(
+        session, eligible_for=(principal, set(groups), set(roles)), limit=1000
+    )
+    return sorted(r.task.name for r in rows)
+
+
+async def test_a_lane_binding_makes_its_group_or_role_responsible(session):
+    definition = await _definition(session, "Lanes", LANES)
+    instance = await _start(session, definition.id)
+    assert await _responsible(session, instance.id) == [("Prüfen", "group", "Sachbearbeitung")]
+    assert await _mine(session, "anna", groups=["Sachbearbeitung"]) == ["Prüfen"]
+    assert await _mine(session, "otto", groups=["Andere"]) == []
+
+    [task] = await repository.indexed_ready_tasks(session, instance.id)
+    await repository.complete_task(session, instance.id, task.id, completed_by="anna", data={})
+    assert await _responsible(session, instance.id) == [("Freigeben", "role", "dms-freigabe")]
+    assert await _mine(session, "otto", roles=["dms-freigabe"]) == ["Freigeben"]
+    assert await _mine(session, "anna", groups=["Sachbearbeitung"]) == []
+
+
+async def test_a_claim_decides_over_responsibility(session):
+    definition = await _definition(session, "Lanes", LANES)
+    instance = await _start(session, definition.id)
+    [task] = await repository.indexed_ready_tasks(session, instance.id)
+    await repository.claim_task(session, instance.id, task.id, principal_id="anna")
+    # Claimed: only the claimant sees it, even another group member doesn't.
+    assert await _mine(session, "anna", groups=["Sachbearbeitung"]) == ["Prüfen"]
+    assert await _mine(session, "berta", groups=["Sachbearbeitung"]) == []
+
+
+async def test_the_route_step_is_responsible_and_follows_a_recall(session):
+    template = await repository.ensure_circulation_template(session)
+    route = [
+        {"kind": "kenntnis", "assignee_type": "principal", "assignee": "bob"},
+        {"kind": "kenntnis", "assignee_type": "group", "assignee": "Poststelle"},
+    ]
+    instance = await repository.start_instance(
+        session, template.id, created_by="carla", business_key=None, initial_data={}, route=route
+    )
+    [(_, kind, who)] = await _responsible(session, instance.id)
+    assert (kind, who) == ("principal", "bob")
+    assert len(await _mine(session, "bob")) == 1
+    assert await _mine(session, "carla") == []
+
+    await repository.recall_route_step(
+        session,
+        instance.id,
+        {"kind": "kenntnis", "assignee_type": "principal", "assignee": "carla"},
+        actor="carla",
+        reason="zurück",
+        expected_version=None,
+    )
+    [(_, kind, who)] = await _responsible(session, instance.id)
+    assert (kind, who) == ("principal", "carla")
+    assert len(await _mine(session, "carla")) == 1
+    assert await _mine(session, "bob") == []
+
+    [task] = await repository.indexed_ready_tasks(session, instance.id)
+    await repository.complete_task(session, instance.id, task.id, completed_by="carla", data={})
+    [(_, kind, who)] = await _responsible(session, instance.id)
+    assert (kind, who) == ("group", "Poststelle")
+    assert len(await _mine(session, "dora", groups=["Poststelle"])) == 1
+
+
+async def test_refresh_all_fills_rows_from_before_the_columns(session, engine):
+    definition = await _definition(session, "Lanes", LANES)
+    instance = await _start(session, definition.id)
+    await session.execute(update(ReadyTask).values(responsible_type=None, responsible=None))
+    await session.commit()
+    factory = repository.async_sessionmaker(engine, expire_on_commit=False)
+    assert await repository.refresh_all_responsible(factory) == 1
+    async with factory() as fresh:
+        assert await _responsible(fresh, instance.id) == [("Prüfen", "group", "Sachbearbeitung")]

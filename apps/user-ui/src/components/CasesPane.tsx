@@ -12,6 +12,7 @@ import {
   importXdomeaIntoCase,
   importXjustizIntoCase,
   listCaseDocuments,
+  CASE_PAGE_SIZE,
   listCases,
   listFavorites,
   listProcessDefinitions,
@@ -90,18 +91,38 @@ export function CasesPane({
   const [favoriteCaseIds, setFavoriteCaseIds] = useState<Set<string>>(new Set());
   const [favoriteError, setFavoriteError] = useState<string | null>(null);
 
+  // Paging (P95-S1f): a full page means there may be more.
+  const [hasMore, setHasMore] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+
   const reload = useCallback(async () => {
     if (!token) return;
     setIsLoading(true);
     setError(null);
     try {
-      setCases(await listCases(token, statusFilter || undefined));
+      const page = await listCases(token, statusFilter || undefined);
+      setCases(page);
+      setHasMore(page.length >= CASE_PAGE_SIZE);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("cases.loadError"));
     } finally {
       setIsLoading(false);
     }
   }, [token, statusFilter, t]);
+
+  async function loadMore() {
+    setIsLoadingMore(true);
+    setError(null);
+    try {
+      const page = await listCases(token, statusFilter || undefined, cases.length);
+      setCases((prev) => [...prev, ...page]);
+      setHasMore(page.length >= CASE_PAGE_SIZE);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t("cases.loadError"));
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }
 
   const reloadFavorites = useCallback(async () => {
     if (!token || !username) return;
@@ -224,6 +245,18 @@ export function CasesPane({
             </li>
           ))}
         </ul>
+      )}
+      {!isLoading && hasMore && (
+        <p>
+          <button
+            type="button"
+            className="rounded-md border border-border bg-hover-bg px-3 py-1.5 text-sm text-fg transition-colors hover:bg-accent-bg disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap"
+            disabled={isLoadingMore}
+            onClick={loadMore}
+          >
+            {isLoadingMore ? t("common.loading") : t("cases.loadMore")}
+          </button>
+        </p>
       )}
 
       <NewCirculationSection

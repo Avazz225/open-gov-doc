@@ -211,3 +211,38 @@ async def test_subscribe_without_existing_stream_raises_subject_not_found():
             )
     finally:
         await consumer.close()
+
+
+async def test_consumer_pending_counts_unseen_and_unacked_messages(client):
+    """P95-S1f: the backlog a sensor reports - messages not yet delivered plus
+    delivered but unacknowledged ones; `None` for an unknown consumer."""
+    bus, stream = client
+    gate = asyncio.Event()
+
+    async def slow_handler(payload: bytes) -> None:
+        await gate.wait()
+
+    try:
+        await bus.subscribe(f"{stream}.work", slow_handler, durable="pending-probe")
+        for n in range(5):
+            await bus.publish(f"{stream}.work", f"job {n}".encode())
+        assert await _wait_until_async(
+            lambda: bus.consumer_pending(stream, "pending-probe"), lambda v: v == 5
+        )
+        gate.set()
+        assert await _wait_until_async(
+            lambda: bus.consumer_pending(stream, "pending-probe"), lambda v: v == 0
+        )
+        assert await bus.consumer_pending(stream, "no-such-consumer") is None
+    finally:
+        gate.set()
+        await bus._js.delete_stream(stream)
+
+
+async def _wait_until_async(read, predicate, timeout_seconds: float = 5.0) -> bool:
+    deadline = asyncio.get_running_loop().time() + timeout_seconds
+    while asyncio.get_running_loop().time() < deadline:
+        if predicate(await read()):
+            return True
+        await asyncio.sleep(0.05)
+    return False

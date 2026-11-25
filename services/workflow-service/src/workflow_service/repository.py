@@ -1027,6 +1027,9 @@ async def _change_route(
         raise ConcurrentModificationError(
             f"instance_id {instance_id!r} wurde gleichzeitig geändert - bitte neu laden"
         ) from exc
+    # A recall (or any edit) can move the current step - who is
+    # responsible for the ready task follows it (P95-S1f).
+    await refresh_responsible(session, instance)
     return change
 
 
@@ -1434,6 +1437,71 @@ async def _save_state(
     return completed
 
 
+def _responsible_for(
+    task_type: str | None,
+    lane: str | None,
+    bindings: dict[str, dict[str, str]],
+    step: CirculationStep | None,
+) -> tuple[str | None, str | None]:
+    """The same rule `GET /tasks` applies (P93-S1/S3): a circulation task's
+    current step names who is responsible; otherwise the lane's binding;
+    otherwise anyone."""
+    if task_type == spiff_adapter.CIRCULATION_TASK_TYPE and step is not None:
+        return step.assignee_type, step.assignee
+    binding = bindings.get(lane) if lane else None
+    if binding:
+        [(kind, value)] = binding.items()
+        return kind, value
+    return None, None
+
+
+async def _responsibility_context(
+    session: AsyncSession, instance: ProcessInstance, needs_step: bool
+) -> tuple[dict[str, dict[str, str]], CirculationStep | None]:
+    definition = await session.get(ProcessDefinition, instance.process_definition_id)
+    bindings = (definition.lane_bindings or {}) if definition is not None else {}
+    step = await current_step(session, instance.id) if needs_step else None
+    return bindings, step
+
+
+async def refresh_responsible(session: AsyncSession, instance: ProcessInstance) -> None:
+    """Recomputes who is responsible for an instance's ready tasks without
+    touching the engine state - after a route edit moved the current step
+    (P95-S1f)."""
+    result = await session.execute(select(ReadyTask).where(ReadyTask.instance_id == instance.id))
+    rows = list(result.scalars().all())
+    if not rows:
+        return
+    bindings, step = await _responsibility_context(
+        session,
+        instance,
+        any(row.task_type == spiff_adapter.CIRCULATION_TASK_TYPE for row in rows),
+    )
+    for row in rows:
+        row.responsible_type, row.responsible = _responsible_for(
+            row.task_type, row.lane, bindings, step
+        )
+    await session.flush()
+
+
+async def refresh_all_responsible(session_factory: async_sessionmaker[AsyncSession]) -> int:
+    """Startup (P95-S1f): fills `responsible_*` for every ready task of a
+    running instance - rows written before the columns existed, and a
+    safety net otherwise. No engine state is read; idempotent."""
+    async with session_factory() as session:
+        result = await session.execute(
+            select(ProcessInstance)
+            .where(ProcessInstance.status == "running")
+            .where(ProcessInstance.id.in_(select(ReadyTask.instance_id).distinct()))
+            .options(defer(ProcessInstance.workflow_state))
+        )
+        instances = list(result.scalars().all())
+        for instance in instances:
+            await refresh_responsible(session, instance)
+        await session.commit()
+        return len(instances)
+
+
 async def _sync_ready_tasks(
     session: AsyncSession,
     instance: ProcessInstance,
@@ -1444,6 +1512,15 @@ async def _sync_ready_tasks(
     rest are updated in place (their `ready_since` stays)."""
     result = await session.execute(select(ReadyTask).where(ReadyTask.instance_id == instance.id))
     existing = {row.task_id: row for row in result.scalars().all()}
+    bindings, step = (
+        await _responsibility_context(
+            session,
+            instance,
+            any(t.extensions.get("taskType") == spiff_adapter.CIRCULATION_TASK_TYPE for t in ready),
+        )
+        if ready
+        else ({}, None)
+    )
     ready_ids = {task.id for task in ready}
     for task_id, row in existing.items():
         if task_id not in ready_ids:
@@ -1464,6 +1541,9 @@ async def _sync_ready_tasks(
         row.task_type = task.extensions.get("taskType")
         row.extensions = _json_safe(task.extensions)
         row.data = _json_safe(task.data)
+        row.responsible_type, row.responsible = _responsible_for(
+            row.task_type, task.lane, bindings, step
+        )
     await session.flush()
 
 
@@ -1500,6 +1580,7 @@ async def list_indexed_ready_tasks(
     *,
     exclude_task_types: tuple[str, ...] = (),
     claimable_by: str | None = None,
+    eligible_for: tuple[str, set[str], set[str]] | None = None,
     limit: int,
     offset: int = 0,
 ) -> list[IndexedTask]:
@@ -1527,6 +1608,32 @@ async def list_indexed_ready_tasks(
         )
     if claimable_by is not None:
         query = query.where(or_(TaskClaim.id.is_(None), TaskClaim.principal_id == claimable_by))
+    if eligible_for is not None:
+        # "Meine Aufgaben" entirely in SQL (P95-S1f): claimed by the caller,
+        # or unclaimed and nobody in particular, the caller, one of their
+        # groups (by name) or one of their roles is responsible.
+        principal_id, group_names, roles = eligible_for
+        responsible_match = [
+            ReadyTask.responsible_type.is_(None),
+            and_(ReadyTask.responsible_type == "principal", ReadyTask.responsible == principal_id),
+        ]
+        if group_names:
+            responsible_match.append(
+                and_(
+                    ReadyTask.responsible_type == "group",
+                    ReadyTask.responsible.in_(group_names),
+                )
+            )
+        if roles:
+            responsible_match.append(
+                and_(ReadyTask.responsible_type == "role", ReadyTask.responsible.in_(roles))
+            )
+        query = query.where(
+            or_(
+                TaskClaim.principal_id == principal_id,
+                and_(TaskClaim.id.is_(None), or_(*responsible_match)),
+            )
+        )
     query = (
         query.order_by(
             ReadyTask.instance_created_at.desc(), ReadyTask.instance_id, ReadyTask.position

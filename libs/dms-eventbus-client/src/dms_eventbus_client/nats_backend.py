@@ -167,6 +167,17 @@ class NatsEventBusClient(EventBusClient):
                 f"Kein Stream deckt Subject {subject!r} ab - noch kein Producer gestartet?"
             ) from exc
 
+    async def consumer_pending(self, stream: str, durable: str) -> int | None:
+        """How many messages a durable consumer still has to see (P95-S1f):
+        JetStream's `num_pending` plus those delivered but not yet acked.
+        `None` when the consumer doesn't exist (yet) or NATS can't say - a
+        sensor shows a gap rather than a made-up zero."""
+        try:
+            info = await self._js.consumer_info(stream, durable)
+        except Exception:  # noqa: BLE001 - a sensor must not fail the scrape
+            return None
+        return int(info.num_pending or 0) + int(info.num_ack_pending or 0)
+
     async def close(self) -> None:
         """`drain()` instead of `close()` - the latter disconnects immediately,
         without cleanly unsubscribing active subscriptions server-side. For a

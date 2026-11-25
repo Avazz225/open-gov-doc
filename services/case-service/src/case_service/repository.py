@@ -232,8 +232,16 @@ async def get_case_or_none(session: AsyncSession, case_id: str) -> Case | None:
 
 
 async def list_cases(
-    session: AsyncSession, *, status: str | None = None, object_type_id: int | None = None
+    session: AsyncSession,
+    *,
+    status: str | None = None,
+    object_type_id: int | None = None,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[Case]:
+    """Without `limit` every matching case, oldest first (the internal
+    callers, e.g. the startup backfill). With `limit` (P95-S1f, `GET
+    /cases`) one page, newest first."""
     # A destroyed case (P89-S1) is a tombstone, not a case to work with:
     # it stays readable by id, but no longer appears in listings.
     stmt = select(Case).where(Case.destroyed_at.is_(None))
@@ -241,7 +249,11 @@ async def list_cases(
         stmt = stmt.where(Case.status == status)
     if object_type_id is not None:
         stmt = stmt.where(Case.object_type_id == object_type_id)
-    result = await session.execute(stmt.order_by(Case.created_at))
+    if limit is None:
+        stmt = stmt.order_by(Case.created_at)
+    else:
+        stmt = stmt.order_by(Case.created_at.desc(), Case.id).limit(limit).offset(offset)
+    result = await session.execute(stmt)
     return list(result.scalars().all())
 
 

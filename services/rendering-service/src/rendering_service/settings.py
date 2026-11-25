@@ -23,6 +23,11 @@ class Settings(BaseServiceSettings):
     # subject per call would need its own JetStream durable consumer name -
     # instead the consumer handler filters by event_type (see
     # permission-service structure_consumer.py for the same pattern).
+    # Renditions processed in parallel per process (P95-S1f). Each one is
+    # mostly a `soffice` subprocess (1 s and a core for a small text file)
+    # or Pillow work in a thread, so a few at once use the cores instead of
+    # queueing: one at a time fell 230,000 events behind under the load test.
+    document_consumer_concurrency: int = 4
     document_subjects: list[str] = ["document.>"]
 
     # Follow-up effect from P5-S3 (2.4/3.9): OCR full text feeds a

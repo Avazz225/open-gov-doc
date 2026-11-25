@@ -533,6 +533,7 @@
     "downloadError": "Package download failed"
   },
   "cases": {
+    "loadMore": "Load more",
     "paneLabel": "Case binders",
     "heading": "Case binders",
     "hint": "Overview of all case binders - selecting a row opens the detail view with its documents plus export/import for the government/judicial handover.",

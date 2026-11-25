@@ -204,6 +204,13 @@ class ReadyTask(Base):
     # The instance's `created_at`, copied so `GET /tasks`' order (newest
     # instance first) is an index scan that stops after one page.
     instance_created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # Who may work on the task while it is unclaimed (P95-S1f): a circulation
+    # task's current route step (`principal`/`group`), otherwise its lane's
+    # binding (`principal`/`group`/`role`); both `None` = anyone. Lets
+    # `GET /tasks?eligible=me` filter in SQL. Kept by `_sync_ready_tasks`
+    # and, for route edits, `refresh_responsible`.
+    responsible_type: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    responsible: Mapped[str | None] = mapped_column(String(256), nullable=True)
 
 
 class TaskClaim(Base):

@@ -1,3 +1,4 @@
+import asyncio
 import os
 from io import BytesIO
 
@@ -62,9 +63,10 @@ class PdfArchiveRenderer(Renderer):
         stem = os.path.splitext(filename)[0] or "dokument"
 
         if content_type == "application/pdf" or ext == ".pdf":
-            pdf_bytes = self._tag_pdf(data, filename)
+            # pypdf and Pillow in a thread (P95-S1f), see ThumbnailRenderer.
+            pdf_bytes = await asyncio.to_thread(self._tag_pdf, data, filename)
         elif (content_type and content_type.startswith("image/")) or ext in _IMAGE_EXTENSIONS:
-            pdf_bytes = self._image_to_pdf(data)
+            pdf_bytes = await asyncio.to_thread(self._image_to_pdf, data)
         else:
             pdf_bytes = await convert_via_libreoffice(data, filename=filename, pdf_a=True)
 

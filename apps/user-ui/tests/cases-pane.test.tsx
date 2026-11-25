@@ -111,6 +111,27 @@ describe("CasesPane", () => {
     mockPermissions = ["archival.write"];
   });
 
+  it("loads cases in pages and offers more only after a full page", async () => {
+    const page = (start: number, count: number) =>
+      Array.from({ length: count }, (_, n) => ({
+        ...CASE_A,
+        id: `case-p${start + n}`,
+        name: `Mappe ${start + n}`,
+      }));
+    listCasesMock
+      .mockResolvedValueOnce(page(0, 100))
+      .mockResolvedValueOnce(page(100, 2));
+    renderPane();
+    const more = await screen.findByRole("button", { name: "Weitere laden" });
+    expect(listCasesMock).toHaveBeenLastCalledWith("token-123", undefined);
+
+    await userEvent.click(more);
+
+    expect(await screen.findByText(/Mappe 101/)).toBeInTheDocument();
+    expect(listCasesMock).toHaveBeenLastCalledWith("token-123", undefined, 100);
+    expect(screen.queryByRole("button", { name: "Weitere laden" })).not.toBeInTheDocument();
+  });
+
   it("shows the empty state when no cases exist", async () => {
     listCasesMock.mockResolvedValue([]);
     renderPane();

@@ -214,6 +214,16 @@ request principal (`created_by`, `registered_by`, `added_by`, `removed_by`, `pse
 case as `mail-connector` on behalf of the mailbox's user (before: the non-service principal
 `system:mail-connector`, plus `added_by` in the body).
 
+## Paged Listing (P95-S1f)
+
+`GET /cases` takes `limit` (default 100, at most 500) and `offset` and returns newest first.
+- Rows are read in chunks and filtered by permission (ADR 0154) until the page is full, so `offset` counts
+  cases the caller may read.
+- Before, every case came back at once: 5,822 open ones after two load-test runs, with p50 2.5 s.
+- The internal `repository.list_cases` without `limit` still returns everything, oldest first (startup
+  backfill).
+- user-ui and reviewer-ui load 100 at a time, with "Weitere laden".
+
 ## Workflow Start Without a Known Outcome (P95-S1c)
 
 Before, a timeout, connection error or `5xx` from workflow-service while creating a case gave the caller a

@@ -5048,6 +5048,26 @@ by the pilot's numbers, not a committed rewrite of all of them (see ADR 0257's c
   - **k6 extended teardown:** terminates the circulations its users started.
   - **Measure again:** two extended runs back to back, to show the second one no longer degrades. This
     also isolates the workflow and case pool change of P95-S1e. Report updated.
+  - **Result** ([report, third measurement](docs/operations/performance-ranking.md#third-measurement-p95-s1f-2026-11-25)):
+    - **Changes:**
+      - `ready_task.responsible_type/responsible` and `eligible=me` in SQL, with refresh on route edits
+        and at startup (ADR 0019 note);
+      - `GET /cases` paged, newest first, permission-filtered, with "Weitere laden" in user-ui and
+        reviewer-ui;
+      - rendering: 4 in parallel, Pillow/pypdf in threads, a pool of reused LibreOffice profiles,
+        sensor `rendering.consumer.pending` (`NatsEventBusClient.consumer_pending`);
+      - the k6 extended teardown terminates the run's instances.
+    - **Two extended runs back to back:** goodput 96.4 % and 95.5 % (P95-S1e 79 %), errors 0.00 % and
+      0.01 %, and no degradation from run to run.
+    - **Workflow and case paths:** p50 4–10× faster (my_tasks 1,240 → 105–122 ms, workflow_complete
+      1,952 → 268–314 ms, case_create 1,370 → 333–343 ms).
+    - **The bottleneck moved to permission-service:** own time 53–64 ms per call, latency share
+      28–33 %, its pool at 30. list_folder and search p50 are therefore 2× higher than in P95-S1e.
+    - **Rendering:** the profile pool came after the runs. Live it produced 680–814 renditions per
+      minute instead of 3–10, and the backlog of 64,000 drained with 8,456 renditions, none failed.
+    - **Cold-cache measurement:** 176 ms.
+    - **Tests:** workflow 283 (+4), case 103 (+1), rendering 117 (+5), eventbus lib +1, user-ui 348
+      (+1), reviewer-ui 72.
 - **P95-S2 — Scoping: migrating services to Rust (ADR 0257). No code.**
   - **Selection:** from S1's ranking, only services where own compute or memory dominates. Not
     I/O-bound ones, where tuning (queries, caching, batching, pools) is the cheaper fix.

@@ -131,8 +131,19 @@ The blob stays the truth. A derived index makes cross-instance reads cheap:
   - **`GET /tasks`:** one query per page; claims are joined, federated task types are filtered in SQL,
     `limit`/`offset` apply in SQL (`limit` capped at 1,000), and circulation routes are fetched once per
     page.
-  - **`GET /tasks?eligible=me`:** SQL keeps unclaimed tasks and the caller's own claims; lane and route
-    eligibility are checked in Python while the index is read in chunks until the page is full.
+  - **`GET /tasks?eligible=me`:** entirely in SQL since P95-S1f. The index carries who is responsible
+    for an unclaimed task (`responsible_type`/`responsible`):
+    - a circulation task's current route step (`principal`/`group`), otherwise its lane's binding
+      (`principal`/`group`/`role`), otherwise anyone;
+    - the query matches the caller, their group names and roles, and a claim decides over
+      responsibility;
+    - the columns are kept by `_sync_ready_tasks` and, after a route edit (a recall moves the current
+      step), by `refresh_responsible`;
+    - lane bindings belong to a definition version and never change, so they need no sync;
+    - at startup, `refresh_all_responsible` fills rows from before the columns existed.
+
+    Until P95-S1f lanes and routes were checked in Python over chunks of the index, so a call read
+    every task assigned to someone else (3 s p50 with about 6,000 foreign tasks in P95-S1e).
   - **The claim-expiry loop:** reads task names from the index.
   - **The SLA poll loop:** deserializes only instances whose `waits_on_timer` is not false.
 - **Backfill:** at startup, instances with `waits_on_timer IS NULL` (saved before the index) are indexed

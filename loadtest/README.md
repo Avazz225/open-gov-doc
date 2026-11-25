@@ -88,7 +88,10 @@ the auth-service/folder-service admin APIs.
   the same arithmetic.
 - **The extended scenario leaves state behind:** its circulations and cases outlive the teardown, which
   removes only users and the folder. A second run then starts on a larger stack and isn't comparable.
-  Terminate the run's circulations before the next one (P95-S1e).
+  Since P95-S1f the extended teardown does that itself. Setup grants the admin
+  `domain-admin-workflow-instances` for the run, and teardown terminates every running instance one of
+  the run's users started, then revokes the grant (`teardownTimeout` 10 minutes). The cases stay, because
+  cases cannot be deleted; `GET /cases` is paged since P95-S1f, so their number no longer costs time.
 - Results of both full runs: `docs/operations/performance-ranking.md`.
 
 ## License limits

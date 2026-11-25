@@ -156,6 +156,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         storage=app.state.storage,
         publish_event=publish_event,
         max_attempts=settings.max_rendering_attempts,
+        max_concurrency=settings.document_consumer_concurrency,
     )
     # Follow-up effect from P5-S3 (2.4/3.9): second subscription on the same
     # event_bus client, but on the "ocr" stream instead of "document" - see
