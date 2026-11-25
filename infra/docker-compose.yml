@@ -816,6 +816,10 @@ services:
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       DMS_POSTGRES_DSN: postgresql+asyncpg://svc_workflow:${POSTGRES_PASSWORD_WORKFLOW:-workflow_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      # Pool budget (P95-S1e, ADR 0263): the default 2 + 3 was full for the whole extended
+      # load test - 75 % of request time went to waiting for a connection.
+      DMS_DB_POOL_SIZE: "8"
+      DMS_DB_MAX_OVERFLOW: "4"
       DMS_NATS_URL: nats://nats:4222
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://workflow-service:8000
@@ -928,6 +932,9 @@ services:
       DMS_OTEL_EXPORTER_ENDPOINT: ${DMS_OTEL_EXPORTER_ENDPOINT-http://otel-collector:4318}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://svc_case:${POSTGRES_PASSWORD_CASE:-case_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      # Pool budget (P95-S1e, ADR 0263): case creation peaks filled the default 2 + 3.
+      DMS_DB_POOL_SIZE: "4"
+      DMS_DB_MAX_OVERFLOW: "4"
       DMS_NATS_URL: nats://nats:4222
       DMS_WORKFLOW_SERVICE_BASE_URL: http://workflow-service:8000
       DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000

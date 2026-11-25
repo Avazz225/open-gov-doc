@@ -537,7 +537,10 @@ services:
         envVar: DMS_FEDERATION_HUB_BASE_URL
       - name: gateway-service
         envVar: DMS_INSTALLATION_GATEWAY_BASE_URL
-    env: {}
+    env:
+      # Pool budget per replica (P95-S1e, ADR 0263), see postgresql.maxConnections.
+      DMS_DB_POOL_SIZE: "8"
+      DMS_DB_MAX_OVERFLOW: "4"
 
   # smtp_host/smtp_port defaults in settings.py are already "mailpit"/1025
   # (matching infra/docker-compose.yml) - no explicit
@@ -584,7 +587,10 @@ services:
       - document-service
       - object-type-service
       - permission-service
-    env: {}
+    env:
+      # Pool budget per replica (P95-S1e, ADR 0263), see postgresql.maxConnections.
+      DMS_DB_POOL_SIZE: "4"
+      DMS_DB_MAX_OVERFLOW: "4"
 
   signature-service:
     enabled: true
@@ -1339,10 +1345,11 @@ services:
 postgresql:
   # Connection budget (P89-S4, ADR 0254). Every service process may hold up
   # to DMS_DB_POOL_SIZE + DMS_DB_MAX_OVERFLOW connections (default 2 + 3;
-  # permission 20 + 10, document and folder 12 + 8 (P95-S1d), storage 4 + 6 per
-  # replica, see their `env`). Formula: sum over services of maxReplicas (or
-  # replicas without autoscaling) x pool budget, plus Keycloak's own pool and
-  # a reserve. With these values: about 370 for the services at full
+  # permission 20 + 10, document and folder 12 + 8 (P95-S1d), workflow 8 + 4
+  # and case 4 + 4 (P95-S1e), storage 4 + 6 per replica, see their `env`).
+  # Formula: sum over services of maxReplicas (or replicas without
+  # autoscaling) x pool budget, plus Keycloak's own pool and a reserve. With
+  # these values: about 400 for the services at full
   # autoscaling, plus Keycloak (its pool can reach 100) and admin sessions.
   # Raise it with replicas/maxReplicas; an external Postgres needs the same
   # budget on its side.

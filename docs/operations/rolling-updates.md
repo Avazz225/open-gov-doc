@@ -150,6 +150,8 @@ hold `DMS_DB_POOL_SIZE + DMS_DB_MAX_OVERFLOW` connections:
 - **permission-service:** 20 + 10.
 - **document-service and folder-service:** 12 + 8.
 - **storage-service:** 4 + 6.
+- **workflow-service:** 8 + 4, since P95-S1e.
+- **case-service:** 4 + 4, since P95-S1e.
 
 **Since P95-S1d** ([ADR 0263](../adr/0263-scoped-permission-cache-and-pool-sizing.md)), the hot services keep
 more connections open (`pool_size`) and need less overflow. The totals and the budget are unchanged.
@@ -169,7 +171,7 @@ sessions.
 | Environment | Services at full scale | Plus | `max_connections` |
 |---|---|---|---|
 | docker-compose (one replica each) | about 200 | Keycloak and admin sessions | 300 |
-| Helm, chart's own Postgres (`postgresql.maxConnections`) | about 370 at full autoscaling | Keycloak, whose pool can reach 100 | 500 |
+| Helm, chart's own Postgres (`postgresql.maxConnections`) | about 400 at full autoscaling | Keycloak, whose pool can reach 100 | 500 |
 
 **When you change replicas:**
 - Raising `replicas`/`maxReplicas` or a pool size raises the requirement.

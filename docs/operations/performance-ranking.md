@@ -4,6 +4,10 @@ The input for P95-S2, the scoping of a Rust pilot (ADR 0257). It asks where the 
 resources under load, and which of that a faster implementation could fix and which needs a
 different algorithm.
 
+> **Second measurement (P95-S1e, 2026-11-25):** after the fixes P95-S1a–d, see
+> [the section at the end](#second-measurement-p95-s1e-2026-11-25). The sections up to "What follows"
+> are the first measurement, unchanged except for one correction.
+
 ## How it was measured
 
 - **Profile:** the agreed k6 profile (10 min ramp to 200 VUs, 5 min hold, 5 min ramp down), run twice:
@@ -180,3 +184,111 @@ second measurement in P95-S1e as the basis for P95-S2:
 7. **dev-stack debris:** 1,046 open `ocr_review` instances, ~1,200 case-service-test instances and 519
    orphan cases. The 1,059 circulation instances this run started were set to `completed` afterwards
    (status only, history kept), so the dev stack isn't slowed by them.
+
+## Second measurement (P95-S1e, 2026-11-25)
+
+The same profile, tools and settings as above:
+- both k6 scenarios, tracing at 10 %, `rank_services.py` with 500 traces;
+- py-spy after 690 s in each hold phase;
+- the cold-cache measurement.
+
+New in `loadtest/`: `summarize_run.py`, the per-action numbers from a run's k6 JSON. It reproduces the
+first run's table above exactly. Results: `loadtest/results/summary-*-20261125.json` and
+`ranking-*-20261125.json` (gitignored).
+
+**Starting state:**
+- **Before (P95-S1):** 2,259 running instances (test debris) and 519 orphan cases.
+- **Now:** 17 running instances, no orphans, cleaned up in P95-S1c.
+
+### Base run
+
+74,330 requests, 62/s, no errors. Goodput 100.00 % (before 99.93 %).
+
+| Action | p50 / p95 / p99 before (ms) | after |
+|---|---|---|
+| search | 9 / 30 / 66 | 7 / 25 / 52 |
+| list_folder | 20 / 102 / 292 | 16 / 39 / 81 |
+| download | 34 / 180 / 359 | 26 / 65 / 123 |
+| login | 40 / 52 / 82 | 37 / 47 / 86 |
+| upload | 91 / 382 / 798 | 74 / 158 / 241 |
+
+The tails come down the most: p95 and p99 drop by 2–3×.
+
+| Service | CPU per request before | after | own time per call before | after |
+|---|---|---|---|---|
+| permission-service | 4.4 ms | 3.7 ms | 7.8 ms | 5.1 ms |
+| document-service | 6.1 ms | 5.0 ms | 15.1 ms | 10.7 ms |
+| folder-service | 5.4 ms | 4.5 ms | 4.8 ms | 3.6 ms |
+| gateway-service | 4.0 ms | 3.3 ms | 4.1 ms | 3.1 ms |
+| storage-service | 3.9 ms | 3.3 ms | 4.6 ms | 4.1 ms |
+
+The mean end-to-end time of the sampled requests is 31 ms (before 46 ms). Latency share: permission-service
+22.6 % (before 25.1 %), document-service 15.0 %, gateway-service 9.9 %. **The order is unchanged.**
+
+### Extended run: no collapse
+
+70,044 requests (before 11,336), 58/s, errors 0.39 % (before 16.9 %), goodput 79 % (before 26 %).
+
+| Action | p50 / p95 / p99 before (ms) | after |
+|---|---|---|
+| list_folder | 2,269 / 14,112 / 17,481 | 27 / 359 / 617 |
+| download | 2,419 / 13,408 / 18,510 | 36 / 361 / 571 |
+| search | 2,747 / 15,192 / 18,107 | 8 / 23 / 102 |
+| upload | 2,492 / 12,849 / 17,692 | 113 / 891 / 1,493 |
+| mail_inbound | 4,887 / 15,554 / 20,622 | 14 / 32 / 87 |
+| case_list | 3,106 / 14,399 / 18,312 | 326 / 1,198 / 1,682 |
+| case_create | 12,180 / 22,409 / 27,078 | 1,370 / 2,773 / 3,610 |
+| workflow_start | 26,238 / 39,401 / 46,335 | 1,101 / 2,689 / 3,369 |
+| workflow_my_tasks | 30,045 / 40,223 / 47,980 | 1,240 / 2,902 / 3,502 |
+| workflow_complete | 30,128 / 39,427 / 48,239 | 1,952 / 4,512 / 5,495 |
+
+The errors are almost all the gateway's fail-fast `503` for workflow-service: 300 of 303, and
+`gateway_upstream_refused_total{upstream="workflow-service"}` is 302. A slow service no longer drags the
+others down.
+
+### Each fix, as measured
+
+| Fix | Effect |
+|---|---|
+| **S1a gateway:** bulkhead, single-flight (ADR 0262) | Registry and maintenance lookups: 48 % of the gateway's samples under extended load before, 0 now. Actions that never touch workflow-service are back to base-run latencies under extended load (list_folder p50 27 ms instead of 2.3 s). |
+| **S1b workflow:** ready-task index | `GET /tasks` no longer scans the instances: workflow_my_tasks 30 s → 1.2 s. The SLA tick reads no instances without a timer. |
+| **S1c:** mail paging, orphan cases, debris | mail_inbound 4.9 s → 14 ms. No orphan cases (before, 519 from one run). |
+| **S1d:** permission cache, pool (ADR 0263) | Cold 1,000-child listing 3,744 → 285 ms (192 ms in P95-S1d). After an unrelated grant it stays warm (57 ms instead of 3,506 ms). HMAC in permission-service 3–4 % → 0.2 % (base) and 2.3 % (extended, where its pool reached 30). |
+
+### What is still slow, and why
+
+**workflow-service waits for database connections.**
+- It ran with the default pool of 2 + 3.
+- The pool sensor showed it full for the whole extended run, and 75 % of its request time was pool
+  checkout (the instrumentation's `connect` span).
+- case-service (2 + 3) hit its limit at peaks too.
+- **Done in this session:** workflow-service 8 + 4, case-service 4 + 4 (compose and Helm, same budget rule).
+
+**A second extended run** after that change (1795594840–1795596048) was worse: goodput 54 %,
+workflow_my_tasks p50 3.0 s, case_list 2.5 s, list_folder 427 ms.
+- **Cause:** it started on the leftovers of the first run, not on the pool change. The first run left
+  3,100 running circulations and about 3,000 open cases of its test users. k6's teardown removes users
+  and the folder, not these.
+- **It is not comparable,** and the pool change's own effect remains unmeasured.
+- **What it did show:** two paths that grow with that state.
+  1. **`GET /tasks?eligible=me`:** SQL keeps unclaimed tasks and the caller's own claims. Lane and route
+     eligibility are checked in Python while the index is read in chunks. With thousands of tasks
+     assigned to other principals, every "Meine Aufgaben" call reads all of them again (the limitation
+     P95-S1b recorded). **Fix:** store each ready task's responsible principal, group or role in the
+     index and filter in SQL. That needs a sync on route changes and lane-binding changes.
+  2. **`GET /cases`:** not paged. It returns every open case, 5,822 after the two runs.
+- **Cleaned up afterwards:** the 6,336 load-test circulations were terminated. The open load-test cases
+  remain, because cases cannot be deleted.
+
+### For the Rust question (P95-S2)
+
+- **The algorithmic and configuration problems of the first measurement are fixed and measured.** What
+  remains slow in the extended scenario is the two O(N) paths above and pool sizing. That is again
+  algorithmic or configuration, not compute.
+- **Where own compute dominates in the healthy base run is unchanged:**
+  - permission-service: first in latency share, 3.7 ms CPU per request, 1.37 calls per request;
+  - gateway-service: 3.3 ms CPU per request.
+  
+  Both are now measured without the queueing and the cache invalidation that inflated them before.
+- **The layers inside permission-service:** about half of the samples are in the database driver
+  (SQLAlchemy/asyncpg). A rewrite would replace that layer as well.

@@ -83,7 +83,13 @@ the auth-service/folder-service admin APIs.
   attributed by layer (DB driver, HTTP client, ASGI, middleware, service code).
 - `uv run python loadtest/cold_cache.py` - first vs. second filtered listing of a 1,000-child folder, and
   again after a permission change.
-- Results of the first full run: `docs/operations/performance-ranking.md`.
+- `uv run python loadtest/summarize_run.py results/run-<ts>.json [--json out.json]` (P95-S1e) - requests,
+  error share, goodput and p50/p95/p99 per action from one run's k6 JSON, so two runs are compared with
+  the same arithmetic.
+- **The extended scenario leaves state behind:** its circulations and cases outlive the teardown, which
+  removes only users and the folder. A second run then starts on a larger stack and isn't comparable.
+  Terminate the run's circulations before the next one (P95-S1e).
+- Results of both full runs: `docs/operations/performance-ranking.md`.
 
 ## License limits
 
