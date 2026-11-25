@@ -1,10 +1,12 @@
+import json
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import func, select, update
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.orm import defer
 from sqlalchemy.orm.exc import StaleDataError
 
 from workflow_service import spiff_adapter
@@ -15,6 +17,7 @@ from workflow_service.models import (
     FederationTask,
     ProcessDefinition,
     ProcessInstance,
+    ReadyTask,
     TaskClaim,
 )
 
@@ -569,13 +572,7 @@ async def start_instance(
     try:
         spiff_adapter.run_ready_steps(wf)
     finally:
-        completed = spiff_adapter.is_completed(wf)
-        instance.workflow_state = spiff_adapter.serialize(wf)
-        instance.status = "completed" if completed else "running"
-        instance.updated_at = datetime.now(UTC)
-        if completed:
-            instance.completed_at = instance.updated_at
-        await session.flush()
+        await _save_state(session, instance, wf)
     return instance
 
 
@@ -649,15 +646,8 @@ async def complete_task(
     try:
         spiff_adapter.run_ready_steps(wf)
     finally:
-        completed = spiff_adapter.is_completed(wf)
-        now = datetime.now(UTC)
-        instance.workflow_state = spiff_adapter.serialize(wf)
-        instance.status = "completed" if completed else "running"
-        instance.updated_at = now
-        if completed:
-            instance.completed_at = now
         try:
-            await session.flush()
+            await _save_state(session, instance, wf)
         except StaleDataError as exc:
             # Optimistic-concurrency conflict (Phase 60 Session 3, ADR
             # 0185) - another request already modified this instance
@@ -717,13 +707,13 @@ async def _modify_instance(
     try:
         spiff_adapter.run_ready_steps(wf)
     finally:
-        completed = spiff_adapter.is_completed(wf)
-        now = datetime.now(UTC)
-        instance.workflow_state = spiff_adapter.serialize(wf)
-        instance.status = "completed" if completed else "running"
-        instance.updated_at = now
-        if completed:
-            instance.completed_at = now
+        try:
+            await _save_state(session, instance, wf)
+        except StaleDataError as exc:
+            raise ConcurrentModificationError(
+                f"instance_id {instance_id!r} wurde gleichzeitig von einer anderen "
+                "Anfrage geändert - bitte erneut versuchen"
+            ) from exc
     after = spiff_adapter.ready_manual_tasks(wf)
 
     after_ids = {t.id for t in after}
@@ -1300,15 +1290,8 @@ async def retry_instance(session: AsyncSession, instance_id: str) -> ProcessInst
     try:
         spiff_adapter.run_ready_steps(wf)
     finally:
-        completed = spiff_adapter.is_completed(wf)
-        now = datetime.now(UTC)
-        instance.workflow_state = spiff_adapter.serialize(wf)
-        instance.status = "completed" if completed else "running"
-        instance.updated_at = now
-        if completed:
-            instance.completed_at = now
         try:
-            await session.flush()
+            await _save_state(session, instance, wf)
         except StaleDataError as exc:
             # Same optimistic-concurrency conflict as `complete_task`
             # above (Phase 60 Session 3, ADR 0185) - e.g. racing against a
@@ -1323,11 +1306,12 @@ async def retry_instance(session: AsyncSession, instance_id: str) -> ProcessInst
 
 async def advance_timers(session: AsyncSession) -> list[TimerAdvanceResult]:
     """A poll tick of SLA time monitoring (P6-S2, ADR 0020): deserializes
-    **every** running instance, lets due boundary timers fire, and
-    re-persists the blob - regardless of whether anything fired, since the
-    internal timer state (next due time) can also change otherwise. The
-    consequence already documented in ADR 0019 (no efficient cross-instance
-    query possible) applies unchanged here.
+    every running instance that waits on a timer, lets due boundary timers
+    fire, and re-persists the blob - regardless of whether anything fired,
+    since the internal timer state (next due time) can also change
+    otherwise. Until P95-S1b this was every running instance; now
+    `ProcessInstance.waits_on_timer` (kept by `_save_state`) narrows it to
+    those with a waiting timer, `None` (not yet indexed) counting as yes.
 
     Since Phase 60 Session 3 (ADR 0185), `ProcessInstance.workflow_version`
     protects this batched write too - if ANY instance in this tick's batch
@@ -1347,23 +1331,224 @@ async def advance_timers(session: AsyncSession) -> list[TimerAdvanceResult]:
     rare race is low, and the restructure would need per-instance
     transactions/savepoints - real added complexity for a narrow edge
     case, not undertaken in this session."""
-    running = await list_instances(session, status="running")
+    result = await session.execute(
+        select(ProcessInstance)
+        .where(ProcessInstance.status == "running")
+        .where(ProcessInstance.waits_on_timer.is_not(False))
+        .order_by(ProcessInstance.created_at.desc())
+    )
     results: list[TimerAdvanceResult] = []
-    now = datetime.now(UTC)
-    for instance in running:
+    for instance in result.scalars().all():
         wf = spiff_adapter.deserialize(instance.workflow_state)
         fired = spiff_adapter.check_timers(wf)
-        completed = spiff_adapter.is_completed(wf)
-        instance.workflow_state = spiff_adapter.serialize(wf)
-        instance.updated_at = now
-        if completed:
-            instance.status = "completed"
-            instance.completed_at = now
+        completed = await _save_state(session, instance, wf)
         results.append(
             TimerAdvanceResult(instance=instance, fired=fired, newly_completed=completed)
         )
-    await session.flush()
     return results
+
+
+# --- Ready-task index (P95-S1b) ---------------------------------------------
+
+
+def _json_default(value: object) -> str:
+    # Task data may hold dates and other values the engine's own serializer
+    # handles; the index stores what a JSON response would show.
+    if isinstance(value, date | datetime):
+        return value.isoformat()
+    return str(value)
+
+
+def _json_safe(value: dict) -> dict:
+    return json.loads(json.dumps(value, default=_json_default))
+
+
+async def _save_state(session: AsyncSession, instance: ProcessInstance, wf) -> bool:
+    """The one place an instance's engine state is written back (P95-S1b):
+    serializes the workflow, sets status and timestamps, records whether a
+    timer waits, flushes (the optimistic-concurrency check of ADR 0185
+    fires here, before any index row is touched), then brings the instance's
+    `ReadyTask` rows in line with the engine's ready user tasks. Returns
+    whether the instance completed. Raises `StaleDataError` on a conflict -
+    the callers translate it as before."""
+    completed = spiff_adapter.is_completed(wf)
+    now = datetime.now(UTC)
+    instance.workflow_state = spiff_adapter.serialize(wf)
+    instance.status = "completed" if completed else "running"
+    instance.updated_at = now
+    if completed:
+        instance.completed_at = now
+    instance.waits_on_timer = not completed and spiff_adapter.waits_on_timer(wf)
+    await session.flush()
+    ready = [] if completed else spiff_adapter.ready_manual_tasks(wf)
+    await _sync_ready_tasks(session, instance, ready, now)
+    return completed
+
+
+async def _sync_ready_tasks(
+    session: AsyncSession,
+    instance: ProcessInstance,
+    ready: list[spiff_adapter.TaskInfo],
+    now: datetime,
+) -> None:
+    """Rows for tasks that are no longer ready go, new ones come, and the
+    rest are updated in place (their `ready_since` stays)."""
+    result = await session.execute(select(ReadyTask).where(ReadyTask.instance_id == instance.id))
+    existing = {row.task_id: row for row in result.scalars().all()}
+    ready_ids = {task.id for task in ready}
+    for task_id, row in existing.items():
+        if task_id not in ready_ids:
+            await session.delete(row)
+    for position, task in enumerate(ready):
+        row = existing.get(task.id)
+        if row is None:
+            row = ReadyTask(
+                instance_id=instance.id,
+                task_id=task.id,
+                ready_since=now,
+                instance_created_at=instance.created_at,
+            )
+            session.add(row)
+        row.position = position
+        row.name = task.name
+        row.lane = task.lane
+        row.task_type = task.extensions.get("taskType")
+        row.extensions = _json_safe(task.extensions)
+        row.data = _json_safe(task.data)
+    await session.flush()
+
+
+def _task_info(row: ReadyTask) -> spiff_adapter.TaskInfo:
+    return spiff_adapter.TaskInfo(
+        id=row.task_id,
+        name=row.name,
+        lane=row.lane,
+        data=dict(row.data or {}),
+        extensions=dict(row.extensions or {}),
+    )
+
+
+async def indexed_ready_tasks(
+    session: AsyncSession, instance_id: str
+) -> list[spiff_adapter.TaskInfo]:
+    """An instance's ready user tasks from the index - no deserialization.
+    The write paths keep using `get_ready_tasks` (the blob is the truth)."""
+    result = await session.execute(
+        select(ReadyTask).where(ReadyTask.instance_id == instance_id).order_by(ReadyTask.position)
+    )
+    return [_task_info(row) for row in result.scalars().all()]
+
+
+@dataclass
+class IndexedTask:
+    task: spiff_adapter.TaskInfo
+    instance: ProcessInstance
+    claim: TaskClaim | None
+
+
+async def list_indexed_ready_tasks(
+    session: AsyncSession,
+    *,
+    exclude_task_types: tuple[str, ...] = (),
+    claimable_by: str | None = None,
+    limit: int,
+    offset: int = 0,
+) -> list[IndexedTask]:
+    """Ready user tasks across all running instances, newest instance first,
+    then in the engine's order - one query, paged in SQL. `claimable_by`
+    keeps only tasks that are unclaimed or claimed by that principal (the
+    part of "Meine Aufgaben" SQL can answer; lane and route eligibility are
+    checked by the caller). The instance comes without its state blob."""
+    query = (
+        select(ReadyTask, ProcessInstance, TaskClaim)
+        .join(ProcessInstance, ProcessInstance.id == ReadyTask.instance_id)
+        .outerjoin(
+            TaskClaim,
+            and_(
+                TaskClaim.instance_id == ReadyTask.instance_id,
+                TaskClaim.task_id == ReadyTask.task_id,
+            ),
+        )
+        .where(ProcessInstance.status == "running")
+        .options(defer(ProcessInstance.workflow_state))
+    )
+    if exclude_task_types:
+        query = query.where(
+            or_(ReadyTask.task_type.is_(None), ReadyTask.task_type.not_in(exclude_task_types))
+        )
+    if claimable_by is not None:
+        query = query.where(or_(TaskClaim.id.is_(None), TaskClaim.principal_id == claimable_by))
+    query = (
+        query.order_by(
+            ReadyTask.instance_created_at.desc(), ReadyTask.instance_id, ReadyTask.position
+        )
+        .limit(limit)
+        .offset(offset)
+    )
+    result = await session.execute(query)
+    return [
+        IndexedTask(task=_task_info(row), instance=instance, claim=claim)
+        for row, instance, claim in result.all()
+    ]
+
+
+async def current_steps(
+    session: AsyncSession, instance_ids: list[str]
+) -> dict[str, list[CirculationStep]]:
+    """The routes of several instances in one query (for a page of tasks)."""
+    if not instance_ids:
+        return {}
+    result = await session.execute(
+        select(CirculationStep)
+        .where(CirculationStep.instance_id.in_(instance_ids))
+        .order_by(CirculationStep.instance_id, CirculationStep.position, CirculationStep.added_at)
+    )
+    routes: dict[str, list[CirculationStep]] = {}
+    for step in result.scalars().all():
+        routes.setdefault(step.instance_id, []).append(step)
+    return routes
+
+
+async def backfill_ready_task_index(
+    session_factory: async_sessionmaker[AsyncSession], *, batch_size: int = 200
+) -> int:
+    """Indexes the running instances saved before P95-S1b (those with
+    `waits_on_timer IS NULL`), once, at startup. Batches are taken with
+    `FOR UPDATE SKIP LOCKED`, so several replicas starting together share
+    the work. The flag is set with a plain UPDATE so `workflow_version`
+    doesn't move (a client's expected version stays valid). A blob that
+    can't be read is flagged as waiting on a timer - the SLA loop keeps
+    looking at it, as before - and gets no index rows."""
+    indexed = 0
+    while True:
+        async with session_factory() as session:
+            result = await session.execute(
+                select(ProcessInstance)
+                .where(ProcessInstance.status == "running")
+                .where(ProcessInstance.waits_on_timer.is_(None))
+                .limit(batch_size)
+                .with_for_update(skip_locked=True)
+            )
+            batch = list(result.scalars().all())
+            if not batch:
+                return indexed
+            now = datetime.now(UTC)
+            for instance in batch:
+                try:
+                    wf = spiff_adapter.deserialize(instance.workflow_state)
+                    waits = spiff_adapter.waits_on_timer(wf)
+                    ready = spiff_adapter.ready_manual_tasks(wf)
+                except Exception:  # noqa: BLE001 - one broken blob must not stop startup
+                    waits, ready = True, []
+                await session.execute(
+                    update(ProcessInstance)
+                    .where(ProcessInstance.id == instance.id)
+                    .values(waits_on_timer=waits)
+                    .execution_options(synchronize_session=False)
+                )
+                await _sync_ready_tasks(session, instance, ready, instance.updated_at or now)
+                indexed += 1
+            await session.commit()
 
 
 async def create_federation_task(

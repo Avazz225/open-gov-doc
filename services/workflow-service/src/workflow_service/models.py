@@ -164,8 +164,46 @@ class ProcessInstance(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     workflow_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    # Whether the engine state holds a waiting timer (P95-S1b) - the SLA poll
+    # loop only deserializes instances where this is not false. `None` means
+    # "not yet indexed": rows from before P95-S1b, which the startup backfill
+    # (`repository.backfill_ready_task_index`) fills in.
+    waits_on_timer: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
     __mapper_args__ = {"version_id_col": workflow_version}
+
+
+class ReadyTask(Base):
+    """Index of the ready user tasks per instance (P95-S1b) - a derived copy
+    of what `spiff_adapter.ready_manual_tasks` reads from the opaque
+    ``workflow_state`` blob (ADR 0019 stays: the blob is the truth). Kept in
+    step by `repository._save_state`, the one place every state change goes
+    through, so cross-instance reads (`GET /tasks`, the claim-expiry loop) no
+    longer deserialize every running instance. ``position`` is the task's
+    order within its instance's ready list; ``ready_since`` survives later
+    saves while the task stays ready."""
+
+    __tablename__ = "ready_task"
+    __table_args__ = (
+        UniqueConstraint("instance_id", "task_id", name="uq_ready_task_instance_task"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    instance_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("workflow.process_instance.id"), index=True
+    )
+    task_id: Mapped[str] = mapped_column(String(128))
+    position: Mapped[int] = mapped_column(Integer)
+    name: Mapped[str] = mapped_column(Text)
+    lane: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # `extensions["taskType"]`, as a column so federated tasks are filtered in SQL.
+    task_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    extensions: Mapped[dict] = mapped_column(JSON)
+    data: Mapped[dict] = mapped_column(JSON)
+    ready_since: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # The instance's `created_at`, copied so `GET /tasks`' order (newest
+    # instance first) is an index scan that stops after one page.
+    instance_created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class TaskClaim(Base):

@@ -182,6 +182,14 @@ async def _clean_tables():
     async with eng.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS workflow"))
         await conn.run_sync(Base.metadata.create_all)
+        # `create_all` doesn't add columns to an existing table; the app's
+        # lifespan does, but repository tests may run before any app start.
+        await conn.execute(
+            text(
+                "ALTER TABLE workflow.process_instance "
+                "ADD COLUMN IF NOT EXISTS waits_on_timer BOOLEAN"
+            )
+        )
         await conn.execute(
             text(
                 "TRUNCATE workflow.process_instance, workflow.process_definition, "

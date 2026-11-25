@@ -117,9 +117,33 @@ Freely named, CRUD-maintained calendars of additional non-working days (holidays
 
 Every process instance stores exclusively the complete JSON blob produced by `BpmnWorkflowSerializer.serialize_json()` — **no** separate, normalized task table. Rationale/consequences: see [ADR 0019](../adr/0019-workflow-full-state-serialization.md).
 
+### Ready-task index (P95-S1b, [ADR 0019 addendum](../adr/0019-workflow-full-state-serialization.md#addendum-p95-s1b-the-projection-this-adr-anticipated))
+
+The blob stays the truth. A derived index makes cross-instance reads cheap:
+- **`workflow.ready_task`:** one row per ready user task (task id, position, name, lane, `taskType`,
+  extensions, data, `ready_since`, `instance_created_at`).
+- **`process_instance.waits_on_timer`:** whether a timer waits in the engine state.
+- **Written only by `repository._save_state`:**
+  - every state change goes through it: start, complete, skip, send back, migrate, retry, timer tick;
+  - it flushes the instance first (the ADR 0185 version check), then brings the instance's rows in line;
+  - a task that stays ready keeps its row and its `ready_since`.
+- **Read by:**
+  - **`GET /tasks`:** one query per page; claims are joined, federated task types are filtered in SQL,
+    `limit`/`offset` apply in SQL (`limit` capped at 1,000), and circulation routes are fetched once per
+    page.
+  - **`GET /tasks?eligible=me`:** SQL keeps unclaimed tasks and the caller's own claims; lane and route
+    eligibility are checked in Python while the index is read in chunks until the page is full.
+  - **The claim-expiry loop:** reads task names from the index.
+  - **The SLA poll loop:** deserializes only instances whose `waits_on_timer` is not false.
+- **Backfill:** at startup, instances with `waits_on_timer IS NULL` (saved before the index) are indexed
+  once, in `FOR UPDATE SKIP LOCKED` batches. A plain UPDATE leaves `workflow_version` alone. An unreadable
+  blob is marked as waiting on a timer, so the SLA loop keeps reporting it.
+- **Order of `GET /tasks`:** newest instance first, then the engine's order (unchanged), served by the
+  index `ix_ready_task_page`.
+
 ## SLA poll loop (P6-S2, ADR 0020)
 
-An asyncio background task (`_sla_poll_loop` in `main.py`, started in `lifespan`) checks every `sla_poll_interval_seconds` (default 30s, `DMS_SLA_POLL_INTERVAL_SECONDS`) **every** instance with `status="running"`: deserialize, `spiff_adapter.check_timers()`, re-persist the blob, publish fired boundary events as `workflow.task.escalated`. No push mechanism, no distributed lock across multiple `workflow-service` replicas — see [ADR 0020](../adr/0020-sla-timer-polling.md) for the full rationale and the documented limitations. **Since P6-S6**: before every tick, additionally checks directly via the new `permission_client.py` (`is_maintenance_active()`, `GET /maintenance-mode` at the Permission Service) whether system-wide maintenance mode (4.8) is active, and then skips the tick entirely — no incoming request to which the gateway could attach an `X-DMS-Maintenance-Active` header, hence the only place in this service with its own polling connection to the Permission Service instead of header evaluation.
+An asyncio background task (`_sla_poll_loop` in `main.py`, started in `lifespan`) checks every `sla_poll_interval_seconds` (default 30s, `DMS_SLA_POLL_INTERVAL_SECONDS`) every instance with `status="running"` that waits on a timer (since P95-S1b: `waits_on_timer` not false; before, every running instance): deserialize, `spiff_adapter.check_timers()`, re-persist the blob, publish fired boundary events as `workflow.task.escalated`. No push mechanism, no distributed lock across multiple `workflow-service` replicas — see [ADR 0020](../adr/0020-sla-timer-polling.md) for the full rationale and the documented limitations. **Since P6-S6**: before every tick, additionally checks directly via the new `permission_client.py` (`is_maintenance_active()`, `GET /maintenance-mode` at the Permission Service) whether system-wide maintenance mode (4.8) is active, and then skips the tick entirely — no incoming request to which the gateway could attach an `X-DMS-Maintenance-Active` header, hence the only place in this service with its own polling connection to the Permission Service instead of header evaluation.
 
 ## Authorization & maintenance mode (4.6/4.8, since P6-S6)
 

@@ -127,6 +127,7 @@ from SpiffWorkflow.bpmn.script_engine.python_environment import TaskDataEnvironm
 from SpiffWorkflow.bpmn.serializer import BpmnWorkflowSerializer
 from SpiffWorkflow.bpmn.serializer.default.task_spec import BpmnTaskSpecConverter
 from SpiffWorkflow.bpmn.specs.defaults import ServiceTask
+from SpiffWorkflow.bpmn.specs.event_definitions.timer import TimerEventDefinition
 from SpiffWorkflow.bpmn.specs.mixins.events.intermediate_event import BoundaryEvent
 from SpiffWorkflow.bpmn.workflow import BpmnWorkflow
 from SpiffWorkflow.camunda.parser import CamundaParser
@@ -501,6 +502,24 @@ def ready_manual_tasks(wf: BpmnWorkflow) -> list[TaskInfo]:
         )
         for task in tasks
     ]
+
+
+def _is_timer(event_definition) -> bool:
+    if isinstance(event_definition, TimerEventDefinition):
+        return True
+    # A multiple event (several definitions on one event) waits on a timer
+    # if any of its parts is one.
+    return any(_is_timer(d) for d in getattr(event_definition, "event_definitions", None) or [])
+
+
+def waits_on_timer(wf: BpmnWorkflow) -> bool:
+    """Whether a timer is waiting anywhere in the workflow (boundary timer
+    on a ready task, intermediate timer, timer branch of an event gateway)
+    - only such instances need the SLA poll tick (P95-S1b)."""
+    return any(
+        _is_timer(getattr(task.task_spec, "event_definition", None))
+        for task in wf.get_tasks(state=TaskState.WAITING)
+    )
 
 
 def find_ready_task(wf: BpmnWorkflow, task_id: str) -> Task | None:

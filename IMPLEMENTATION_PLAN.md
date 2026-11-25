@@ -4925,6 +4925,21 @@ by the pilot's numbers, not a committed rewrite of all of them (see ADR 0257's c
     the claim-expiry loop read it instead of deserializing every instance.
   - Tests for every state change keeping the index right, a consistency check against a full scan, and a
     test with thousands of running instances showing constant cost per call.
+  - **Result** ([ADR 0019 addendum](docs/adr/0019-workflow-full-state-serialization.md#addendum-p95-s1b-the-projection-this-adr-anticipated)):
+    - **What was built:** `workflow.ready_task` plus `process_instance.waits_on_timer`, both written only
+      by `repository._save_state`. Every state change goes through it: start, complete, skip, send back,
+      migrate, retry, timer tick; federation callbacks use complete.
+    - **Deviations from the plan:**
+      - Claim and circulation step are joined or fetched once per page rather than copied into the index.
+        Route edits don't change the engine state, so they need no sync.
+      - The SLA loop uses `waits_on_timer`, because it has to fire timers, not read tasks.
+    - **Startup backfill:** `FOR UPDATE SKIP LOCKED` batches, `workflow_version` unchanged.
+    - **Tests:** workflow-service 278 (+10), including 3,005 running instances with the same statement
+      count as 5.
+    - **Live:**
+      - 2,259 instances indexed at startup (startup 3.2 s); index equal to a full scan;
+      - `GET /tasks?limit=50` 14–24 ms (`eligible=me` included), before 1.2–2.3 s at idle;
+      - SLA tick: 0 instances read instead of 2,259.
 - **P95-S1c — mail inbox paging, orphan cases, instance debris.**
   - mail-connector `GET /inbound` and `GET /routing-log` paged (`limit`/`offset`, default 100), attachments
     and routing log loaded in one query each per page; user-ui and admin-ui callers adapted.

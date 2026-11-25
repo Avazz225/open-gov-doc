@@ -19,3 +19,29 @@ Every `process_instance` row stores the full JSON blob produced by `SpiffWorkflo
 - A query "all ready tasks across all running instances" (e.g. for a future task-inbox UI) requires deserializing every running instance — no SQL-level filter at the task level is possible. Should an efficient cross-instance query become foreseeably necessary (likely around P6-S8), an additional projection table derived from the blob would need to be added (a pure read-acceleration measure, not a replacement of the blob as the source of truth).
 - The blob is largely opaque to `workflow-service` itself — any interpretation runs exclusively through `spiff_adapter.py`, never directly via SQL/JSON operators on the column. A future SpiffWorkflow version bump with a changed serialization format only affects this one module, but may require a migration strategy for already-stored, older blobs (not relevant in this session, since no production data exists yet).
 - No field-level audit trail within a task (e.g. "which value was entered for which form field") beyond what ends up in the `workflow.task.completed` event — for detailed traceability, the event payload would need to be extended if needed, not the persistence structure itself.
+
+## Addendum (P95-S1b): the projection this ADR anticipated
+
+P95-S1's load test showed the cost this ADR predicted. `GET /tasks` deserialized every running instance
+(about 3,300 in the dev stack), with several queries each, and the SLA poll loop did the same on every
+tick. A call took 16.9 s (`docs/operations/performance-ranking.md`).
+
+So the projection named above now exists, as a read accelerator. The blob stays the truth.
+- **`workflow.ready_task`:** one row per ready user task (task id, position, name, lane, `taskType`,
+  extensions, data, `ready_since`, and the instance's `created_at` for ordering). It is derived only
+  from `spiff_adapter.ready_manual_tasks()`.
+- **`process_instance.waits_on_timer`:** whether a timer waits anywhere in the engine state.
+- **One write path:** both are written only in `repository._save_state`, which every state change goes
+  through (start, complete, skip, send back, migrate, retry, timers). It flushes the instance first, so
+  the optimistic-concurrency check fires before any index row changes.
+- **Readers:**
+  - `GET /tasks` reads the index, one query per page with `limit`/`offset` in SQL;
+  - the claim-expiry loop reads the index;
+  - the SLA poll loop reads only instances with `waits_on_timer` not false.
+  
+  Write paths (complete, claim, the eligibility checks) still read the blob.
+- **Backfill:** instances saved before the index have `waits_on_timer IS NULL`. They are indexed once at
+  startup in `FOR UPDATE SKIP LOCKED` batches, without moving `workflow_version`.
+
+The drift risk named in the rationale above is contained by having one write path, and by tests that
+compare the index with a full scan after every kind of state change.

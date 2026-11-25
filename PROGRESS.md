@@ -2,6 +2,48 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P95-S1b, workflow-service ready-task index
+([ADR 0019 addendum](docs/adr/0019-workflow-full-state-serialization.md#addendum-p95-s1b-the-projection-this-adr-anticipated)).
+
+**What changed:**
+- **Index:** `workflow.ready_task` (one row per ready user task) and `process_instance.waits_on_timer`.
+  Both are written only by `repository._save_state`, which replaces the five places that wrote
+  `workflow_state` (start, complete, skip/send back/migrate, retry, timer tick). It flushes the instance
+  first, so the ADR 0185 version check fires before any index row changes.
+- **Readers:**
+  - **`GET /tasks`:** one query per page, `limit`/`offset` in SQL (`limit` capped at 1,000), claims
+    joined, routes fetched once per page.
+  - **`GET /tasks?eligible=me`:** reads in chunks until the page is full.
+  - **Claim-expiry loop:** reads task names from the index.
+  - **SLA loop:** reads only instances with a waiting timer. It also no longer bumps every running
+    instance's `workflow_version` on each tick.
+- **Backfill at startup:** instances with `waits_on_timer IS NULL`, in `FOR UPDATE SKIP LOCKED` batches,
+  without moving `workflow_version`.
+- **ADR:** no new number (0263 stays reserved for P95-S1d). This is the projection ADR 0019 itself
+  anticipated, recorded as an addendum there.
+
+**Checks:**
+- **workflow-service:** 278 tests (+10, `test_ready_task_index.py`):
+  - index against the engine state after start, complete, skip, send back, migrate and a timer firing;
+  - a task that stays ready keeps its row;
+  - a full-scan consistency check;
+  - the backfill (version unchanged, broken blob handled);
+  - the SLA tick reads only timer instances;
+  - 3,005 running instances with the same SQL statement count as 5, under 1 s;
+  - claims in "Meine Aufgaben".
+  
+  One existing test was adjusted: the SLA tick no longer returns instances without a timer.
+- **Live (container rebuilt):**
+  - 2,259 running instances backfilled at startup (startup 3.2 s); the index equals a full scan (2,259
+    tasks);
+  - `GET /tasks?limit=50` 14–24 ms, also with `offset=2000` and `eligible=me`, against 1.2–2.3 s before
+    at idle;
+  - no running instance waits on a timer, so the SLA tick reads none of them.
+
+**Next session:** P95-S1c (mail inbox paging, orphan cases, instance debris).
+
+---
+
 **Last completed:** P95-S1a, gateway bulkhead and single-flight
 ([ADR 0262](docs/adr/0262-gateway-bulkhead-and-single-flight.md)).
 

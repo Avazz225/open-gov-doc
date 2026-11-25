@@ -589,10 +589,8 @@ async def test_advance_timers_ignores_instances_without_due_timers(session, manu
     await repository.start_instance(
         session, definition.id, created_by="alice", business_key=None, initial_data={}
     )
-    results = await repository.advance_timers(session)
-    assert len(results) == 1
-    assert results[0].fired == []
-    assert results[0].newly_completed is False
+    # Since P95-S1b an instance without a waiting timer isn't even read.
+    assert await repository.advance_timers(session) == []
 
 
 async def test_list_instances_filters_by_status(session, manual_task_bpmn, no_tasks_bpmn):

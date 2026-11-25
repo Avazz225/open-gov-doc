@@ -283,7 +283,7 @@ async def _task_claim_expiry_poll_loop(
                 ):
                     instance = await repository.get_instance(session, claim.instance_id)
                     task_name = claim.task_id
-                    for task in await repository.get_ready_tasks(session, claim.instance_id):
+                    for task in await repository.indexed_ready_tasks(session, claim.instance_id):
                         if task.id == claim.task_id:
                             task_name = task.name
                             break
@@ -529,6 +529,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ADD COLUMN IF NOT EXISTS workflow_version INTEGER NOT NULL DEFAULT 0"
             )
         )
+        # Ready-task index (P95-S1b): NULL marks an instance not indexed yet,
+        # filled in by `backfill_ready_task_index` below.
+        await conn.execute(
+            text(
+                "ALTER TABLE workflow.process_instance "
+                "ADD COLUMN IF NOT EXISTS waits_on_timer BOOLEAN"
+            )
+        )
+        # `GET /tasks`' order, so a page is an index scan with a stop.
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_ready_task_page "
+                "ON workflow.ready_task (instance_created_at DESC, instance_id, position)"
+            )
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
     # Business calendar cache (P14-S5): `business_days()` reads it
@@ -542,6 +557,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # The shipped circulation template (P93-S3, ADR 0249).
         await repository.ensure_circulation_template(session)
         await session.commit()
+    # Ready-task index (P95-S1b): instances saved before it existed are
+    # indexed once, before the first request reads the index.
+    indexed = await repository.backfill_ready_task_index(app.state.session_factory)
+    if indexed:
+        logger.info("ready_task_index_backfilled", extra={"instances": indexed})
     app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
     app.state.auth_client = AuthServiceClient(settings.auth_service_base_url)
     app.state.signature_client = SignatureServiceClient(settings.signature_service_base_url)
@@ -1517,67 +1537,108 @@ async def list_ready_tasks(
     gate beyond the license check, same as for instance start/task
     completion itself.
 
-    `limit`/`offset` since P62-S1 (previously fully unbounded) - applied to
-    the flattened TASK list at the end, not to the instance scan above:
-    every `running` instance still needs to be scanned to find all ready
-    tasks system-wide, a page of instances could silently omit ready tasks
-    that legitimately exist beyond that page."""
+    Since P95-S1b it reads the ready-task index (`models.ReadyTask`) instead
+    of deserializing every running instance: one query per page, `limit`/
+    `offset` in SQL, claims joined, circulation routes fetched once for the
+    page. `eligible=me` leaves to SQL what it can answer (unclaimed or
+    claimed by the caller) and checks lanes and routes here, reading the
+    index in chunks until the page is full - its cost grows with the tasks
+    the caller can't work on, not with the number of instances."""
     if eligible is not None and eligible != "me":
         raise HTTPException(status_code=422, detail="eligible kennt nur den Wert 'me'")
     if eligible == "me" and not x_dms_principal:
         raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
-    instances = await repository.list_instances(session, status="running")
-    tasks: list[ReadyTaskWithInstanceOut] = []
+    limit = max(0, min(limit, 1000))
+    offset = max(0, offset)
     binding_cache: dict = {}
     caller_memberships = await _memberships(x_dms_principal) if x_dms_principal else None
-    for instance in instances:
-        claims_by_task_id = {
-            claim.task_id: claim
-            for claim in await repository.get_task_claims_for_instance(session, instance.id)
-        }
-        for task in await repository.get_ready_tasks(session, instance.id):
-            if task.extensions.get("taskType") in _FEDERATED_TASK_TYPES:
+    if eligible is None:
+        rows = await repository.list_indexed_ready_tasks(
+            session, exclude_task_types=_FEDERATED_TASK_TYPES, limit=limit, offset=offset
+        )
+        return await _task_list_entries(
+            session, rows, caller_memberships, x_dms_principal, binding_cache
+        )
+    chunk = min(max(2 * limit, 100), 500)
+    page: list[ReadyTaskWithInstanceOut] = []
+    to_skip = offset
+    cursor = 0
+    while len(page) < limit:
+        rows = await repository.list_indexed_ready_tasks(
+            session,
+            exclude_task_types=_FEDERATED_TASK_TYPES,
+            claimable_by=x_dms_principal,
+            limit=chunk,
+            offset=cursor,
+        )
+        cursor += len(rows)
+        for entry in await _task_list_entries(
+            session, rows, caller_memberships, x_dms_principal, binding_cache
+        ):
+            if not entry.eligible:
                 continue
-            claim = claims_by_task_id.get(task.id)
-            binding = await _lane_binding_for(session, instance, task.lane, binding_cache)
-            step = (
-                await _circulation_step_info(session, instance.id)
-                if _is_circulation_task(task)
-                else None
-            )
-            responsible = _step_binding(step) if step else binding
-            may_work = None
-            if caller_memberships is not None:
-                # "Meine Aufgaben" (P93-S1, ADR 0249): claimed by me, or
-                # unclaimed and in an unbound lane or one of mine - for a
-                # circulation step (P93-S3): assigned to me or my group.
-                if claim is not None:
-                    may_work = claim.principal_id == x_dms_principal
-                else:
-                    may_work = responsible is None or _matches_binding(
-                        caller_memberships, responsible, x_dms_principal
-                    )
-            if eligible == "me" and not may_work:
+            if to_skip:
+                to_skip -= 1
                 continue
-            tasks.append(
-                ReadyTaskWithInstanceOut(
-                    id=task.id,
-                    name=task.name,
-                    lane=task.lane,
-                    data=task.data,
-                    extensions=task.extensions,
-                    claimed_by=claim.principal_id if claim else None,
-                    grant_kind=claim.grant_kind if claim else None,
-                    lane_binding=binding,
-                    eligible=may_work,
-                    circulation_step=step,
-                    instance_id=instance.id,
-                    process_definition_id=instance.process_definition_id,
-                    business_key=instance.business_key,
-                    created_by=instance.created_by,
+            page.append(entry)
+            if len(page) == limit:
+                break
+        if len(rows) < chunk:
+            break
+    return page
+
+
+async def _task_list_entries(
+    session: AsyncSession,
+    rows: list[repository.IndexedTask],
+    caller_memberships: dict | None,
+    principal_id: str,
+    binding_cache: dict,
+) -> list[ReadyTaskWithInstanceOut]:
+    routes = await repository.current_steps(
+        session,
+        sorted({row.instance.id for row in rows if _is_circulation_task(row.task)}),
+    )
+    entries = []
+    for row in rows:
+        task, instance, claim = row.task, row.instance, row.claim
+        binding = await _lane_binding_for(session, instance, task.lane, binding_cache)
+        step = (
+            _step_info_from_route(routes.get(instance.id, []))
+            if _is_circulation_task(task)
+            else None
+        )
+        responsible = _step_binding(step) if step else binding
+        may_work = None
+        if caller_memberships is not None:
+            # "Meine Aufgaben" (P93-S1, ADR 0249): claimed by me, or
+            # unclaimed and in an unbound lane or one of mine - for a
+            # circulation step (P93-S3): assigned to me or my group.
+            if claim is not None:
+                may_work = claim.principal_id == principal_id
+            else:
+                may_work = responsible is None or _matches_binding(
+                    caller_memberships, responsible, principal_id
                 )
+        entries.append(
+            ReadyTaskWithInstanceOut(
+                id=task.id,
+                name=task.name,
+                lane=task.lane,
+                data=task.data,
+                extensions=task.extensions,
+                claimed_by=claim.principal_id if claim else None,
+                grant_kind=claim.grant_kind if claim else None,
+                lane_binding=binding,
+                eligible=may_work,
+                circulation_step=step,
+                instance_id=instance.id,
+                process_definition_id=instance.process_definition_id,
+                business_key=instance.business_key,
+                created_by=instance.created_by,
             )
-    return tasks[offset : offset + limit]
+        )
+    return entries
 
 
 @app.get(
@@ -1864,7 +1925,10 @@ def _step_binding(step: dict) -> dict[str, str]:
 
 
 async def _circulation_step_info(session: AsyncSession, instance_id: str) -> dict | None:
-    steps = await repository.get_route(session, instance_id)
+    return _step_info_from_route(await repository.get_route(session, instance_id))
+
+
+def _step_info_from_route(steps: list) -> dict | None:
     open_steps = [s for s in steps if s.status in ("done", "current", "pending")]
     current = next((s for s in open_steps if s.status == "current"), None)
     if current is None:
