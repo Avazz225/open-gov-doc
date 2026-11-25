@@ -315,3 +315,15 @@ None yet — to follow in Phase 11.
 count. Empty by default; only a principal set after the token check can match, client headers are
 stripped. The dev compose stack exempts `2` (the e2e account `users-admin`), whose three UI suites back to
 back had exceeded 600/min. Test: `test_rate_limit_exempt_principal_is_not_limited`.
+
+## Bulkhead per upstream and single-flight lookups (P95-S1a, [ADR 0262](../adr/0262-gateway-bulkhead-and-single-flight.md))
+
+- **Per upstream service type** its own `httpx.AsyncClient` and a concurrency limit
+  (`DMS_UPSTREAM_MAX_CONCURRENCY_DEFAULT`, default 64; overrides `DMS_UPSTREAM_MAX_CONCURRENCY`, e.g.
+  `workflow-service=32`). A full share waits at most `DMS_UPSTREAM_QUEUE_WAIT_SECONDS` (1 s), then `503`
+  with `Retry-After: 1`. Before, one shared pool let a stalled service starve every route (P95-S1).
+- **Registry resolution and maintenance-mode state:** fetched once per expiry (single-flight), on a pool
+  of their own (`DMS_CONTROL_POOL_MAX_CONNECTIONS`, 10; `DMS_CONTROL_TIMEOUT_SECONDS`, 5).
+- **Sensors:** `gateway.upstream.in_use` and `gateway.upstream.refused`, label `upstream`.
+- **Tests:** `test_upstream.py` (single-flight, bulkhead, limit parsing),
+  `test_a_stalled_upstream_no_longer_slows_another` in `test_api.py`.

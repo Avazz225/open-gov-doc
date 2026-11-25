@@ -376,3 +376,83 @@ def test_rate_limit_exempt_principal_is_not_limited(client, make_token, monkeypa
 
     assert 429 not in exempt_codes
     assert other_codes[-1] == 429
+
+
+async def test_a_stalled_upstream_no_longer_slows_another(
+    monkeypatch, jwks, issuer, audience, make_token
+):
+    """P95-S1a (ADR 0262): before, one shared pool let a stalled
+    workflow-service starve every other route (a list_folder spent 17.6 s in
+    the gateway, 21 ms in folder-service). Now the stalled service's share
+    fills up and its overflow is refused fast, while another service answers
+    at once."""
+    import asyncio
+
+    from gateway_service.upstream import InstanceResolver, UpstreamBulkhead
+
+    async def upstream(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "slow-service":
+            await asyncio.sleep(1.5)
+        return httpx.Response(200, json={"host": request.url.host})
+
+    async def registry(request: httpx.Request) -> httpx.Response:
+        service = request.url.path.rsplit("/", 1)[-1]
+        return httpx.Response(
+            200, json=[{"address": f"http://{service}:8000", "healthy": True, "status": "active"}]
+        )
+
+    class _Allow:
+        async def allow(self, key):
+            return True
+
+    class _NoMaintenance:
+        async def is_active(self):
+            return False
+
+    monkeypatch.setattr(
+        app.state,
+        "token_validator",
+        TokenValidator(issuer=issuer, audience=audience, jwks=jwks),
+        raising=False,
+    )
+    monkeypatch.setattr(app.state, "rate_limiter", _Allow(), raising=False)
+    monkeypatch.setattr(app.state, "maintenance_state", _NoMaintenance(), raising=False)
+    monkeypatch.setattr(
+        app.state,
+        "instance_resolver",
+        InstanceResolver(
+            client=httpx.AsyncClient(transport=httpx.MockTransport(registry)),
+            registry_base_url="http://registry",
+            cache_ttl_seconds=60,
+        ),
+        raising=False,
+    )
+    bulkhead = UpstreamBulkhead(
+        default_limit=3,
+        limits={},
+        wait_seconds=0.2,
+        timeout_seconds=10,
+        transport=httpx.MockTransport(upstream),
+    )
+    monkeypatch.setattr(app.state, "upstream_bulkhead", bulkhead, raising=False)
+    headers = {"Authorization": f"Bearer {make_token()}"}
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://gw"
+    ) as gw:
+        slow = [
+            asyncio.create_task(gw.get("/api/slow-service/x", headers=headers)) for _ in range(5)
+        ]
+        await asyncio.sleep(0.1)
+        started = time.perf_counter()
+        fast = await gw.get("/api/fast-service/x", headers=headers)
+        fast_seconds = time.perf_counter() - started
+        slow_responses = await asyncio.gather(*slow)
+
+    assert fast.status_code == 200
+    assert fast_seconds < 0.5
+    codes = sorted(r.status_code for r in slow_responses)
+    assert codes == [200, 200, 200, 503, 503]
+    refused = next(r for r in slow_responses if r.status_code == 503)
+    assert refused.headers["retry-after"] == "1"
+    await bulkhead.aclose()

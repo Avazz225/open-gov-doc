@@ -1,3 +1,4 @@
+import asyncio
 import random
 import time
 from collections.abc import AsyncIterator
@@ -63,6 +64,9 @@ class InstanceResolver:
         self._registry_base_url = registry_base_url.rstrip("/")
         self._cache_ttl = cache_ttl_seconds
         self._cache: dict[str, tuple[float, list[dict]]] = {}
+        # Single-flight (P95-S1a, ADR 0262): one registry fetch per expired
+        # entry; concurrent callers await it instead of each fetching.
+        self._inflight: dict[str, asyncio.Task] = {}
         # Workload-aware selection (P25-S4): counter of open requests per
         # instance address, purely in-process (see `pick()`/`reserve()`/
         # `release()` below). Deliberately NOT shared via Redis like the
@@ -74,11 +78,20 @@ class InstanceResolver:
         self._open_requests: dict[str, int] = {}
 
     async def resolve(self, service_type: str) -> list[dict]:
+        cached = self._cache.get(service_type)
+        if cached is not None and time.monotonic() - cached[0] < self._cache_ttl:
+            return cached[1]
+        task = self._inflight.get(service_type)
+        if task is None:
+            task = asyncio.ensure_future(self._fetch(service_type))
+            self._inflight[service_type] = task
+            task.add_done_callback(lambda _t, key=service_type: self._inflight.pop(key, None))
+        # shield: a caller that gives up must not cancel the shared fetch.
+        return await asyncio.shield(task)
+
+    async def _fetch(self, service_type: str) -> list[dict]:
         now = time.monotonic()
         cached = self._cache.get(service_type)
-        if cached is not None and now - cached[0] < self._cache_ttl:
-            return cached[1]
-
         try:
             response = await self._client.get(f"{self._registry_base_url}/instances/{service_type}")
             response.raise_for_status()
@@ -165,12 +178,18 @@ class MaintenanceStateClient:
         self._cache_ttl = cache_ttl_seconds
         self._cached_at: float = 0.0
         self._cached_active: bool = False
+        self._inflight: asyncio.Task | None = None
 
     async def is_active(self) -> bool:
-        now = time.monotonic()
-        if now - self._cached_at < self._cache_ttl:
+        if time.monotonic() - self._cached_at < self._cache_ttl:
             return self._cached_active
+        # Single-flight (P95-S1a): one status fetch per expiry.
+        if self._inflight is None or self._inflight.done():
+            self._inflight = asyncio.ensure_future(self._fetch())
+        return await asyncio.shield(self._inflight)
 
+    async def _fetch(self) -> bool:
+        now = time.monotonic()
         try:
             instances = await self._resolver.resolve("permission-service")
             if not instances:
@@ -183,3 +202,103 @@ class MaintenanceStateClient:
             pass
         self._cached_at = now
         return self._cached_active
+
+
+class UpstreamBusyError(Exception):
+    """The upstream service type's share is used up (P95-S1a)."""
+
+    def __init__(self, service_type: str) -> None:
+        super().__init__(service_type)
+        self.service_type = service_type
+
+
+def parse_limits(spec: str) -> dict[str, int]:
+    """`"workflow-service=32, document-service=128"` -> a dict."""
+    limits: dict[str, int] = {}
+    for part in spec.split(","):
+        if "=" not in part:
+            continue
+        name, _, value = part.partition("=")
+        limits[name.strip()] = int(value)
+    return limits
+
+
+class UpstreamBulkhead:
+    """Isolation per upstream service type (P95-S1a, ADR 0262).
+
+    Before, one `httpx.AsyncClient` carried every proxied request. When one
+    service stalled (workflow-service in P95-S1's extended run), its
+    requests held the shared pool's connections for up to the timeout, and
+    every other route waited for a free connection - a list_folder spent
+    17.6 s in the gateway and 21 ms in folder-service. Now each service type
+    has its own client and a concurrency limit; a request that finds its
+    share full waits at most `wait_seconds`, then gets `UpstreamBusyError`
+    (the caller answers `503` with `Retry-After`) instead of queueing until
+    the timeout. Other service types are untouched."""
+
+    def __init__(
+        self,
+        *,
+        default_limit: int,
+        limits: dict[str, int],
+        wait_seconds: float,
+        timeout_seconds: float,
+        on_refused=None,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        self._default_limit = default_limit
+        self._transport = transport  # tests only
+        self._limits = limits
+        self._wait = wait_seconds
+        self._timeout = timeout_seconds
+        self._on_refused = on_refused
+        self._clients: dict[str, httpx.AsyncClient] = {}
+        self._slots: dict[str, asyncio.Semaphore] = {}
+        self._in_use: dict[str, int] = {}
+
+    def limit(self, service_type: str) -> int:
+        return self._limits.get(service_type, self._default_limit)
+
+    def in_use(self, service_type: str) -> int:
+        return self._in_use.get(service_type, 0)
+
+    def in_use_all(self) -> dict[str, int]:
+        return dict(self._in_use)
+
+    def client(self, service_type: str) -> httpx.AsyncClient:
+        client = self._clients.get(service_type)
+        if client is None:
+            limit = self.limit(service_type)
+            client = httpx.AsyncClient(
+                timeout=self._timeout,
+                transport=self._transport,
+                limits=httpx.Limits(
+                    max_connections=limit, max_keepalive_connections=min(limit, 20)
+                ),
+            )
+            self._clients[service_type] = client
+        return client
+
+    @asynccontextmanager
+    async def slot(self, service_type: str) -> AsyncIterator[httpx.AsyncClient]:
+        semaphore = self._slots.get(service_type)
+        if semaphore is None:
+            semaphore = asyncio.Semaphore(self.limit(service_type))
+            self._slots[service_type] = semaphore
+        try:
+            async with asyncio.timeout(self._wait):
+                await semaphore.acquire()
+        except TimeoutError:
+            if self._on_refused is not None:
+                self._on_refused(service_type)
+            raise UpstreamBusyError(service_type) from None
+        self._in_use[service_type] = self._in_use.get(service_type, 0) + 1
+        try:
+            yield self.client(service_type)
+        finally:
+            self._in_use[service_type] -= 1
+            semaphore.release()
+
+    async def aclose(self) -> None:
+        for client in self._clients.values():
+            await client.aclose()

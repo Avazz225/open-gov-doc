@@ -2,6 +2,40 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P95-S1a, gateway bulkhead and single-flight
+([ADR 0262](docs/adr/0262-gateway-bulkhead-and-single-flight.md)).
+
+**What changed:**
+- **Bulkhead:** each upstream service type gets its own HTTP client (its own pool) and a concurrency limit:
+  - `DMS_UPSTREAM_MAX_CONCURRENCY_DEFAULT`, 64 by default;
+  - overrides in `DMS_UPSTREAM_MAX_CONCURRENCY`;
+  - a full share waits at most 1 s (`DMS_UPSTREAM_QUEUE_WAIT_SECONDS`), then `503` with
+    `Retry-After: 1`.
+- **Single-flight:** registry resolution and maintenance-mode state are fetched once per expiry, on a
+  pool of their own (10 connections, 5 s).
+- **Sensors:** `gateway.upstream.in_use` and `gateway.upstream.refused` (label `upstream`).
+- **Found on the way:**
+  - The sensor guards take labels as keyword arguments, not `.labels()`.
+  - A `service` label collided with the one monitoring-service's scrape proxy sets itself, so it is now
+    `upstream`.
+- **Dev stack:** started again after the reboot; all containers up.
+
+**Checks:**
+- **Gateway:** 37 tests (+5):
+  - single-flight under 50 concurrent callers;
+  - bulkhead refusal and isolation;
+  - an API test where a slow upstream's overflow gets a fast `503` while another upstream answers in
+    under 0.5 s.
+- **Live:** workflow-service frozen (`docker pause`) and 120 requests to it through the gateway.
+  Meanwhile folder listings took a median of 21–23 ms. 36 workflow requests were refused after 1 s; the
+  rest finished after the unpause. Monitoring shows
+  `gateway_upstream_refused_total{upstream="workflow-service"} 36`.
+- **Containers rebuilt:** gateway-service.
+
+**Next session:** P95-S1b (workflow-service: a ready-task index).
+
+---
+
 **Last completed:** P95-S1, load test with a per-service ranking
 ([report](docs/operations/performance-ranking.md)).
 

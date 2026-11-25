@@ -4911,6 +4911,12 @@ by the pilot's numbers, not a committed rewrite of all of them (see ADR 0257's c
     wait for it) on their own small pool, so they can't be starved by the proxied traffic.
   - Tests (one stalled upstream doesn't slow another; one fetch per expiry under concurrency), a metric
     per upstream (in use, refused), docs.
+  - **Result** ([ADR 0262](docs/adr/0262-gateway-bulkhead-and-single-flight.md)): `UpstreamBulkhead`
+    (own client per service type, limit 64 by default with overrides, 1 s queue wait, then `503` +
+    `Retry-After`); single-flight registry and maintenance lookups on their own small pool; sensors
+    `gateway.upstream.in_use`/`.refused` (label `upstream`). Tests: gateway 37 (+5). Live with
+    workflow-service frozen and 120 requests to it: folder listings median 21–23 ms, 36 workflow requests
+    refused fast, the rest done after the unpause.
 - **P95-S1b — workflow-service: a ready-task index.**
   - A table of ready user tasks per instance (task id, name, lane, claim, circulation step, created),
     maintained wherever the engine state changes: start, complete, skip/send back/migrate, timers,

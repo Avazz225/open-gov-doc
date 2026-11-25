@@ -134,3 +134,119 @@ async def test_reserved_instance_releases_when_upstream_call_raises():
             raise httpx.HTTPError("simulierter Verbindungsfehler")
 
     assert resolver._open_requests[instance["address"]] == 0
+
+
+# --- P95-S1a (ADR 0262): single-flight and bulkhead --------------------------
+
+import asyncio  # noqa: E402
+import time  # noqa: E402
+
+from gateway_service.upstream import (  # noqa: E402
+    MaintenanceStateClient,
+    UpstreamBulkhead,
+    UpstreamBusyError,
+    parse_limits,
+)
+
+
+def _counting_transport(calls: list[str], payload, delay: float = 0.05):
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        await asyncio.sleep(delay)
+        return httpx.Response(200, json=payload)
+
+    return httpx.MockTransport(handler)
+
+
+async def test_resolver_fetches_once_per_expiry_under_concurrency():
+    calls: list[str] = []
+    resolver = InstanceResolver(
+        client=httpx.AsyncClient(
+            transport=_counting_transport(
+                calls, [{"address": "http://a:8000", "healthy": True, "status": "active"}]
+            )
+        ),
+        registry_base_url="http://registry.test",
+        cache_ttl_seconds=5.0,
+    )
+
+    results = await asyncio.gather(*(resolver.resolve("folder-service") for _ in range(50)))
+
+    assert calls == ["/instances/folder-service"]
+    assert all(
+        r == [{"address": "http://a:8000", "healthy": True, "status": "active"}] for r in results
+    )
+    # Within the TTL nothing is fetched again.
+    await resolver.resolve("folder-service")
+    assert len(calls) == 1
+
+
+async def test_maintenance_state_fetches_once_under_concurrency():
+    calls: list[str] = []
+    transport = _counting_transport(calls, {"active": True})
+
+    class _Resolver:
+        async def resolve(self, service_type):
+            return [{"address": "http://permission:8000"}]
+
+        def pick(self, instances):
+            return instances[0]
+
+    state = MaintenanceStateClient(
+        client=httpx.AsyncClient(transport=transport), resolver=_Resolver(), cache_ttl_seconds=5.0
+    )
+
+    results = await asyncio.gather(*(state.is_active() for _ in range(50)))
+
+    assert calls == ["/maintenance-mode"]
+    assert all(results)
+
+
+def test_parse_limits():
+    assert parse_limits("workflow-service=32, document-service = 128,") == {
+        "workflow-service": 32,
+        "document-service": 128,
+    }
+    assert parse_limits("") == {}
+
+
+async def test_bulkhead_refuses_fast_when_a_share_is_full_and_spares_others():
+    refused: list[str] = []
+    bulkhead = UpstreamBulkhead(
+        default_limit=2,
+        limits={"document-service": 5},
+        wait_seconds=0.1,
+        timeout_seconds=5.0,
+        on_refused=refused.append,
+    )
+    assert bulkhead.limit("document-service") == 5
+    release = asyncio.Event()
+
+    async def hold(service):
+        async with bulkhead.slot(service):
+            await release.wait()
+
+    holders = [asyncio.create_task(hold("workflow-service")) for _ in range(2)]
+    await asyncio.sleep(0.01)
+    assert bulkhead.in_use("workflow-service") == 2
+
+    started = time.perf_counter()
+    try:
+        async with bulkhead.slot("workflow-service"):
+            raise AssertionError("a third slot must not be granted")
+    except UpstreamBusyError as exc:
+        assert exc.service_type == "workflow-service"
+    assert time.perf_counter() - started < 0.5
+    assert refused == ["workflow-service"]
+
+    # Another service type is not affected by the full share.
+    async with bulkhead.slot("folder-service") as client:
+        assert isinstance(client, httpx.AsyncClient)
+        assert bulkhead.in_use("folder-service") == 1
+
+    release.set()
+    await asyncio.gather(*holders)
+    assert bulkhead.in_use("workflow-service") == 0
+    # Each service type has its own client (own connection pool).
+    assert bulkhead.client("workflow-service") is not bulkhead.client("folder-service")
+    await bulkhead.aclose()

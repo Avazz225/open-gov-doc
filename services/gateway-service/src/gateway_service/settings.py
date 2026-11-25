@@ -163,3 +163,16 @@ class Settings(BaseServiceSettings):
     redis_url: str = "redis://localhost:6379/0"
 
     upstream_timeout_seconds: float = 30.0
+
+    # Bulkhead per upstream service type (P95-S1a, ADR 0262): concurrent
+    # proxied requests per service type, each with its own connection pool.
+    # A request that finds its service's share full waits at most
+    # `upstream_queue_wait_seconds`, then gets `503` with `Retry-After`.
+    # Overrides: "workflow-service=32,document-service=128".
+    upstream_max_concurrency_default: int = 64
+    upstream_max_concurrency: str = ""
+    upstream_queue_wait_seconds: float = 1.0
+    # The gateway's own lookups (registry resolution, maintenance-mode state)
+    # get a small pool of their own, so proxied traffic can't starve them.
+    control_pool_max_connections: int = 10
+    control_timeout_seconds: float = 5.0

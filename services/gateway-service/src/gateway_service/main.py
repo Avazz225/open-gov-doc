@@ -10,6 +10,7 @@ from dms_common.otel import setup_observability
 from dms_common.shutdown import bounded_shutdown_step
 from dms_metrics_client import (
     SensorConfigClient,
+    SensorSpec,
     bootstrap_http_sensors,
     http_sensor_declarations,
     metrics_payload,
@@ -20,7 +21,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from gateway_service.rate_limiter import RateLimiter
 from gateway_service.settings import Settings
-from gateway_service.upstream import InstanceResolver, MaintenanceStateClient, filter_headers
+from gateway_service.upstream import (
+    InstanceResolver,
+    MaintenanceStateClient,
+    UpstreamBulkhead,
+    UpstreamBusyError,
+    filter_headers,
+    parse_limits,
+)
 
 settings = Settings()
 configure_logging(settings)
@@ -55,10 +63,25 @@ def _build_token_validator(settings: Settings) -> MultiIssuerTokenValidator:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     startup_start = time.time()
-    http_client = httpx.AsyncClient(timeout=settings.upstream_timeout_seconds)
-    app.state.http_client = http_client
+    # The gateway's own lookups on a small pool of their own (P95-S1a).
+    control_client = httpx.AsyncClient(
+        timeout=settings.control_timeout_seconds,
+        limits=httpx.Limits(
+            max_connections=settings.control_pool_max_connections,
+            max_keepalive_connections=settings.control_pool_max_connections,
+        ),
+    )
+    app.state.control_client = control_client
+    # Proxied traffic: one pool and one concurrency share per service type.
+    app.state.upstream_bulkhead = UpstreamBulkhead(
+        default_limit=settings.upstream_max_concurrency_default,
+        limits=parse_limits(settings.upstream_max_concurrency),
+        wait_seconds=settings.upstream_queue_wait_seconds,
+        timeout_seconds=settings.upstream_timeout_seconds,
+        on_refused=lambda service: _upstream_refused.inc(upstream=service),
+    )
     app.state.instance_resolver = InstanceResolver(
-        client=http_client,
+        client=control_client,
         registry_base_url=settings.registry_service_base_url,
         cache_ttl_seconds=settings.instance_cache_ttl_seconds,
     )
@@ -68,7 +91,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         window_seconds=settings.rate_limit_window_seconds,
     )
     app.state.maintenance_state = MaintenanceStateClient(
-        client=http_client,
+        client=control_client,
         resolver=app.state.instance_resolver,
         cache_ttl_seconds=settings.maintenance_cache_ttl_seconds,
     )
@@ -100,7 +123,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         self_address=settings.self_address,
         service_type=settings.service_name,
         version="0.1.0",
-        sensors=http_sensor_declarations(),
+        sensors=[
+            *http_sensor_declarations(),
+            UPSTREAM_IN_USE.as_dict(),
+            UPSTREAM_REFUSED.as_dict(),
+        ],
     )
 
     startup_end = time.time()
@@ -115,7 +142,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     if registration:
         await bounded_shutdown_step("registration.stop", registration.stop())
-    await bounded_shutdown_step("http_client.aclose", http_client.aclose())
+    await bounded_shutdown_step("upstream_bulkhead.aclose", app.state.upstream_bulkhead.aclose())
+    await bounded_shutdown_step("control_client.aclose", control_client.aclose())
 
 
 app = FastAPI(title=settings.service_name, lifespan=lifespan)
@@ -128,6 +156,24 @@ setup_observability(app, settings)
 sensor_config_proxy, sensor_registry, _http_requests_sensor, _http_duration_sensor = (
     bootstrap_http_sensors(app, settings.service_name)
 )
+
+# Bulkhead per upstream service type (P95-S1a, ADR 0262).
+UPSTREAM_IN_USE = SensorSpec(
+    name="gateway.upstream.in_use",
+    group="performance",
+    cost=1,
+    description="Laufende Weiterleitungen je Zieldienst (Anteil am Bulkhead)",
+)
+UPSTREAM_REFUSED = SensorSpec(
+    name="gateway.upstream.refused",
+    group="reliability",
+    cost=1,
+    description="Abgewiesene Weiterleitungen je Zieldienst (Anteil ausgeschöpft, 503)",
+)
+# Label `upstream`, not `service`: monitoring-service's scrape proxy sets
+# `service` itself (to the scraped service) and would overwrite it.
+_upstream_in_use = sensor_registry.gauge(UPSTREAM_IN_USE, labelnames=("upstream",))
+_upstream_refused = sensor_registry.counter(UPSTREAM_REFUSED, labelnames=("upstream",))
 
 # Must be registered before the routes, so Starlette intercepts preflight
 # OPTIONS requests before they would hit the generic proxy route (OPTIONS
@@ -249,19 +295,33 @@ async def proxy(service_type: str, path: str, request: Request) -> Response:
     # the counter open for the entire duration of the upstream call - the
     # `finally` in `reserved_instance()` releases the slot again even on an
     # `httpx.HTTPError` below, no permanent leaking.
-    async with resolver.reserved_instance(instances) as instance:
-        try:
-            upstream_response = await request.app.state.http_client.request(
-                request.method,
-                f"{instance['address'].rstrip('/')}/{path}",
-                params=request.query_params,
-                headers=headers,
-                content=body,
-            )
-        except httpx.HTTPError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Upstream-Fehler: {exc}"
-            ) from exc
+    bulkhead: UpstreamBulkhead = request.app.state.upstream_bulkhead
+    try:
+        async with bulkhead.slot(service_type) as upstream_client:
+            _upstream_in_use.set(bulkhead.in_use(service_type), upstream=service_type)
+            async with resolver.reserved_instance(instances) as instance:
+                try:
+                    upstream_response = await upstream_client.request(
+                        request.method,
+                        f"{instance['address'].rstrip('/')}/{path}",
+                        params=request.query_params,
+                        headers=headers,
+                        content=body,
+                    )
+                except httpx.HTTPError as exc:
+                    raise HTTPException(
+                        status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Upstream-Fehler: {exc}"
+                    ) from exc
+    except UpstreamBusyError:
+        # P95-S1a: this service's share is full - answer now instead of
+        # queueing until the timeout and starving everything else.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"{service_type} ist ausgelastet - bitte gleich erneut versuchen",
+            headers={"Retry-After": "1"},
+        ) from None
+    finally:
+        _upstream_in_use.set(bulkhead.in_use(service_type), upstream=service_type)
 
     return Response(
         content=upstream_response.content,
