@@ -5084,7 +5084,49 @@ by the pilot's numbers, not a committed rewrite of all of them (see ADR 0257's c
   - **Decision criteria for continuing after the pilot:** measured CPU and RAM per 1,000 requests
     (say ≥ 2× better, or a threshold the ADR sets), plus the cost of a second language in build, CI,
     on-call and hiring.
-- **P95-S3 — Rust pilot.** The highest-ranked suitable service from S1/S2:
+  - **Result** ([ADR 0257](docs/adr/0257-rust-migration-scoping.md), accepted with the user decision for
+    P95-S2a–c):
+    - **Candidates:** permission-service (the bottleneck under full load in P95-S1f: 53–64 ms own time
+      per call, 28–33 % latency share), then gateway-service. Every other service was limited by
+      algorithmic or configuration causes, all fixed in Python.
+    - **permission-service profile:** about 41 % of its CPU is SQLAlchemy, 4.5 % asyncpg, 2 % service
+      code. A hot path without the ORM is a Python lever.
+    - **Found:** a second instance of any service with a durable NATS consumer dies at startup ("consumer
+      is already bound", verified live). This blocks scaling permission-service across processes, and
+      breaks Helm's default `RollingUpdate` for consumer services (the surge pod crash-loops) and the
+      optional HPA. The fix is queue groups in `dms-eventbus-client`.
+    - **For a Rust service:** shared crates mirroring dms-common, dms-db-base, eventbus, metrics,
+      registry and auth, with the Python libraries as the reference.
+    - **Prerequisites:** versioned SQL migrations (ADR 0260 B) and a conformance switch
+      (`DMS_CONFORMANCE_BASE_URL`). 101 of 116 permission API tests transfer; the repository-level race
+      tests (ADR 0239/0263) must be expressed again; the gateway tests need groundwork.
+    - **Criterion:** ≥ 2× better CPU per 1,000 requests than Python **after** queue groups, the ORM-free
+      hot path and several processes, at equal p95.
+    - **Recommendation:** those Python levers and a measurement before the pilot.
+- **P95-S2a — Queue groups in the event bus; Helm rollouts for consumer services (user decision
+  2026-11-25).**
+  - `dms-eventbus-client` subscribes durables as queue subscriptions (`deliver_group` = durable name), so
+    several instances share a consumer.
+  - A one-time migration recreates the existing durables with a deliver group at their current position,
+    without losing or replaying events. It runs at startup and is idempotent.
+  - Tests:
+    - two instances of a consumer share messages, none lost or duplicated;
+    - migration of a durable that has a backlog;
+    - live, a second permission-service container starts and both receive events.
+  - Helm: consumer services roll without a hanging surge pod, and autoscaling works.
+  - `docs/operations/rolling-updates.md` corrected, and the compose rolling-update script's exclusion
+    lifted where possible.
+- **P95-S2b — permission-service hot path without the ORM; several processes.**
+  - `GET /check`, `POST /check/batch` and the effective-permissions read in SQLAlchemy Core with
+    precompiled statements (or asyncpg directly), same semantics.
+  - The race tests of ADR 0239/0263 and the scoped-cache tests stay green unchanged.
+  - Then 2–4 processes (uvicorn workers or replicas, now possible after S2a), with the pool budget per
+    process adjusted.
+  - py-spy before and after; sensors and the registry with several processes checked.
+- **P95-S2c — Measure again.** Base and extended k6 run, the cold-cache measurement and py-spy, as in
+  P95-S1f. The report updated. That is the baseline for the go/no-go of the Rust pilot (criterion in
+  ADR 0257 §7: ≥ 2× CPU per 1,000 requests against this Python state, at equal p95).
+- **P95-S3 — Rust pilot (only if P95-S2c leaves a gap that meets ADR 0257 §7).** The highest-ranked suitable service from S1/S2:
   - likely candidates are the gateway (every request passes through it, thin logic) or
     permission-service (CPU-bound recomputation, on every request path);
   - rebuilt in Rust against its unchanged pytest suite;
