@@ -159,13 +159,80 @@ class NatsEventBusClient(EventBusClient):
 
         deliver_policy = api.DeliverPolicy.NEW if deliver_new else None
         try:
-            await self._js.subscribe(
-                subject, durable=durable, cb=_callback, deliver_policy=deliver_policy
-            )
+            if durable is None:
+                await self._js.subscribe(subject, cb=_callback, deliver_policy=deliver_policy)
+            else:
+                # Queue groups (P95-S2a, ADR 0257): a durable is shared by
+                # every instance of the service - each message goes to one of
+                # them. Without a group, a second instance (a replica, a
+                # worker, a rolling update's surge pod) died at startup with
+                # "consumer is already bound to a subscription".
+                await self._migrate_to_queue_group(subject, durable)
+                await self._js.subscribe(
+                    subject,
+                    queue=durable,
+                    durable=durable,
+                    cb=_callback,
+                    deliver_policy=deliver_policy,
+                )
         except NotFoundError as exc:
             raise SubjectNotFoundError(
                 f"Kein Stream deckt Subject {subject!r} ab - noch kein Producer gestartet?"
             ) from exc
+
+    async def _migrate_to_queue_group(self, subject: str, durable: str) -> None:
+        """Recreates a durable from before P95-S2a (push, no deliver group) as
+        a queue consumer, once, at the position it had reached: the first
+        unacknowledged message (`ack_floor + 1`), so nothing is lost; messages
+        delivered but not yet acked come again - JetStream's at-least-once,
+        the same as after any redelivery. A durable that never delivered
+        anything keeps its original start rule. The deliver subject is derived
+        from the names, so two instances migrating at the same moment end up
+        with the same consumer. Idempotent: a durable with a group is left
+        alone."""
+        try:
+            stream = await self._js.find_stream_name_by_subject(subject)
+            info = await self._js.consumer_info(stream, durable)
+        except NotFoundError:
+            return  # no stream (subscribe reports it) or a new durable
+        config = info.config
+        if config.deliver_group or not config.deliver_subject:
+            return  # already a queue consumer, or a pull consumer
+        delivered = info.delivered.stream_seq if info.delivered else 0
+        ack_floor = info.ack_floor.stream_seq if info.ack_floor else 0
+        if delivered:
+            start = {
+                "deliver_policy": api.DeliverPolicy.BY_START_SEQUENCE,
+                "opt_start_seq": ack_floor + 1,
+            }
+        else:
+            start = {
+                "deliver_policy": config.deliver_policy,
+                "opt_start_seq": config.opt_start_seq,
+                "opt_start_time": config.opt_start_time,
+            }
+        logger.warning(
+            "eventbus_durable_migrated_to_queue_group",
+            extra={"stream": stream, "durable": durable, "ack_floor": ack_floor},
+        )
+        await self._js.delete_consumer(stream, durable)
+        try:
+            await self._js.add_consumer(
+                stream,
+                api.ConsumerConfig(
+                    durable_name=durable,
+                    deliver_group=durable,
+                    deliver_subject=f"_DMS.deliver.{stream}.{durable}",
+                    filter_subject=config.filter_subject,
+                    ack_policy=config.ack_policy,
+                    ack_wait=config.ack_wait,
+                    max_deliver=config.max_deliver,
+                    max_ack_pending=config.max_ack_pending,
+                    **start,
+                ),
+            )
+        except Exception:  # noqa: BLE001 - another instance created it first
+            await self._js.consumer_info(stream, durable)
 
     async def consumer_pending(self, stream: str, durable: str) -> int | None:
         """How many messages a durable consumer still has to see (P95-S1f):

@@ -59,13 +59,10 @@ REGISTRY_URL="${REGISTRY_URL:-http://localhost:${REGISTRY_SERVICE_PORT:-8001}}"
 REGISTRY_OPERATOR_KEY="${REGISTRY_OPERATOR_KEY:-}"
 REGISTRY_AUTH_HEADER=(-H "Authorization: Bearer ${REGISTRY_OPERATOR_KEY}")
 
-# Gleiche Liste wie scripts/run-tests.sh's CONSUMER_SERVICES - Services mit
-# eigenem exklusiven NATS-Durable-Consumer (durable=<service-name>). Ein
-# zweiter, gleichzeitig laufender Container wuerde beim Abonnieren mit
-# "consumer is already bound to a subscription" fehlschlagen - echter
-# Parallelbetrieb braucht Queue-Groups statt exklusiver Durable-Namen, nicht
-# Teil dieser Session (siehe docs/operations/rolling-updates.md).
-CONSUMER_SERVICES=(audit-service auth-service case-service document-service folder-service notification-service ocr-service permission-service query-service registry-service rendering-service reporting-service search-service)
+# Consumer services (their own NATS durable) used to be excluded here: a
+# second container died with "consumer is already bound to a subscription".
+# Since P95-S2a (ADR 0257) durables are queue groups - old and new container
+# share the consumer during the switch, so every service can be rolled.
 
 DRAIN_GRACE_SECONDS=30
 READINESS_TIMEOUT_SECONDS=60
@@ -86,27 +83,6 @@ if [ -z "$SERVICE" ]; then
 fi
 
 SERVICE_TYPE="$SERVICE"  # Konvention in diesem Projekt: service_type == Compose-Servicename
-
-is_consumer_service() {
-  local s="$1"
-  for c in "${CONSUMER_SERVICES[@]}"; do
-    [ "$c" = "$s" ] && return 0
-  done
-  return 1
-}
-
-if is_consumer_service "$SERVICE"; then
-  cat >&2 <<EOF
-Fehler: '$SERVICE' hat einen exklusiven NATS-Durable-Consumer (Durable-Name
-= Servicename). Ein zweiter, gleichzeitig laufender Container wuerde beim
-Abonnieren mit "consumer is already bound to a subscription" fehlschlagen -
-dieselbe Einschraenkung, wegen der scripts/run-tests.sh betroffene Services
-vor ihrem Testlauf gezielt stoppt. Echter Parallelbetrieb fuer
-Consumer-Services braucht NATS-Queue-Groups statt exklusiver Durable-Namen -
-nicht Teil dieser Session, siehe docs/operations/rolling-updates.md.
-EOF
-  exit 1
-fi
 
 get_instances_json() {
   curl -sf "$REGISTRY_URL/instances/$SERVICE_TYPE"

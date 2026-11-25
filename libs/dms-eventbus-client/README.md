@@ -68,3 +68,11 @@ OpenTelemetry API is used - without a configured provider (tracing off) both are
 JetStream's `num_pending` plus delivered but unacknowledged ones. It returns `None` when the consumer doesn't
 exist or NATS can't answer, so a sensor shows a gap, not a made-up zero. rendering-service exports it as
 `rendering.consumer.pending`.
+
+## Queue groups (P95-S2a, ADR 0264)
+
+Every durable subscription is a queue subscription (deliver group = durable name), so several instances
+of a service share one consumer, and each message goes to one of them. A durable from before has no
+deliver group. The first `subscribe` recreates it with one, at its acknowledged position (`ack_floor + 1`),
+and logs `eventbus_durable_migrated_to_queue_group`. Ephemeral subscriptions (`durable=None`) are
+unchanged.

@@ -3,12 +3,14 @@
 #
 # Löst zwei wiederkehrende manuelle Schritte ab (siehe PROGRESS.md "Tooling &
 # Testing"):
-#   1. NATS-Durable-Konflikt: ein Service mit eigenem Konsumenten (durable=
-#      <service-name>) kann nicht gleichzeitig als Docker-Container UND als
-#      `pytest`-Lauf denselben Subject abonnieren. Dieses Skript stoppt vor
-#      jedem betroffenen Service-Testlauf gezielt dessen eigenen Container
-#      und startet ihn danach wieder - alle anderen Container (für
-#      Cross-Service-HTTP-Aufrufe ohne Mocking) bleiben währenddessen live.
+#   1. A service with its own NATS consumer (durable=<service-name>) must not
+#      run as a container while its in-process tests consume. Since P95-S2a
+#      (ADR 0264) the durables are queue groups: container and test process
+#      would no longer fail to subscribe, but SHARE the messages, and a test
+#      waiting for its event could see the container take it. So the script
+#      still stops that one container before the service's test run and
+#      starts it again afterwards - all other containers (for cross-service
+#      HTTP calls without mocking) stay live.
 #   2. TEST_POSTGRES_DSN-Default zeigt auf die echte `dms`-Datenbank, nicht
 #      auf `dms_test` - ohne explizites Überschreiben liefe jeder Testlauf
 #      gegen die Entwicklungsdatenbank (siehe P5-S2-Datenverlust in
@@ -48,8 +50,8 @@ TEST_DB="dms_test"
 # TESTS EIGENSTÄNDIG PER IN-PROZESS-TESTCLIENT LAUFEN - siehe
 # `grep -rl "durable=" services/*/src/*/*.py`. Nur diese müssen vor ihrem
 # eigenen Testlauf als Container gestoppt werden, da sonst der laufende
-# Container-Konsument und der in-process gestartete Test-Konsument um
-# denselben Durable-Namen konkurrieren. Services, deren Tests stattdessen
+# Container-Konsument und der in-process gestartete Test-Konsument sich die
+# Nachrichten teilen (queue group since P95-S2a - see point 1 above). Services, deren Tests stattdessen
 # gegen den echten laufenden Container gehen (kein In-Prozess-`TestClient`,
 # z. B. `config-service`/`migration-service`) gehören NICHT hierher, obwohl
 # sie ebenfalls einen eigenen Konsumenten haben - ihre Tests brauchen den
@@ -201,7 +203,7 @@ for service in "${SERVICES[@]}"; do
 
   STOPPED=0
   if is_consumer_service "$service" && is_running "$service"; then
-    echo "==> Stoppe Container '$service' (eigener NATS-Konsument, Durable-Konflikt sonst)"
+    echo "==> Stoppe Container '$service' (eigener NATS-Konsument, teilt sich sonst die Nachrichten)"
     docker compose -f "$COMPOSE_FILE" stop "$service" >/dev/null
     STOPPED=1
   fi

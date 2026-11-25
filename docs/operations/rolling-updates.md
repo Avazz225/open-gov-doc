@@ -49,15 +49,15 @@ reachable — no time window with no service at all.
   an ongoing storage write, an open signature task, ...).
   A fixed, configurable time period is the pragmatic choice that
   Concept 10.5 itself provides for the general case.
-- **Consumer services excluded**: services with their own
-  exclusive NATS durable consumer (the same list as
-  `scripts/run-tests.sh`'s `CONSUMER_SERVICES`) cannot be updated with this
-  script — a second, simultaneously running container would fail to subscribe
-  with "consumer is already bound to a
-  subscription". A true parallel operation for
-  consumer services would need NATS queue groups instead of exclusive
-  durable names (an architecture change to the event bus client, not part
-  of this session).
+- **Consumer services included since P95-S2a**
+  ([ADR 0264](../adr/0264-event-bus-queue-groups.md)).
+  - **Before:** services with their own NATS durable consumer were excluded. A second container died
+    with "consumer is already bound to a subscription".
+  - **Now:** durables are queue groups, so old and new container share the consumer during the switch.
+  - **Verified:** `scripts/rolling-update.sh permission-service` (canary, drain, regular instance) on the
+    dev stack.
+  - **Helm:** the same holds for the Kubernetes `RollingUpdate` (the surge pod joins the group) and for
+    `autoscaling`.
 - **No actual container automation as a live service** (the P10-S1
   boundary still stands): `rolling-update.sh` is a script executed by a
   human/CI, not a permanently running

@@ -246,3 +246,92 @@ async def _wait_until_async(read, predicate, timeout_seconds: float = 5.0) -> bo
             return True
         await asyncio.sleep(0.05)
     return False
+
+
+# --- Queue groups (P95-S2a) --------------------------------------------------
+
+
+async def test_two_instances_share_a_durable_without_losing_or_doubling(client):
+    """Two instances of one service (a replica, a rolling update's surge pod)
+    subscribe the same durable: both start, and each message reaches exactly
+    one of them. Before P95-S2a the second died with "consumer is already
+    bound to a subscription"."""
+    bus, stream = client
+    second = NatsEventBusClient(NATS_URL, ensure_stream=False)
+    await second.connect()
+    seen: dict[str, list[bytes]] = {"a": [], "b": []}
+
+    def handler_for(name):
+        async def handler(payload: bytes) -> None:
+            seen[name].append(payload)
+
+        return handler
+
+    try:
+        await bus.subscribe(f"{stream}.job", handler_for("a"), durable="shared")
+        await second.subscribe(f"{stream}.job", handler_for("b"), durable="shared")
+        await asyncio.sleep(0.2)
+        for n in range(40):
+            await bus.publish(f"{stream}.job", f"job {n}".encode())
+        assert await _wait_until(lambda: len(seen["a"]) + len(seen["b"]) >= 40)
+        await asyncio.sleep(0.3)
+        everything = seen["a"] + seen["b"]
+        assert sorted(everything) == sorted(f"job {n}".encode() for n in range(40))
+        assert seen["a"] and seen["b"], "both instances should get a share"
+    finally:
+        await second.close()
+        await bus._js.delete_stream(stream)
+
+
+async def test_a_durable_from_before_queue_groups_is_migrated_at_its_position(client):
+    """An old-style durable (push, no deliver group) that already acked two of
+    six messages: the first subscribe recreates it as a queue consumer and
+    delivers exactly the four that were left."""
+    bus, stream = client
+    js = bus._js
+    old_inbox = bus._nc.new_inbox()
+    await js.add_consumer(
+        stream,
+        nats.js.api.ConsumerConfig(
+            durable_name="legacy",
+            deliver_subject=old_inbox,
+            filter_subject=f"{stream}.legacy",
+            ack_policy=nats.js.api.AckPolicy.EXPLICIT,
+        ),
+    )
+    for n in range(6):
+        await bus.publish(f"{stream}.legacy", f"msg {n}".encode())
+    # The old version of the service handled and acked the first two.
+    acked = 0
+    done = asyncio.Event()
+
+    async def old_handler(msg):
+        nonlocal acked
+        if acked < 2:
+            await msg.ack()
+            acked += 1
+            if acked == 2:
+                done.set()
+
+    old_sub = await bus._nc.subscribe(old_inbox, cb=old_handler)
+    await asyncio.wait_for(done.wait(), timeout=5)
+    await old_sub.unsubscribe()
+    await asyncio.sleep(0.2)
+
+    received: list[bytes] = []
+
+    async def handler(payload: bytes) -> None:
+        received.append(payload)
+
+    try:
+        await bus.subscribe(f"{stream}.legacy", handler, durable="legacy")
+        assert await _wait_until(lambda: len(received) >= 4)
+        await asyncio.sleep(0.3)
+        assert received == [f"msg {n}".encode() for n in range(2, 6)]
+        info = await js.consumer_info(stream, "legacy")
+        assert info.config.deliver_group == "legacy"
+        # A second subscribe (another instance) joins instead of migrating again.
+        await bus.subscribe(f"{stream}.legacy", handler, durable="legacy")
+        assert (await js.consumer_info(stream, "legacy")).config.deliver_group == "legacy"
+    finally:
+        await bus._js.delete_stream(stream)

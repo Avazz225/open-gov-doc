@@ -5116,6 +5116,19 @@ by the pilot's numbers, not a committed rewrite of all of them (see ADR 0257's c
   - Helm: consumer services roll without a hanging surge pod, and autoscaling works.
   - `docs/operations/rolling-updates.md` corrected, and the compose rolling-update script's exclusion
     lifted where possible.
+  - **Result** ([ADR 0264](docs/adr/0264-event-bus-queue-groups.md)):
+    - **Queue groups:** every durable subscription is a queue subscription (group = durable name).
+    - **One-time migration at the first subscribe:** recreated at `ack_floor + 1`, deliver subject
+      derived from the names, idempotent.
+    - **Tests:** dms-eventbus-client 16 (+2). Two instances share 40 messages with none lost or doubled,
+      and a migrated old durable delivers exactly its four unacked messages.
+    - **Live:**
+      - all consumer services migrated their durables at startup;
+      - a second permission-service container runs next to the first, and 21 events split 10/11;
+      - `scripts/rolling-update.sh permission-service` works, and the consumer exclusion is gone from
+        it.
+    - **Helm:** no template change needed; the surge pod now joins the group. rolling-updates.md and
+      run-tests.sh (why the container still stops: the test process would share the messages) updated.
 - **P95-S2b — permission-service hot path without the ORM; several processes.**
   - `GET /check`, `POST /check/batch` and the effective-permissions read in SQLAlchemy Core with
     precompiled statements (or asyncpg directly), same semantics.

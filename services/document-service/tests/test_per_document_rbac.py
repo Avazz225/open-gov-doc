@@ -128,7 +128,15 @@ def test_moving_a_document_reparents_its_resource_node(client, real_folder_id):
     update_response = client.patch(f"/documents/{document_id}", json={"folder_id": real_folder_id})
     assert update_response.status_code == 200
 
-    moved = httpx.get(f"{PERMISSION_SERVICE_URL}/resources/{document_id}", timeout=10.0).json()
+    # The node is reparented via `document.resource.moved`, so asynchronously
+    # - wait instead of racing the consumer, like the purge test below (failed
+    # twice in P95-S1e/S2a while permission-service was working through
+    # earlier events).
+    for _ in range(50):
+        moved = httpx.get(f"{PERMISSION_SERVICE_URL}/resources/{document_id}", timeout=10.0).json()
+        if moved["parent_id"] == real_folder_id:
+            break
+        time.sleep(0.1)
     assert moved["parent_id"] == real_folder_id
 
 

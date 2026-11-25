@@ -2,6 +2,44 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P95-S2a, queue groups in the event bus
+([ADR 0264](docs/adr/0264-event-bus-queue-groups.md)).
+
+**What changed:**
+- **`dms-eventbus-client`:** every durable subscription is a queue subscription (deliver group = durable
+  name), so several instances share a consumer.
+  - **One-time migration in `_migrate_to_queue_group`:** an old durable without a group is recreated at
+    `ack_floor + 1`, with a derived deliver subject `_DMS.deliver.<stream>.<durable>`; idempotent.
+  - Unacked messages come again (at-least-once); a never-delivered durable keeps its start rule.
+- **`scripts/rolling-update.sh`:** the consumer-service exclusion is gone.
+- **`scripts/run-tests.sh`:** the comment says why it still stops a service's container (test process
+  and container would now share the messages).
+- **Docs:** `rolling-updates.md` and the eventbus README updated. Helm needs no template change: the surge
+  pod of the default `RollingUpdate` joins the group, and autoscaling works.
+- **document-service test:** `test_moving_a_document_reparents_its_resource_node` now waits for the
+  event-driven reparenting instead of reading at once. It failed in the P95-S1e and P95-S2a runs.
+
+**Checks:**
+- **dms-eventbus-client:** 16 tests (+2): two instances share 40 messages with none lost or doubled; a
+  migrated old durable with 2 of 6 acked delivers exactly the remaining 4, and a second subscribe joins.
+- **Live:**
+  - all services rebuilt; every consumer service migrated its durables once (notification 27, audit 20,
+    the rest 1–4);
+  - a second permission-service container starts (P95-S2: exit 3, "already bound") and sits in the queue
+    group on 4 streams, and 21 folder events split 10/11 with nothing pending;
+  - `scripts/rolling-update.sh permission-service` ran through canary, drain and regular instance.
+- **The 19 services with consumers:** all green (document-service 455 after the test fix; the rest as
+  listed in the run, e.g. permission 223, workflow 283, auth 168). ruff green.
+- **Containers:** all rebuilt (the library is in every image).
+
+**Open, found along the way:** folder-service's retention tick fails with a foreign-key violation when it
+deletes a folder that still has subfolders (`folder.folder` referenced by `folder.folder`). This is an
+existing defect in retention deletion, unrelated to the event bus, and not yet scheduled.
+
+**Next session:** P95-S2b (permission-service hot path without the ORM; several processes).
+
+---
+
 **Last completed:** P95-S2, Rust scoping
 ([ADR 0257](docs/adr/0257-rust-migration-scoping.md), accepted; no code).
 
