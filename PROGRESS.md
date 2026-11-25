@@ -2,6 +2,45 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P95-S2c, the Python baseline for the Rust decision. **Phase 95 is closed.**
+P95-S3 (Rust pilot) was not started (user decision 2026-11-25, ADR 0257 §9).
+
+**Results** ([report, fourth measurement](docs/operations/performance-ranking.md#fourth-measurement-p95-s2c-2026-11-25-the-python-baseline-for-adr-0257)):
+- **Four k6 runs,** base and extended with permission-service at 1 and 3 instances (compose profile
+  `permission-replicas`); tracing 10 %, py-spy as before.
+- **Extended, 1 instance:** 101,301 requests, 0 errors, goodput 99.48 % (P95-S1f: 96.4 %).
+  permission-service's own time per call 5.1 ms (P95-S1f: 53–64 ms), latency share 10.9 %. The largest
+  share is now workflow-service (34 %).
+- **Extended, 3 instances:** 102,483 requests, 0 errors, **goodput 100.00 %**, every p99 < 300 ms,
+  mean e2e 24.8 ms (1 instance: 51.7).
+- **Base:** goodput 99.84 % (1 instance) and 99.89 % (3); list_folder p99 124 → 61 ms with 3 instances.
+- **permission-service CPU in the full mix:** 3.1–3.8 ms per request, 0.37–0.48 cores on average, 7–10 %
+  of the stack.
+  - ORM samples 4–5 % (before 12–13 %).
+  - About 10 % is still building the SQL statement per call: an open Python lever, like the miss path
+    without the ORM.
+- **Cold cache:** 254 ms.
+- **Measurement caveat:** rendering-service now does its work during the run (up to 2.8 cores, P95-S1e
+  1.0), so the base runs are compared 1 vs 3 within this measurement.
+
+**Decision:** ADR 0257 §9, no pilot, because permission-service no longer limits the full load and a
+Rust version would save perhaps 0.3–0.4 cores. The §7 criteria stay the yardstick. The plan and ADR 0257
+record it.
+
+**Done along the way:**
+- **`loadtest/rank_services.py`:** adds up a service's replicas (they had been booked as a separate
+  service).
+- **mail-connector test `test_inbound_pages_are_disjoint_and_cost_the_same`:** counts only the listing's
+  own statements. It failed in the regression because the mailbox poll loop added one.
+
+**Phase-close regression:** all 32 services green, **3,329 tests**, ruff green. mail-connector was
+repeated in full after the test fix (97); the first pass failed only on that test.
+
+**Next session:** P96-S1 (scoping: the admin skill, ADR 0253, no code). `graphify update .` comes only at
+the end of P96-S3.
+
+---
+
 **Last completed:** P95-S2b, permission-service with one read per check, and replicas
 ([ADR 0265](docs/adr/0265-permission-hot-path-and-replicas.md)).
 

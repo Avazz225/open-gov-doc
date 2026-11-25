@@ -45,8 +45,10 @@ def prom(query: str, at: int) -> list[dict]:
 
 
 def service_of_container(name: str) -> str:
-    # dms-document-service-1 -> document-service
-    return name.removeprefix("dms-").rsplit("-", 1)[0]
+    # dms-document-service-1 -> document-service; the extra instances of
+    # P95-S2b's compose profile (dms-permission-service-replica-2) count
+    # toward their service.
+    return name.removeprefix("dms-").rsplit("-", 1)[0].removesuffix("-replica")
 
 
 def resources(start: int, end: int, rest_start: int | None) -> dict[str, dict]:
@@ -56,13 +58,16 @@ def resources(start: int, end: int, rest_start: int | None) -> dict[str, dict]:
         f'sum by (name) (increase(container_cpu_usage_seconds_total{{name=~"dms-.+"}}[{window}]))',
         end,
     ):
-        out[service_of_container(row["metric"]["name"])]["cpu_seconds"] = float(row["value"][1])
+        # Summed over every instance of the service (P95-S2c).
+        data = out[service_of_container(row["metric"]["name"])]
+        data["cpu_seconds"] = data.get("cpu_seconds", 0.0) + float(row["value"][1])
+        data["instances"] = data.get("instances", 0) + 1
     for row in prom(
         f'max by (name) (max_over_time(container_memory_rss{{name=~"dms-.+"}}[{window}]))', end
     ):
-        out[service_of_container(row["metric"]["name"])]["rss_peak_mb"] = (
-            float(row["value"][1]) / 2**20
-        )
+        # Per instance: the largest one.
+        data = out[service_of_container(row["metric"]["name"])]
+        data["rss_peak_mb"] = max(data.get("rss_peak_mb", 0.0), float(row["value"][1]) / 2**20)
     if rest_start:
         rest_window = f"{start - rest_start}s"
         for row in prom(

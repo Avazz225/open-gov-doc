@@ -7,7 +7,9 @@ different algorithm.
 > **Second measurement (P95-S1e, 2026-11-25):** after the fixes P95-S1a–d, see
 > [the section at the end](#second-measurement-p95-s1e-2026-11-25). The sections up to "What follows"
 > are the first measurement, unchanged except for one correction. **Third measurement (P95-S1f):** two
-> extended runs back to back, [at the very end](#third-measurement-p95-s1f-2026-11-25).
+> extended runs back to back, [further down](#third-measurement-p95-s1f-2026-11-25). **Fourth
+> measurement (P95-S2c):** the Python baseline for the Rust decision,
+> [at the very end](#fourth-measurement-p95-s2c-2026-11-25-the-python-baseline-for-adr-0257).
 
 ## How it was measured
 
@@ -368,3 +370,93 @@ instances (4,592 and 4,456).
 come back in two consecutive runs. Under the full mixed load, **permission-service's own processing** is
 now the limiting factor, the candidate P95-S1 named. gateway-service follows at 7–9 % latency share
 (12.9–24.3 ms own time per call).
+
+## Fourth measurement (P95-S2c, 2026-11-25): the Python baseline for ADR 0257
+
+**State:**
+- P95-S2a: queue groups;
+- P95-S2b: permission-service answers a check with one read, and runs as replicas.
+
+**Four runs,** same settings as before (tracing 10 %, py-spy after 690 s):
+- base and extended with permission-service at **1** instance;
+- then base and extended at **3** instances (compose profile `permission-replicas`).
+
+`rank_services.py` now adds up a service's replicas (it booked them as a separate service).
+
+**One difference from earlier runs:** rendering-service now keeps up (P95-S1f), so it does its work during
+the run. In the base run it used 2.8 cores against 1.0 in P95-S1e, and the stack 6.0–6.3 cores against
+3.9. On a shared host that costs the other services latency. The base runs are therefore compared within
+this measurement (1 vs 3), not with P95-S1e.
+
+### Base run
+
+| | 1 instance | 3 instances |
+|---|---|---|
+| Requests / errors / goodput | 73,673 / 0.00 % / 99.84 % | 74,349 / 0.00 % / 99.89 % |
+
+| Action, p50 / p95 / p99 (ms) | 1 instance | 3 instances |
+|---|---|---|
+| list_folder | 18 / 53 / 124 | 12 / 26 / 61 |
+| download | 34 / 141 / 278 | 23 / 69 / 192 |
+| search | 9 / 33 / 76 | 7 / 26 / 54 |
+| upload | 94 / 293 / 512 | 66 / 182 / 658 |
+| login | 41 / 54 / 100 | 35 / 44 / 75 |
+
+### Extended run
+
+| | P95-S1f run 1 | 1 instance | 3 instances |
+|---|---|---|---|
+| Requests | 89,678 | 101,301 | 102,483 |
+| Errors | 0.00 % | 0.00 % | 0.00 % |
+| Goodput | 96.4 % | 99.48 % | **100.00 %** |
+| Mean e2e of the sampled requests | 178 ms | 51.7 ms | 24.8 ms |
+
+| Action, p50 / p95 / p99 (ms) | P95-S1f run 1 | 1 instance | 3 instances |
+|---|---|---|---|
+| workflow_my_tasks | 122 / 628 / 988 | 19 / 82 / 422 | 18 / 43 / 92 |
+| workflow_start | 217 / 810 / 1,136 | 31 / 158 / 1,529 | 28 / 83 / 163 |
+| workflow_complete | 314 / 1,269 / 1,866 | 45 / 195 / 652 | 40 / 114 / 212 |
+| case_create | 343 / 1,339 / 2,231 | 62 / 267 / 2,361 | 53 / 132 / 283 |
+| case_list | 194 / 1,280 / 2,112 | 50 / 208 / 1,795 | 45 / 90 / 147 |
+| list_folder | 62 / 538 / 861 | 13 / 45 / 105 | 12 / 28 / 62 |
+| download | 82 / 553 / 898 | 20 / 60 / 247 | 19 / 36 / 74 |
+| search | 15 / 157 / 403 | 7 / 15 / 48 | 7 / 15 / 51 |
+| upload | 225 / 1,386 / 2,626 | 65 / 251 / 2,127 | 57 / 103 / 163 |
+| mail_inbound | 24 / 147 / 306 | 12 / 23 / 71 | 13 / 24 / 75 |
+
+### permission-service
+
+| | P95-S1f (extended) | 1 instance (ext.) | 3 instances (ext.) | 1 instance (base) | 3 instances (base) |
+|---|---|---|---|---|---|
+| Own time per call | 53–64 ms | 5.1 ms | 3.2 ms | 4.9 ms | 2.6 ms |
+| Latency share | 28–33 % | 10.9 % | 14.8 % | 13.6 % | 13.4 % |
+| CPU per request, all instances | – | 3.1 ms | 3.6 ms | 3.7 ms | 3.8 ms |
+| CPU, average over the run | – | 0.37 cores | 0.43 cores | 0.44 cores | 0.48 cores |
+| Share of the stack's CPU | – | 9 % | 10 % | 7 % | 8 % |
+
+**Reading:**
+- **The one-read hot path (P95-S2b) removed the bottleneck even with one instance.** Own time per call
+  went from 53–64 ms to about 5 ms under the full extended load.
+- **Replicas halve the latency again and smooth the tails.** The extended run reaches 100 % goodput with
+  every p99 below 300 ms. CPU per request stays the same, so they buy latency and headroom, not
+  efficiency.
+- **CPU per request in the full mix is 3.1–3.8 ms,** against 1.9 ms for a cached check in isolation.
+  The mix also has misses (every upload's new document), resource registrations, batch checks and group
+  lookups, which still go through the ORM path. ORM samples are down to 4–5 % (12–13 % before).
+- **SQLAlchemy Core/engine is still 35–38 %.** About 10 percentage points of that is building the
+  statement on every call (`select`, `in_`, `__eq__`). Building it once with bind parameters is a further
+  Python lever, not applied here because this session only measures.
+- **The cold-cache measurement:** 254 ms cold, warm after an unrelated grant (38 ms).
+
+### What this means for the Rust question (ADR 0257 §7 and §9)
+
+ADR 0257 §9's rule for the pilot: start it only if permission-service **still limits the full load** and
+Rust promises at least 2× in CPU per 1,000 requests. The first condition no longer holds:
+- **No longer limiting:** at one instance, permission-service is 11 % of the extended latency
+  (workflow-service is the largest, 34 %). With three instances the extended run has no errors, 100 %
+  goodput and every p99 below 300 ms.
+- **The absolute gain would be small:** permission-service uses 0.37–0.48 cores on average, 7–10 % of the
+  stack's CPU. A Rust service several times more efficient would save perhaps 0.3–0.4 cores. rendering-
+  service alone uses 1.2–2.8 cores, in native libraries.
+- **Cheaper levers remain in Python:** the statement built once (about 10 % of the service's CPU), and
+  the miss path without the ORM.

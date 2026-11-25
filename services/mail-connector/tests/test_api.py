@@ -1282,8 +1282,11 @@ def _count_statements(client, path: str, params: dict) -> tuple[list[dict], int]
 
     statements = []
 
-    def on_execute(*_args):
-        statements.append(1)
+    def on_execute(conn, cursor, statement, *_args):
+        # Only the listing's own reads: the mailbox poll loop runs on the
+        # same engine and can slip a statement into the window (P95-S2c).
+        if any(t in statement for t in ("inbound_message", "inbound_attachment", "routing_log")):
+            statements.append(1)
 
     sync_engine = app.state.engine.sync_engine
     event.listen(sync_engine, "before_cursor_execute", on_execute)

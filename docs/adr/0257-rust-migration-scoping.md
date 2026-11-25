@@ -166,3 +166,32 @@ Then decide on the pilot (P95-S3) with that as the baseline:
 - **If permission-service still limits the full load and Rust promises at least 2×:** pilot with
   permission-service, after the schema migrations (ADR 0260 B) and the conformance switch.
 - **If not:** no pilot. The criteria of section 7 stay as the yardstick for later.
+
+## Result of the Python levers (P95-S2c, 2026-11-25)
+
+The baseline is measured
+([report, fourth measurement](../operations/performance-ranking.md#fourth-measurement-p95-s2c-2026-11-25-the-python-baseline-for-adr-0257)):
+- **Queue groups:** ADR 0264.
+- **One read per check, and replicas:** ADR 0265.
+- **Extended run with permission-service at one instance:** goodput 99.48 % and no errors (P95-S1f
+  96.4 %). permission-service's own time per call is 5.1 ms (before 53–64 ms), and its latency share
+  10.9 %; workflow-service is the largest, at 34 %.
+- **At three instances:** goodput 100.00 %, no errors, every p99 below 300 ms, mean e2e 24.8 ms.
+- **permission-service's CPU in the full mix:** 3.1–3.8 ms per request, 0.37–0.48 cores on average,
+  7–10 % of the stack's CPU.
+
+**Applying §9:** the condition "permission-service still limits the full load" no longer holds. The rule
+therefore says **no pilot.**
+- **The absolute gain would be small.** Even several times more efficient, a Rust permission-service
+  would save perhaps 0.3–0.4 cores on this host.
+- **Cheaper Python levers are still open:** build the hot statement once (about 10 % of its CPU), and the
+  miss path without the ORM.
+- **gateway-service:** 3.0–3.4 ms CPU per request and 7–13 % latency share. It doesn't meet the condition
+  either.
+
+**The criteria of §7 stay the yardstick** for a later change: for example, a load profile where a service's
+own compute limits again after all algorithmic and configuration causes are fixed, or a target platform
+where CPU per request is the cost that matters.
+
+**User decision (2026-11-25):** no pilot. P95-S3 is not started, Phase 95 is closed, and work continues
+with Phase 96.

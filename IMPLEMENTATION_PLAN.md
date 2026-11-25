@@ -5159,7 +5159,23 @@ by the pilot's numbers, not a committed rewrite of all of them (see ADR 0257's c
 - **P95-S2c — Measure again.** Base and extended k6 run, the cold-cache measurement and py-spy, as in
   P95-S1f. The report updated. That is the baseline for the go/no-go of the Rust pilot (criterion in
   ADR 0257 §7: ≥ 2× CPU per 1,000 requests against this Python state, at equal p95).
-- **P95-S3 — Rust pilot (only if P95-S2c leaves a gap that meets ADR 0257 §7).** The highest-ranked suitable service from S1/S2:
+  - **Result** ([report, fourth measurement](docs/operations/performance-ranking.md#fourth-measurement-p95-s2c-2026-11-25-the-python-baseline-for-adr-0257),
+    [ADR 0257 addendum](docs/adr/0257-rust-migration-scoping.md#result-of-the-python-levers-p95-s2c-2026-11-25)):
+    - **Four runs** (base/extended × permission-service at 1/3 instances).
+    - **Extended at 1 instance:** goodput 99.48 % (P95-S1f 96.4 %), permission-service own time
+      53–64 → 5.1 ms per call.
+    - **At 3 instances:** goodput 100.00 %, no errors, every p99 < 300 ms, mean e2e 24.8 ms.
+    - **permission-service:** 0.37–0.48 cores on average (7–10 % of the stack), 3.1–3.8 ms CPU per
+      request in the mix.
+    - **Cold cache:** 254 ms.
+    - **ADR 0257 §9:** permission-service no longer limits the full load, so no pilot. Open Python
+      levers: the statement built once (about 10 %), the miss path without the ORM.
+    - **Measurement caveat:** rendering-service now does its work during the run (up to 2.8 cores), so the
+      base runs are compared 1 vs 3 within this measurement. `rank_services.py` adds up replicas.
+- **P95-S3 — not started (user decision 2026-11-25, ADR 0257 §9).** P95-S2c showed that permission-
+  service no longer limits the full load (0.4–0.5 cores, 7–10 % of the stack's CPU). The §7 criteria
+  stay the yardstick for a later change. The original scope follows for reference.
+- *(Original scope)* **Rust pilot (only if P95-S2c leaves a gap that meets ADR 0257 §7).** The highest-ranked suitable service from S1/S2:
   - likely candidates are the gateway (every request passes through it, thin logic) or
     permission-service (CPU-bound recomputation, on every request path);
   - rebuilt in Rust against its unchanged pytest suite;
