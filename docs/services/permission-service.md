@@ -71,7 +71,9 @@
   - A new node has no assignments of its own and changes no existing effective permission.
   - A deny for a not-yet-registered resource is no longer cached, so no stale answer for it can exist
     when it registers.
-  - One invalidation at startup drops such rows left from before the upgrade.
+  - One invalidation at startup dropped such rows left from before the upgrade. It was removed in
+    P95-S2b (ADR 0265): every installation has started since, and with replicas each new instance would
+    have made the whole cache cold.
 - **Invalidation per principal, since P95-S1d** ([ADR 0263](../adr/0263-scoped-permission-cache-and-pool-sizing.md)):
   - **Assignments and memberships:** a role assignment to a user, service or group, a group membership
     change or a group deletion bumps only the affected principals' counters
@@ -415,6 +417,23 @@ Registers itself with the registry on startup (`libs/dms-registry-client`: regis
 
 None yet — follows in Phase 11.
 
+
+## One Read per Check; Replicas (P95-S2b, [ADR 0265](../adr/0265-permission-hot-path-and-replicas.md))
+
+- **One read per check:** `GET /check`, `POST /check/batch` and `GET /effective-permissions/...` read
+  through `repository.cached_effective_permissions`. That is one SQLAlchemy Core statement in autocommit,
+  returning both generations, the valid cached rows and whether any scope lock is active.
+  - Misses go through the unchanged computing path.
+  - The scope-lock walk runs only when a lock is active (before, it ran on every single check: two
+    queries per ancestor level).
+  - A warm check is one statement (test `test_a_warm_check_is_one_database_statement`).
+- **Effect, one process:** single check 311 → 488–528/s, CPU 3.2 → 1.9–2.0 ms. Batch of 50 317 →
+  346–361/s, CPU 3.1 → 2.8 ms.
+- **Replicas:**
+  - Compose profile `permission-replicas` (`permission-service-replica`, network alias
+    `permission-service`, `PERMISSION_SERVICE_EXTRA_REPLICAS`).
+  - Each instance registers under its own IP (`DMS_SELF_ADDRESS: http://{ip}:8000`).
+  - Three instances: 1,412 checks/s instead of 437, p50 28 ms instead of 97 ms.
 
 ## Batch Check as a Real Batch (P91-S4, [ADR 0259](../adr/0259-listings-show-only-what-the-caller-can-read.md))
 

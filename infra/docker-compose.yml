@@ -475,7 +475,10 @@ services:
       DMS_DB_MAX_OVERFLOW: "10"
       DMS_NATS_URL: nats://nats:4222
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
-      DMS_SELF_ADDRESS: http://permission-service:8000
+      # `{ip}` (P95-S2b): each instance registers under its own address, so
+      # with extra replicas (see permission-service-replica) monitoring
+      # scrapes every one of them instead of whichever the name resolves to.
+      DMS_SELF_ADDRESS: http://{ip}:8000
       # No `depends_on: auth-service` here (would form a cycle with
       # auth-service's `depends_on: permission-service` from P6-S5, Docker
       # Compose forbids that). Uncritical: the call only happens on
@@ -490,6 +493,25 @@ services:
         condition: service_healthy
     networks:
       - dms-net
+
+  # Extra permission-service instances (P95-S2b, ADR 0257 §3a), opt-in:
+  #   docker compose --profile permission-replicas up -d
+  #   PERMISSION_SERVICE_EXTRA_REPLICAS=3 docker compose --profile permission-replicas up -d
+  # Same image and configuration; no host port; the network alias makes
+  # `permission-service` resolve to every instance, so the callers' connections
+  # spread over them. Possible since P95-S2a: the NATS durables are queue groups.
+  permission-service-replica:
+    extends:
+      service: permission-service
+    image: dms-permission-service
+    build: !reset null
+    profiles: ["permission-replicas"]
+    deploy:
+      replicas: ${PERMISSION_SERVICE_EXTRA_REPLICAS:-1}
+    ports: !reset []
+    networks: !override
+      dms-net:
+        aliases: [permission-service]
 
   storage-service:
     build:

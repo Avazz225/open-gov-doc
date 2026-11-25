@@ -167,12 +167,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     async with app.state.session_factory() as session:
         await repository.ensure_root_resource(session)
-        # P89-S4 (ADR 0254): before this release a deny for a not-yet-
-        # registered resource was cached, and registering the node cleared
-        # it by invalidating. Registration no longer invalidates, so such a
-        # row left from before the upgrade would stick - one invalidation at
-        # startup drops them. Cheap and harmless when repeated per replica.
-        await repository.invalidate_cache(session)
+        # No cache invalidation at startup any more (P95-S2b): P89-S4 (ADR
+        # 0254) added one to drop denies cached for unregistered resources
+        # before that release - every installation has started since. With
+        # replicas, each new instance (a scale-out, every pod of a rolling
+        # update) made the whole cache cold for everyone.
         await repository.ensure_domain_admin_roles(session)
         await repository.ensure_everyone_role(session)
         # Break-glass activation (4.6) mandatorily requires the four-eyes
@@ -870,8 +869,13 @@ async def update_resource(
 async def effective_permissions(
     principal_id: str, resource_id: str, session: AsyncSession = Depends(get_session)
 ) -> EffectivePermissionsOut:
-    entry = await repository.get_effective_permissions(session, principal_id, resource_id)
-    await session.commit()
+    lookup = await repository.cached_effective_permissions(
+        app.state.engine, principal_id, [resource_id]
+    )
+    entry = lookup.entries.get(resource_id)
+    if entry is None:
+        entry = await repository.get_effective_permissions(session, principal_id, resource_id)
+        await session.commit()
     return EffectivePermissionsOut(
         principal_id=principal_id,
         resource_id=resource_id,
@@ -916,9 +920,20 @@ async def check(
     session: AsyncSession = Depends(get_session),
 ) -> CheckResult:
     _validate_access_type(permission, access_type)
-    entry = await repository.get_effective_permissions(session, principal_id, resource_id)
+    # P95-S2b (ADR 0257 §3b): one read outside a transaction answers the
+    # usual case - a valid cache entry and no active scope lock anywhere.
+    lookup = await repository.cached_effective_permissions(
+        app.state.engine, principal_id, [resource_id]
+    )
+    entry = lookup.entries.get(resource_id)
+    if entry is None:
+        entry = await repository.get_effective_permissions(session, principal_id, resource_id)
 
-    active_locks = await repository.get_active_scope_locks_for_resource(session, resource_id)
+    active_locks = (
+        await repository.get_active_scope_locks_for_resource(session, resource_id)
+        if lookup.any_lock_active
+        else []
+    )
     blocking_locks = [lock for lock in active_locks if access_type == "write" or lock.blocks_read]
     if blocking_locks and "scope_lock.bypass" not in entry.permissions:
         blocking_lock = blocking_locks[0]
@@ -930,7 +945,8 @@ async def check(
             scope_lock_expires_at=blocking_lock.expires_at,
         )
 
-    await session.commit()
+    if session.in_transaction():
+        await session.commit()
     return CheckResult(allowed=permission in entry.permissions)
 
 
@@ -948,10 +964,18 @@ async def check_batch(
     resource_ids = list(dict.fromkeys(payload.resource_ids))
     # P91-S4 (ADR 0259): cached entries in one query, and the per-resource
     # scope-lock walk only when some lock is active at all (usually none).
-    entries = await repository.get_effective_permissions_batch(
-        session, payload.principal_id, resource_ids
+    # P95-S2b: cached entries and the lock question in one read outside a
+    # transaction; only the misses go through the computing path.
+    lookup = await repository.cached_effective_permissions(
+        app.state.engine, payload.principal_id, resource_ids
     )
-    any_lock_active = bool(await repository.list_active_scope_locks(session))
+    entries = dict(lookup.entries)
+    misses = [resource_id for resource_id in resource_ids if resource_id not in entries]
+    if misses:
+        entries.update(
+            await repository.get_effective_permissions_batch(session, payload.principal_id, misses)
+        )
+    any_lock_active = lookup.any_lock_active
     for resource_id in resource_ids:
         entry = entries[resource_id]
         active_locks = (
@@ -966,7 +990,8 @@ async def check_batch(
             results[resource_id] = False
             continue
         results[resource_id] = payload.permission in entry.permissions
-    await session.commit()
+    if session.in_transaction():
+        await session.commit()
     return BatchCheckResult(results=results)
 
 

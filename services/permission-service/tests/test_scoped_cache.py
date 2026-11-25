@@ -269,3 +269,46 @@ async def test_a_cold_batch_walks_shared_ancestors_once(engine, session):
 
     warm = await repository.get_effective_permissions_batch(session, "erik", children)
     assert [warm[c].permissions for c in children] == [["read"]] * len(children)
+
+
+# --- The hot path's single read (P95-S2b) -----------------------------------
+
+
+async def test_the_cached_lookup_returns_only_entries_valid_in_both_generations(session, engine):
+    role = await repository.create_role(session, "Viewer", "", ["read"])
+    await _grant(session, "user", "fritz", role)
+    await repository.get_effective_permissions(session, "fritz", ROOT_RESOURCE_ID)
+    await session.commit()
+
+    lookup = await repository.cached_effective_permissions(engine, "fritz", [ROOT_RESOURCE_ID])
+    assert lookup.entries[ROOT_RESOURCE_ID].permissions == ["read"]
+    assert lookup.any_lock_active is False
+
+    # A change to fritz moves his generation: the row is no longer a hit.
+    await repository.invalidate_principals(session, {"fritz"})
+    await session.commit()
+    lookup = await repository.cached_effective_permissions(engine, "fritz", [ROOT_RESOURCE_ID])
+    assert lookup.entries == {}
+    # And a global change does the same for everyone.
+    await repository.get_effective_permissions(session, "fritz", ROOT_RESOURCE_ID)
+    await repository.invalidate_cache(session)
+    await session.commit()
+    assert (
+        await repository.cached_effective_permissions(engine, "fritz", [ROOT_RESOURCE_ID])
+    ).entries == {}
+
+
+async def test_the_cached_lookup_knows_whether_any_scope_lock_is_active(session, engine):
+    lock = await repository.create_scope_lock(
+        session,
+        resource_id=ROOT_RESOURCE_ID,
+        locked_by="admin",
+        reason="Test",
+        blocks_read=False,
+        expires_at=None,
+    )
+    await session.commit()
+    assert (await repository.cached_effective_permissions(engine, "x", ["a"])).any_lock_active
+    await repository.release_scope_lock(session, lock.id, "admin")
+    await session.commit()
+    assert not (await repository.cached_effective_permissions(engine, "x", ["a"])).any_lock_active

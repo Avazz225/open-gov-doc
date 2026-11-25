@@ -5136,6 +5136,26 @@ by the pilot's numbers, not a committed rewrite of all of them (see ADR 0257's c
   - Then 2–4 processes (uvicorn workers or replicas, now possible after S2a), with the pool budget per
     process adjusted.
   - py-spy before and after; sensors and the registry with several processes checked.
+  - **Result** ([ADR 0265](docs/adr/0265-permission-hot-path-and-replicas.md)):
+    - **One read per check:** `/check`, `/check/batch` and `/effective-permissions` answer the usual case
+      with one Core statement in autocommit (generations, valid rows, "any lock active"). Misses and the
+      ADR 0239/0263 semantics are unchanged; the race tests pass without a change.
+    - **The scope-lock walk** runs only when a lock is active. Before, every single check walked the
+      ancestors, 2 queries per level.
+    - **One process:** check 311 → 488–528/s, CPU 3.2 → 1.9–2.0 ms; batch of 50 317 → 346–361/s, CPU
+      3.1 → 2.8 ms.
+    - **Replicas, not workers** (sensors, registration and startup per instance):
+      - compose profile `permission-replicas` with the network alias `permission-service`;
+      - `{ip}` in `DMS_SELF_ADDRESS` (`dms-registry-client`);
+      - Helm: every pod registers under its pod IP (a defect for any service with more than one replica,
+        e.g. the gateway with autoscaling on).
+    - **Three instances:** 1,412 checks/s instead of 437, p50 28 instead of 97 ms; batch 997 instead of
+      304/s; CPU per request unchanged.
+    - **Also checked:** registration and deregistration per instance, monitoring per instance, the NATS
+      queue group shared.
+    - **Startup invalidation removed** (ADR 0254 note).
+    - **Tests:** permission-service 226 (+3), dms-registry-client 9 (+1; one stale sensor-format test
+      fixed).
 - **P95-S2c — Measure again.** Base and extended k6 run, the cold-cache measurement and py-spy, as in
   P95-S1f. The report updated. That is the baseline for the go/no-go of the Rust pilot (criterion in
   ADR 0257 §7: ≥ 2× CPU per 1,000 requests against this Python state, at equal p95).

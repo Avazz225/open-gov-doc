@@ -2467,3 +2467,34 @@ def test_delete_approval_config(client, role_management_headers):
     assert client.get("/approval-config/delete.test.action").json()["requires_approval"] is False
     missing = client.delete("/approval-config/delete.test.action", headers=role_management_headers)
     assert missing.status_code == 404
+
+
+def test_a_warm_check_is_one_database_statement(client):
+    """P95-S2b: with a valid cache entry and no active scope lock, `GET
+    /check` reads once (plus the pool's pre-ping) - before, about a dozen
+    round trips: BEGIN, generations, the row, two per ancestor level for
+    scope locks, COMMIT."""
+    from sqlalchemy import event
+
+    params = {
+        "principal_id": "hot-path",
+        "resource_id": "root",
+        "permission": "document.read",
+        "access_type": "read",
+    }
+    assert client.get("/check", params=params).status_code == 200  # fills the cache
+
+    statements: list[str] = []
+
+    def on_execute(conn, cursor, statement, *_args):
+        statements.append(statement)
+
+    sync_engine = app.state.engine.sync_engine
+    event.listen(sync_engine, "before_cursor_execute", on_execute)
+    try:
+        response = client.get("/check", params=params)
+    finally:
+        event.remove(sync_engine, "before_cursor_execute", on_execute)
+    assert response.status_code == 200
+    real = [s for s in statements if s.strip().lower() not in ("select 1", ";")]
+    assert len(real) == 1, statements

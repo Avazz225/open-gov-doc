@@ -2,6 +2,49 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P95-S2b, permission-service with one read per check, and replicas
+([ADR 0265](docs/adr/0265-permission-hot-path-and-replicas.md)).
+
+**What changed:**
+- **`repository.cached_effective_permissions`:** one SQLAlchemy Core statement in autocommit returns
+  both cache generations, the cached rows valid in both, and whether any scope lock is active.
+  - `/check`, `/check/batch` and `/effective-permissions` use it, and only misses go through the
+    unchanged computing path.
+  - The scope-lock ancestor walk runs only when a lock is active; before, it ran on every single check.
+  - Rows are plain dataclasses, and the hit sensor counts once per read.
+- **Startup cache invalidation removed** (from ADR 0254). With replicas it would have made the cache
+  cold on every new instance.
+- **`dms-registry-client`:** `{ip}` in `DMS_SELF_ADDRESS` registers the instance's own IP.
+- **Compose:**
+  - permission-service registers as `http://{ip}:8000`;
+  - new optional profile `permission-replicas` (`permission-service-replica`, alias
+    `permission-service`, `PERMISSION_SERVICE_EXTRA_REPLICAS`, default 1; off by default).
+- **Helm:** every pod registers under its pod IP (`DMS_POD_IP` via the downward API). Before, all
+  replicas of a service registered the Service name; `helm lint`/`template` are fine (via
+  `alpine/helm:3.14.0`).
+
+**Checks:**
+- **Bench (k6 against permission-service, cgroup CPU):**
+  - one process: check 311 → 488–528/s (CPU 3.2 → 1.9–2.0 ms); batch of 50 317 → 346–361/s (CPU
+    3.1 → 2.8 ms);
+  - three instances against one at 50 VUs: check 1,412 vs 437/s (p50 28 vs 97 ms), batch 997 vs 304/s.
+  
+  A first bench with a Python httpx client was limited by the client, not the service. The k6 scripts
+  are in the scratchpad, not in the repo.
+- **Live:**
+  - three instances registered with their own IPs, deregistered on stop;
+  - monitoring sees three `exported_instance` values with their own sensors;
+  - a warm check is one SQL statement (test).
+- **Tests:** permission-service 226 (+3: lookup validity in both generations, the lock flag, one
+  statement per warm check), all earlier race and scope tests unchanged and green. dms-registry-client
+  9 (+1; a stale test from the P88 sensor format corrected).
+- **Containers:** permission-service rebuilt. The stack runs with one instance by default.
+
+**Next session:** P95-S2c (measure again: base and extended k6 with permission-service at 1 and 3
+instances, cold cache, py-spy; the report is the baseline for the Rust go/no-go).
+
+---
+
 **Last completed:** P95-S2a, queue groups in the event bus
 ([ADR 0264](docs/adr/0264-event-bus-queue-groups.md)).
 

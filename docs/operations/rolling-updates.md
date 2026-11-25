@@ -58,6 +58,13 @@ reachable — no time window with no service at all.
     dev stack.
   - **Helm:** the same holds for the Kubernetes `RollingUpdate` (the surge pod joins the group) and for
     `autoscaling`.
+- **Every instance registers under its own address since P95-S2b**
+  ([ADR 0265](../adr/0265-permission-hot-path-and-replicas.md)):
+  - **Helm:** the pod IP (`DMS_POD_IP`);
+  - **compose:** `{ip}` in `DMS_SELF_ADDRESS`, for permission-service and its optional replicas.
+
+  With several instances behind one name, monitoring now scrapes each of them, and the gateway routes to
+  each.
 - **No actual container automation as a live service** (the P10-S1
   boundary still stands): `rolling-update.sh` is a script executed by a
   human/CI, not a permanently running

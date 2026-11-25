@@ -49,3 +49,9 @@ Against a real running `registry-service` instance (no mock):
 cd infra && docker compose up -d postgres nats registry-service && cd ..
 uv run pytest libs/dms-registry-client/tests
 ```
+
+## `{ip}` in the self-address (P95-S2b)
+
+`DMS_SELF_ADDRESS=http://{ip}:8000` registers the instance under its own IP (`resolve_self_address`). Use it
+when several instances share one DNS name. Otherwise monitoring scrapes, and the gateway routes to,
+whichever instance the name resolves to.

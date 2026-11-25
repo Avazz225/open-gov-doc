@@ -40,9 +40,9 @@ def build_sensors(registry: SensorRegistry, app=None) -> None:
     _rebuild = registry.histogram(REBUILD_DURATION)
 
 
-def count_lookup(hit: bool) -> None:
-    if _lookups is not None:
-        _lookups.inc(result="hit" if hit else "miss")
+def count_lookup(hit: bool, n: int = 1) -> None:
+    if _lookups is not None and n:
+        _lookups.inc(n, result="hit" if hit else "miss")
 
 
 def count_invalidation(scope: str = "global", n: int = 1) -> None:

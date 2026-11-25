@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import logging
+import socket
 import uuid
 
 import httpx
@@ -108,6 +109,17 @@ class RegistryRegistration:
         await self._client.aclose()
 
 
+def resolve_self_address(self_address: str) -> str:
+    """`{ip}` in the address becomes this instance's own IP (P95-S2b): with
+    several replicas behind one service name, each must register where it
+    itself is reachable - otherwise monitoring scrapes (and the gateway
+    routes to) whichever replica the shared name resolves to, and every
+    replica's sensors look like one instance's."""
+    if "{ip}" not in self_address:
+        return self_address
+    return self_address.replace("{ip}", socket.gethostbyname(socket.gethostname()))
+
+
 async def maybe_start_registration(
     *,
     registry_service_base_url: str | None,
@@ -130,7 +142,7 @@ async def maybe_start_registration(
         registry_base_url=registry_service_base_url,
         service_type=service_type,
         version=version,
-        address=self_address,
+        address=resolve_self_address(self_address),
         health_endpoint=health_endpoint,
         capabilities=capabilities,
         sensors=sensors,

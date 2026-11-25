@@ -1,11 +1,12 @@
 import logging
 import time
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import and_, delete, or_, select, tuple_
+from sqlalchemy import and_, delete, exists, func, literal, or_, select, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from permission_service import metrics
 from permission_service.models import (
@@ -158,6 +159,105 @@ async def _cache_generations(session: AsyncSession, principal_id: str) -> tuple[
         )
     ).one()
     return row[0] or 0, row[1] or 0
+
+
+@dataclass(slots=True)
+class CachedEntry:
+    """A valid cache row as the hot path returns it - the same fields as
+    `EffectivePermissionCache`, without building an ORM-mapped object per
+    row (measurably expensive for a batch of 50, P95-S2b)."""
+
+    principal_id: str
+    resource_id: str
+    roles: list[str]
+    permissions: list[str]
+    computed_at: datetime
+    generation: int
+    principal_generation: int
+
+
+@dataclass
+class CachedLookup:
+    """What one read of the hot path returns (P95-S2b): the valid cache
+    entries among the requested resources, and whether any scope lock is
+    active at all (usually not - then nobody walks the ancestors)."""
+
+    entries: dict[str, CachedEntry]
+    any_lock_active: bool
+
+
+async def cached_effective_permissions(
+    engine: AsyncEngine, principal_id: str, resource_ids: list[str]
+) -> CachedLookup:
+    """The read side of `/check`, `/check/batch` and `/effective-permissions`
+    in **one** statement, outside a transaction (P95-S2b, ADR 0257 §3b):
+    the global and the principal's generation, the cached rows that match
+    both, and whether a scope lock is active. Before, a single check took
+    about a dozen round trips (pre-ping, BEGIN, generations, the row through
+    the ORM, two queries per ancestor level for scope locks, COMMIT).
+
+    Same validity rule as `get_effective_permissions` (ADR 0239/0263): a row
+    counts only while both generations still match - here compared in the
+    same snapshot it is read in. Misses are left to the caller, which
+    computes them through the unchanged path."""
+    cache = EffectivePermissionCache.__table__
+    generations = select(
+        func.coalesce(
+            select(PermissionCacheGeneration.generation)
+            .where(PermissionCacheGeneration.id == CACHE_GENERATION_ROW_ID)
+            .scalar_subquery(),
+            0,
+        ).label("g"),
+        func.coalesce(
+            select(PrincipalCacheGeneration.generation)
+            .where(PrincipalCacheGeneration.principal_id == principal_id)
+            .scalar_subquery(),
+            0,
+        ).label("pg"),
+        exists()
+        .where(ScopeLock.released_at.is_(None))
+        .where(or_(ScopeLock.expires_at.is_(None), ScopeLock.expires_at > func.now()))
+        .label("locked"),
+    ).subquery()
+    stmt = select(
+        generations.c.locked,
+        cache.c.resource_id,
+        cache.c.roles,
+        cache.c.permissions,
+        cache.c.computed_at,
+        cache.c.generation,
+        cache.c.principal_generation,
+    ).select_from(
+        generations.outerjoin(
+            cache,
+            and_(
+                cache.c.principal_id == literal(principal_id),
+                cache.c.resource_id.in_(resource_ids),
+                cache.c.generation == generations.c.g,
+                cache.c.principal_generation == generations.c.pg,
+            ),
+        )
+    )
+    async with engine.connect() as conn:
+        conn = await conn.execution_options(isolation_level="AUTOCOMMIT")
+        rows = (await conn.execute(stmt)).all()
+    entries = {}
+    for row in rows:
+        if row.resource_id is None:
+            continue
+        entries[row.resource_id] = CachedEntry(
+            principal_id=principal_id,
+            resource_id=row.resource_id,
+            roles=row.roles,
+            permissions=row.permissions,
+            computed_at=row.computed_at,
+            generation=row.generation,
+            principal_generation=row.principal_generation,
+        )
+    # Counted once per read, not per row (a per-row sensor call was 5 % of a
+    # batch's CPU).
+    metrics.count_lookup(hit=True, n=len(entries))
+    return CachedLookup(entries=entries, any_lock_active=bool(rows and rows[0].locked))
 
 
 async def current_cache_generation(session: AsyncSession) -> int:

@@ -119,6 +119,15 @@ async def test_stop_deregisters_instance():
     assert instance is None
 
 
+SENSOR = {
+    "name": "test.sensor",
+    "group": "test",
+    "cost": 2,
+    "description": "x",
+    "default_enabled": True,
+}
+
+
 async def test_start_registers_sensor_declarations():
     service_type = _service_type()
     registration = RegistryRegistration(
@@ -127,15 +136,15 @@ async def test_start_registers_sensor_declarations():
         version="0.1.0",
         address="http://localhost:9999",
         heartbeat_interval_seconds=60,
-        sensors=[{"name": "test.sensor", "group": "test", "cost": "cheap", "description": "x"}],
+        # The current declaration format (cost as a level, P88-S2b; the test
+        # still sent the old "cheap" string until P95-S2b).
+        sensors=[SENSOR],
     )
     await registration.start()
     try:
         instance = await _get_instance(service_type, registration.instance_id)
         assert instance is not None
-        assert instance["sensors"] == [
-            {"name": "test.sensor", "group": "test", "cost": "cheap", "description": "x"}
-        ]
+        assert instance["sensors"] == [SENSOR]
     finally:
         await registration.stop()
 
@@ -178,3 +187,17 @@ async def test_unreachable_registry_does_not_raise(bad_url):
     )
     await registration.start()
     await registration.stop()
+
+
+def test_self_address_with_ip_placeholder_resolves_to_this_instance():
+    """P95-S2b: replicas behind one service name each register their own
+    address."""
+    import socket
+
+    from dms_registry_client.client import resolve_self_address
+
+    own_ip = socket.gethostbyname(socket.gethostname())
+    assert resolve_self_address("http://{ip}:8000") == f"http://{own_ip}:8000"
+    assert resolve_self_address("http://permission-service:8000") == (
+        "http://permission-service:8000"
+    )

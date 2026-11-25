@@ -145,3 +145,7 @@ virus-scan's check). Every hop costs 2.5–4 ms of the service's own request han
   argument).
 - Every service picks up the new pool defaults on its next build. The phase-close regression runs again
   because a shared library changed.
+
+**Note (P95-S2b, [ADR 0265](0265-permission-hot-path-and-replicas.md)):** the startup invalidation of
+Decision 1 is removed. Every installation has started since P89, and with replicas each new instance
+would have made the whole cache cold.

@@ -324,8 +324,16 @@ unverändert beim globalen Secret. */}}
   value: {{ include "dms.natsUrl" .root | quote }}
 - name: DMS_REGISTRY_SERVICE_BASE_URL
   value: {{ printf "http://%s-registry-service:8000" (include "dms.fullname" .root) | quote }}
+{{/* P95-S2b: each pod registers under its own IP, not the Service name -
+with several replicas (autoscaling, a rolling update's surge pod) monitoring
+must scrape every pod, and the gateway route to each, instead of whichever
+pod the Service hands out. */}}
+- name: DMS_POD_IP
+  valueFrom:
+    fieldRef:
+      fieldPath: status.podIP
 - name: DMS_SELF_ADDRESS
-  value: {{ printf "http://%s:8000" (include "dms.serviceFullname" .) | quote }}
+  value: "http://$(DMS_POD_IP):8000"
 {{- if .root.Values.tracing.enabled }}
 {{/* Distributed tracing (P94-S1, ADR 0250): the bundled collector or an
 external one; the ratio is the start value until monitoring-service's
