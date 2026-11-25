@@ -280,6 +280,21 @@ workflow_my_tasks p50 3.0 s, case_list 2.5 s, list_folder 427 ms.
 - **Cleaned up afterwards:** the 6,336 load-test circulations were terminated. The open load-test cases
   remain, because cases cannot be deleted.
 
+**rendering-service falls behind under load.**
+- Its `document.>` consumer runs one message at a time, at 100 % of one core.
+- After the runs of P95-S1 and P95-S1e it was 229,819 events behind, finishing about one per second
+  against about 12 uploads per second under load.
+- The regression's two rendering integration tests timed out because of it: their event was at the end of
+  that queue.
+- **Fixed for the dev stack:** the consumer was moved to the end of the stream. The skipped events were
+  almost all load-test uploads, already trashed by k6.
+- The throughput itself is P95-S1f.
+- It is the one service whose own (native) work doesn't keep pace. It is still no Rust candidate: the
+  work happens in the conversion libraries.
+
+**Scheduled as P95-S1f** (user decision 2026-11-25): `eligible=me` in SQL, `GET /cases` paged, rendering
+throughput, the k6 teardown terminating its circulations, and two extended runs back to back.
+
 ### For the Rust question (P95-S2)
 
 - **The algorithmic and configuration problems of the first measurement are fixed and measured.** What

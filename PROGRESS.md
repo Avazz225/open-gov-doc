@@ -2,6 +2,60 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P95-S1e, second measurement
+([report](docs/operations/performance-ranking.md#second-measurement-p95-s1e-2026-11-25)).
+
+**Results:**
+- **Base run:** 74,330 requests, goodput 100 % (before 99.93 %), p95/p99 2–3× lower on every action
+  (list_folder p99 292 → 81 ms, upload p99 798 → 241 ms).
+  - CPU per request: permission 4.4 → 3.7 ms, document 6.1 → 5.0, folder 5.4 → 4.5, gateway
+    4.0 → 3.3.
+  - Mean end-to-end time of the sampled requests 46 → 31 ms.
+  - The ranking order is unchanged: permission first, then document and gateway.
+- **Extended run:** 70,044 requests (before 11,336), errors 0.39 % (before 16.9 %; almost all the
+  gateway's fail-fast `503` for workflow-service), goodput 79 % (before 26 %). list_folder p50
+  2,269 → 27 ms, workflow_my_tasks 30 s → 1.2 s, mail_inbound 4.9 s → 14 ms.
+- **Per fix:**
+  - gateway lookups 48 % → 0 of samples;
+  - cold 1,000-child listing 3,744 → 285 ms, warm after an unrelated grant (57 ms);
+  - HMAC in permission-service 3–4 % → 0.2 % (base).
+
+**Done along the way:**
+- **workflow-service and case-service pools:** 8 + 4 and 4 + 4, compose and Helm (ADR 0263 addendum).
+  workflow-service had spent 75 % of its request time waiting for one of its 5 connections.
+- **Load-test leftovers:** 6,336 load-test circulations terminated. 5,822 open load-test cases remain,
+  because cases cannot be deleted.
+- **rendering-service backlog (dev stack):** its `document.>` consumer was 229,819 events behind (one
+  message/s against about 12 uploads/s under load). It was moved to the end of the stream (recreated
+  with `deliver_subject`, see below); the skipped events were almost all trashed load-test uploads.
+- **cmis-connector:** `test_delete_tree_cascades_documents_and_subfolders` now waits up to 15 s for the
+  event-driven node deletion instead of reading at once. It failed in the regression because
+  permission-service was still working through earlier events.
+- **`loadtest/summarize_run.py`:** reproduces the P95-S1 table exactly. The loadtest README notes that
+  the extended scenario leaves state behind.
+
+**Findings → P95-S1f** (user decision 2026-11-25, before P95-S2): a second extended run on the first
+run's leftovers degraded (goodput 54 %). Two paths grow with the data:
+- `GET /tasks?eligible=me` filters lanes and route steps in Python;
+- `GET /cases` is not paged.
+
+Plus rendering throughput, the k6 teardown, and two extended runs back to back.
+
+**Checks:**
+- **Phase-close regression:** all 32 services green, **3,316 tests**, ruff green. The first pass had 4
+  failures: cmis-connector 1 (timing, fixed), document-service 1 (passes on repeat), rendering-service 2
+  (the backlog). The three services were repeated in full: green.
+- **Measurement:** with the same settings as P95-S1 (tracing 10 %, py-spy windows), files in
+  `loadtest/results/*-20261125.json` (gitignored).
+
+**Note on NATS:** a durable push consumer can only be recreated by hand with a `deliver_subject`.
+Without it, the nats-py client refuses to bind (`config.deliver_subject is required`).
+
+**Next session:** P95-S1f (`eligible=me` in SQL, `GET /cases` paged, rendering throughput, k6 teardown,
+measure again).
+
+---
+
 **Last completed:** P95-S1d, permission cache and DB pool
 ([ADR 0263](docs/adr/0263-scoped-permission-cache-and-pool-sizing.md)).
 

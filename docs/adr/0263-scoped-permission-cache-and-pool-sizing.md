@@ -113,3 +113,16 @@ handshakes. P95-S1e measures the full profiles.
   - Existing rows get `principal_generation = 0`, which matches a principal without a counter row, so
     they stay valid.
   - The startup invalidation (ADR 0254) still clears everything once per start.
+
+## Addendum (P95-S1e): workflow-service and case-service pools
+
+The second measurement showed two more pools at their limit under the extended scenario:
+- **workflow-service:** at 2 + 3 for the whole run. 75 % of its request time was pool checkout (the
+  SQLAlchemy instrumentation's `connect` span measures every checkout, not only new connections).
+- **case-service:** at its 5 at peaks.
+
+They now get 8 + 4 and 4 + 4 (compose and Helm). The Helm budget at full autoscaling goes from about 370
+to about 400, within `postgresql.maxConnections: 500`.
+
+**Not yet measured in isolation:** the run after the change started on the first run's leftovers and
+isn't comparable. P95-S1f measures it.

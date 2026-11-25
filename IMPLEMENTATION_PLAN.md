@@ -5007,6 +5007,47 @@ by the pilot's numbers, not a committed rewrite of all of them (see ADR 0257's c
 - **P95-S1e — Measure again.** Both k6 scenarios, the cold-cache measurement and the py-spy profiles with
   the same tools and settings as P95-S1; the ranking report updated with before/after per fix. Phase-close
   style full regression. This is the basis for P95-S2.
+  - **Result** ([report, second measurement](docs/operations/performance-ranking.md#second-measurement-p95-s1e-2026-11-25)):
+    - **Base:** goodput 100 %, p95/p99 2–3× lower; permission CPU per request 4.4 → 3.7 ms; mean e2e of
+      the sampled requests 46 → 31 ms.
+    - **Extended:** no collapse. 70,044 requests instead of 11,336, errors 0.39 % (almost all the
+      gateway's intended `503`), goodput 79 %.
+    - **Per fix:**
+      - gateway lookups 48 % → 0 of samples;
+      - workflow_my_tasks 30 s → 1.2 s;
+      - mail_inbound 4.9 s → 14 ms;
+      - cold listing 3,744 → 285 ms;
+      - HMAC 3–4 % → 0.2 %.
+    - **New, done in this session:**
+      - workflow-service and case-service pools 8 + 4 and 4 + 4 (ADR 0263 addendum).
+      - The rendering consumer moved to the stream's end on the dev stack: it was 230,000 events
+        behind, and two rendering tests timed out because of it.
+      - A test that read an event-driven state too early now waits (cmis-connector).
+      - `loadtest/summarize_run.py`.
+    - **New, open → P95-S1f:** a second extended run on the first run's leftovers degraded. That
+      exposed `eligible=me` filtering in Python and `GET /cases` unpaged; rendering throughput too.
+    - **The order for P95-S2 is unchanged:** permission- and gateway-service.
+    - **Phase-close regression:** all 32 services green, 3,316 tests, ruff green, after the three
+      corrections above.
+- **P95-S1f — What the second measurement found (user decision 2026-11-25: before P95-S2).**
+  - **workflow-service `GET /tasks?eligible=me` in SQL:**
+    - The ready-task index gets the task's responsible party: a circulation step's assignee, or a lane
+      binding (principal, group or role).
+    - It is kept by `_save_state`, by route changes (the current step) and by lane-binding changes (all
+      running instances of that definition).
+    - The query filters by the caller, their groups and roles, so the cost no longer grows with tasks
+      assigned to others.
+  - **case-service `GET /cases`:** paged (`limit`/`offset`, default 100, at most 500), user-ui callers
+    adapted. The load test lists open cases, and two runs left 5,822.
+  - **rendering-service throughput:** the `document.>` consumer runs one message at a time and fell
+    230,000 events behind (one message/s against about 12 uploads/s under load; two rendering tests
+    failed in the regression for that reason).
+    - Parallel rendering per process (`max_concurrency`, bounded by CPU).
+    - A sensor for the consumer's backlog.
+    - Whether a second replica (queue group) is the better lever.
+  - **k6 extended teardown:** terminates the circulations its users started.
+  - **Measure again:** two extended runs back to back, to show the second one no longer degrades. This
+    also isolates the workflow and case pool change of P95-S1e. Report updated.
 - **P95-S2 — Scoping: migrating services to Rust (ADR 0257). No code.**
   - **Selection:** from S1's ranking, only services where own compute or memory dominates. Not
     I/O-bound ones, where tuning (queries, caching, batching, pools) is the cheaper fix.

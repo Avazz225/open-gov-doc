@@ -4,6 +4,7 @@ laufenden Container (kein In-Prozess-`TestClient`, kein Mocking der
 Nachbar-Services)."""
 
 import os
+import time
 import uuid
 
 import httpx
@@ -303,8 +304,18 @@ def test_delete_tree_cascades_documents_and_subfolders(real_user):
     # `root` and inherited the "everyone" grant - `200`, not `403`. Fixed at
     # the database level (`ON DELETE CASCADE`), not by special-casing this
     # code path, so any resource hierarchy with the same shape self-heals.
-    detail = httpx.get(
-        f"{DOCUMENT_SERVICE_URL}/documents/{document['cmis:objectId']}",
-        headers={"X-DMS-Principal": "cmis-connector-tests"},
-    )
+    #
+    # The node deletion arrives through the `folder.resource.deleted` event,
+    # so it is eventually consistent: in a full regression permission-
+    # service's consumer can still be working through earlier events when
+    # this read comes (P95-S1e - failed twice that way). Wait for it.
+    deadline = time.monotonic() + 15
+    while True:
+        detail = httpx.get(
+            f"{DOCUMENT_SERVICE_URL}/documents/{document['cmis:objectId']}",
+            headers={"X-DMS-Principal": "cmis-connector-tests"},
+        )
+        if detail.status_code == 403 or time.monotonic() > deadline:
+            break
+        time.sleep(0.2)
     assert detail.status_code == 403
