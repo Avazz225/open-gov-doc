@@ -11,6 +11,9 @@ Read-only. Answer the question, and propose a fix only if asked.
     - which of them grant the permission;
     - active scope locks;
     - the verdict and the deciding step.
+  - It answers for any id, also one that doesn't exist. Check the user in `dms user list` first: user
+    ids are technical ids; if the admin gives a name, look it up, and ask if it's ambiguous.
+  - `groups` lists the user's real groups; `everyone` applies to all and isn't listed there.
   - **Typical causes:**
     - no assignment on the path;
     - a folder with inheritance off;

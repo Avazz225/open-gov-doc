@@ -11,6 +11,7 @@ import typer
 
 from dms_cli import client as gateway_client
 from dms_cli import credentials
+from dms_cli.client import ApiError
 from dms_cli.context import get_client, output_format
 from dms_cli.output import emit
 
@@ -57,4 +58,22 @@ def logout() -> None:
 def whoami(ctx: typer.Context) -> None:
     client = get_client()
     me = client.get("auth-service", "me")
+    # P96-S3: the realm roles alone don't show what the session may do in
+    # OG Doc - add the domain roles effective at the root and whether the
+    # break-glass superuser session is active for this principal. Both are
+    # best effort: a failure leaves them out instead of failing whoami.
+    principal = me.get("sub") if isinstance(me, dict) else None
+    if principal:
+        try:
+            effective = client.get("permission-service", f"effective-permissions/{principal}/root")
+            me["domain_roles"] = sorted(effective.get("roles") or [])
+        except ApiError:
+            pass
+        try:
+            status = client.get("auth-service", "superuser/status")
+            me["superuser_active"] = bool(
+                status.get("active") and status.get("principal_id") == principal
+            )
+        except ApiError:
+            pass
     emit(me, output_format=output_format(ctx))

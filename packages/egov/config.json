@@ -724,16 +724,24 @@
       "name": "Registratur/Aktenverwaltung",
       "description": "Tägliche Aktenverwaltung: Anlegen, Bearbeiten und Ablegen von Akten im Aktenplan (Registratur-Funktion, 14.2).",
       "permissions": [
-        "read",
-        "write"
+        "case.read",
+        "case.write",
+        "document.read",
+        "document.write",
+        "folder.read",
+        "folder.write"
       ]
     },
     {
       "name": "Amtsleitung",
       "description": "Amtsleitung/Behördenleitung: erweiterte Aufsichts- und Freigabebefugnis, u. a. Zugriff trotz aktiver Bereichssperre für dringende Vorgänge (14.2).",
       "permissions": [
-        "read",
-        "write",
+        "case.read",
+        "case.write",
+        "document.read",
+        "document.write",
+        "folder.read",
+        "folder.write",
         "scope_lock.bypass"
       ]
     }

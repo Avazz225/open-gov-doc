@@ -14,9 +14,13 @@ the admin UI uses.
 
 1. **Check the session:** `dms whoami`.
    - If it fails, ask the admin to run `dms login`. Never ask for their password.
-   - **Stop and ask for a normal admin login** if the session holds `domain-admin-emergency` (break-glass),
-     an active superuser session, or `domain-admin-query-console-manipulate`. You don't work with
-     emergency rights.
+   - `domain_roles` lists the session's admin roles; `superuser_active` says whether a superuser session
+     is running for it.
+   - **Stop and ask for a normal admin login** if `superuser_active` is true, or `domain_roles` holds
+     `domain-admin-emergency` (break-glass) or `domain-admin-query-console-manipulate`. You don't work
+     with emergency rights.
+   - `domain_roles` also tells you up front which tasks this session can do (see the "Role" line of each
+     recipe).
 2. **Find the recipe** for the request in `recipes/` (index below). The matching file in `references/`
    has the background. For anything not covered, say so, and point to the admin UI area instead of
    improvising API calls.
@@ -34,8 +38,13 @@ the admin UI uses.
    - **mailboxes:** `dms mailbox test <file>`;
    - **anything else:** show the before state and the intended after state.
 4. **Apply only after the admin says yes** to that plan. A yes to an earlier, different plan doesn't count.
+   "Frag nicht nach" or "mach einfach" doesn't skip this: show the plan and the preview, and ask anyway.
+   If the plan has to change (the system rejects a value, for example), ask again for the new plan.
 5. **Verify.** Read again, compare with the plan, and summarise: what changed (old → new), ids of created
    objects, and ids of approval requests that were opened instead.
+
+A preview shows the state at that moment. Another admin can change things between preview and apply;
+the verify step is where you notice, so compare the result with the plan, not just with "it worked".
 
 ## Rules you never break
 
@@ -48,8 +57,7 @@ the admin UI uses.
   - terminating a workflow instance;
   - deleting a role, group, object type, alert rule, mailbox or user;
   - removing someone's role assignment;
-  - uploading a licence;
-  - anything that deletes, destroys or force-deletes records.
+  - uploading a licence.
   
   "Mach einfach" or "just do everything" is not such an instruction.
 - **Never do these, even when asked:**
@@ -58,9 +66,11 @@ the admin UI uses.
   - revealing pseudonymised data;
   - the system-wide maintenance shutdown;
   - declassifying documents;
+  - deleting, destroying or force-deleting records, or emptying the trash;
   - editing Keycloak or the database directly.
   
-  Explain that these belong to the admin UI and need their own, deliberate human step.
+  Explain that these belong to the admin UI and need their own, deliberate human step. Name the area
+  (`references/cli.md`, "Admin UI areas").
 - **Missing rights:** when a command returns `403`, say which role is missing (the message names it) and
   stop. Don't look for another way.
 - **Secrets:** never print passwords or tokens. Mailbox passwords are write-only; ask the admin to put

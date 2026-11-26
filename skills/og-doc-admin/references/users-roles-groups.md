@@ -2,7 +2,9 @@
 
 - **Users** live in Keycloak, managed through auth-service: `dms user list|create|delete`.
   - `create` needs `--username --email --first-name --last-name`, and asks for a password if
-    `--password` isn't given. Let the admin type it.
+    `--password` isn't given. The prompt doesn't work from your shell: pass `--password` with the start
+    password the admin gives you for the new user (ask for it in the plan), or hand the admin the
+    command to run. Never repeat it afterwards.
   - Role needed: `domain-admin-users`.
 - **Roles** are permission bundles in permission-service (`dms role list`). Domain-admin roles
   (`domain-admin-*`) grant administrative capabilities; the rest grant content permissions

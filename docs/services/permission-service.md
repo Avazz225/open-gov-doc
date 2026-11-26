@@ -430,6 +430,8 @@ and reports for every node:
 
 Then it gives the verdict with a reason:
 - granted at a given node;
+- assignments apply, but none of their roles holds the permission (the roles are named; P96-S3, after a
+  package role with generic `read`/`write` names was reported as "no matching assignment");
 - no assignment along the path;
 - inheritance ended at an `inherit=false` node;
 - blocked by a scope lock;
@@ -438,7 +440,8 @@ Then it gives the verdict with a reason:
 It is computed fresh, never from or into the cache. The valid cached entry, if any, is reported next to
 it (`cached.agrees`), so a stale cache shows up. CLI: `dms permission explain`. Tests: the source and
 deciding node of a group assignment two levels up (agreeing with `/check`), broken inheritance, a
-blocking lock with `401`/`403` for the endpoint itself, an unregistered resource.
+blocking lock with `401`/`403` for the endpoint itself, an unregistered resource, a role that lacks the
+permission.
 
 ## One Read per Check; Replicas (P95-S2b, [ADR 0265](../adr/0265-permission-hot-path-and-replicas.md))
 

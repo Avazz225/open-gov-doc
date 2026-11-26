@@ -86,7 +86,7 @@ not yet connected to the CLI until now — this gap was closed directly in the s
 
 | Domain | Commands |
 |---|---|
-| Login | `dms login [--username] [--password] [--gateway-url]`, `dms logout`, `dms whoami` |
+| Login | `dms login [--username] [--password] [--gateway-url]`, `dms logout`, `dms whoami` (also `domain_roles` at the root and `superuser_active`, P96-S3) |
 | Configuration | `dms config show`, `dms config set-gateway-url <url>` |
 | Configuration import/export & comparison (7.3/7.5) | `dms config export [--category]... [--file out.json]`, `dms config compare <compare.json> [--base base.json] [--category]... [--ignore-regex '{"*": "..."}']` |
 | Query & trace (6.1) | `dms query events list [--actor] [--subject] [--event-type] [--since] [--until] [--limit]`, `dms query text "<...>"`, `dms query manipulation-mode status\|activate [--minutes]\|deactivate`, `dms query manipulate dry-run --action <type> --param k=v...`, `dms query manipulate execute --dry-run-token <token>`, `dms query approvals list\|approve <id> [--approved-by]` |

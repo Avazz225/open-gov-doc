@@ -1,3 +1,5 @@
+import json
+
 import httpx
 from dms_cli import client as client_module
 from dms_cli import credentials
@@ -89,6 +91,52 @@ def test_whoami_json_output(cli_home, runner, logged_in, mock_transport_factory)
 
     assert result.exit_code == 0, result.output
     assert '"username": "alice"' in result.output
+
+
+def test_whoami_adds_domain_roles_and_superuser_state(
+    cli_home, runner, logged_in, mock_transport_factory
+):
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/api/auth-service/me":
+            return httpx.Response(200, json={"sub": "u1", "preferred_username": "alice"})
+        if path == "/api/permission-service/effective-permissions/u1/root":
+            return httpx.Response(
+                200, json={"roles": ["domain-admin-users", "domain-admin-config"]}
+            )
+        if path == "/api/auth-service/superuser/status":
+            return httpx.Response(200, json={"active": True, "principal_id": "u1"})
+        raise AssertionError(f"unexpected request {path}")
+
+    mock_transport_factory(handler)
+
+    result = runner.invoke(app, ["-o", "json", "whoami"])
+
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert data["domain_roles"] == ["domain-admin-config", "domain-admin-users"]
+    assert data["superuser_active"] is True
+
+
+def test_whoami_superuser_of_someone_else_is_not_active_and_errors_are_skipped(
+    cli_home, runner, logged_in, mock_transport_factory
+):
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/api/auth-service/me":
+            return httpx.Response(200, json={"sub": "u1", "preferred_username": "alice"})
+        if path.startswith("/api/permission-service/"):
+            return httpx.Response(403, json={"detail": "Fehlende Domain-Admin-Rolle"})
+        return httpx.Response(200, json={"active": True, "principal_id": "someone-else"})
+
+    mock_transport_factory(handler)
+
+    result = runner.invoke(app, ["-o", "json", "whoami"])
+
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert "domain_roles" not in data
+    assert data["superuser_active"] is False
 
 
 def test_invalid_output_format_rejected(cli_home, runner):

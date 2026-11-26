@@ -6,6 +6,8 @@
 **New version:** `dms workflow definitions list`, then `dms workflow definitions upload antrag.bpmn --name <family>`.
 Running instances stay on their version. Migrate them only on request:
 `dms workflow instances migration-preview <id> --to <new-definition-id>`, then `migrate` with `--reason`.
+Operations that take `--expected-version` want the instance's `workflow_version` field from
+`dms -o json workflow instances get <id>` (it guards against changes in between).
 
 **Instance operations:**
 1. `dms workflow instances get <id>` and `dms workflow instances tasks <id>`.
@@ -13,4 +15,11 @@ Running instances stay on their version. Migrate them only on request:
 3. After a yes: `skip <id> <task-id> --reason …`, or `send-back <id> --to <task-id> --reason …`.
 4. **Verify:** `dms workflow instances tasks <id>`.
 
-**Note:** `terminate` ends an instance for good. Only on an explicit instruction for that instance.
+**Terminate** (ends an instance for good):
+1. `dms workflow instances get <id>`: status, definition, open tasks.
+2. Name the consequence: the instance ends as `terminated`, open tasks are withdrawn, it can't be
+   resumed. Ask, even if the request already said "beenden", unless the admin confirmed exactly this
+   instance and the consequence.
+3. After an explicit yes for that instance: `dms workflow instances terminate <id> --reason "…"` (the
+   reason is logged; use the admin's words).
+4. **Verify:** `dms workflow instances get <id>` shows `terminated`.

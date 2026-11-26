@@ -4,7 +4,9 @@
 **Role:** domain-admin-monitoring
 
 1. `dms monitoring alert-rule list`: is there a rule already? (`Speicherziel fast voll` ships in
-   `packages/monitoring-defaults`.) If yes, offer to adjust it instead of adding one.
+   `packages/monitoring-defaults`.) If yes, show it with its thresholds and current value and level
+   (`dms -o json monitoring alert-rule list`), and offer to adjust it instead of adding one. If the admin
+   keeps it as it is, you're done: no preview, nothing to apply.
 2. `dms monitoring sensors`: pick the sensor (`storage.target.used_percent` for storage fill level).
 3. Write the rule:
    `{"name": "...", "sensor": "storage.target.used_percent", "aggregation": "max", "max_warning": 80, "max_error": 90, "warning_repeat": 3, "error_repeat": 2, "description": "..."}`.

@@ -5,6 +5,12 @@
 
 **Pending requests:** `dms approvals list`, then `dms approvals show <id>` for details. Explain who
 initiated it and what it would do. **Never approve.**
+- Many requests: `dms -o json approvals list` into a file, count by `action_type` and initiator, and show
+  the newest few. `--action-type <type>` narrows the list.
+- `initiated_by` is a user id; `dms user list` gives the name. Ids that aren't in the list are technical
+  or test accounts; say so instead of guessing.
+- Very old requests nobody will approve can be rejected, but only per request and on the admin's
+  explicit instruction (note below).
 
 **Switching on or off:**
 1. `dms -o json config export --category approval_config`.

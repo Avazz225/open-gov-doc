@@ -1473,6 +1473,17 @@ async def explain_permission(
         verdict, reason = False, f"Gesperrt durch Bereichssperre {blocking[0]['lock_id']}."
     elif granted_at is not None:
         verdict, reason = True, f"Gewährt durch eine Zuweisung am Knoten {granted_at}."
+    elif applicable_roles := sorted(
+        {assignment["role"] for step in steps for assignment in step["assignments"]}
+    ):
+        # P96-S3: assignments apply, but none of their roles carries the
+        # permission - say so instead of blaming the path, so the diagnosis
+        # points at the role definition.
+        verdict, reason = (
+            False,
+            f"Zuweisungen vorhanden, aber keine der Rollen ({', '.join(applicable_roles)}) "
+            f"enthält die Berechtigung {permission!r}.",
+        )
     elif stopped_by_inherit:
         verdict, reason = (
             False,

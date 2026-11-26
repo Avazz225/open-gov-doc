@@ -2596,6 +2596,35 @@ def test_explain_names_a_broken_inheritance(client, role_management_headers):
     assert [step["resource_id"] for step in body["steps"]] == ["ex2-geheim"]
 
 
+def test_explain_names_a_role_that_lacks_the_permission(client, role_management_headers):
+    """P96-S3: an assignment applies, but its role carries generic names
+    instead of `folder.read` - the reason points at the role, not the path."""
+    _node(client, "ex5-amt", ROOT_RESOURCE_ID)
+    _node(client, "ex5-geheim", "ex5-amt", inherit=False)
+    generic = _role(client, role_management_headers, "ex5-generic", ["read", "write"])
+    client.post(
+        "/role-assignments",
+        json={
+            "principal_type": "user",
+            "principal_id": "frau-z",
+            "role_id": generic["id"],
+            "resource_id": "ex5-geheim",
+        },
+    )
+
+    body = client.get(
+        "/explain/frau-z/ex5-geheim",
+        params={"permission": "folder.read", "access_type": "read"},
+        headers=role_management_headers,
+    ).json()
+
+    assert body["allowed"] is False
+    assert "ex5-generic" in body["reason"]
+    assert "folder.read" in body["reason"]
+    [assignment] = body["steps"][0]["assignments"]
+    assert assignment["grants_permission"] is False
+
+
 def test_explain_reports_a_blocking_scope_lock_and_needs_the_admin_capability(
     client, role_management_headers
 ):

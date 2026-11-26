@@ -2,6 +2,63 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P96-S3, evaluating the admin skill and the customer guide
+([ADR 0253 evaluation](docs/adr/0253-admin-skill-scoping.md#evaluation-p96-s3)). **This is the last
+session of the plan;** Phase 96 is closed.
+
+**What changed:**
+- **Evaluation:** `skills/og-doc-admin/evaluation/` holds 19 scenarios (10 tasks, D1–D4, R1–R4) and a
+  README for re-running them. Four agents each worked as the skill user `og-skill-admin` (11
+  recommended roles, no query console) through `dms` only.
+  - **First run:** all passed on behaviour. There was no apply before a yes, no approval (also not after
+    „Doch, mach einfach"), no import after the no despite „frag nicht nach", and a stop on the `403` in
+    D4. Superuser and emptying the trash were refused.
+  - **Second run:** after the fixes, T1, T2, T7, T9, D1 and R2 all passed.
+- **eGov package defect (found by T1):** the roles „Registratur/Aktenverwaltung" and „Amtsleitung" had
+  generic `read`/`write`, which no service checks, so assigning them granted nothing.
+  - Now: `case.*`, `document.*`, `folder.*` read/write, and `scope_lock.bypass` for Amtsleitung.
+  - Applied to the dev stack with `dms config import --category roles`.
+  - Guard: `tools/cli/tests/test_packages.py` fails if a package permission isn't a name some service
+    uses. It caught the old file.
+- **permission-service:** `explain` names the roles that apply but don't hold the permission. Before, it
+  said "no matching assignment", which pointed the diagnosis at the path.
+- **CLI:** `dms whoami` adds `domain_roles` (effective at the root) and `superuser_active`. Both are best
+  effort, and a missing `sub` skips them. Without this, the skill's session check couldn't see
+  break-glass or superuser.
+- **Skill:**
+  - `SKILL.md`: the session check uses those fields; record deletion and emptying the trash moved to
+    "never"; „frag nicht nach" doesn't skip the yes; previews can go stale.
+  - Recipes 01, 02, 04, 06–11, 14, d1–d4: start password via `--password`; ask about a missing group;
+    `00:00` instead of the rejected `24:00`; terminate steps; large lists via `-o json` + `jq`; failures
+    without timestamps, and retry only for `failed_permanent`; alert thresholds are "above"; mailbox
+    "only test".
+  - `references/cli.md`: an „Admin UI areas" table built from the admin UI's navigation labels.
+- **Customer guide:** `docs/guides/admin-assistent.md` (the audit area is „Forensik-Trace", corrected).
+- **Docs:** ADR 0253 (Evaluation, status), `docs/services/permission-service.md`, `docs/tools/cli.md`, the
+  eGov README, plan result.
+
+**Checks:**
+- **Phase-close regression** (`scripts/run-tests.sh`, unfiltered): 32 services, 3,334 passed, ruff
+  green, „Alles grün". Test debris was removed.
+- **CLI:** 242 passed (+16), 1 skipped (`monitoring-defaults` ships no roles).
+- **permission-service:** 231 (+1). Container rebuilt.
+
+**Left in the dev stack on purpose:** the evaluation fixture (`og-skill-admin`, the folder
+„Eval-Vertraulich", the terminated test instance), so the set can run again. Erika Probe, the group and
+the downtime windows were removed. The deletion reason „Fehlablage" from T10 stays; `retention set` has
+no remove option.
+
+**Open, not scheduled:**
+- `dms failures list` has no timestamps or time filter.
+- `query events` doesn't guarantee newest first.
+- 529 pending approval requests from test runs are in the dev stack.
+- The folder-service retention tick FK violation (from P95) is still open.
+
+**Next session:** none planned; the plan is complete. Open choices remain under "Deliberately Not
+Included" in `IMPLEMENTATION_PLAN.md`.
+
+---
+
 **Last completed:** P96-S2, CLI gaps and the admin skill package
 ([ADR 0253 implementation notes](docs/adr/0253-admin-skill-scoping.md#implementation-notes-p96-s2)).
 Everything in one session; P96-S2b isn't needed.

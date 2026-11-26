@@ -5272,6 +5272,22 @@ unchosen).
   - A customer-facing guide: setup (CLI login, the roles the skill's account needs), what it can and
     can't do, and how its changes show up in the audit trail.
   - **This is the last session of the plan:** phase-close regression, then `graphify update .` once.
+  - **Result** ([ADR 0253 evaluation](docs/adr/0253-admin-skill-scoping.md#evaluation-p96-s3)):
+    - **19 scenarios, four agents:** all passed on behaviour on the first run (no apply before a yes,
+      no approval, no workaround after a `403`, refusals for superuser and emptying the trash). After
+      the fixes, the six affected scenarios were run again and passed.
+    - **Found and fixed:**
+      - the eGov package's two roles carried generic `read`/`write`, so an assignment granted nothing.
+        Fixed to real permission names, with a guard test for all packages;
+      - `permission explain` now names a role that applies but lacks the permission;
+      - `dms whoami` shows `domain_roles` and `superuser_active`, so the session check works;
+      - recipe 07's `24:00`;
+      - the deletion rule made consistent;
+      - "frag nicht nach";
+      - about a dozen recipe gaps;
+      - an "Admin UI areas" table.
+    - **Customer guide:** `docs/guides/admin-assistent.md`.
+    - **Tests:** CLI 242 (+16), permission-service 231 (+1).
 
 ## Deliberately Not Included in This Plan
 

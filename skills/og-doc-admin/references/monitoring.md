@@ -24,4 +24,4 @@
 - **The standard rules** are in `packages/monitoring-defaults/config.json` (storage 80/90 %, failed
   transfers, old locks, ...). Applying the package is often better than writing a rule by hand.
 - **Downtime windows** suppress alerts for some or all rules: once (`starts_at`/`ends_at`) or weekly
-  (`weekdays` 0=Monday, `daily_start`/`daily_end` "HH:MM"). `rule_ids` empty means every rule.
+  (`weekdays` 0=Monday, `daily_start`/`daily_end` "HH:MM"). `rule_ids` `null` or empty means every rule.
