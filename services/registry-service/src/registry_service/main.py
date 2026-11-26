@@ -197,6 +197,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ADD COLUMN IF NOT EXISTS sensors JSON DEFAULT '[]'::json NOT NULL"
             )
         )
+        # Logger catalog (P97-S1, ADR 0267) - same additive pattern.
+        await conn.execute(
+            text(
+                "ALTER TABLE registry.service_instance "
+                "ADD COLUMN IF NOT EXISTS loggers JSON DEFAULT '[]'::json NOT NULL"
+            )
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 

@@ -7,13 +7,14 @@ from datetime import UTC, datetime
 
 import httpx
 from dms_common import configure_logging
+from dms_common.logging import apply_log_levels
 from dms_common.otel import set_sampling_ratio, setup_observability
 from dms_common.shutdown import bounded_shutdown_step
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
 from dms_registry_client import maybe_start_registration
-from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
-from monitoring_service import alert_store, alerting, repository, scraper
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response, status
+from monitoring_service import alert_store, alerting, log_levels, repository, scraper
 from monitoring_service.clients import AuthServiceClient, PermissionServiceClient, RegistryClient
 from monitoring_service.models import Base
 from monitoring_service.schemas import (
@@ -24,6 +25,9 @@ from monitoring_service.schemas import (
     DowntimeWindowIn,
     DowntimeWindowOut,
     GlobalSensorConfigIn,
+    LogLevelIn,
+    LogLevelSettingOut,
+    LogLevelsOut,
     SensorConfigOut,
     SensorOut,
     SensorOverrideIn,
@@ -138,6 +142,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Alerting (P88-S5, ADR 0245): one evaluator per tick across replicas.
     app.state.family_types = {}
     alert_task = asyncio.create_task(_alert_loop())
+    # Central log levels (P97-S1, ADR 0267): expiry and this service's own
+    # levels; it hands the configuration out and doesn't poll itself.
+    await run_log_level_tick()
+    log_level_task = asyncio.create_task(_log_level_loop())
 
     startup_end = time.time()
     millis = round((startup_end - startup_start) * 1000, 3)
@@ -147,6 +155,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     alert_task.cancel()
     await bounded_shutdown_step("task alert_task", alert_task)
+    log_level_task.cancel()
+    await bounded_shutdown_step("task log_level_task", log_level_task)
     if registration:
         await bounded_shutdown_step("registration.stop", registration.stop())
     await bounded_shutdown_step("event_bus.close", event_bus.close())
@@ -203,6 +213,34 @@ async def _alert_loop() -> None:
             await run_alert_tick()
         except Exception:
             logger.exception("alert_tick_failed")
+
+
+async def run_log_level_tick(now: datetime | None = None) -> list[dict]:
+    """Removes expired log levels (each announced once, by the replica whose
+    DELETE returned it) and applies the current ones to this process."""
+    now = now or datetime.now(UTC)
+    async with app.state.session_factory() as session:
+        expired = await log_levels.purge_expired(session, now)
+        await session.commit()
+        config = log_levels.distributed(await log_levels.list_active(session, now))
+    for entry in expired:
+        await publish_event(
+            "monitoring.log_levels.expired",
+            subject=entry["scope"],
+            payload=entry,
+            actor="system:monitoring-log-levels",
+        )
+    apply_log_levels(config)
+    return expired
+
+
+async def _log_level_loop() -> None:
+    while True:
+        await asyncio.sleep(settings.log_level_refresh_seconds)
+        try:
+            await run_log_level_tick()
+        except Exception:
+            logger.exception("log_level_tick_failed")
 
 
 app = FastAPI(title=settings.service_name, lifespan=lifespan)
@@ -369,6 +407,149 @@ async def set_sensor_override(
             payload={"enabled": payload.enabled, "actor": x_dms_principal},
         )
     return result
+
+
+# --- Central log levels (P97-S1, ADR 0267) ---------------------------------------
+
+
+def _setting_out(row) -> LogLevelSettingOut:
+    scope = log_levels.Scope.parse(row.scope)
+    return LogLevelSettingOut(
+        scope=row.scope,
+        service=scope.service,
+        logger=scope.logger,
+        level=row.level,
+        expires_at=row.expires_at,
+        updated_by=row.updated_by,
+        updated_at=row.updated_at,
+    )
+
+
+async def _logger_catalog() -> dict[str, list[str]] | None:
+    try:
+        return await app.state.registry_client.service_loggers()
+    except Exception:
+        logger.warning("logger_catalog_unavailable", exc_info=True)
+        return None
+
+
+async def _log_levels_view(session: AsyncSession) -> LogLevelsOut:
+    rows = await log_levels.list_active(session, datetime.now(UTC))
+    config = log_levels.distributed(rows)
+    catalog = await _logger_catalog() or {}
+    services = sorted(
+        set(catalog)
+        | set(config["services"])
+        | {e["service"] for e in config["loggers"] if e["service"] != log_levels.ALL_SERVICES}
+    )
+    return LogLevelsOut(
+        settings=[_setting_out(row) for row in rows],
+        effective=log_levels.effective(config, services),
+        catalog=catalog,
+        debug_default_minutes=settings.log_level_debug_default_minutes,
+        debug_max_minutes=settings.log_level_debug_max_minutes,
+    )
+
+
+@app.get("/log-levels", response_model=LogLevelsOut)
+async def get_log_levels(session: AsyncSession = Depends(get_session)) -> LogLevelsOut:
+    """Settings, what applies per service, and the logger catalog. Ungated
+    like `GET /sensor-config`, which carries the same settings."""
+    return await _log_levels_view(session)
+
+
+async def _require_known_service(scope: log_levels.Scope) -> None:
+    """A typo in a service name would silently match nothing. Checked
+    against the registered services; skipped if the registry can't answer."""
+    if not scope.service or scope.service == log_levels.ALL_SERVICES:
+        return
+    catalog = await _logger_catalog()
+    if catalog and scope.service not in catalog:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unbekannter Dienst {scope.service!r} - registriert: {', '.join(catalog)}",
+        )
+
+
+async def _after_log_level_change(session: AsyncSession) -> None:
+    # This service applies its own levels right away; the others follow with
+    # their next poll (15 s), every replica on its own.
+    apply_log_levels(
+        log_levels.distributed(await log_levels.list_active(session, datetime.now(UTC)))
+    )
+
+
+@app.put("/log-levels", response_model=LogLevelsOut)
+async def set_log_level(
+    payload: LogLevelIn,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> LogLevelsOut:
+    """Sets a level for everything, one service, or one logger. DEBUG always
+    expires (default `log_level_debug_default_minutes`, at most
+    `log_level_debug_max_minutes`)."""
+    await _require_monitoring_permission(x_dms_principal)
+    now = datetime.now(UTC)
+    try:
+        scope = log_levels.make_scope(payload.service, payload.logger)
+        level = log_levels.normalize_level(payload.level)
+        expires_at = log_levels.resolve_expiry(
+            level,
+            now=now,
+            expires_in_minutes=payload.expires_in_minutes,
+            expires_at=payload.expires_at,
+            debug_default_minutes=settings.log_level_debug_default_minutes,
+            debug_max_minutes=settings.log_level_debug_max_minutes,
+        )
+    except log_levels.LogLevelError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await _require_known_service(scope)
+    row, previous = await log_levels.set_level(
+        session, scope, level, actor=x_dms_principal, expires_at=expires_at, now=now
+    )
+    await session.commit()
+    await publish_event(
+        "monitoring.log_levels.changed",
+        subject=scope.key,
+        payload={
+            "scope": scope.key,
+            "level": level,
+            "expires_at": expires_at.isoformat() if expires_at else None,
+            "previous": previous,
+            "actor": x_dms_principal,
+        },
+        actor=x_dms_principal,
+    )
+    await _after_log_level_change(session)
+    return await _log_levels_view(session)
+
+
+@app.delete("/log-levels", response_model=LogLevelsOut)
+async def reset_log_level(
+    service: str | None = None,
+    logger_name: str | None = Query(default=None, alias="logger"),
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> LogLevelsOut:
+    """Removes one setting; the scope falls back to the next broader one
+    (in the end the service's own DMS_LOG_LEVEL)."""
+    await _require_monitoring_permission(x_dms_principal)
+    try:
+        scope = log_levels.make_scope(service, logger_name)
+    except log_levels.LogLevelError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    previous = await log_levels.remove(session, scope)
+    if previous is None:
+        raise HTTPException(status_code=404, detail=f"Keine Einstellung für {scope.key!r}")
+    await session.commit()
+    await publish_event(
+        "monitoring.log_levels.changed",
+        subject=scope.key,
+        payload={"scope": scope.key, "level": None, "previous": previous, "actor": x_dms_principal},
+        actor=x_dms_principal,
+    )
+    await _after_log_level_change(session)
+    return await _log_levels_view(session)
 
 
 # --- Alerting (P88-S5, ADR 0245) -------------------------------------------------

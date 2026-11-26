@@ -7,9 +7,47 @@ import uuid
 import httpx
 
 logger = logging.getLogger(__name__)
-# Set to WARN during development to reduce log output.
-# Later, control logger granularity via XML or JSON config management.
+# httpx logs every request at INFO; quiet by default. Since P97-S1 (ADR 0267)
+# this is only the default: monitoring-service's log-level settings can raise
+# or lower it per service at runtime.
 logging.getLogger("httpx").setLevel(logging.WARNING)
+
+# Third-party loggers worth offering in the logger catalog (P97-S1); the
+# service's own package and the dms_* libraries are always included.
+_CATALOG_THIRD_PARTY = (
+    "sqlalchemy",
+    "sqlalchemy.engine",
+    "sqlalchemy.pool",
+    "httpx",
+    "httpcore",
+    "uvicorn",
+    "uvicorn.error",
+    "uvicorn.access",
+    "nats",
+    "opentelemetry",
+)
+_CATALOG_LIMIT = 1000
+
+
+def collect_logger_names(service_type: str) -> list[str]:
+    """The logger catalog of this process (P97-S1, ADR 0267): every logger
+    created so far under the service's own package (`workflow-service` ->
+    `workflow_service.*`) or a `dms_*` library, plus a few third-party
+    loggers that matter for diagnosis. Modules log via `getLogger(__name__)`,
+    so these names are the "areas" a log level can be set for."""
+    own = service_type.replace("-", "_")
+    names = {
+        name
+        for name, entry in logging.Logger.manager.loggerDict.items()
+        if isinstance(entry, logging.Logger)
+        and (
+            name == own
+            or name.startswith(f"{own}.")
+            or name.startswith("dms_")
+            or name in _CATALOG_THIRD_PARTY
+        )
+    }
+    return sorted(names)[:_CATALOG_LIMIT]
 
 
 class RegistryRegistration:
@@ -72,6 +110,9 @@ class RegistryRegistration:
         return self._instance_id
 
     async def start(self) -> None:
+        # Collected at start, not in __init__: by now the service's modules
+        # are imported and their loggers exist.
+        self._payload["loggers"] = collect_logger_names(self._payload["service_type"])
         try:
             await self._client.post("/instances", json=self._payload)
         except httpx.HTTPError:

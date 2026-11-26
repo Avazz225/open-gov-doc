@@ -75,5 +75,21 @@ class RegistryClient:
             if i["healthy"] and i["status"] == "active" and i.get("sensors")
         ]
 
+    async def service_loggers(self) -> dict[str, list[str]]:
+        """The logger catalog per service type (P97-S1, ADR 0267): the union
+        over every healthy instance, so a replica that has created a logger
+        the others haven't yet still contributes it. Services without
+        sensors count too - log levels apply to every service."""
+        response = await self._client.get("/instances")
+        response.raise_for_status()
+        catalog: dict[str, set[str]] = {}
+        for instance in response.json():
+            if not instance["healthy"]:
+                continue
+            catalog.setdefault(instance["service_type"], set()).update(
+                instance.get("loggers") or []
+            )
+        return {service: sorted(names) for service, names in sorted(catalog.items())}
+
     async def close(self) -> None:
         await self._client.aclose()

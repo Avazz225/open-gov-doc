@@ -2,6 +2,50 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P97-S1, central log levels: backend
+([ADR 0267](docs/adr/0267-central-log-levels.md)).
+
+**What changed:**
+- **monitoring-service:**
+  - table `log_level_setting` (scope `global` / `service:<s>` / `logger:<s|*>:<logger>`, level,
+    `expires_at`);
+  - `GET /log-levels` (settings, effective per service with source, logger catalog), and
+    `PUT`/`DELETE /log-levels` (`admin.monitoring`, 422 for bad input or an unregistered service);
+  - `GET /sensor-config` carries `log_levels` (expired ones left out);
+  - **DEBUG always expires:** 60 min default, at most 1440;
+  - a loop every 15 s removes expired rows (`DELETE … RETURNING`, announced once across replicas) and
+    applies its own levels;
+  - events `monitoring.log_levels.changed`/`.expired`.
+- **dms-common (`logging.py`):**
+  - `resolve_log_levels`: the service over global, the service's own logger entry over `*`;
+  - `apply_log_levels`: idempotent per poll, restores a logger's previous level (httpx keeps
+    WARNING), falls back to `DMS_LOG_LEVEL`, announces a change once and straight to the handler.
+    The first poll without settings stays silent.
+- **dms-metrics-client:** a log-levels listener on the `sensor-config` poll; an absent key changes
+  nothing.
+- **dms-registry-client** and **registry-service:** the logger catalog (`loggers`) at registration
+  (own package, `dms_*`, selected third-party loggers), passed through.
+- **Replicas:** each one polls on its own, keyed by service name, so all replicas follow, including
+  ones started later. To be verified live in P97-S3 with the permission-service replicas.
+- No change to any of the 30 services; they pick it up with their next image.
+
+**Checks:**
+- **Tests:**
+  - monitoring 56 (+8), registry 85 (+1);
+  - dms-common 36 (+4), dms-metrics-client 31 (+1), dms-registry-client 11 (+2, one live);
+  - workflow-service 283 and permission-service 231 green with the new libraries;
+  - ruff green.
+- **Live** (registry, monitoring and workflow rebuilt):
+  - the catalog matches the workflow-service modules that log;
+  - `workflow_service.main` → DEBUG arrived within one poll;
+  - `httpx` → INFO for one minute: the request lines appeared, and after the expiry the service fell
+    back by itself and the lines stopped;
+  - audit trail: changes under the admin, the expiry under `system:monitoring-log-levels`.
+
+**Next session:** P97-S2 (CLI `dms logging …`, admin UI section „Log-Level", skill recipe).
+
+---
+
 **Last completed:** after the plan, three user requests (2026-11-26): a page outline in admin-ui,
 clipped panes in user-ui, a licence tool ([ADR 0266](docs/adr/0266-license-tool.md)).
 
@@ -37,6 +81,12 @@ clipped panes in user-ui, a licence tool ([ADR 0266](docs/adr/0266-license-tool.
 
 **Open:** license-service's signing tests need the development key, which only exists on developer
 machines (fresh clones can't run them; ADR 0266 Consequences).
+
+**Planned (user request 2026-11-26): Phase 97, central per-area log levels.**
+- Today there is one level per service (`DMS_LOG_LEVEL`), fixed at startup.
+- Planned: settings stored in monitoring-service (global, per service, per logger, with an expiry for
+  DEBUG), distributed through the existing 15 s `sensor-config` poll, and `dms logging …` in the CLI.
+
 
 ---
 

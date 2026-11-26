@@ -188,3 +188,26 @@ async def test_tracing_ratio_reaches_registered_listeners():
         assert received == [0.25]
     finally:
         config_client._tracing_ratio_listeners.remove(received.append)
+
+
+async def test_log_levels_reach_registered_listeners_and_absence_changes_nothing():
+    """P97-S1 (ADR 0267): log levels come with the sensor config; an older
+    monitoring-service without the key must not reset anything."""
+    from dms_metrics_client import config_client
+
+    received: list[dict] = []
+    config_client.register_log_levels_listener(received.append)
+    levels = {"global": "WARNING", "services": {}, "loggers": []}
+    try:
+        for body in (
+            {"global_default": True, "overrides": {}, "log_levels": levels},
+            {"global_default": True, "overrides": {}},
+        ):
+            client = SensorConfigClient(
+                "http://monitoring-service", client=_client_with_response(body)
+            )
+            await client.start()
+            await client.stop()
+        assert received == [levels]
+    finally:
+        config_client._log_levels_listeners.remove(received.append)

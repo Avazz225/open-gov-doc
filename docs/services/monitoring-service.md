@@ -40,6 +40,9 @@
 | `POST`/`PUT`/`DELETE` | `/downtime-windows[/{id}]` | `admin.monitoring`; `422` without any range/weekday/time, half a daily range, a bad `HH:MM`, or an end before the start |
 | `GET` | `/tracing-config` | P94-S1 ([ADR 0250](../adr/0250-distributed-tracing.md)): the tracing sampling ratio (`sampling_ratio`, who/when, `tracing_enabled` for this service), ungated. The same ratio comes with `GET /sensor-config` as `tracing_sampling_ratio`, which every polling service applies to its sampler |
 | `PUT` | `/tracing-config` | Set the ratio 0..1 (`admin.monitoring`), table `tracing_config`; without a row the service's own `DMS_OTEL_SAMPLING_RATIO` applies |
+| `GET` | `/log-levels` | P97-S1 ([ADR 0267](../adr/0267-central-log-levels.md)): the active log-level settings, what applies per service (`root_level`/`root_source` `service`/`global`/`env`, logger levels with source `service`/`all`), the logger catalog per service (from the instances' registrations), and the DEBUG limits. Ungated like `/sensor-config`, which carries the same settings as `log_levels` |
+| `PUT` | `/log-levels` | `admin.monitoring`. Body `{service?, logger?, level, expires_in_minutes? \| expires_at?}`: nothing = global, a service = its root level, a logger = that logger in that service (or `*`, the default without a service). `422` for an unknown level, an unregistered service (unchecked when the registry doesn't answer), `*` without a logger, a bad logger name, both expiry forms, or DEBUG longer than `DMS_LOG_LEVEL_DEBUG_MAX_MINUTES` (1440). DEBUG without a duration expires after `DMS_LOG_LEVEL_DEBUG_DEFAULT_MINUTES` (60) |
+| `DELETE` | `/log-levels?service=&logger=` | `admin.monitoring`; removes one setting, `404` if there is none |
 | `GET` | `/healthz` | Own health check |
 
 ## Events
@@ -48,6 +51,8 @@ Published (stream `monitoring`, `dms-eventbus-client`, after commit):
 
 - `monitoring.sensor.config_changed` — `subject`=sensor name or `"__global__"`, `payload`={`enabled`, `actor`}
 - `monitoring.tracing.config_changed` — `subject`=`"tracing"`, `payload`={`sampling_ratio`, `actor`} (P94-S1)
+- `monitoring.log_levels.changed` — `subject`=scope, `payload`={`scope`, `level` (`null` on removal), `expires_at`, `previous`, `actor`} (P97-S1)
+- `monitoring.log_levels.expired` — actor `system:monitoring-log-levels`, once per expired entry (P97-S1)
 - Since P88-S5 (actor = the admin):
   - `monitoring.alert_rule.created`/`.updated`/`.deleted`;
   - `monitoring.downtime_window.saved`/`.deleted`.
@@ -145,8 +150,36 @@ allowed), and `rule_ids` (null = all).
 
 `GET /metrics` is the only source Grafana ever reaches — indirectly via Prometheus, which in turn scrapes exclusively this service. A default dashboard (`infra/grafana/dashboards/dms-sensor-overview.json`) visualizes all currently declared sensors, provisioned declaratively (no manual setup). See `docs/operations/monitoring.md` for details.
 
+## Central log levels (P97-S1, [ADR 0267](../adr/0267-central-log-levels.md))
+
+- **Table `log_level_setting`:** `scope` (PK: `global`, `service:<service>`,
+  `logger:<service|*>:<logger>`), `level`, `expires_at`, `updated_by`, `updated_at`.
+- **Distribution:** `GET /sensor-config` carries `log_levels`, with expired entries already left out:
+  `{"global", "services": {…}, "loggers": [{service, logger, level}]}`.
+  - Every service replica polls it every 15 s (`SensorConfigClient`) and applies it with
+    `dms_common.logging.apply_log_levels`.
+  - Precedence: the service's level over global; the service's own logger entry over `*`.
+  - Removed or expired settings give back the logger's previous level (httpx: WARNING) and the root
+    level falls back to `DMS_LOG_LEVEL`.
+  - A change is written once as `log_levels_applied`, also when the new level would hide it.
+- **The log-level loop** (`DMS_LOG_LEVEL_REFRESH_SECONDS`, 15 s): deletes expired rows with
+  `DELETE … RETURNING`, so with several replicas each expiry is announced once, and applies this
+  service's own levels; it doesn't poll itself. A change through the API is applied here right away.
+- **Logger catalog:** `RegistryRegistration` reports the logger names at start (own package, `dms_*`,
+  a few third-party loggers); `RegistryClient.service_loggers` merges all healthy instances per service.
+
 ## Tests
 
 ```bash
-uv run pytest services/monitoring-service/tests
+scripts/run-tests.sh monitoring-service
 ```
+
+Log levels (`tests/test_log_levels.py`, 8):
+- storage, resolution and distribution;
+- DEBUG expiry and cap;
+- expiry purged once;
+- reset and `404`;
+- validation and `403`;
+- registry down;
+- this service applies its own levels;
+- scope round trip.

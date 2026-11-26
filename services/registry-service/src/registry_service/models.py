@@ -37,6 +37,8 @@ class ServiceInstance(Base):
     # any sensor configuration/aggregation, that's done by `monitoring-service`
     # via GET /instances (which simply reads this field along with the rest).
     sensors: Mapped[list[dict]] = mapped_column(JSON, default=list)
+    # Logger catalog (P97-S1, ADR 0267), passed through like `sensors`.
+    loggers: Mapped[list[str]] = mapped_column(JSON, default=list)
 
 
 class BrandingConfig(Base):

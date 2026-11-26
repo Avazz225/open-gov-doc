@@ -201,3 +201,43 @@ def test_self_address_with_ip_placeholder_resolves_to_this_instance():
     assert resolve_self_address("http://permission-service:8000") == (
         "http://permission-service:8000"
     )
+
+
+def test_logger_catalog_holds_own_package_libraries_and_known_third_party():
+    """P97-S1 (ADR 0267): the catalog offered for per-logger log levels."""
+    import logging
+
+    for name in ("catalog_probe_service.repository", "dms_common.logging", "sqlalchemy.engine"):
+        logging.getLogger(name)
+    logging.getLogger("unrelated_package.module")
+
+    from dms_registry_client.client import collect_logger_names
+
+    names = collect_logger_names("catalog-probe-service")
+    assert "catalog_probe_service.repository" in names
+    assert "dms_common.logging" in names
+    assert "sqlalchemy.engine" in names
+    assert "unrelated_package.module" not in names
+    assert names == sorted(names)
+
+
+async def test_start_registers_the_logger_catalog():
+    import logging
+
+    service_type = _service_type()
+    own_logger = f"{service_type.replace('-', '_')}.main"
+    logging.getLogger(own_logger)
+    registration = RegistryRegistration(
+        registry_base_url=REGISTRY_URL,
+        service_type=service_type,
+        version="0.1.0",
+        address="http://localhost:9999",
+        heartbeat_interval_seconds=60,
+    )
+    await registration.start()
+    try:
+        instance = await _get_instance(service_type, registration.instance_id)
+        assert instance is not None
+        assert own_logger in instance["loggers"]
+    finally:
+        await registration.stop()

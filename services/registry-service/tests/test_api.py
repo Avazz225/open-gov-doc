@@ -99,6 +99,22 @@ def test_register_with_sensor_declarations_roundtrips(client):
     ]
 
 
+def test_register_passes_the_logger_catalog_through(client):
+    """P97-S1 (ADR 0267): monitoring-service reads it for per-logger levels;
+    an instance from before P97 sends none and gets an empty list."""
+    names = ["document_service.main", "sqlalchemy.engine"]
+    response = client.post("/instances", json=make_payload(loggers=names))
+    assert response.status_code == 201
+    assert response.json()["loggers"] == names
+    listed = client.get("/instances/document-service").json()
+    assert (
+        next(i for i in listed if i["instance_id"] == response.json()["instance_id"])["loggers"]
+        == names
+    )
+    legacy = client.post("/instances", json=make_payload())
+    assert legacy.json()["loggers"] == []
+
+
 def test_register_with_cost_levels_and_rejects_out_of_range(client):
     sensor = {"name": "x.breakdown", "group": "capacity", "description": "x"}
     ok = client.post(

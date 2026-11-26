@@ -36,6 +36,21 @@ class TracingConfig(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class LogLevelSetting(Base):
+    """A central log level (P97-S1, ADR 0267). `scope` is `global`,
+    `service:<service>` or `logger:<service|*>:<logger>`; handed out with the
+    sensor configuration every service polls. An entry past `expires_at` no
+    longer applies and is removed by the log-level loop."""
+
+    __tablename__ = "log_level_setting"
+
+    scope: Mapped[str] = mapped_column(String(512), primary_key=True)
+    level: Mapped[str] = mapped_column(String(16))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_by: Mapped[str] = mapped_column(String(128))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class AlertRule(Base):
     """A threshold rule on one sensor (P88-S5, ADR 0245 Decision 2)."""
 

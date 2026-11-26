@@ -85,6 +85,27 @@ def _notify_tracing_ratio(ratio) -> None:
             logger.warning("tracing_ratio_listener_failed", exc_info=True)
 
 
+# Log levels (P97-S1, ADR 0267) travel the same way: `dms_common.logging`
+# registers a listener that applies them to this process's loggers.
+_log_levels_listeners: list[Callable[[dict], None]] = []
+
+
+def register_log_levels_listener(listener: Callable[[dict], None]) -> None:
+    if listener not in _log_levels_listeners:
+        _log_levels_listeners.append(listener)
+
+
+def _notify_log_levels(config) -> None:
+    # Absent (an older monitoring-service) leaves the levels as they are.
+    if not isinstance(config, dict):
+        return
+    for listener in list(_log_levels_listeners):
+        try:
+            listener(config)
+        except Exception:
+            logger.warning("log_levels_listener_failed", exc_info=True)
+
+
 class SensorConfigClient:
     """Polls the sensor activation configuration from `monitoring-service`
     (`GET /sensor-config`) - TTL poll instead of NATS invalidation (deliberate
@@ -138,6 +159,7 @@ class SensorConfigClient:
             self._global_default = body["global_default"]
             self._overrides = body["overrides"]
             _notify_tracing_ratio(body.get("tracing_sampling_ratio"))
+            _notify_log_levels(body.get("log_levels"))
         except httpx.HTTPError:
             logger.warning("sensor_config_refresh_failed")
 

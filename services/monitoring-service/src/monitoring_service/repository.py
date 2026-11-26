@@ -2,6 +2,7 @@ import logging
 from datetime import UTC, datetime
 
 from dms_metrics_client import COST_LEVELS, LEGACY_KEY_LEVELS, normalize_cost, resolve_active
+from monitoring_service import log_levels
 from monitoring_service.clients import RegistryInstance
 from monitoring_service.models import GLOBAL_DEFAULT_KEY, SensorConfigEntry, TracingConfig
 from monitoring_service.schemas import SensorConfigOut, SensorOut, TracingConfigOut
@@ -26,10 +27,12 @@ async def get_sensor_config(session: AsyncSession) -> SensorConfigOut:
     entries = {e.key: e.enabled for e in result.scalars().all()}
     global_default = entries.pop(GLOBAL_DEFAULT_KEY, True)
     tracing = await get_tracing_config(session)
+    active_levels = await log_levels.list_active(session, datetime.now(UTC))
     return SensorConfigOut(
         global_default=global_default,
         overrides=entries,
         tracing_sampling_ratio=tracing.sampling_ratio,
+        log_levels=log_levels.distributed(active_levels),
     )
 
 

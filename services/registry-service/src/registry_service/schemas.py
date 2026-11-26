@@ -36,6 +36,9 @@ class RegisterRequest(BaseModel):
     version: str
     capabilities: list[str] = []
     sensors: list[SensorDeclaration] = []
+    # Logger catalog (P97-S1, ADR 0267): the logger names this instance
+    # knows, so log levels can be set per logger with real names.
+    loggers: list[str] = Field(default=[], max_length=2000)
     health_endpoint: str
     address: str
 
@@ -46,6 +49,7 @@ class InstanceOut(BaseModel):
     version: str
     capabilities: list[str]
     sensors: list[SensorDeclaration] = []
+    loggers: list[str] = []
     health_endpoint: str
     address: str
     registered_at: datetime

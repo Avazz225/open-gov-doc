@@ -66,3 +66,109 @@ def configure_logging(settings: BaseServiceSettings) -> None:
         return record
 
     logging.setLogRecordFactory(factory)
+
+    global _service_name, _bootstrap_level
+    # A fresh configuration starts from the bootstrap level again; give back
+    # what earlier central settings changed, so the next poll reapplies them.
+    for name in list(_applied):
+        if name:
+            logging.getLogger(name).setLevel(_original_levels.pop(name, logging.NOTSET))
+    _applied.clear()
+    _service_name = settings.service_name
+    _bootstrap_level = logging.getLevelName(settings.log_level.upper())
+    _register_log_levels_listener()
+
+
+# --- Central log levels (P97-S1, ADR 0267) -----------------------------------
+#
+# monitoring-service stores log levels (global, per service, per logger) and
+# hands them out with the sensor configuration every service polls every 15 s.
+# Each replica polls on its own, so every replica of a service applies the
+# same settings. `DMS_LOG_LEVEL` stays the start value and the fallback for
+# the root level; while monitoring-service is unreachable the last applied
+# levels stay.
+
+LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+
+_service_name: str | None = None
+_bootstrap_level: int = logging.INFO
+# Level a logger had before a central setting first touched it (e.g. httpx's
+# WARNING default), restored when the setting is removed again.
+_original_levels: dict[str, int] = {}
+_applied: dict[str, str] = {}
+
+
+def resolve_log_levels(config: dict, service_name: str) -> tuple[str | None, dict[str, str]]:
+    """The root level and the per-logger levels that apply to one service.
+
+    `config` is monitoring-service's distributed form (expired entries are
+    already left out): `{"global": level|None, "services": {name: level},
+    "loggers": [{"service": name|"*", "logger": name, "level": level}]}`.
+    Root: the service's setting, then the global one (`None` = keep the
+    bootstrap level). Loggers: the service's own entry wins over `*`."""
+    services = config.get("services") or {}
+    root = services.get(service_name) or config.get("global")
+    loggers: dict[str, str] = {}
+    own: dict[str, str] = {}
+    for entry in config.get("loggers") or []:
+        name, level = entry.get("logger"), entry.get("level")
+        if not name or level not in LEVELS:
+            continue
+        if entry.get("service") == service_name:
+            own[name] = level
+        elif entry.get("service") == "*":
+            loggers[name] = level
+    loggers.update(own)
+    return (root if root in LEVELS else None), loggers
+
+
+def _announce(message: str, **extra) -> None:
+    """Writes one line whatever the current level is (a switch to ERROR must
+    still be visible): the record goes straight to the handlers."""
+    root = logging.getLogger()
+    record = root.makeRecord(__name__, logging.WARNING, __file__, 0, message, (), None)
+    for key, value in extra.items():
+        setattr(record, key, value)
+    root.handle(record)
+
+
+def apply_log_levels(config: dict) -> None:
+    """Applies the central levels to this process; idempotent (called on
+    every poll), announces only actual changes."""
+    if _service_name is None:
+        return
+    root_level, logger_levels = resolve_log_levels(config, _service_name)
+    wanted = dict(logger_levels)
+    wanted[""] = root_level or logging.getLevelName(_bootstrap_level)
+    if wanted == _applied:
+        return
+
+    for name in set(_applied) - set(wanted):
+        target = logging.getLogger(name)
+        target.setLevel(_original_levels.pop(name, logging.NOTSET))
+    for name, level in wanted.items():
+        target = logging.getLogger(name or None)
+        if name and name not in _original_levels:
+            _original_levels[name] = target.level
+        target.setLevel(level)
+
+    previous = dict(_applied)
+    _applied.clear()
+    _applied.update(wanted)
+    if not previous and wanted == {"": logging.getLevelName(_bootstrap_level)}:
+        # First poll with nothing set centrally: nothing changed, no line.
+        return
+    _announce(
+        "log_levels_applied",
+        root_level=wanted[""],
+        logger_levels={k: v for k, v in wanted.items() if k},
+        previous=previous or None,
+    )
+
+
+def _register_log_levels_listener() -> None:
+    try:
+        from dms_metrics_client.config_client import register_log_levels_listener
+    except ImportError:
+        return
+    register_log_levels_listener(apply_log_levels)

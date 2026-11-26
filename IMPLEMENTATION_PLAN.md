@@ -3443,7 +3443,8 @@ ADR 0239**.
 3. Then the three user-requested UI/fleet/admin initiatives.
 4. Then compliance completions, the new collaboration features, and operations/hygiene last.
 
-`graphify update .` runs once, at the end of this whole plan: P96-S3, the last session. Phases 91–96
+`graphify update .` runs once, at the end of this whole plan: P96-S3 originally, now P97-S3 (Phase 97
+added 2026-11-26). Phases 91–96
 were added or reordered on 2026-11-21/22/23 and renumbered so they run in numerical order. The full backend
 regression runs at each phase close.
 
@@ -5288,6 +5289,87 @@ unchosen).
       - an "Admin UI areas" table.
     - **Customer guide:** `docs/guides/admin-assistent.md`.
     - **Tests:** CLI 242 (+16), permission-service 231 (+1).
+
+## Phase 97 — Central, Per-Area Log Levels (user request 2026-11-26)
+
+**Today:**
+- every service has exactly one log level, `DMS_LOG_LEVEL` (`BaseServiceSettings.log_level`, default
+  `INFO`), applied once at startup in `dms_common.logging.configure_logging`;
+- changing it means a redeploy; there is no per-area setting, no runtime change, no CLI.
+
+What makes it cheap:
+- every module already logs through `logging.getLogger(__name__)`, so per-area levels are per-logger
+  levels (`workflow_service.repository`, `sqlalchemy.engine`, `httpx` …);
+- the channel exists: 30 of 32 services poll `GET /sensor-config` from monitoring-service every 15 s
+  (`dms_metrics_client.SensorConfigClient`), and P94-S1's tracing ratio already travels that way
+  (store, audit event, runtime apply).
+
+**Order:** after Phase 96. The plan's phase-close regression and the single `graphify update .` move to
+the end of this phase (P97-S3).
+
+- **P97-S1 — Backend: storing, distributing and applying log levels (ADR 0267).**
+  - **monitoring-service:**
+    - a `log_level_setting` table with the scope (`global`, `service:<name>`,
+      `logger:<service|*>:<logger-prefix>`), the level (`DEBUG`…`CRITICAL`, or `inherit`), an optional
+      `expires_at`, `updated_by`, `updated_at`;
+    - `GET /log-levels` (the settings plus the resolved view per service);
+    - `PUT /log-levels/{scope}` and `DELETE /log-levels/{scope}`, gated like tracing
+      (`admin.monitoring`);
+    - an audit event `monitoring.log_levels.changed`.
+  - **Resolution:**
+    - for the root level: the service setting, then global, then the service's own `DMS_LOG_LEVEL`
+      (stays the bootstrap default and the fallback while monitoring-service is unreachable);
+    - for a logger: the most specific prefix wins, the service's own over `*`.
+  - **Expiry:** levels below `INFO` get an expiry by default (60 min, configurable). After it the
+    level falls back by itself, and the resolved view omits expired entries. DEBUG can log personal
+    data and is expensive, and forgotten DEBUG settings are a classic problem.
+  - **Distribution:** `GET /sensor-config` carries the log-level settings. `SensorConfigClient` applies
+    them on each poll:
+    - `setLevel` on root and on the named loggers;
+    - loggers that lost their setting go back to `NOTSET`;
+    - a change is logged once at `WARNING`, so it's visible whatever the new level is.
+  - **Catalog for "per Funktion":** each service reports its logger names (its own package and the
+    common libraries) with its sensor catalog, so UI and CLI can offer real names instead of guessing.
+    Friendly area names (e.g. „Rechteprüfung" → `permission_service.repository`) only where the
+    catalog shows they're needed.
+  - **Tests:** resolution, expiry, apply/reset in the client, gating, catalog.
+  - **Result** ([ADR 0267](docs/adr/0267-central-log-levels.md)):
+    - **monitoring-service:** `log_level_setting`, `GET/PUT/DELETE /log-levels`, `log_levels` in
+      `/sensor-config`, a loop for expiry and its own levels. DEBUG has a 60-minute default, at most
+      1440. Audit events `changed`/`expired`.
+    - **dms-common:** `resolve_log_levels`/`apply_log_levels`, idempotent; it restores the previous
+      logger level and announces changes once.
+    - **dms-metrics-client:** the listener on the poll.
+    - **dms-registry-client** and **registry-service:** the logger catalog (`loggers`).
+    - **None of the 30 services changed.**
+    - **Tests:** monitoring 56 (+8), registry 85 (+1), dms-common 36 (+4), dms-metrics-client 31 (+1),
+      dms-registry-client 11 (+2). workflow-service (283) and permission-service (231) are green with
+      the new libraries.
+    - **Live:** `httpx` → INFO for workflow-service with one minute. The lines appeared within one
+      poll, it fell back by itself after the expiry, and the audit trail holds the change and the
+      expiry.
+- **P97-S2 — CLI and admin UI.**
+  - **CLI:**
+    - `dms logging show [--service S]` (effective levels and where they come from);
+    - `dms logging set <level> [--service S] [--logger L] [--for 30m|--until …]`;
+    - `dms logging reset [--service S] [--logger L]`;
+    - `dms logging loggers --service S` (the catalog);
+    - command tests.
+  - **admin-ui:** a „Log-Level" section on the monitoring page, next to tracing:
+    - the global level, per-service levels, per-logger overrides with a picker from the catalog;
+    - the expiry shown and editable.
+  - **Docs:** monitoring-service, cli, admin-ui; the admin skill (`references/monitoring.md`, a recipe
+    „Log-Level für X auf DEBUG"); the skill-command test stays green.
+- **P97-S3 — Live verification and phase close.**
+  - **Live on the stack:**
+    - DEBUG for one logger of one service shows up in its stdout/Loki lines within one poll;
+    - other services and loggers stay unchanged;
+    - expiry returns the level by itself;
+    - unreachable monitoring-service keeps the last applied levels;
+    - the CLI and UI agree.
+  - **Browser check** of the new section at 1400/390, plus the two still-open UI checks from
+    2026-11-26 (admin page outline, user-ui pane bottoms).
+  - **Close:** phase-close regression (`scripts/run-tests.sh`), then `graphify update .` once.
 
 ## Deliberately Not Included in This Plan
 

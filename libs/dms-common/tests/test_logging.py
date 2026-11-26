@@ -89,3 +89,86 @@ def test_access_log_writes_one_structured_line_per_request(capsys):
     ]
     assert access[0]["message"] == "GET /documents/{document_id} 200"
     assert access[0]["duration_ms"] >= 0
+
+
+# --- Central log levels (P97-S1, ADR 0267) ------------------------------------
+
+
+def _levels(**kwargs) -> dict:
+    return {"global": None, "services": {}, "loggers": [], **kwargs}
+
+
+def test_resolve_prefers_service_over_global_and_own_logger_over_star():
+    from dms_common.logging import resolve_log_levels
+
+    config = _levels(
+        **{"global": "WARNING"},
+        services={"example-service": "ERROR"},
+        loggers=[
+            {"service": "*", "logger": "httpx", "level": "INFO"},
+            {"service": "*", "logger": "sqlalchemy.engine", "level": "INFO"},
+            {"service": "example-service", "logger": "httpx", "level": "DEBUG"},
+            {"service": "other-service", "logger": "example.x", "level": "DEBUG"},
+            {"service": "*", "logger": "bogus", "level": "LOUD"},
+        ],
+    )
+    root, loggers = resolve_log_levels(config, "example-service")
+    assert root == "ERROR"
+    assert loggers == {"httpx": "DEBUG", "sqlalchemy.engine": "INFO"}
+    assert resolve_log_levels(config, "other-service")[0] == "WARNING"
+    assert resolve_log_levels(_levels(), "x") == (None, {})
+
+
+def test_apply_sets_and_restores_levels_and_announces_once(capsys):
+    from dms_common.logging import apply_log_levels
+
+    configure_logging(ExampleSettings(_env_file=None))
+    probe = logging.getLogger("example_service.repository")
+    quiet = logging.getLogger("httpx_probe")
+    quiet.setLevel(logging.WARNING)  # a library default like httpx's
+    capsys.readouterr()
+
+    config = _levels(
+        services={"example-service": "ERROR"},
+        loggers=[
+            {
+                "service": "example-service",
+                "logger": "example_service.repository",
+                "level": "DEBUG",
+            },
+            {"service": "*", "logger": "httpx_probe", "level": "INFO"},
+        ],
+    )
+    apply_log_levels(config)
+    assert logging.getLogger().level == logging.ERROR
+    assert probe.level == logging.DEBUG
+    assert quiet.level == logging.INFO
+    # The switch to ERROR is still announced (straight to the handler).
+    announced = _last_json_line(capsys)
+    assert announced["message"] == "log_levels_applied"
+    assert announced["root_level"] == "ERROR"
+
+    apply_log_levels(config)  # the next poll, unchanged
+    assert capsys.readouterr().out == ""
+
+    apply_log_levels(_levels())  # settings removed or expired
+    assert logging.getLogger().level == logging.INFO  # back to DMS_LOG_LEVEL
+    assert probe.level == logging.NOTSET
+    assert quiet.level == logging.WARNING  # its own default again
+
+
+def test_first_poll_without_central_settings_stays_silent(capsys):
+    from dms_common.logging import apply_log_levels
+
+    configure_logging(ExampleSettings(_env_file=None))
+    capsys.readouterr()
+    apply_log_levels(_levels())
+    assert capsys.readouterr().out == ""
+
+
+def test_apply_is_wired_to_the_sensor_config_poll():
+    from dms_common.logging import apply_log_levels
+    from dms_metrics_client import config_client
+
+    configure_logging(ExampleSettings(_env_file=None))
+    assert apply_log_levels in config_client._log_levels_listeners

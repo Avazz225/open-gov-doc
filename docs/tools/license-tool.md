@@ -82,6 +82,20 @@ It doesn't check usage limits; those depend on the installation's live counts (a
 **Without this setting, license-service accepts only the development key.** That is right for the dev
 stack and wrong for every real installation.
 
+## Air-gapped installations
+
+Verification is fully offline: license-service checks the signature against the configured public key
+and counts users, storage and documents locally. Nothing calls home, and the fleet licence push is
+optional. A licence for an air-gapped site is issued like any other, ideally bound with
+`--installation-id`, and travels as a file. Upload it in the admin UI („Lizenzstatus") or with
+`dms license upload`.
+
+**An operator's own key** works the same way. Whoever controls the deployment decides which public key
+license-service trusts (`DMS_LICENSE_PUBLIC_KEY_PEM`). An operator can therefore run `og-license keygen`
+themselves, configure their public key and sign their own licences. That is a deliberate consequence of
+ADR 0032, not a separate mode: the licensing protects against tampering with a licence file, not against
+the operator of the installation.
+
 ## Rotating the key
 
 1. Back up the old `public.pem`.

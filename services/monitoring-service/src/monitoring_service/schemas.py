@@ -30,6 +30,41 @@ class SensorConfigOut(BaseModel):
     overrides: dict[str, bool]
     # P94-S1 (ADR 0250): share of new traces that are recorded, 0..1.
     tracing_sampling_ratio: float | None = None
+    # P97-S1 (ADR 0267): central log levels in the form every replica
+    # applies (`dms_common.logging.apply_log_levels`); expired ones left out.
+    log_levels: dict | None = None
+
+
+class LogLevelIn(BaseModel):
+    """No service and no logger = global; a service = that service's root
+    level; a logger with a service (or `*`, or none = `*`) = that logger."""
+
+    service: str | None = None
+    logger: str | None = None
+    level: str
+    expires_in_minutes: int | None = None
+    expires_at: datetime | None = None
+
+
+class LogLevelSettingOut(BaseModel):
+    scope: str
+    service: str | None
+    logger: str | None
+    level: str
+    expires_at: datetime | None
+    updated_by: str
+    updated_at: datetime
+
+
+class LogLevelsOut(BaseModel):
+    settings: list[LogLevelSettingOut]
+    # Per service: root level and source (`service`/`global`/`env` = the
+    # service's own DMS_LOG_LEVEL), and the logger levels that apply.
+    effective: dict[str, dict]
+    # Logger names per service, from the instances' registrations.
+    catalog: dict[str, list[str]]
+    debug_default_minutes: int
+    debug_max_minutes: int
 
 
 class TracingConfigOut(BaseModel):

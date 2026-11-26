@@ -22,3 +22,12 @@ class Settings(BaseServiceSettings):
     # time zone downtime windows' daily times are read in.
     alert_evaluation_interval_seconds: float = 60.0
     timezone: str = "Europe/Berlin"
+
+    # Central log levels (P97-S1, ADR 0267): DEBUG always expires - it can
+    # log personal data and costs volume, and a forgotten DEBUG is a classic.
+    # Without an explicit duration it lasts the default, at most the maximum.
+    log_level_debug_default_minutes: int = 60
+    log_level_debug_max_minutes: int = 1440
+    # How often expired entries are removed and this service applies its own
+    # levels (it hands the configuration out and doesn't poll itself).
+    log_level_refresh_seconds: float = 15.0
