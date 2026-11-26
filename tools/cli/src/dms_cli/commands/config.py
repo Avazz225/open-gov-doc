@@ -114,3 +114,62 @@ def compare_config(
         columns=["category", "only_in_base", "only_in_compare", "differing", "identical"],
     )
     typer.echo("Detailanzeige je abweichendem Attribut: --output json")
+
+
+@config_app.command("import")
+def import_config(
+    ctx: typer.Context,
+    file: Path = typer.Argument(
+        ...,
+        exists=True,
+        help="Konfigurationspaket bzw. Export (JSON), z. B. packages/egov/config.json.",
+    ),
+    category: list[str] = typer.Option(
+        [],
+        "--category",
+        help="Wiederholbar - nur diese Kategorien anwenden. Default: alle im Paket.",
+    ),
+) -> None:
+    """Wendet ein Konfigurationspaket an (7.3, P96-S2). Vorher mit
+    'config compare <paket> ' pruefen, was sich aendert. Ist fuer config.import das
+    Vier-Augen-Prinzip aktiv, entsteht ein Freigabeantrag statt einer Aenderung."""
+    client = get_client()
+    document = json.loads(file.read_text(encoding="utf-8"))
+    result = client.post(
+        "config-service",
+        "config/import",
+        json_body=document,
+        params={"categories": category} if category else None,
+    )
+    if output_format(ctx) == "json":
+        emit(result, output_format="json")
+        return
+    if result.get("status") == "pending_approval":
+        typer.echo(
+            "Vier-Augen-Prinzip aktiv: Freigabeantrag "
+            f"{result.get('approval_request_id')} angelegt - nichts geaendert, bis eine "
+            "zweite Person ihn freigibt ('dms approvals show <id>')."
+        )
+        return
+    rows = [
+        {
+            "category": name,
+            "created": entry.get("created", 0),
+            "updated": entry.get("updated", 0),
+            "skipped": entry.get("skipped", 0),
+            "errors": len(entry.get("errors") or []),
+        }
+        for name, entry in ((result.get("result") or {}).get("results") or {}).items()
+    ]
+    emit(
+        rows, output_format="table", columns=["category", "created", "updated", "skipped", "errors"]
+    )
+    errors = [
+        f"{name}: {message}"
+        for name, entry in ((result.get("result") or {}).get("results") or {}).items()
+        for message in entry.get("errors") or []
+    ]
+    for line in errors:
+        typer.echo(f"Fehler - {line}", err=True)
+    if errors:
+        raise typer.Exit(code=1)

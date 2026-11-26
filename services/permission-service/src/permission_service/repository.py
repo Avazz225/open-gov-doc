@@ -1357,6 +1357,158 @@ async def get_effective_permissions(
     )
 
 
+async def explain_permission(
+    session: AsyncSession,
+    principal_id: str,
+    resource_id: str,
+    permission: str,
+    access_type: str,
+) -> dict:
+    """Why a principal has - or hasn't - a permission on a resource (P96-S2,
+    ADR 0253 D1): the same walk as `_collect_effective_roles`, but every step
+    is reported - the node, its `inherit` flag, each matching assignment with
+    where it comes from (direct, a group by name, "everyone") and whether its
+    role grants the permission, the scope locks active there - plus the
+    verdict and the step that decided it. Computed fresh, never from or into
+    the cache; the cached answer is reported next to it, so a stale entry
+    shows up as a mismatch."""
+    group_rows = await session.execute(
+        select(Group.id, Group.name)
+        .join(GroupMembership, GroupMembership.group_id == Group.id)
+        .where(GroupMembership.principal_id == principal_id)
+    )
+    groups = {group_id: name for group_id, name in group_rows.all()}
+    now = datetime.now(UTC)
+    steps: list[dict] = []
+    granted_at: str | None = None
+    all_permissions: set[str] = set()
+    locks: list[dict] = []
+    registered = False
+    current_id: str | None = resource_id
+    stopped_by_inherit = False
+    while current_id is not None:
+        node = await session.get(ResourceNode, current_id)
+        if node is None:
+            steps.append({"resource_id": current_id, "registered": False})
+            break
+        if current_id == resource_id:
+            registered = True
+        rows = await session.execute(
+            select(RoleAssignment, Role)
+            .join(Role, Role.id == RoleAssignment.role_id)
+            .where(RoleAssignment.resource_id == current_id)
+            .where(
+                or_(
+                    RoleAssignment.principal_id == principal_id,
+                    and_(
+                        RoleAssignment.principal_type == EVERYONE_PRINCIPAL_TYPE,
+                        RoleAssignment.principal_id == EVERYONE_PRINCIPAL_ID,
+                    ),
+                    and_(
+                        RoleAssignment.principal_type == "group",
+                        RoleAssignment.principal_id.in_(list(groups) or [""]),
+                    ),
+                )
+            )
+        )
+        matched = []
+        for assignment, role in rows.all():
+            if assignment.principal_id == principal_id and assignment.principal_type != "group":
+                source = "direct"
+            elif assignment.principal_id == EVERYONE_PRINCIPAL_ID:
+                source = "everyone"
+            elif assignment.principal_id in groups:
+                source = f"group:{groups[assignment.principal_id]}"
+            else:
+                source = "direct"
+            grants = permission in role.permissions
+            if grants and granted_at is None:
+                granted_at = current_id
+            all_permissions.update(role.permissions)
+            matched.append(
+                {
+                    "assignment_id": assignment.id,
+                    "source": source,
+                    "role": role.name,
+                    "grants_permission": grants,
+                }
+            )
+        step_locks = []
+        lock_rows = await session.execute(
+            select(ScopeLock).where(ScopeLock.resource_id == current_id)
+        )
+        for lock in lock_rows.scalars().all():
+            if _scope_lock_is_active(lock, now):
+                entry = {
+                    "lock_id": lock.id,
+                    "blocks_read": lock.blocks_read,
+                    "reason": lock.reason,
+                    "expires_at": lock.expires_at.isoformat() if lock.expires_at else None,
+                }
+                step_locks.append(entry)
+                locks.append(entry)
+        steps.append(
+            {
+                "resource_id": current_id,
+                "resource_type": node.resource_type,
+                "registered": True,
+                "inherit": node.inherit,
+                "assignments": matched,
+                "active_locks": step_locks,
+            }
+        )
+        if not node.inherit:
+            stopped_by_inherit = current_id != ROOT_RESOURCE_ID and node.parent_id is not None
+            break
+        current_id = node.parent_id
+
+    blocking = [lock for lock in locks if access_type == "write" or lock["blocks_read"]]
+    bypass = "scope_lock.bypass" in all_permissions
+    if not registered:
+        verdict, reason = (
+            False,
+            "Ressource ist nicht registriert - ohne Knoten wird alles verweigert.",
+        )
+    elif blocking and not bypass:
+        verdict, reason = False, f"Gesperrt durch Bereichssperre {blocking[0]['lock_id']}."
+    elif granted_at is not None:
+        verdict, reason = True, f"Gewährt durch eine Zuweisung am Knoten {granted_at}."
+    elif stopped_by_inherit:
+        verdict, reason = (
+            False,
+            ("Keine passende Zuweisung; die Vererbung endet an einem Knoten mit inherit=false."),
+        )
+    else:
+        verdict, reason = False, "Keine Zuweisung entlang des Pfads gewährt diese Berechtigung."
+    cached = await session.get(
+        EffectivePermissionCache, (principal_id, resource_id), populate_existing=True
+    )
+    generation, principal_generation = await _cache_generations(session, principal_id)
+    cache_valid = (
+        cached is not None
+        and cached.generation == generation
+        and cached.principal_generation == principal_generation
+    )
+    return {
+        "principal_id": principal_id,
+        "resource_id": resource_id,
+        "permission": permission,
+        "access_type": access_type,
+        "allowed": verdict,
+        "reason": reason,
+        "groups": sorted(groups.values()),
+        "steps": steps,
+        "cached": (
+            {
+                "permissions": cached.permissions,
+                "agrees": (permission in cached.permissions) == (granted_at is not None),
+            }
+            if cache_valid
+            else None
+        ),
+    }
+
+
 async def create_scope_lock(
     session: AsyncSession,
     *,

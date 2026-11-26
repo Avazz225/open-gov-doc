@@ -950,6 +950,29 @@ async def check(
     return CheckResult(allowed=permission in entry.permissions)
 
 
+@app.get("/explain/{principal_id}/{resource_id}")
+async def explain(
+    principal_id: str,
+    resource_id: str,
+    permission: str,
+    access_type: Literal["read", "write"] = "read",
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Explains a permission decision (P96-S2, ADR 0253 D1): every node of
+    the walk with its matching assignments, their source and active locks,
+    the verdict and the step that decided it. Same capability as reading and
+    changing role assignments (`admin.user_management`) - it reveals who
+    holds what where."""
+    _validate_access_type(permission, access_type)
+    await _require_role_management(session, x_dms_principal)
+    result = await repository.explain_permission(
+        session, principal_id, resource_id, permission, access_type
+    )
+    await session.rollback()
+    return result
+
+
 @app.post("/check/batch", response_model=BatchCheckResult)
 async def check_batch(
     payload: BatchCheckRequest, session: AsyncSession = Depends(get_session)

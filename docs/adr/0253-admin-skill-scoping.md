@@ -195,3 +195,33 @@ it, 6–9 move to a P96-S2b, and the skill marks those tasks "über admin-ui" un
   checks plus the rules above, not on the skill alone.
 - Adding an admin area later means a CLI command, a reference entry and a recipe, with the command check
   of section 6 keeping them in step.
+
+## Implementation notes (P96-S2)
+
+- **CLI (`tools/cli`):** every item of §5 is built:
+  - `config import`, `permission explain`, `group`, `monitoring`, `approvals`, `mailbox`, `retention`,
+    `failures`;
+  - `workflow definitions upload`;
+  - `workflow instances skip|send-back|migration-preview|migrate|terminate`.
+  
+  The client gained `patch` and multipart (`post_files`). 12 command tests (MockTransport).
+- **permission-service:** `GET /explain/{principal}/{resource}` (`repository.explain_permission`),
+  4 tests.
+- **The skill (`skills/og-doc-admin/`):** `SKILL.md` (session check, workflow, rules, recipe index), 10
+  references, 18 recipes (14 tasks, 4 diagnosis), `scripts/preview-package.sh` (compare limited to the
+  fragment's categories). `scripts/package-skill.sh` zips it for a release.
+- **Kept in step:** `tools/cli/tests/test_skill_commands.py` parses every `dms …` command in the skill
+  (alternatives like `list|get` expanded) and checks subcommands and options against the Typer app; the
+  category lists are checked against `config_service.schemas.CATEGORIES`. On its first run it found two
+  wrong mentions.
+- **Live** with a CLI login against the gateway:
+  - groups, approvals, alerts, retention and failures;
+  - the missing-role refusals for mail and notifications;
+  - `permission explain`;
+  - `preview-package.sh` against `packages/monitoring-defaults`.
+- **Found on the way:**
+  - `dms retention show` makes visible that the deletion-reason catalogue differs between document- and
+    folder-service in the dev stack (the two copies of ADR 0233).
+  - The eGov package README had already documented a `dms config import` that didn't exist.
+- **Not built:** the optional client tag (§5 item 10). Changes are attributed through the admin's own
+  session and the `--reason` texts.

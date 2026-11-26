@@ -93,3 +93,105 @@ def complete_task(
         json_body={"completed_by": completed_by, "data": data, "signature_id": signature_id},
     )
     emit(result, output_format=output_format(ctx))
+
+
+# --- Upload and administrative operations (P96-S2, ADR 0249/P93-S2, P95-S1c) --
+
+
+@definitions_app.command("upload")
+def definitions_upload(
+    ctx: typer.Context,
+    file: Path = typer.Argument(..., exists=True, help="BPMN-Datei"),
+    name: str = typer.Option(..., "--name", help="Prozessfamilie; gleicher Name = neue Version."),
+) -> None:
+    client = get_client()
+    result = client.post_files(
+        "workflow-service",
+        "process-definitions",
+        data={"name": name},
+        files={"bpmn_xml": (file.name, file.read_bytes(), "application/xml")},
+    )
+    emit(result, output_format=output_format(ctx))
+
+
+def _operation(path: str, body: dict, ctx: typer.Context) -> None:
+    client = get_client()
+    emit(client.post("workflow-service", path, json_body=body), output_format=output_format(ctx))
+
+
+@instances_app.command("skip")
+def instances_skip(
+    ctx: typer.Context,
+    instance_id: str,
+    task_id: str,
+    reason: str = typer.Option(..., "--reason"),
+    expected_version: int | None = typer.Option(None, "--expected-version"),
+) -> None:
+    """Schliesst eine bereite Aufgabe administrativ ab (workflow.instance_modify)."""
+    _operation(
+        f"instances/{instance_id}/tasks/{task_id}/skip",
+        {"reason": reason, "expected_version": expected_version},
+        ctx,
+    )
+
+
+@instances_app.command("send-back")
+def instances_send_back(
+    ctx: typer.Context,
+    instance_id: str,
+    target_task_id: str = typer.Option(..., "--to", help="ID einer abgeschlossenen Aufgabe"),
+    reason: str = typer.Option(..., "--reason"),
+    expected_version: int | None = typer.Option(None, "--expected-version"),
+) -> None:
+    _operation(
+        f"instances/{instance_id}/send-back",
+        {"target_task_id": target_task_id, "reason": reason, "expected_version": expected_version},
+        ctx,
+    )
+
+
+@instances_app.command("migration-preview")
+def instances_migration_preview(
+    ctx: typer.Context,
+    instance_id: str,
+    target_definition_id: int = typer.Option(..., "--to"),
+) -> None:
+    _operation(
+        f"instances/{instance_id}/migration-preview",
+        {"target_definition_id": target_definition_id},
+        ctx,
+    )
+
+
+@instances_app.command("migrate")
+def instances_migrate(
+    ctx: typer.Context,
+    instance_id: str,
+    target_definition_id: int = typer.Option(..., "--to"),
+    reason: str = typer.Option(..., "--reason"),
+    expected_version: int | None = typer.Option(None, "--expected-version"),
+) -> None:
+    _operation(
+        f"instances/{instance_id}/migrate",
+        {
+            "target_definition_id": target_definition_id,
+            "reason": reason,
+            "expected_version": expected_version,
+        },
+        ctx,
+    )
+
+
+@instances_app.command("terminate")
+def instances_terminate(
+    ctx: typer.Context,
+    instance_id: str,
+    reason: str = typer.Option(..., "--reason"),
+    expected_version: int | None = typer.Option(None, "--expected-version"),
+) -> None:
+    """Beendet eine laufende Instanz endgueltig - nicht umkehrbar."""
+    _operation(
+        f"instances/{instance_id}/terminate",
+        {"reason": reason, "expected_version": expected_version},
+        ctx,
+    )

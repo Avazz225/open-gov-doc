@@ -5248,6 +5248,17 @@ unchosen).
     6. then mailboxes, retention, failures, workflow operations, and the optional client tag.
     
     If one session doesn't hold items 6 onwards, they move to a P96-S2b.
+  - **Result** ([ADR 0253 implementation notes](docs/adr/0253-admin-skill-scoping.md#implementation-notes-p96-s2)):
+    - **Everything in one session,** P96-S2b not needed. CLI: `config import`, `permission explain`,
+      `group`, `monitoring`, `approvals`, `mailbox`, `retention`, `failures`, workflow upload and
+      instance operations. Tests: CLI 226 (+125: 12 command tests, 113 skill-command checks).
+    - **permission-service:** `GET /explain/...` (230 tests, +4).
+    - **Skill:** `skills/og-doc-admin/` with `SKILL.md`, 10 references, 18 recipes,
+      `preview-package.sh`; `scripts/package-skill.sh` for the zip.
+    - **Live:** checked through the gateway.
+    - **Found:** the deletion-reason catalogue differs between document- and folder-service in the dev
+      stack.
+    - **Not built:** the optional client tag.
   - `skills/og-doc-admin/`:
     - `SKILL.md` (when to use it, the safety rules, the workflow);
     - `references/` per admin domain (users/roles, object types, retention/archival, monitoring/alerts,

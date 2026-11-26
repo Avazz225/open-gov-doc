@@ -99,6 +99,15 @@ not yet connected to the CLI until now — this gap was closed directly in the s
 | Migration/transfer operations (7.2, since **P67-S2**) | `dms migration installations list\|pair --display-name --base-url [--api-key]\|unpair <id>`, `dms migration transfers list [--status]\|get <id>\|create --source-folder-id --target-installation-id [--dry-run] [--retention-days]` |
 | License status (9.3, since **P67-S2**) | `dms license status`, `dms license upload --token <token>` |
 | Plugin orchestration (3.8, since **P67-S2**) | `dms plugin-orchestration status`, `dms plugin-orchestration placements list [--plugin-type]` |
+| Configuration import (7.3, since **P96-S2**) | `dms config import <package.json> [--category]...`: `applied` with counts per category, or `pending_approval` with the request id under four-eyes; exit code 1 on entry errors |
+| Permission explanation (since **P96-S2**, [ADR 0253](../adr/0253-admin-skill-scoping.md)) | `dms permission explain <principal> <resource> [--permission] [--access-type]`: the walk with assignments and their source, locks, the verdict |
+| Groups (since **P96-S2**) | `dms group list\|create <name> [--org-unit]\|members <group>\|add <group> <principal>\|remove <group> <principal>\|delete <group>`, group by name or id |
+| Monitoring (since **P96-S2**) | `dms monitoring sensors`, `dms monitoring alerts [--all]`, `dms monitoring alert-rule list\|preview <file>\|create <file>\|update <rule> <file>\|delete <rule>`, `dms monitoring downtime list\|create <file>\|delete <id>` |
+| Four-eyes requests (since **P96-S2**) | `dms approvals list [--status] [--action-type]\|show <id>\|approve <id>\|reject <id> --reason`, every action type (`dms query approvals` stays the query console's view) |
+| Mailboxes (since **P96-S2**) | `dms mailbox list\|test <file>\|create <file>\|update <id> <file>\|delete <id>`; passwords are write-only |
+| Retention (since **P96-S2**) | `dms retention show`, `dms retention set [--trash-days] [--reason-required/--no-reason-required] [--reminder-lead-days] [--add-reason]...`, on document- and folder-service |
+| Failed processing (since **P96-S2**) | `dms failures list [--kind rendition\|ocr\|notification]`, `dms failures retry <kind> <id>`; a source the session can't read is named, not fatal |
+| Workflow operations (since **P96-S2**) | `dms workflow definitions upload <file> --name`, `dms workflow instances skip\|send-back\|migration-preview\|migrate\|terminate ... --reason [--expected-version]` |
 | Deletion-register (10.4, since **P67-S2**) | `dms deletion-register list [--kind document\|folder] [--id]`, `dms deletion-register reconcile <id> --original-entry-id <id> [--kind document\|folder] [--reason]` |
 
 Every command accepts the global `--output table\|json` (`-o`), which must be given

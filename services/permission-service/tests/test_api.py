@@ -2498,3 +2498,144 @@ def test_a_warm_check_is_one_database_statement(client):
     assert response.status_code == 200
     real = [s for s in statements if s.strip().lower() not in ("select 1", ";")]
     assert len(real) == 1, statements
+
+
+# --- Permission explanation (P96-S2, ADR 0253 D1) ---------------------------
+
+
+def _node(client, resource_id, parent_id, inherit=True):
+    client.post(
+        "/resources",
+        json={"resource_id": resource_id, "parent_id": parent_id, "resource_type": "folder"},
+    )
+    if not inherit:
+        client.patch(f"/resources/{resource_id}", json={"inherit": False})
+
+
+def _role(client, headers, name, permissions):
+    return client.post(
+        "/roles", json={"name": name, "permissions": permissions}, headers=headers
+    ).json()["role"]
+
+
+def test_explain_shows_the_deciding_step_and_its_source(client, role_management_headers):
+    """A group assignment two levels up grants; the explanation names the
+    node, the group and the role - and agrees with `/check`."""
+    _node(client, "ex-amt", ROOT_RESOURCE_ID)
+    _node(client, "ex-akte", "ex-amt")
+    reader = _role(client, role_management_headers, "ex-reader", ["folder.read"])
+    group = client.post("/groups", json={"name": "Bauamt"}, headers=role_management_headers).json()
+    client.post(
+        f"/groups/{group['id']}/members",
+        json={"principal_id": "frau-x"},
+        headers=role_management_headers,
+    )
+    client.post(
+        "/role-assignments",
+        json={
+            "principal_type": "group",
+            "principal_id": group["id"],
+            "role_id": reader["id"],
+            "resource_id": "ex-amt",
+        },
+    )
+
+    response = client.get(
+        "/explain/frau-x/ex-akte",
+        params={"permission": "folder.read", "access_type": "read"},
+        headers=role_management_headers,
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["allowed"] is True
+    assert "ex-amt" in body["reason"]
+    assert body["groups"] == ["Bauamt"]
+    assert [step["resource_id"] for step in body["steps"]][:2] == ["ex-akte", "ex-amt"]
+    [granting] = [a for a in body["steps"][1]["assignments"] if a["grants_permission"]]
+    assert granting == {
+        "assignment_id": granting["assignment_id"],
+        "source": "group:Bauamt",
+        "role": "ex-reader",
+        "grants_permission": True,
+    }
+    check = client.get(
+        "/check",
+        params={
+            "principal_id": "frau-x",
+            "resource_id": "ex-akte",
+            "permission": "folder.read",
+            "access_type": "read",
+        },
+    ).json()
+    assert check["allowed"] is body["allowed"]
+
+
+def test_explain_names_a_broken_inheritance(client, role_management_headers):
+    _node(client, "ex2-amt", ROOT_RESOURCE_ID)
+    reader = _role(client, role_management_headers, "ex2-reader", ["folder.read"])
+    client.post(
+        "/role-assignments",
+        json={
+            "principal_type": "user",
+            "principal_id": "herr-y",
+            "role_id": reader["id"],
+            "resource_id": "ex2-amt",
+        },
+    )
+    _node(client, "ex2-geheim", "ex2-amt", inherit=False)
+
+    body = client.get(
+        "/explain/herr-y/ex2-geheim",
+        params={"permission": "folder.read", "access_type": "read"},
+        headers=role_management_headers,
+    ).json()
+
+    assert body["allowed"] is False
+    assert "inherit=false" in body["reason"]
+    assert [step["resource_id"] for step in body["steps"]] == ["ex2-geheim"]
+
+
+def test_explain_reports_a_blocking_scope_lock_and_needs_the_admin_capability(
+    client, role_management_headers
+):
+    _node(client, "ex3-amt", ROOT_RESOURCE_ID)
+    writer = _role(client, role_management_headers, "ex3-writer", ["folder.write"])
+    client.post(
+        "/role-assignments",
+        json={
+            "principal_type": "user",
+            "principal_id": "dora",
+            "role_id": writer["id"],
+            "resource_id": "ex3-amt",
+        },
+    )
+    client.post(
+        "/scope-locks",
+        json={"resource_id": "ex3-amt", "locked_by": "admin", "reason": "Prüfung"},
+        headers=role_management_headers,
+    )
+
+    params = {"permission": "folder.write", "access_type": "write"}
+    body = client.get(
+        "/explain/dora/ex3-amt", params=params, headers=role_management_headers
+    ).json()
+    assert body["allowed"] is False
+    assert "Bereichssperre" in body["reason"]
+    assert body["steps"][0]["active_locks"][0]["reason"] == "Prüfung"
+
+    assert client.get("/explain/dora/ex3-amt", params=params).status_code == 401
+    forbidden = client.get(
+        "/explain/dora/ex3-amt", params=params, headers={"X-DMS-Principal": "dora"}
+    )
+    assert forbidden.status_code == 403
+
+
+def test_explain_for_an_unregistered_resource(client, role_management_headers):
+    body = client.get(
+        "/explain/someone/no-such-node",
+        params={"permission": "document.read", "access_type": "read"},
+        headers=role_management_headers,
+    ).json()
+    assert body["allowed"] is False
+    assert "nicht registriert" in body["reason"]

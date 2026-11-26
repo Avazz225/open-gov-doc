@@ -2,6 +2,61 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P96-S2, CLI gaps and the admin skill package
+([ADR 0253 implementation notes](docs/adr/0253-admin-skill-scoping.md#implementation-notes-p96-s2)).
+Everything in one session; P96-S2b isn't needed.
+
+**What changed:**
+- **CLI (`tools/cli`), new commands:**
+  - `dms config import` (`applied` with counts, or `pending_approval` with the request id; exit 1 on
+    entry errors);
+  - `dms permission explain`;
+  - `dms group …` (name or id);
+  - `dms monitoring sensors|alerts`, `alert-rule list|preview|create|update|delete`,
+    `downtime list|create|delete`;
+  - `dms approvals list|show|approve|reject` (all action types);
+  - `dms mailbox list|test|create|update|delete`;
+  - `dms retention show|set` (writes document- and folder-service);
+  - `dms failures list|retry` (renditions, OCR, notifications; an unreadable source is named, not
+    fatal);
+  - `dms workflow definitions upload`, `dms workflow instances skip|send-back|migration-preview|migrate|terminate`.
+  
+  The client gained `patch` and multipart.
+- **permission-service:** `GET /explain/{principal}/{resource}?permission=&access_type=`
+  (`admin.user_management`). It reports the walk per node (`inherit`, matching assignments with their
+  source direct/group/everyone and whether they grant, active locks), the verdict with a reason, and the
+  cached state alongside.
+- **Skill `skills/og-doc-admin/`:**
+  - `SKILL.md`: session check, read → plan → preview → apply on a yes → verify, the rules (never
+    approve, irreversible only on an explicit instruction, never superuser, manipulation, pii,
+    maintenance shutdown, declassification), recipe index;
+  - 10 references and 18 recipes;
+  - `scripts/preview-package.sh`.
+- **`scripts/package-skill.sh`:** builds `dist/og-doc-admin-skill-<version>.zip`.
+- **`tools/cli/tests/test_skill_commands.py`:** checks every `dms …` command in the skill against the
+  Typer app, and the category lists against `config_service.schemas.CATEGORIES`.
+
+**Checks:**
+- **CLI:** 226 tests (+125), ruff green.
+- **permission-service:** 230 (+4).
+- **Live** (CLI login against the gateway):
+  - group, approvals, alerts, retention and failures lists;
+  - refusals with the missing role named (mail, notifications);
+  - `permission explain` on a real folder;
+  - `preview-package.sh` against `packages/monitoring-defaults` (19 rules identical, 3 local ones kept).
+- **Containers:** permission-service rebuilt.
+
+**Found:**
+- `dms retention show` makes visible that the deletion-reason catalogue differs between document-service
+  (empty) and folder-service (4 reasons) in the dev stack. Not fixed; that's an admin decision.
+- The eGov README had already documented `dms config import` before it existed. Now it does.
+- The optional client tag (ADR 0253 §5.10) was not built.
+
+**Next session:** P96-S3 (scenario evaluation with an agent, customer guide; the last session: phase-close
+regression, then `graphify update .`).
+
+---
+
 **Last completed:** P96-S1, scoping the admin skill
 ([ADR 0253](docs/adr/0253-admin-skill-scoping.md); no code).
 

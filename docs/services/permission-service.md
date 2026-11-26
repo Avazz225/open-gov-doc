@@ -418,6 +418,28 @@ Registers itself with the registry on startup (`libs/dms-registry-client`: regis
 None yet — follows in Phase 11.
 
 
+## Permission Explanation (P96-S2, [ADR 0253](../adr/0253-admin-skill-scoping.md) D1)
+
+`GET /explain/{principal_id}/{resource_id}?permission=&access_type=` explains a decision. It is gated by
+`admin.user_management`, because it reveals who holds what where. It walks like `_collect_effective_roles`
+and reports for every node:
+- its id, type and `inherit`;
+- each matching assignment with its source (`direct`, `group:<name>`, `everyone`), its role, and whether
+  that role grants the permission;
+- the scope locks active there.
+
+Then it gives the verdict with a reason:
+- granted at a given node;
+- no assignment along the path;
+- inheritance ended at an `inherit=false` node;
+- blocked by a scope lock;
+- resource not registered.
+
+It is computed fresh, never from or into the cache. The valid cached entry, if any, is reported next to
+it (`cached.agrees`), so a stale cache shows up. CLI: `dms permission explain`. Tests: the source and
+deciding node of a group assignment two levels up (agreeing with `/check`), broken inheritance, a
+blocking lock with `401`/`403` for the endpoint itself, an unregistered resource.
+
 ## One Read per Check; Replicas (P95-S2b, [ADR 0265](../adr/0265-permission-hot-path-and-replicas.md))
 
 - **One read per check:** `GET /check`, `POST /check/batch` and `GET /effective-permissions/...` read

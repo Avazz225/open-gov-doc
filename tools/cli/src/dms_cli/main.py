@@ -9,15 +9,22 @@ import typer
 
 from dms_cli.client import ApiError, AuthRequiredError
 from dms_cli.commands import (
+    approvals,
     archival,
     auth,
     config,
     deletion_register,
+    failures,
+    group,
+    mailbox,
     migration,
+    monitoring,
     object_type,
+    permission,
     plugin_orchestration,
     query,
     registry,
+    retention,
     role,
     user,
     workflow,
@@ -58,6 +65,14 @@ migration.register(app)
 license_cmd.register(app)
 plugin_orchestration.register(app)
 deletion_register.register(app)
+# P96-S2 (ADR 0253 §5): the admin skill's gaps.
+permission.register(app)
+group.register(app)
+monitoring.register(app)
+approvals.register(app)
+mailbox.register(app)
+retention.register(app)
+failures.register(app)
 
 
 def run() -> None:

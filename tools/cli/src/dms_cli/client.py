@@ -93,6 +93,8 @@ class GatewayClient:
         *,
         params: dict[str, Any] | None = None,
         json_body: Any = None,
+        data: dict[str, Any] | None = None,
+        files: dict[str, Any] | None = None,
         _retry: bool = True,
     ) -> httpx.Response:
         if not self._creds.access_token:
@@ -106,12 +108,21 @@ class GatewayClient:
             self._url(service_type, path),
             params=clean_params,
             json=json_body,
+            data=data,
+            files=files,
             headers=headers,
         )
         if response.status_code == 401 and _retry:
             self._refresh_once()
             return self.request(
-                method, service_type, path, params=params, json_body=json_body, _retry=False
+                method,
+                service_type,
+                path,
+                params=params,
+                json_body=json_body,
+                data=data,
+                files=files,
+                _retry=False,
             )
         if response.status_code >= 400:
             raise ApiError(response.status_code, _extract_detail(response))
@@ -127,8 +138,19 @@ class GatewayClient:
         response = self.request("POST", service_type, path, json_body=json_body, params=params)
         return response.json() if response.content else None
 
+    def post_files(
+        self, service_type: str, path: str, *, data: dict[str, Any], files: dict[str, Any]
+    ) -> Any:
+        """Multipart upload (P96-S2: process definitions)."""
+        response = self.request("POST", service_type, path, data=data, files=files)
+        return response.json() if response.content else None
+
     def put(self, service_type: str, path: str, *, json_body: Any = None) -> Any:
         response = self.request("PUT", service_type, path, json_body=json_body)
+        return response.json() if response.content else None
+
+    def patch(self, service_type: str, path: str, *, json_body: Any = None) -> Any:
+        response = self.request("PATCH", service_type, path, json_body=json_body)
         return response.json() if response.content else None
 
     def delete(self, service_type: str, path: str) -> Any:
