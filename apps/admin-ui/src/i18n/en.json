@@ -92,6 +92,9 @@
     "groupUpgrade": "With a licence extension",
     "workflowInstances": "Process instances"
   },
+  "outline": {
+    "label": "On this page"
+  },
   "home": {
     "title": "OG Doc Admin",
     "hint": "Select an area from the navigation.",

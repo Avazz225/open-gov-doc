@@ -696,6 +696,14 @@ in a folder (its class, or the root): `undefined` while loading, `null` if the r
   `document-workspace.test.tsx`; `PreviewPane.test.tsx` goes through "Weitere Aktionen"; e2e: CAdES
   upload with `.p7s` through the form plus `.p7m` extraction, and the preview toolbar.
 
+## Pane height (after P96-S3, user report)
+
+user-ui loads Tailwind without preflight, so boxes default to `content-box`. The dockview panes
+(`.explorer-pane`, `.trash-pane`, … in `globals.css`) have `height: 100%` plus padding. That made each
+pane 2 × space-4 taller than its container, and dockview clips the overflow (`overflow: hidden`), so
+the last entry was cut off when scrolled to the end. The panes and `.preview-text`
+(`max-height: 100%` plus padding and border) now use `box-sizing: border-box`.
+
 ## Authenticated direct links (Post-Roadmap Phase 29, [ADR 0109](../adr/0109-direct-link-url-scheme.md))
 
 `DocumentWorkspace.tsx` reads `?document=<id>`/`?folder=<id>` (and since P90-S2 `?case=<id>`, which opens the case view as "Open" from the favorites does) from `window.location.search` once on mount (not `useSearchParams()`, same Suspense-avoidance reasoning as the share link's `/share/` page above) and resolves them via the already-existing `GET /documents/{id}`/`GET /folders/{id}` plus the already-existing `openDocumentTab`/`openFolderPath` navigation functions — no new backend endpoint. A `403`/`404` surfaces via the normal `error` state instead of a silent fallback to the root folder. Structurally opposite to the public share link (anonymous, single-document, token-bearing) — a direct link carries no secret, just a stable resource ID resolved through the normal session/permission-check path, see ADR 0109 for the full comparison.

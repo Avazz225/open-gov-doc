@@ -305,6 +305,12 @@ body {
      `height: 100%`) ins Leere laufen (P16-S1-Regression, bei P17-S3-Folgesession
      gefunden). */
   height: 100%;
+  /* This app loads Tailwind without preflight, so the default is
+     `content-box`: `height: 100%` plus the padding made every pane 2 x
+     space-4 taller than its dockview container, which clips with
+     `overflow: hidden`. Scrolled to the end, the last entry was cut off.
+     `border-box` keeps the padding inside the 100%. */
+  box-sizing: border-box;
   min-height: 0;
   min-width: 0;
   overflow-y: auto;
@@ -459,6 +465,9 @@ body {
   white-space: pre-wrap;
   word-break: break-word;
   max-height: 100%;
+  /* Same as the panes above: without it the padding and border add to the
+     100% and the last lines are clipped. */
+  box-sizing: border-box;
   overflow-y: auto;
   padding: var(--dms-space-3);
   border: 1px solid var(--dms-border);

@@ -92,6 +92,9 @@
     "groupUpgrade": "Mit Lizenzerweiterung",
     "workflowInstances": "Prozessinstanzen"
   },
+  "outline": {
+    "label": "Auf dieser Seite"
+  },
   "home": {
     "title": "OG Doc Admin",
     "hint": "Wähle einen Bereich aus der Navigation.",

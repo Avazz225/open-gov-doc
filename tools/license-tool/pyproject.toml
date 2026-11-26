@@ -1,0 +1,20 @@
+[project]
+name = "og-license-tool"
+version = "0.1.0"
+description = "Lizenzen für OG Doc ausstellen, inspizieren und prüfen (Lizenzgeber-Werkzeug, ADR 0032). Enthält keine Schlüssel."
+requires-python = ">=3.12"
+dependencies = [
+    "typer>=0.12",
+    "python-jose[cryptography]>=3.3",
+    "cryptography>=42",
+]
+
+[project.scripts]
+og-license = "og_license_tool.main:run"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/og_license_tool"]

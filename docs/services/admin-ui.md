@@ -197,6 +197,16 @@ Replaces the earlier flat top-nav bar with a classic management dashboard layout
 
 - **`AdminSidebar`** (left): grouped, individually expandable/collapsible navigation (`sidebar-group` blocks, expand/collapse state remembered per browser in `localStorage`). Groups — "Administration" (users & roles, object types, since P5e-S3 additionally reference-number settings, since **P17-S1** additionally configuration packages — visible only with the capability `admin.object_config`, registry), "Installations", since P5b-S5 "Processing" (OCR settings, since P5d-S1 additionally the format allowlist), since P5b-S6 "Storage" (storage guard), since **P7-S1** "Compliance" (retention settings, deletion register, since **P7-S3** additionally records disposal & archiving), since **P6-S5** "Security" (superuser break-glass, since **P7-S2c** additionally forensic trace and audit depth), since **P7-S2b** "Reports" (standard reports), and since **P8-S1** "Diagnostic Tools" (query console, visible only with the capability `admin.query_console`) — built generically for further groups in future sessions. The manipulation section of the query console (since **P8-S2b**) is additionally hidden within the page itself behind the fine-grained capability `admin.query_console.manipulate` (not just the sidebar entry).
 - **`AdminShell`**: header (title, `InstallationSwitcher`, `ThemeSwitcher` since P4-S6, username, log out) + a main area on the right that shows whichever page is selected. Since **P6-S6**, `AdminShell` additionally renders a global `MaintenanceBanner` (not-shutdown, 4.8) as its first child — polls `GET /api/permission-service/maintenance-mode` every 30s, shows a prominent notice above the entire page if maintenance mode is active, otherwise `null`; deliberately stays silent if the Permission Service is unreachable (fail-open, no error message).
+- **Page outline** (after P96-S3, user request): `PageOutline.tsx` lists the page's `<h2>` sections.
+  - It reads them from the rendered `main`, so no page needs its own list. A MutationObserver picks up
+    sections that appear after data loads.
+  - Headings without an id get one from their text (`abschnitt-<slug>`). Headings in dialogs are
+    skipped.
+  - From 1280px it is a sticky column right of the content; below that, a collapsible „Auf dieser
+    Seite" above it. A page with fewer than two sections shows none.
+  - A click smooth-scrolls to the section card (`auto` under `prefers-reduced-motion`), moves focus to
+    the heading and sets the hash. The current section is marked (`aria-current="location"`).
+  - Tests: `tests/page-outline.test.tsx` (3).
 
 ## Role-Dependent Dashboard + Installation Branding (Concept 8, P69-S2, [ADR 0202](../adr/0202-p69s2-branding-config-and-role-dependent-dashboard.md))
 

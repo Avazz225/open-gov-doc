@@ -31,6 +31,11 @@ apps/libreoffice-addin/*.oxt
 !.env.example
 *.pem
 *.key
+# Licence tool (tools/license-tool): issued licences and the licensor's
+# issuance log never belong in git; the key itself lives outside the repo
+# (~/.config/og-doc-license) and is covered by *.pem anyway.
+*.license
+issued.jsonl
 
 # --- Plan ---
 CLAUDE.md 

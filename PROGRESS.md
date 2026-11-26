@@ -2,6 +2,44 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** after the plan, three user requests (2026-11-26): a page outline in admin-ui,
+clipped panes in user-ui, a licence tool ([ADR 0266](docs/adr/0266-license-tool.md)).
+
+**What changed:**
+- **admin-ui, page outline** (`components/PageOutline.tsx`, in `AdminShell`):
+  - it lists the page's `<h2>` sections, read from the rendered page (MutationObserver), so every page
+    has it without changes;
+  - from 1280px a sticky column right of the content, below that a collapsible „Auf dieser Seite";
+  - a click smooth-scrolls to the section card (respects reduced motion), focuses the heading and marks
+    the current section.
+- **user-ui, clipped last entry:** Tailwind runs without preflight there (`content-box`). The dockview
+  panes had `height: 100%` plus padding, so they were 32px taller than their container, and dockview
+  clipped that. Panes and `.preview-text` now use `box-sizing: border-box`.
+- **Licence tool `tools/license-tool` (`og-license`):** `keygen`, `public-key`, `issue`, `inspect`,
+  `verify`, `issued`.
+  - The private key lives outside the repo (`~/.config/og-doc-license`, 0600). `keygen` refuses a git
+    work tree. `issue` refuses keys that git could pick up or others can read.
+  - `.gitignore` also covers `*.license` and `issued.jsonl`.
+  - `--dev` signs with the local development key (never in git; checked).
+- **Helm:** `values.yaml` names `DMS_LICENSE_PUBLIC_KEY_PEM` at license-service. Without it an
+  installation accepts only the development key. A multi-line PEM via `env`/`--set-file` arrives intact
+  (`helm template`).
+- **Docs:** ADR 0266, `docs/tools/license-tool.md`, `docs/services/admin-ui.md`,
+  `docs/services/user-ui.md`.
+
+**Checks:**
+- **admin-ui:** tsc and eslint green; vitest 415 (+3); Prettier on the new files.
+- **license-tool:** 10 tests, ruff green. A `--dev` licence passes license-service's own
+  `license_verifier.decode` (components, installation binding, user model).
+- **Not done:** a browser check of both UI changes. The Docker stack was stopped from outside during the
+  session (exit 143), so there was no login. To do with the stack running: a long admin page (sensors)
+  at 1400 and 390, and user-ui panes scrolled to the end.
+
+**Open:** license-service's signing tests need the development key, which only exists on developer
+machines (fresh clones can't run them; ADR 0266 Consequences).
+
+---
+
 **Last completed:** P96-S3, evaluating the admin skill and the customer guide
 ([ADR 0253 evaluation](docs/adr/0253-admin-skill-scoping.md#evaluation-p96-s3)). **This is the last
 session of the plan;** Phase 96 is closed.

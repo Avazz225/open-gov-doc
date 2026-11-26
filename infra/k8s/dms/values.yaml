@@ -790,6 +790,14 @@ services:
       # as config-service below (a fleet-management-service provisions
       # both paths via the same installation).
       DMS_FLEET_AGENT_API_KEY: "dev-fleet-agent-key"
+      # Licence verification key (ADR 0032): without it the service accepts
+      # only its built-in DEVELOPMENT key. A real installation sets the
+      # licensor's public key here (`og-license public-key`, see
+      # docs/tools/license-tool.md), as a block scalar:
+      # DMS_LICENSE_PUBLIC_KEY_PEM: |
+      #   -----BEGIN PUBLIC KEY-----
+      #   ...
+      #   -----END PUBLIC KEY-----
 
   plugin-orchestration-service:
     enabled: true

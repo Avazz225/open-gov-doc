@@ -10,6 +10,7 @@ import { InstallationSwitcher } from "./InstallationSwitcher";
 import { LicenseStatusBanner } from "./LicenseStatusBanner";
 import { MaintenanceBanner } from "./MaintenanceBanner";
 import { NavDrawer } from "./NavDrawer";
+import { PageOutlineAside, PageOutlineInline, usePageOutline } from "./PageOutline";
 
 // Management dashboard layout (P4-S5, user feedback after P4-S3, concept 8):
 // replaces the previous flat top-nav bar with a left-hand navigation
@@ -17,6 +18,10 @@ import { NavDrawer } from "./NavDrawer";
 // selected function. The `InstallationSwitcher` sits in the header bar
 // because - unlike the side navigation - it is installation-wide rather
 // than scoped to a specific section.
+//
+// Page outline (after P96-S3): the page's `<h2>` sections as a sticky column
+// right of the content from 1280px, and as a collapsible list above it below
+// that. Pages with fewer than two sections show none.
 //
 // Narrow widths (P83-S12, ADR 0238 Decisions 2 and 3): below 768px the
 // sidebar becomes a modal drawer behind a menu button; the header cluster
@@ -27,6 +32,8 @@ export function AdminShell({ title, children }: { title: string; children: React
   const pathname = usePathname();
   const [navOpen, setNavOpen] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const mainRef = useRef<HTMLElement>(null);
+  const outline = usePageOutline(mainRef);
 
   // Navigating from the drawer closes it.
   useEffect(() => {
@@ -55,7 +62,11 @@ export function AdminShell({ title, children }: { title: string; children: React
         <div className="hidden md:flex">
           <AdminSidebar />
         </div>
-        <main className="max-w-[1100px] flex-1 min-w-0 p-4 md:p-6">{children}</main>
+        <main ref={mainRef} className="max-w-[1100px] flex-1 min-w-0 p-4 md:p-6">
+          <PageOutlineInline items={outline.items} activeId={outline.activeId} />
+          {children}
+        </main>
+        <PageOutlineAside items={outline.items} activeId={outline.activeId} />
       </div>
       <NavDrawer
         open={navOpen}

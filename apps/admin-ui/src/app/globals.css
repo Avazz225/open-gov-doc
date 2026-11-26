@@ -43,6 +43,13 @@
   textarea {
     font: inherit;
   }
+
+  /* Page outline (after P96-S3): a jump to a section leaves a little room
+     above its heading instead of gluing it to the window edge. */
+  main section,
+  main h2 {
+    scroll-margin-top: 1rem;
+  }
 }
 
 /* Post-Roadmap Phase 75 (Tailwind rollout): this app is large enough
