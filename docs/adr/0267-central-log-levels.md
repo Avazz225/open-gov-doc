@@ -1,6 +1,6 @@
 # 0267 — Central, per-area log levels
 
-**Status:** accepted (P97-S1; CLI and admin UI follow in P97-S2)
+**Status:** accepted (P97-S1 backend, P97-S2 CLI and admin UI)
 **Context:** user request 2026-11-26.
 - Log levels should be settable centrally and per function, and through the CLI.
 - Until now each service had exactly one level, `DMS_LOG_LEVEL`, applied once at startup in
@@ -90,5 +90,9 @@ check is skipped. Logger names aren't checked against the catalog: loggers can a
 - **Per-instance confirmation** (which replica runs which level) isn't reported back. The
   `log_levels_applied` line per instance (with `service_name`, in Loki) serves as the evidence. A
   heartbeat field could follow if needed.
-- **Open for P97-S2:** `dms logging …` and the admin UI section. P97-S3 verifies live, including the
-  permission-service replicas.
+- **P97-S2:**
+  - `dms logging show|set|reset|loggers` (`--for 30m|2h|1h30m`);
+  - the admin UI section „Log-Level" on the monitoring page;
+  - the admin skill recipe `15-log-levels.md`.
+
+  P97-S3 verifies live, including the permission-service replicas.

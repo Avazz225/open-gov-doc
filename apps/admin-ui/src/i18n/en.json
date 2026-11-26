@@ -1311,6 +1311,39 @@
       "invalid": "Please enter a value between 0 and 100.",
       "notConfigured": "No trace collector is configured for this monitoring-service (DMS_OTEL_EXPORTER_ENDPOINT) – the value takes effect once tracing is switched on.",
       "lastChange": "Last changed by {who}, {when}"
+    },
+    "logLevels": {
+      "heading": "Log levels",
+      "hint": "Set log levels centrally: for all services, one service or a single logger (with its child loggers). Every replica of a service applies a change within 15 seconds. DEBUG always expires (default {defaultMinutes} min, at most {maxHours} h) because it can write personal data. Without a setting a service runs on its DMS_LOG_LEVEL.",
+      "current": "Settings",
+      "none": "No central settings – every service runs on its DMS_LOG_LEVEL.",
+      "scope": "Scope",
+      "level": "Level",
+      "expires": "Expires",
+      "changedBy": "Changed by",
+      "noExpiry": "no expiry",
+      "remaining": "in {minutes} min",
+      "remove": "Remove",
+      "removeLabel": "Remove setting {scope}",
+      "removed": "Removed – the services apply it with their next poll.",
+      "service": "Service",
+      "allServices": "All services",
+      "logger": "Logger (optional)",
+      "loggerPlaceholder": "e.g. workflow_service.repository",
+      "duration": "Duration",
+      "minutes": "{minutes} min",
+      "hours": "{hours} h",
+      "set": "Set",
+      "saved": "Saved – every replica applies it within 15 seconds.",
+      "effective": "In effect per service",
+      "rootLevel": "Root level",
+      "loggerLevels": "Loggers",
+      "envLevel": "DMS_LOG_LEVEL",
+      "source": {
+        "service": "service",
+        "global": "global",
+        "env": "the service's own setting"
+      }
     }
   },
   "license": {

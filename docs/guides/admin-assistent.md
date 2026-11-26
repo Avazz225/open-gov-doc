@@ -80,7 +80,7 @@ Der Assistent kann nur, was Ihre Rollen erlauben. Für den vollen Aufgabenkatalo
 | Benutzer und Rechte | anlegen, Rolle in einem Ordner geben, Gruppen pflegen, Abteilungen (Organisationseinheiten) einrichten |
 | Konfigurationspakete | „Was würde das eGov-Paket ändern?", Paket oder Teile davon einspielen |
 | Dokument- und Ordnertypen | neue Typen, Felder, Aufbewahrungsfristen, Ablageregeln |
-| Überwachung | Alarmregeln mit Vorschau, Wartungsfenster, aktive Alarme |
+| Überwachung | Alarmregeln mit Vorschau, Wartungsfenster, aktive Alarme, Log-Level je Dienst oder Bereich (DEBUG läuft automatisch ab) |
 | Vier-Augen | offene Anträge anzeigen und erklären; Vier-Augen für eine Aktion ein- oder ausschalten |
 | Poststelle | Postfächer einrichten und testen |
 | Aufbewahrung | Papierkorb-Frist, Löschgründe, Erinnerungen |

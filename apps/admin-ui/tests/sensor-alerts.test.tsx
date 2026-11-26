@@ -31,6 +31,10 @@ const mocks = vi.hoisted(() => ({
   // P94-S1: the tracing section on the same page; not under test here.
   getTracingConfig: vi.fn(),
   setTracingSamplingRatio: vi.fn(),
+  // P97-S2: the log-level section on the same page; not under test here.
+  getLogLevels: vi.fn(),
+  setLogLevel: vi.fn(),
+  resetLogLevel: vi.fn(),
   permissions: ["admin.monitoring"] as string[],
 }));
 
@@ -123,6 +127,13 @@ describe("alerting UI", () => {
     });
     mocks.listAlertRules.mockResolvedValue([rule()]);
     mocks.listDowntimeWindows.mockResolvedValue([]);
+    mocks.getLogLevels.mockResolvedValue({
+      settings: [],
+      effective: {},
+      catalog: {},
+      debug_default_minutes: 60,
+      debug_max_minutes: 1440,
+    });
     mocks.createAlertRule.mockResolvedValue({});
     mocks.updateAlertRule.mockResolvedValue({});
     mocks.saveDowntimeWindow.mockResolvedValue({});

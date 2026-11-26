@@ -5360,6 +5360,20 @@ the end of this phase (P97-S3).
     - the expiry shown and editable.
   - **Docs:** monitoring-service, cli, admin-ui; the admin skill (`references/monitoring.md`, a recipe
     „Log-Level für X auf DEBUG"); the skill-command test stays green.
+  - **Result:**
+    - **CLI:** `dms logging show|set|reset|loggers`, and `delete` in the client takes query
+      parameters. 255 tests (+13), plus the skill command check (148).
+    - **admin-ui:** `LogLevelSettings` on the monitoring page (settings, form with logger suggestions,
+      „Wirksam je Dienst"). 420 tests (+5); tsc and eslint green.
+    - **Skill:** recipe `15-log-levels.md`, `references/monitoring.md`, the admin UI areas table; the
+      customer guide mentions it.
+    - **Live:**
+      - CLI over the gateway: set with expiry, show, catalog, reset; `422` for a mistyped service, `403`
+        without the monitoring role;
+      - admin-ui container rebuilt and browser-checked at 1400/390 (set, remove, outline jump, no
+        horizontal scroll);
+      - the two UI checks still open from 2026-11-26 are done: the outline on a long page, and user-ui
+        panes scrolled to the end, where the last entry ends 25 px above the visible edge.
 - **P97-S3 — Live verification and phase close.**
   - **Live on the stack:**
     - DEBUG for one logger of one service shows up in its stdout/Loki lines within one poll;

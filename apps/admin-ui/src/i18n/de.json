@@ -1311,6 +1311,39 @@
       "invalid": "Bitte einen Wert zwischen 0 und 100 eingeben.",
       "notConfigured": "Für diesen monitoring-service ist kein Trace-Collector eingetragen (DMS_OTEL_EXPORTER_ENDPOINT) – der Wert wirkt erst, wenn Tracing eingeschaltet ist.",
       "lastChange": "Zuletzt geändert von {who}, {when}"
+    },
+    "logLevels": {
+      "heading": "Log-Level",
+      "hint": "Log-Level zentral setzen: für alle Dienste, einen Dienst oder einen einzelnen Logger (mit seinen Unterloggern). Alle Replikas eines Dienstes übernehmen eine Änderung innerhalb von 15 Sekunden. DEBUG läuft immer ab (Standard {defaultMinutes} min, höchstens {maxHours} h), weil es personenbezogene Daten schreiben kann. Ohne Einstellung gilt das DMS_LOG_LEVEL des Dienstes.",
+      "current": "Einstellungen",
+      "none": "Keine zentralen Einstellungen – jeder Dienst läuft mit seinem DMS_LOG_LEVEL.",
+      "scope": "Bereich",
+      "level": "Level",
+      "expires": "Läuft ab",
+      "changedBy": "Geändert von",
+      "noExpiry": "ohne Ablauf",
+      "remaining": "in {minutes} min",
+      "remove": "Entfernen",
+      "removeLabel": "Einstellung {scope} entfernen",
+      "removed": "Entfernt – die Dienste übernehmen das mit ihrer nächsten Abfrage.",
+      "service": "Dienst",
+      "allServices": "Alle Dienste",
+      "logger": "Logger (optional)",
+      "loggerPlaceholder": "z. B. workflow_service.repository",
+      "duration": "Dauer",
+      "minutes": "{minutes} min",
+      "hours": "{hours} h",
+      "set": "Setzen",
+      "saved": "Gespeichert – alle Replikas übernehmen das innerhalb von 15 Sekunden.",
+      "effective": "Wirksam je Dienst",
+      "rootLevel": "Grund-Level",
+      "loggerLevels": "Logger",
+      "envLevel": "DMS_LOG_LEVEL",
+      "source": {
+        "service": "Dienst",
+        "global": "global",
+        "env": "eigene Einstellung des Dienstes"
+      }
     }
   },
   "license": {

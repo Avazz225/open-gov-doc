@@ -25,3 +25,18 @@
   transfers, old locks, ...). Applying the package is often better than writing a rule by hand.
 - **Downtime windows** suppress alerts for some or all rules: once (`starts_at`/`ends_at`) or weekly
   (`weekdays` 0=Monday, `daily_start`/`daily_end` "HH:MM"). `rule_ids` `null` or empty means every rule.
+- **Log levels** (P97, ADR 0267): set centrally per scope, from broad to specific:
+  - global (root level of every service);
+  - one service (`--service`);
+  - one logger, with its child loggers (`--logger`, with `--service` or for all services).
+
+  Every replica of a service applies a change within 15 s. Without a setting a service runs on its own
+  `DMS_LOG_LEVEL` (`root_source` `env`).
+  - **DEBUG always expires:** default 60 min, at most 24 h. It can write personal data and multiplies log
+    volume, so prefer one logger over a whole service and keep the duration short.
+  - **Logger names** are module paths (`workflow_service.repository`) or libraries (`sqlalchemy.engine`
+    for SQL, `httpx` for outgoing HTTP). `dms logging loggers --service S` lists the ones a service knows.
+  - **Commands:** `dms logging show [--service S]`,
+    `dms logging set <LEVEL> [--service S] [--logger L] [--for 30m|--until ISO]`,
+    `dms logging reset [--service S] [--logger L]`, `dms logging loggers --service S [--filter T]`.
+  - Admin UI: „Monitoring-Sensoren" → „Log-Level".

@@ -25,6 +25,8 @@ vi.mock("@/lib/api", () => ({
   // P88-S6: alerting has its own test file; here nothing is configured.
   listAlertRules: async () => [],
   listDowntimeWindows: async () => [],
+  // P97-S2: the log-level section has its own test file.
+  getLogLevels: async () => ({ settings: [], effective: {}, catalog: {}, debug_default_minutes: 60, debug_max_minutes: 1440 }),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {

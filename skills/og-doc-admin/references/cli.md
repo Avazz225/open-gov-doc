@@ -50,6 +50,7 @@ navigation:
 | Trash period, deletion reasons | „Aufbewahrung & Papierkorb" |
 | Disposal, archival transfers | „Aussonderung & Archivierung" |
 | Failed renditions and OCR runs | „Verarbeitungsfehler" |
+| Log levels | „Monitoring-Sensoren" → „Log-Level" (or `dms logging`) |
 | Team spaces | „Team-Arbeitsbereiche" |
 | Signatures | „Signaturen" |
 | Reference-number formats | „Kennzeichen-Einstellungen" |

@@ -99,6 +99,7 @@ only if the admin wants one, then follow the workflow above.
 | Branding, export stamp | `recipes/12-branding-export.md` |
 | Licence | `recipes/13-license.md` |
 | "Läuft alles?" | `recipes/14-health.md` |
+| Log level for a service or one area ("Debug-Logs für …") | `recipes/15-log-levels.md` |
 | "Warum sieht X den Ordner Y (nicht)?" | `recipes/d1-permission.md` |
 | "Was ist fehlgeschlagen?" | `recipes/d2-failures.md` |
 | "Welche Alarme sind aktiv?" | `recipes/d3-alerts.md` |

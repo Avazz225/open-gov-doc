@@ -2,6 +2,46 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P97-S2, central log levels: CLI, admin UI, skill
+([ADR 0267](docs/adr/0267-central-log-levels.md)).
+
+**What changed:**
+- **CLI** (`commands/log_levels.py`):
+  - `dms logging show [--service S]` (effective levels with source, plus the settings);
+  - `dms logging set <LEVEL> [--service] [--logger] [--for 30m|2h|1h30m | --until ISO]`;
+  - `dms logging reset [--service] [--logger]`;
+  - `dms logging loggers --service S [--filter]`;
+  - `ApiClient.delete` takes query parameters.
+- **admin-ui:** section „Log-Level" on „Monitoring-Sensoren" (`LogLevelSettings.tsx`):
+  - the settings with remaining time and „Entfernen";
+  - a form: service, logger with suggestions from the catalog, level, duration („ohne Ablauf" disabled
+    for DEBUG);
+  - „Wirksam je Dienst";
+  - read-only without `admin.monitoring`;
+  - de/en texts.
+- **Skill:** recipe `15-log-levels.md` (narrow to one logger, short duration, reset when done),
+  `references/monitoring.md`, admin UI areas, recipe index; the customer guide mentions log levels.
+- **Docs:** ADR 0267, `docs/tools/cli.md`, `docs/services/admin-ui.md`.
+
+**Checks:**
+- **CLI:** 255 (+13) including the skill command check (148).
+- **admin-ui:** vitest 420 (+5), tsc and eslint green, Prettier on the new files (not on `api.ts`).
+- **Live:**
+  - **CLI over the gateway:** set with expiry, show, catalog, reset; `422` with the list of registered
+    services for a mistyped name; `403` for `users-admin` without the monitoring role. A short-lived
+    probe account `log-level-probe` with only `domain-admin-monitoring` was used, because the scratchpad
+    with the eval account's password was gone. To be removed in P97-S3.
+  - **Browser:** admin-ui and user-ui containers rebuilt. Admin UI at 1400 and 390: the outline (sticky
+    column, or collapsible), the jump to „Log-Level" (hash set, heading at 52 px), set and remove
+    through the form, no horizontal scroll.
+  - **user-ui pane bottoms:** the explorer and the approvals list (529 entries) scrolled to the end;
+    the last entry ends 25 px above the visible edge (before the fix: cut off).
+
+**Next session:** P97-S3 (live verification incl. permission-service replicas, removing the probe
+account, phase-close regression, then `graphify update .` once).
+
+---
+
 **Last completed:** P97-S1, central log levels: backend
 ([ADR 0267](docs/adr/0267-central-log-levels.md)).
 
@@ -42,7 +82,6 @@
     back by itself and the lines stopped;
   - audit trail: changes under the admin, the expiry under `system:monitoring-log-levels`.
 
-**Next session:** P97-S2 (CLI `dms logging …`, admin UI section „Log-Level", skill recipe).
 
 ---
 

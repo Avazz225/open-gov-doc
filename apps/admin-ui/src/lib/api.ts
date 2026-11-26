@@ -1882,6 +1882,78 @@ export async function setTracingSamplingRatio(token: string, ratio: number): Pro
   return response.json();
 }
 
+// Central log levels (P97-S2, ADR 0267): global, per service, per logger.
+// Every replica applies a change with its next poll (15 s); DEBUG always
+// expires. Writes need `admin.monitoring`.
+export interface LogLevelSetting {
+  scope: string;
+  service: string | null;
+  logger: string | null;
+  level: string;
+  expires_at: string | null;
+  updated_by: string;
+  updated_at: string;
+}
+
+export interface EffectiveLogLevels {
+  root_level: string | null;
+  // `env` = the service's own DMS_LOG_LEVEL
+  root_source: "service" | "global" | "env";
+  loggers: Record<string, { level: string; source: "service" | "all" }>;
+}
+
+export interface LogLevels {
+  settings: LogLevelSetting[];
+  effective: Record<string, EffectiveLogLevels>;
+  catalog: Record<string, string[]>;
+  debug_default_minutes: number;
+  debug_max_minutes: number;
+}
+
+export interface LogLevelInput {
+  service?: string | null;
+  logger?: string | null;
+  level: string;
+  expires_in_minutes?: number | null;
+}
+
+export async function getLogLevels(token: string): Promise<LogLevels> {
+  const response = await request("monitoring-service", "log-levels", {}, token);
+  return response.json();
+}
+
+export async function setLogLevel(token: string, input: LogLevelInput): Promise<LogLevels> {
+  const response = await request(
+    "monitoring-service",
+    "log-levels",
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    },
+    token
+  );
+  return response.json();
+}
+
+export async function resetLogLevel(
+  token: string,
+  service: string | null,
+  logger: string | null
+): Promise<LogLevels> {
+  const params = new URLSearchParams();
+  if (service) params.set("service", service);
+  if (logger) params.set("logger", logger);
+  const query = params.toString();
+  const response = await request(
+    "monitoring-service",
+    query ? `log-levels?${query}` : "log-levels",
+    { method: "DELETE" },
+    token
+  );
+  return response.json();
+}
+
 export async function listSensors(token: string): Promise<Sensor[]> {
   const response = await request("monitoring-service", "sensors", {}, token);
   return response.json();

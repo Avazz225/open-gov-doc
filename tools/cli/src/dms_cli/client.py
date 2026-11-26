@@ -153,8 +153,8 @@ class GatewayClient:
         response = self.request("PATCH", service_type, path, json_body=json_body)
         return response.json() if response.content else None
 
-    def delete(self, service_type: str, path: str) -> Any:
-        response = self.request("DELETE", service_type, path)
+    def delete(self, service_type: str, path: str, *, params: dict | None = None) -> Any:
+        response = self.request("DELETE", service_type, path, params=params)
         return response.json() if response.content else None
 
     def get_bytes(self, service_type: str, path: str, *, params: dict | None = None) -> bytes:

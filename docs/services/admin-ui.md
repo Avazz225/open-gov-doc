@@ -818,6 +818,14 @@ activation config:
   Anfragen" in per cent (0–100, `PUT /tracing-config`), "Übernehmen", who changed it last, and a note when
   monitoring-service has no trace collector configured. Read-only without `admin.monitoring`. Tests in
   `sensor-settings.test.tsx` (+2).
+- **Log-Level** (P97-S2, [ADR 0267](../adr/0267-central-log-levels.md), `LogLevelSettings.tsx`):
+  - the active settings (scope, level, remaining time, who), each with „Entfernen";
+  - a form: service („Alle Dienste" or one), logger with suggestions from the service's catalog, level,
+    duration. „ohne Ablauf" is disabled for DEBUG;
+  - „Wirksam je Dienst" (collapsed): root level with its source, and the logger levels;
+  - read-only without `admin.monitoring`;
+  - tests: `log-level-settings.test.tsx` (5);
+  - browser-checked at 1400/390: set and remove, the outline jump to the section, no horizontal scroll.
 
 Every switch is Übernehmen/An/Aus: Übernehmen clears the override (`enabled: null`), so the next less
 specific level applies. Without `admin.monitoring` everything is disabled and a read-only hint is shown.
