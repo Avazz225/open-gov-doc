@@ -5221,8 +5221,33 @@ unchosen).
     jobs, alarms, licence.
   - **Knowledge:** which docs the skill carries (condensed references, not the 90-phase history) and how
     it stays current with the code.
+  - **Result** ([ADR 0253](docs/adr/0253-admin-skill-scoping.md)):
+    - **Shape:** an Agent Skill in `skills/og-doc-admin/` (`SKILL.md`, `references/` per domain,
+      `recipes/` per task, `scripts/`), plain Markdown plus shell, zipped for releases.
+    - **Tool surface:** only the `dms` CLI; MCP stays an option.
+    - **Identity:** the logged-in admin's own session, so changes are audited under that person's name.
+      The skill refuses to work in break-glass, superuser or query-manipulation sessions.
+    - **Workflow:** read → plan → preview (compare for package categories, `POST /alert-rules/preview`,
+      migration preview, before/after) → apply on a yes → verify with a summary.
+    - **Safety:** four-eyes requests are surfaced and **never approved by the skill**. Irreversible steps
+      only on an explicit instruction for exactly that step.
+    - **Catalogue:** 14 tasks plus 5 diagnosis questions.
+    - **Gaps found:** the CLI has no `config import`, so packages can be previewed but not applied. There
+      is no endpoint explaining a permission decision (D1). Groups, monitoring/alerts, all four-eyes
+      requests, mailboxes, retention, failures and workflow operations are missing from the CLI.
+    - **Kept current by tests:** every `dms …` command in the skill is checked against the Typer app, and
+      the categories against `CATEGORIES`.
 - **P96-S2 — Build: CLI gaps and the skill package.**
-  - The missing CLI commands from S1's inventory (with tests).
+  - The missing CLI commands from S1's inventory (with tests), in the order of ADR 0253 §5:
+    1. `config import`;
+    2. the permission explanation (`GET /explain/{principal}/{resource}` in permission-service and
+       `dms permission explain`);
+    3. groups;
+    4. monitoring/alerts;
+    5. all four-eyes requests;
+    6. then mailboxes, retention, failures, workflow operations, and the optional client tag.
+    
+    If one session doesn't hold items 6 onwards, they move to a P96-S2b.
   - `skills/og-doc-admin/`:
     - `SKILL.md` (when to use it, the safety rules, the workflow);
     - `references/` per admin domain (users/roles, object types, retention/archival, monitoring/alerts,

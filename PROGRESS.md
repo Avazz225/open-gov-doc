@@ -2,6 +2,50 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P96-S1, scoping the admin skill
+([ADR 0253](docs/adr/0253-admin-skill-scoping.md); no code).
+
+**Results:**
+- **Shape:** an Agent Skill in `skills/og-doc-admin/` (`SKILL.md`, `references/` per domain, `recipes/`
+  per task, `scripts/`). Plain Markdown plus shell, so other agents or a human can follow it. A zip for
+  releases; an admin-ui download later at most.
+- **Tool surface:** only the `dms` CLI, with the same gateway, permissions and audit trail as the UIs.
+  MCP stays an option.
+- **Identity:**
+  - the logged-in admin's own CLI session; no shared bot account (the CLI has no service accounts
+    anyway);
+  - the skill refuses break-glass, superuser and query-manipulation sessions;
+  - the recommended roles go into the customer guide (P96-S3).
+- **Workflow:** read → plan → preview → apply only on a yes → verify with a summary. The previews:
+  - `config compare` against the live state for the 19 package categories;
+  - `POST /alert-rules/preview` for alert rules;
+  - the migration preview for workflows;
+  - otherwise a before/after.
+- **Rules:**
+  - four-eyes requests are surfaced and **never approved by the skill**;
+  - irreversible steps only on an explicit instruction for exactly that step;
+  - never manipulation mode, pii-reveal, or Keycloak outside the CLI.
+- **Catalogue:** 14 tasks (users and roles, groups, org units, packages, object types, alert rules,
+  downtime windows, four-eyes, mailboxes, retention, workflows, branding/export stamp, licence, health)
+  and 5 diagnosis questions.
+- **Gaps (inventory of 14 CLI command groups against 35 admin-ui areas):**
+  - the CLI has **no `config import`**, so packages can only be previewed;
+  - **no endpoint explains a permission decision** ("warum sieht Frau X den Ordner Y nicht?"), only the
+    result exists;
+  - also missing from the CLI: groups, monitoring/alerts, all four-eyes requests (`dms query approvals`
+    shows only query-console requests), mailboxes, retention, failures and retry, workflow upload and
+    operations.
+- **Kept current:** tests check every `dms …` command in the skill against the Typer app, and the
+  categories against `config_service.CATEGORIES`.
+
+**Dev stack:** it had been stopped for about 23 hours (all containers exited at the same time, probably
+a host shutdown), and was started again with `docker compose up -d`. All services up.
+
+**Next session:** P96-S2 (CLI gaps in the order of ADR 0253 §5, plus the skill package; items 6 onwards
+possibly as P96-S2b).
+
+---
+
 **Last completed:** P95-S2c, the Python baseline for the Rust decision. **Phase 95 is closed.**
 P95-S3 (Rust pilot) was not started (user decision 2026-11-25, ADR 0257 §9).
 
