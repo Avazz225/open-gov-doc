@@ -2,6 +2,40 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. **This is not a theoretical risk — it happened again at P71-S3, TWICE in the same session**, despite this exact warning already being in place: several direct `uv run pytest services/<name>/tests` invocations (run outside `scripts/run-tests.sh`, for faster debugging iteration, without ever setting `TEST_POSTGRES_DSN`) truncated the LIVE stack's real `workflow`/`teamspace`/`virus_scan` schemas — every real process definition, DMN definition, process instance, and business calendar that existed in this dev stack before that session was destroyed. Then, mere minutes after writing the incident note you are reading right now into this very file, the SAME mistake was made a second time against `signature-service` (one targeted `-k`-filtered `uv run pytest` invocation, still without `TEST_POSTGRES_DSN`) — truncating `signature.signature`/`.internal_ca`/`.internal_tsa` too. No backup existed to restore from either time (`backups/` was empty). See P71-S3's own `PROGRESS.md` entry for the full incident writeup. **Always use `scripts/run-tests.sh <service>` for literally every test invocation, with no exceptions for "just one quick check"** — it exports `TEST_POSTGRES_DSN` unconditionally; a bare `uv run pytest` does not, no matter how many times this file says so, and knowing the rule does not stop you from forgetting it mid-debugging-session. Details/rule: see "Tooling & Testing" below.
 
+**Last completed:** P97-S3, live verification and phase close. **Phase 97 is closed, and with it the
+plan** ([ADR 0267](docs/adr/0267-central-log-levels.md)).
+
+**Live with replicas** (permission-service + 2 replicas, `--profile permission-replicas`):
+- all three instances reported their logger catalog (16 loggers each);
+- `dms logging set INFO --service permission-service --logger httpx --for 4m`: all three switched at
+  19:38:20–22 (set at 19:38:18), and workflow-service applied nothing;
+- monitoring-service stopped for a minute: each replica logged `sensor_config_refresh_failed` twice and
+  kept INFO;
+- after the restart and the expiry (19:42:17) all three fell back at 19:42:2x;
+  `monitoring.log_levels.expired` appears once in the audit trail.
+
+**Cleaned up:** probe account `log-level-probe` and its role assignment removed; the extra replicas
+stopped and removed; no log-level settings left.
+
+**Checks:**
+- **Phase-close regression:** 32 services, 3,343 tests green, ruff green.
+  - case-service hung once in an async fixture setup (1200 s timeout). It passed alone right after in
+    20 s (103 tests).
+  - The hung run's log was overwritten by the rerun, so the exact spot isn't recorded. Treated as a
+    one-off: case-service uses only the shared libraries from this phase, which the 31 other services
+    passed with.
+- **Libraries and tools:** dms-common 36, dms-metrics-client 31, dms-registry-client 11, CLI 266,
+  license-tool 10.
+- **`graphify update .`** ran once (end of the plan).
+
+**Not rebuilt:** containers built before P97 (all except registry, monitoring, workflow, permission and
+the two UIs) ignore the log levels and report no catalog until their next image build.
+
+**Next session:** none planned. Open choices remain under "Deliberately Not Included" in
+`IMPLEMENTATION_PLAN.md`.
+
+---
+
 **Last completed:** P97-S2, central log levels: CLI, admin UI, skill
 ([ADR 0267](docs/adr/0267-central-log-levels.md)).
 
@@ -37,8 +71,6 @@
   - **user-ui pane bottoms:** the explorer and the approvals list (529 entries) scrolled to the end;
     the last entry ends 25 px above the visible edge (before the fix: cut off).
 
-**Next session:** P97-S3 (live verification incl. permission-service replicas, removing the probe
-account, phase-close regression, then `graphify update .` once).
 
 ---
 

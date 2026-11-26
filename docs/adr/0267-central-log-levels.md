@@ -95,4 +95,12 @@ check is skipped. Logger names aren't checked against the catalog: loggers can a
   - the admin UI section „Log-Level" on the monitoring page;
   - the admin skill recipe `15-log-levels.md`.
 
-  P97-S3 verifies live, including the permission-service replicas.
+- **P97-S3, live with three permission-service instances** (`--profile permission-replicas`, two extra
+  replicas):
+  - all three reported their logger catalog;
+  - `dms logging set INFO --service permission-service --logger httpx --for 4m`: all three switched
+    within 4 s, and workflow-service applied nothing;
+  - monitoring-service stopped for a minute: each replica logged `sensor_config_refresh_failed` and kept
+    its level;
+  - after the restart and the expiry all three fell back within one poll, and the audit trail holds the
+    expiry exactly once.

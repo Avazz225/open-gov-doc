@@ -5384,6 +5384,15 @@ the end of this phase (P97-S3).
   - **Browser check** of the new section at 1400/390, plus the two still-open UI checks from
     2026-11-26 (admin page outline, user-ui pane bottoms).
   - **Close:** phase-close regression (`scripts/run-tests.sh`), then `graphify update .` once.
+  - **Result:**
+    - **Replicas (live):** three permission-service instances switched within 4 s; other services stayed
+      unchanged; with monitoring-service stopped each replica kept its level; after the expiry all three
+      fell back; the expiry appears once in the audit trail.
+    - **Cleaned up:** the probe account and its assignment removed; the extra replicas stopped.
+    - **Regression:** 32 services, 3,343 tests green; ruff green. case-service hung once in a fixture
+      setup (1200 s timeout) and passed alone in 20 s (103). Libraries and tools are green as well:
+      dms-common 36, dms-metrics-client 31, dms-registry-client 11, CLI 266, license-tool 10.
+    - **`graphify update .`** ran once.
 
 ## Deliberately Not Included in This Plan
 
