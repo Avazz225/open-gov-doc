@@ -144,6 +144,8 @@ export const GROUPS: NavGroup[] = [
     labelKey: "nav.groupSecurity",
     items: [
       { href: "/superuser/", labelKey: "nav.superuser", requiresCapability: "breakglass.approve" },
+      // P100-S1 (ADR 0271): software components per service, CycloneDX export.
+      { href: "/components/", labelKey: "nav.components", requiresCapability: "admin.monitoring" },
       {
         href: "/forensic-trace/",
         labelKey: "nav.forensicTrace",

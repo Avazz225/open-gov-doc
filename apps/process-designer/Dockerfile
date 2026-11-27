@@ -20,8 +20,18 @@ COPY libs/dms-showcase/ libs/dms-showcase/
 ARG NEXT_PUBLIC_GATEWAY_BASE_URL=http://localhost:8009
 ENV NEXT_PUBLIC_GATEWAY_BASE_URL=$NEXT_PUBLIC_GATEWAY_BASE_URL
 RUN npm run build --prefix apps/process-designer
+# Components file (P100-S1, ADR 0271): npm production dependencies plus the
+# runtime image's Alpine packages (copied in from it), kept in the image for
+# scanners; the npm part alone is also served (it ships to browsers anyway).
+COPY scripts/frontend-components.mjs scripts/
+COPY --from=nginx:1.27-alpine /lib/apk/db/installed /tmp/runtime-apk-installed
+RUN node scripts/frontend-components.mjs process-designer apps/process-designer/package-lock.json /repo/components /tmp/runtime-apk-installed
 
 FROM nginx:1.27-alpine
 COPY apps/process-designer/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /repo/apps/process-designer/out /usr/share/nginx/html
+COPY --from=build /repo/components/components.cdx.json /app/META-INF/components.cdx.json
+COPY --from=build /repo/components/components-npm.cdx.json /usr/share/nginx/html/META-INF/components.cdx.json
+LABEL org.opencontainers.image.title="process-designer" \
+      dms.components="/app/META-INF/components.cdx.json"
 EXPOSE 80

@@ -20,10 +20,20 @@ ENV NEXT_PUBLIC_GATEWAY_BASE_URL=$NEXT_PUBLIC_GATEWAY_BASE_URL
 ARG NEXT_PUBLIC_TEMPLATE_LIBRARY_FOLDER_NAME=Vorlagen
 ENV NEXT_PUBLIC_TEMPLATE_LIBRARY_FOLDER_NAME=$NEXT_PUBLIC_TEMPLATE_LIBRARY_FOLDER_NAME
 RUN npm run build --prefix apps/office-addin
+# Components file (P100-S1, ADR 0271): npm production dependencies plus the
+# runtime image's Alpine packages (copied in from it), kept in the image for
+# scanners; the npm part alone is also served (it ships to browsers anyway).
+COPY scripts/frontend-components.mjs scripts/
+COPY --from=nginx:1.27-alpine /lib/apk/db/installed /tmp/runtime-apk-installed
+RUN node scripts/frontend-components.mjs office-addin apps/office-addin/package-lock.json /repo/components /tmp/runtime-apk-installed
 
 FROM nginx:1.27-alpine
 COPY apps/office-addin/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /repo/apps/office-addin/out /usr/share/nginx/html
+COPY --from=build /repo/components/components.cdx.json /app/META-INF/components.cdx.json
+COPY --from=build /repo/components/components-npm.cdx.json /usr/share/nginx/html/META-INF/components.cdx.json
+LABEL org.opencontainers.image.title="office-addin" \
+      dms.components="/app/META-INF/components.cdx.json"
 COPY apps/office-addin/manifest.xml /usr/share/nginx/html/manifest.xml
 COPY apps/office-addin/assets/ /usr/share/nginx/html/assets/
 EXPOSE 80

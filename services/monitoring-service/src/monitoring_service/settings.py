@@ -31,3 +31,19 @@ class Settings(BaseServiceSettings):
     # How often expired entries are removed and this service applies its own
     # levels (it hands the configuration out and doesn't poll itself).
     log_level_refresh_seconds: float = 15.0
+
+    # Component inventory (P100-S1, ADR 0271): the frontends are static sites
+    # that don't register; their npm components file is read from these URLs
+    # (compose service names; Helm sets its own).
+    frontend_component_urls: dict[str, str] = {
+        name: f"http://{name}/META-INF/components.cdx.json"
+        for name in (
+            "admin-ui",
+            "user-ui",
+            "reviewer-ui",
+            "process-designer",
+            "migration-console",
+            "office-addin",
+        )
+    }
+    component_inventory_cache_seconds: float = 60.0

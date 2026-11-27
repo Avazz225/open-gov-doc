@@ -75,6 +75,19 @@ class RegistryClient:
             if i["healthy"] and i["status"] == "active" and i.get("sensors")
         ]
 
+    async def all_active_instances(self) -> list[RegistryInstance]:
+        """Every healthy, active instance, with or without sensors - for the
+        component inventory (P100-S1), which covers every service."""
+        response = await self._client.get("/instances")
+        response.raise_for_status()
+        return [
+            RegistryInstance(
+                i["instance_id"], i["service_type"], i["address"], i.get("sensors") or []
+            )
+            for i in response.json()
+            if i["healthy"] and i["status"] == "active"
+        ]
+
     async def service_loggers(self) -> dict[str, list[str]]:
         """The logger catalog per service type (P97-S1, ADR 0267): the union
         over every healthy instance, so a replica that has created a logger

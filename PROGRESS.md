@@ -72,6 +72,53 @@ the two UIs) ignore the log levels and report no catalog until their next image 
   - user management with the reset form checked in the browser.
 - **`graphify update .`** ran once (end of the plan).
 
+**Last completed:** P100-S1, software components
+([ADR 0271](docs/adr/0271-software-components-inventory.md)).
+
+**What changed:**
+- **Components file in every image** (`/app/META-INF/components.cdx.json`, CycloneDX 1.6, label
+  `dms.components`):
+  - **Python services:** `python -m dms_common.components` after the install lists every Python
+    distribution (`importlib.metadata`) and every Debian package (`/var/lib/dpkg/status`), using the
+    standard library only.
+  - **Frontends:** `scripts/frontend-components.mjs` in the Node build stage covers the npm production
+    dependencies plus the Alpine packages of the nginx image. The full list stays in the image; the
+    npm part alone is served at `/META-INF/components.cdx.json`, since a served file is public there.
+- **Runtime report:** `setup_observability` registers `GET /component-report` (only
+  `X-DMS-Principal: monitoring-service`): what the process sees, a fingerprint, and the comparison with
+  the image file.
+- **monitoring-service:** inventory from all healthy instances (each replica) plus the frontend files,
+  cached 60 s. `GET /components` (with `replicas_consistent`, `matches_image`),
+  `/components/{service}`, `/components/search?q=`, `/components/export` (CycloneDX with
+  `dms:services`); all `admin.monitoring`.
+- **CLI:** `dms components list|show|search|export`.
+- **admin-ui:** page „Komponenten" (Sicherheit): package search, a table per service with a detail
+  view and filter, export.
+- **Skill:** `references/diagnosis.md` („Welche Version von X läuft?").
+- **Dockerfiles (all 32 services, 6 frontends):** `uv sync --no-install-workspace` installs the
+  third-party dependencies from the lock before `libs/`, so a library change reuses that layer.
+- **Docs:** ADR 0271, service template (Dockerfile), monitoring-service, cli, admin-ui.
+
+**Checks:**
+- **Tests:**
+  - dms-common 41 (+5), monitoring-service 66 (+4), CLI 291 (+1), admin-ui vitest 431 (+3);
+  - gateway and permission-service green with the new library;
+  - tsc, eslint and ruff green.
+- **Docker:** a rebuild after a change in `dms-common` took 10 s per image (dependency layer cached).
+  The first build with the new layer took 13 min for all 38 images.
+- **Live:**
+  - 35 entries (29 services, 6 UIs), all `matches_image`, no differing replicas;
+  - OpenSSL 3.5.5 everywhere;
+  - `/component-report` through the gateway is 403 even with a spoofed `X-DMS-Principal` (and 401
+    without a valid token);
+  - admin UI page at 1400/390 (36 rows, 60 search hits for openssl, no horizontal scroll);
+  - probe account removed.
+
+**Next session:** P100-S2 (checking a CVE: OSV.dev live online, file import air-gapped, version
+matching per ecosystem).
+
+---
+
 **Last completed:** P99-S2, seeing and replaying dead letters. **Phase 99 is closed.**
 ([ADR 0270](docs/adr/0270-eventbus-dead-letters.md) Decision 5).
 
@@ -111,8 +158,6 @@ the two UIs) ignore the log levels and report no catalog until their next image 
   - mail-connector: the count test fixed, 10/10.
 - **Libraries and tools:** eventbus 22, CLI 290, admin-ui vitest 428 (+4), tsc and eslint green.
 
-**Next session:** P100-S1 (software components: a components file in every image, the runtime report,
-inventory and export, faster Docker layers; ADR 0271).
 
 ---
 

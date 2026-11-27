@@ -12,6 +12,7 @@ from dms_cli.commands import (
     approvals,
     archival,
     auth,
+    components,
     config,
     deletion_register,
     events,
@@ -73,6 +74,7 @@ group.register(app)
 monitoring.register(app)
 log_levels.register(app)
 events.register(app)
+components.register(app)
 approvals.register(app)
 mailbox.register(app)
 retention.register(app)

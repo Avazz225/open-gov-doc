@@ -128,6 +128,19 @@ allowed), and `rule_ids` (null = all).
 
 **UI (P88-S6):** admin-ui's sensors page, see `docs/services/admin-ui.md` "Sensor Alerts". For its rule editor, `POST /alert-rules/preview` evaluates a draft against a fresh scrape (value, would-be level, matching series without `instance`; `reason` `no_samples`/`rate_needs_history`), ungated like `GET /metrics`.
 
+## Software components (P100-S1, [ADR 0271](../adr/0271-software-components-inventory.md))
+
+- **Inventory:** from every healthy instance's `GET /component-report` (each replica on its own) and the
+  frontends' served npm files (`DMS_FRONTEND_COMPONENT_URLS`), cached for 60 s
+  (`DMS_COMPONENT_INVENTORY_CACHE_SECONDS`, `?refresh=true` bypasses it).
+- **API (`admin.monitoring`):**
+  - `GET /components`: per service, instances, counts per ecosystem, `replicas_consistent`,
+    `matches_image`, `error` (e.g. an image from before P100);
+  - `GET /components/{service}`;
+  - `GET /components/search?q=`;
+  - `GET /components/export[?service=]`: CycloneDX 1.6, every component once with `dms:services`.
+- **Tests:** `test_components.py` (4).
+
 ## Dead letters (P99-S1, [ADR 0270](../adr/0270-eventbus-dead-letters.md))
 
 `eventbus_dead_letters{stream,consumer}`: events a consumer gave up on after all delivery attempts, read

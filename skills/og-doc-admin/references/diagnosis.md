@@ -32,3 +32,11 @@ Read-only. Answer the question, and propose a fix only if asked.
 - **"Wer hat was geändert?"** `dms query events list --actor <user> --since <iso>` or
   `--subject <object-id>`. Role needed: `domain-admin-query-console`.
 - **Licence and services:** `dms license status`, `dms registry status`.
+- **"Welche Version von X läuft bei uns?" / "Wo steckt Bibliothek Y drin?"** (P100, ADR 0271)
+  - `dms components search <name>`: every service that runs it, with version and origin (PyPI, npm,
+    Debian, Alpine).
+  - `dms components show <service>`: everything in one service; `dms components list` flags replicas
+    that differ and instances that differ from their image file.
+  - `dms components export -o bom.json`: CycloneDX for an external scanner.
+  - Role: `domain-admin-monitoring`.
+

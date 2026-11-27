@@ -101,15 +101,31 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
+# Third-party dependencies first, from the lock alone (P100-S1, ADR 0271).
+RUN uv sync --frozen --package <name> --no-install-workspace
 COPY libs/ libs/
 COPY services/<name>/ services/<name>/
 
 RUN uv sync --frozen --package <name>
+# Components file (P100-S1, ADR 0271).
+RUN uv run --frozen --no-sync --package <name> python -m dms_common.components --name <name>
+LABEL org.opencontainers.image.title="<name>" \
+      dms.components="/app/META-INF/components.cdx.json"
 
 WORKDIR /app/services/<name>
 EXPOSE 8000
 CMD ["uv", "run", "uvicorn", "<name>.main:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
+
+**Layer order (P100-S1):** the third-party dependencies come from `uv.lock` before `libs/` is
+copied, so a change to a library or to the service reuses that layer. A rebuild after a library change
+takes about 10 s per image instead of minutes. Any `apt-get` step goes before the dependency step, so
+its packages land in the components file.
+
+**Components file:** `/app/META-INF/components.cdx.json` (CycloneDX 1.6: every Python distribution and
+Debian package of the image), readable without running the service. `setup_observability` also
+registers `GET /component-report` (for monitoring-service only) with the runtime view and its comparison
+with this file.
 
 **Important:** The Docker build context is the repo root (`dms/`), not the
 service folder — otherwise `libs/` and `uv.lock` are not reachable for `COPY`.

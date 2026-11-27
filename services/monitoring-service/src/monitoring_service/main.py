@@ -14,7 +14,14 @@ from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
 from dms_registry_client import maybe_start_registration
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response, status
-from monitoring_service import alert_store, alerting, log_levels, repository, scraper
+from monitoring_service import (
+    alert_store,
+    alerting,
+    components_inventory,
+    log_levels,
+    repository,
+    scraper,
+)
 from monitoring_service.clients import AuthServiceClient, PermissionServiceClient, RegistryClient
 from monitoring_service.models import Base
 from monitoring_service.schemas import (
@@ -118,6 +125,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
     app.state.registry_client = RegistryClient(settings.registry_service_base_url)
     app.state.scrape_client = httpx.AsyncClient()
+    app.state.component_inventory = components_inventory.Inventory(
+        settings.component_inventory_cache_seconds
+    )
 
     # Always-active, non-configurable operational counter (P11-S1
     # decision: a self-reference - monitoring-service asking itself
@@ -442,6 +452,74 @@ async def set_sensor_override(
             payload={"enabled": payload.enabled, "actor": x_dms_principal},
         )
     return result
+
+
+# --- Software components (P100-S1, ADR 0271) -------------------------------------
+
+
+async def _inventory(refresh: bool = False) -> dict:
+    async def load():
+        instances = await app.state.registry_client.all_active_instances()
+        return await components_inventory.collect(
+            app.state.scrape_client, instances, settings.frontend_component_urls
+        )
+
+    return await app.state.component_inventory.get(load, refresh=refresh)
+
+
+@app.get("/components")
+async def list_components(
+    refresh: bool = False, x_dms_principal: str = Header(default="")
+) -> list[dict]:
+    """Per service: instances, component count per ecosystem, whether the
+    replicas run the same set and whether it matches the image file."""
+    await _require_monitoring_permission(x_dms_principal)
+    return [entry.summary() for entry in (await _inventory(refresh)).values()]
+
+
+@app.get("/components/search")
+async def search_components(
+    q: str = Query(min_length=2, max_length=200), x_dms_principal: str = Header(default="")
+) -> list[dict]:
+    """Which services run a package, in which version."""
+    await _require_monitoring_permission(x_dms_principal)
+    return components_inventory.search(await _inventory(), q)
+
+
+@app.get("/components/export")
+async def export_components(
+    service: str | None = None, x_dms_principal: str = Header(default="")
+) -> dict:
+    """CycloneDX 1.6 for the installation (every component once, with the
+    services that run it) or for one service."""
+    await _require_monitoring_permission(x_dms_principal)
+    services = await _inventory()
+    if service and service not in services:
+        raise HTTPException(status_code=404, detail=f"Unbekannter Dienst {service!r}")
+    return components_inventory.merged_document(services, only=service)
+
+
+@app.get("/components/{service}")
+async def service_components(service: str, x_dms_principal: str = Header(default="")) -> dict:
+    await _require_monitoring_permission(x_dms_principal)
+    entry = (await _inventory()).get(service)
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"Unbekannter Dienst {service!r}")
+    return {
+        **entry.summary(),
+        "fingerprints": entry.fingerprints,
+        "image_file": entry.image_file,
+        "components": [
+            {
+                "name": c.get("name"),
+                "version": c.get("version"),
+                "ecosystem": components_inventory.ecosystem(c),
+                "purl": c.get("purl"),
+                "own": components_inventory.is_own(c),
+            }
+            for c in entry.components
+        ],
+    }
 
 
 # --- Dead letters (P99-S2, ADR 0270) ---------------------------------------------

@@ -1903,6 +1903,54 @@ export async function setTracingSamplingRatio(token: string, ratio: number): Pro
   return response.json();
 }
 
+// Software components (P100-S1, ADR 0271): which libraries run where, from
+// the running instances and the frontends' files. `admin.monitoring`.
+export interface ComponentSummary {
+  service: string;
+  kind: "service" | "frontend";
+  instances: number;
+  component_count: number;
+  ecosystems: Record<string, number>;
+  replicas_consistent: boolean;
+  matches_image: boolean | null;
+  image_created: string | null;
+  error: string | null;
+}
+
+export interface ComponentRow {
+  service?: string;
+  name: string;
+  version: string;
+  ecosystem: string;
+  purl: string | null;
+  own?: boolean;
+}
+
+export interface ServiceComponents extends ComponentSummary {
+  components: ComponentRow[];
+}
+
+export async function listComponentSummaries(token: string, refresh = false): Promise<ComponentSummary[]> {
+  const response = await request("monitoring-service", `components${refresh ? "?refresh=true" : ""}`, {}, token);
+  return response.json();
+}
+
+export async function getServiceComponents(token: string, service: string): Promise<ServiceComponents> {
+  const response = await request("monitoring-service", `components/${encodeURIComponent(service)}`, {}, token);
+  return response.json();
+}
+
+export async function searchComponents(token: string, query: string): Promise<ComponentRow[]> {
+  const response = await request("monitoring-service", `components/search?q=${encodeURIComponent(query)}`, {}, token);
+  return response.json();
+}
+
+export async function exportComponents(token: string, service?: string): Promise<Blob> {
+  const query = service ? `?service=${encodeURIComponent(service)}` : "";
+  const response = await request("monitoring-service", `components/export${query}`, {}, token);
+  return response.blob();
+}
+
 // Dead letters (P99-S2, ADR 0270): events a consumer gave up on after every
 // delivery attempt. Everything needs `admin.monitoring` (payloads can hold
 // personal data); replay and discard are audited, discard needs a reason.

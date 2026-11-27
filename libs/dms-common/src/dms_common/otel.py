@@ -187,7 +187,29 @@ def setup_observability(app, settings: BaseServiceSettings) -> bool:
     from dms_common.access_log import AccessLogMiddleware
 
     app.add_middleware(AccessLogMiddleware)
+    _register_components_endpoint(app, settings)
     return setup_tracing(app, settings)
+
+
+# Who may read `/component-report` (P100-S1, ADR 0271): only monitoring-service,
+# which collects the inventory. A version list helps an attacker, and the
+# gateway overwrites `X-DMS-Principal` with the real user, so a request from
+# outside can't pass as this principal.
+COMPONENTS_READERS = frozenset({"monitoring-service"})
+
+
+def _register_components_endpoint(app, settings: BaseServiceSettings) -> None:
+    from fastapi import Header, HTTPException
+
+    from dms_common.components import runtime_report
+
+    async def components(x_dms_principal: str = Header(default="")) -> dict:
+        if x_dms_principal not in COMPONENTS_READERS:
+            raise HTTPException(status_code=403, detail="Nur für den Komponenten-Bestand")
+        return runtime_report(settings.service_name)
+
+    # Not `/components`: that path is monitoring-service's inventory API.
+    app.add_api_route("/component-report", components, methods=["GET"], include_in_schema=False)
 
 
 def _instrument_sqlalchemy() -> None:

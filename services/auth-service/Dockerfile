@@ -4,10 +4,18 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
+# Third-party dependencies first, from the lock alone (P100-S1, ADR 0271): a change to
+# libs/ or this service then reuses this layer instead of reinstalling everything.
+RUN uv sync --frozen --package auth-service --no-install-workspace
 COPY libs/ libs/
 COPY services/auth-service/ services/auth-service/
 
 RUN uv sync --frozen --package auth-service
+# Components file (P100-S1, ADR 0271): every Python distribution and Debian package in
+# this image, frozen at build time - readable without running the service.
+RUN uv run --frozen --no-sync --package auth-service python -m dms_common.components --name auth-service
+LABEL org.opencontainers.image.title="auth-service" \
+      dms.components="/app/META-INF/components.cdx.json"
 
 WORKDIR /app/services/auth-service
 EXPOSE 8000

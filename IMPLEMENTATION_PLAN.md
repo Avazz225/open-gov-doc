@@ -5602,6 +5602,26 @@ covered at all.
   - **An inventory view:** components per service, a search across services ("who runs `urllib3`, in
     which version?"), CycloneDX export per service and merged (for Dependency-Track, Trivy, Greenbone);
     API, CLI `dms components …`, admin UI page „Komponenten".
+  - **Result** ([ADR 0271](docs/adr/0271-software-components-inventory.md)):
+    - **Components file in every image:**
+      - Python services: `dms_common.components` with Python distributions plus Debian packages;
+        permission-service, for example, has 141 (54 PyPI, 87 Debian, OpenSSL 3.5.5);
+      - frontends: `scripts/frontend-components.mjs` with npm plus Alpine (kept in the image), and npm
+        alone served;
+      - label `dms.components`.
+    - **Runtime report:** `GET /component-report` (monitoring-service only, path not `/components`),
+      compared with the image file.
+    - **Inventory:** monitoring-service `/components`, `/components/{service}`, `/components/search`
+      and `/components/export` (CycloneDX); CLI `dms components …`; admin UI „Komponenten" under
+      „Sicherheit".
+    - **Dockerfiles:** dependencies installed before the libraries. 10 s per image after a library
+      change; the first build with the new layer took 13 minutes.
+    - **Tests:** dms-common 41 (+5), monitoring 66 (+4), CLI 291 (+1), admin-ui 431 (+3).
+    - **Live:**
+      - 35 entries (29 services, 6 UIs), all matching their image and replicas consistent;
+      - one OpenSSL version everywhere;
+      - `/component-report` refused through the gateway even with a spoofed header;
+      - the page browser-checked at 1400/390.
 - **P100-S2 — Checking a CVE, online and air-gapped.**
   - **Matching:** OSV ranges (introduced/fixed events) against the inventory, with per-ecosystem
     version rules (PEP 440 for PyPI, semver for npm, Debian versions).

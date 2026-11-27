@@ -4,10 +4,18 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
+# Third-party dependencies first, from the lock alone (P100-S1, ADR 0271): a change to
+# libs/ or this service then reuses this layer instead of reinstalling everything.
+RUN uv sync --frozen --package fleet-management-service --no-install-workspace
 COPY libs/ libs/
 COPY services/fleet-management-service/ services/fleet-management-service/
 
 RUN uv sync --frozen --package fleet-management-service
+# Components file (P100-S1, ADR 0271): every Python distribution and Debian package in
+# this image, frozen at build time - readable without running the service.
+RUN uv run --frozen --no-sync --package fleet-management-service python -m dms_common.components --name fleet-management-service
+LABEL org.opencontainers.image.title="fleet-management-service" \
+      dms.components="/app/META-INF/components.cdx.json"
 
 WORKDIR /app/services/fleet-management-service
 EXPOSE 8000
