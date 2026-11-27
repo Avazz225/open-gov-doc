@@ -5666,6 +5666,31 @@ covered at all.
   - an admin skill recipe („Sind wir von CVE-… betroffen?");
   - docs;
   - **phase close:** regression.
+  - **Result** ([ADR 0272](docs/adr/0272-vulnerability-checks.md) Decisions 5–8):
+    - **Scan:** in the background, stored, repeated daily.
+      - **Online:** an OSV batch query with every installed package version. It has its own switch,
+        `DMS_VULNERABILITY_SCAN_ONLINE_ENABLED` (user decision: the package list leaves the
+        installation).
+      - **Offline:** an imported OSV database (per-ecosystem `all.zip`, kept only for installed
+        packages, with a data date). The CLI filters the dumps before uploading.
+      - One entry per flaw, with aliases grouped and severity from GHSA or a computed CVSS 3.x
+        score; „nicht geprüft" lists by reason.
+      - Offline single-id checks are answered from the database.
+    - **Sensors and rules:** `vulnerabilities.known{severity,fixable}`, `…scan_age_hours` and
+      `…database_age_days`. Four default rules in the monitoring package 1.2.0.
+    - **Frontends:** their full components file (incl. Alpine) comes from an internal port 8081
+      (nginx, Helm Service port, never published or routed).
+    - **CLI** `dms vulnerabilities scan|report|scans|database import|status|delete`; **admin UI** page
+      „Schwachstellen" (scan, database, single check); skill recipe d6.
+    - **Live:**
+      - online, 652 known vulnerabilities (340 fixable, 38 critical) in 25 s;
+      - offline with all four dumps, 639, imported in 12 s and scanned in 2.5 s;
+      - all three rules checked in preview (error/warning/ok);
+      - UI at 1400/390.
+    - **Fixed live:**
+      - the npm dump replaced the PyPI database (coverage now by share);
+      - `Debian:13/all.zip` is a stale 2024 leftover (now shown by the data date and its rule);
+      - Alpine `fixed: "0"` counted as affected.
 
 ## Phase 101 — High Availability and Data Growth
 
@@ -5677,6 +5702,19 @@ covered at all.
   - check every other loop of the service for the same issue;
   - Helm `replicas` > 1 allowed with a PDB;
   - live with two replicas: one timer fires exactly once, and a stopped replica's work is taken over.
+  - **Result** ([ADR 0273](docs/adr/0273-workflow-service-replicas.md)):
+    - **Ticks:** the SLA tick and the claim-abandonment tick each take `pg_try_advisory_xact_lock(4, n)`
+      in their transaction, and the other replicas skip. Without it the claim notice went out twice,
+      and the SLA ticks fired timers (with side effects) in both replicas and rolled each other back.
+    - **Startup seeding:** template and responsibilities are serialized. Two replicas starting together
+      had created „Umlauf" versions 1 and 2.
+    - **Calendar cache:** every replica reloads it each SLA tick, since it used to be fresh only in
+      the replica that wrote it.
+    - **Helm:** 2 replicas plus a PDB; the registry expects 2.
+    - **Tests:** `test_replicas.py` 5, all failing with the lock switched off; workflow-service 288 (+5).
+    - **Live** (second container, 5-s tick):
+      - a 25-s timer escalated once, from one replica;
+      - with replica 1 stopped right after the start, replica 2 took the timer over on time.
 - **P101-S2 — Audit-trail retention: scoping (ADR 0274).** The dev stack holds 1.75 M events / 1.07 GB
   and grows with every run. To decide:
   - a retention period per event family (legal minimums for records management);

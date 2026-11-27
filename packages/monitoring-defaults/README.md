@@ -44,13 +44,20 @@ Rules you created yourself under other names are left alone.
 | Knoten-Arbeitsspeicher knapp | `plugin_orchestration.node.available_ram_mb` | min | < 1024 MB | < 256 MB | 3 / 3 |
 | Knoten-CPU ausgelastet | `plugin_orchestration.node.cpu_usage_percent` | max | > 85 % | > 95 % | 5 / 10 |
 | Prozess-Speicher hoch | `process.memory_bytes` | max | > 1.5 GiB | > 3 GiB | 5 / 5 |
+| Unzustellbare Ereignisse | `eventbus.dead_letters` | sum | > 0 | — | 1 / – |
+| Kritische Schwachstellen | `vulnerabilities.known{severity=critical}` | sum | — | > 0 | – / 1 |
+| Behebbare Schwachstellen | `vulnerabilities.known{fixable=true}` | sum | > 0 | — | 1 / – |
+| Schwachstellenprüfung veraltet | `vulnerabilities.scan_age_hours` | max | > 72 h | — | 1 / – |
+| Schwachstellen-Datenbank veraltet | `vulnerabilities.database_age_days` | max | > 30 days | — | 1 / – |
 
 Repeats count evaluations; one happens every 60 s by default. A rule is `unknown` while its sensor has
 no value. For example:
 - no licence is installed;
 - no replica expectation is set;
 - no login has been rejected yet;
-- the sensor is switched off on the sensors page.
+- the sensor is switched off on the sensors page;
+- no vulnerability scan has finished yet, or no OSV database is imported (the vulnerability rules,
+  ADR 0272).
 
 **Downtime window:** "Wartungsfenster Sonntag (Beispiel)", Sundays 02:00–04:00 for every rule, shipped
 **disabled**. Enable or adapt it on the sensors page.

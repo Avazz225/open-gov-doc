@@ -53,6 +53,13 @@ spec:
             - name: http
               containerPort: {{ $svc.port }}
               protocol: TCP
+            {{- if $svc.staticFrontend }}
+            # Internal components port (P100-S3, ADR 0272): the full components
+            # file for monitoring-service, never routed by the ingress.
+            - name: components
+              containerPort: 8081
+              protocol: TCP
+            {{- end }}
           env:
             {{- include "dms.baseEnv" (dict "root" $ "name" $name) | nindent 12 }}
             {{- if $svc.dependsOnServices }}
@@ -65,6 +72,10 @@ spec:
             {{- if $svc.usesRedis }}
             - name: DMS_REDIS_URL
               value: {{ include "dms.redisUrl" $ | quote }}
+            {{- end }}
+            {{- if eq $name "monitoring-service" }}
+            - name: DMS_FRONTEND_COMPONENT_URLS
+              value: {{ include "dms.frontendComponentUrls" $ | quote }}
             {{- end }}
             {{- if eq $name "registry-service" }}
             - name: DMS_EXPECTED_REPLICAS_DEFAULTS

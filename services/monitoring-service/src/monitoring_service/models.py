@@ -109,3 +109,86 @@ class DowntimeWindow(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+
+class VulnerabilityDatabase(Base):
+    """One imported OSV database per ecosystem (P100-S3, ADR 0272): what an
+    offline scan checks against. `covered` holds the package names installed at
+    import time - only their records are kept, so a package added later is
+    reported as not covered instead of silently clean."""
+
+    __tablename__ = "vulnerability_database"
+
+    ecosystem: Mapped[str] = mapped_column(String(64), primary_key=True)
+    source_name: Mapped[str] = mapped_column(String(512))
+    record_count: Mapped[int] = mapped_column(Integer)
+    covered: Mapped[list] = mapped_column(JSON, default=list)
+    # The newest `modified` among the kept records: how current the data is.
+    # OSV still serves stale dumps (e.g. `Debian:13/all.zip` from 2024).
+    data_as_of: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    imported_by: Mapped[str] = mapped_column(String(128))
+
+
+class VulnerabilityRecord(Base):
+    """An OSV record kept from an import, per ecosystem."""
+
+    __tablename__ = "vulnerability_record"
+
+    ecosystem: Mapped[str] = mapped_column(String(64), primary_key=True)
+    record_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    record: Mapped[dict] = mapped_column(JSON)
+
+
+class VulnerabilityPackage(Base):
+    """Which records name which installed package (lookup for a scan)."""
+
+    __tablename__ = "vulnerability_package"
+
+    ecosystem: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(256), primary_key=True)
+    record_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+
+
+class VulnerabilityAlias(Base):
+    """Every id a kept record goes by (lookup for a single-id check offline)."""
+
+    __tablename__ = "vulnerability_alias"
+
+    alias: Mapped[str] = mapped_column(String(128), primary_key=True)
+    ecosystem: Mapped[str] = mapped_column(String(64), primary_key=True)
+    record_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+
+
+class VulnerabilityImport(Base):
+    """An import job: dumps are large, so the import runs in the background."""
+
+    __tablename__ = "vulnerability_import"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    status: Mapped[str] = mapped_column(String(16))  # running | done | failed
+    source_name: Mapped[str] = mapped_column(String(512))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    actor: Mapped[str] = mapped_column(String(128))
+    ecosystems: Mapped[dict] = mapped_column(JSON, default=dict)
+    error: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+
+
+class VulnerabilityScan(Base):
+    """One run over the whole inventory and its result."""
+
+    __tablename__ = "vulnerability_scan"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    status: Mapped[str] = mapped_column(String(16))  # running | done | failed
+    source: Mapped[str] = mapped_column(String(16))  # online | offline
+    trigger: Mapped[str] = mapped_column(String(16))  # manual | schedule
+    actor: Mapped[str] = mapped_column(String(128))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    summary: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    vulnerabilities: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    uncovered: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    checked_services: Mapped[int] = mapped_column(Integer, default=0)

@@ -70,6 +70,9 @@ def test_osv_ranges():
     assert v.affected_by_range("2.1", two, v.compare_pypi)
     assert not v.affected_by_range("2.2", two, v.compare_pypi)
     assert v.first_fix_after("1.1", two, v.compare_pypi) == "1.2"
+    # Alpine: `fixed: "0"` means never affected in this release.
+    never = [{"introduced": "1.1.1"}, {"fixed": "0"}]
+    assert not v.affected_by_range("3.3.3-r0", never, v.compare_alpine)
 
 
 def _component(name, version, ecosystem, **props):

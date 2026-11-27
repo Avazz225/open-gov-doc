@@ -27,6 +27,14 @@ async def _clean_tables():
                 "TRUNCATE monitoring.alert_rule, monitoring.alert_state, monitoring.downtime_window"
             )
         )
+        # P100-S3: vulnerability scans and the offline database.
+        await conn.execute(
+            text(
+                "TRUNCATE monitoring.vulnerability_database, monitoring.vulnerability_record, "
+                "monitoring.vulnerability_package, monitoring.vulnerability_alias, "
+                "monitoring.vulnerability_import, monitoring.vulnerability_scan"
+            )
+        )
     await eng.dispose()
     yield
 

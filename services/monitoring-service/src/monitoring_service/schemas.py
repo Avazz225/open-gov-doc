@@ -53,6 +53,13 @@ class VulnerabilityCheckIn(BaseModel):
     manual: ManualVulnerability | None = None
 
 
+class VulnerabilityScanIn(BaseModel):
+    """Which source a scan of the whole inventory uses (P100-S3): `auto`
+    prefers online (if allowed) over an imported database."""
+
+    source: Literal["auto", "online", "offline"] = "auto"
+
+
 class DeadLetterOut(BaseModel):
     """A message a consumer gave up on (P99-S2, ADR 0270)."""
 

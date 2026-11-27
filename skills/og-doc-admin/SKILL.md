@@ -105,6 +105,7 @@ only if the admin wants one, then follow the workflow above.
 | "Welche Alarme sind aktiv?" | `recipes/d3-alerts.md` |
 | "Wer hat was geändert?" | `recipes/d4-audit.md` |
 | „Unzustellbare Ereignisse" / dead letters | `recipes/d5-dead-letters.md` |
+| "Sind wir von CVE-… betroffen?" / "Welche Schwachstellen haben wir?" | `recipes/d6-vulnerabilities.md` |
 
 ## References
 

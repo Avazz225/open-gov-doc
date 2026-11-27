@@ -1954,9 +1954,34 @@ export async function exportComponents(token: string, service?: string): Promise
 // Vulnerability checks (P100-S2, ADR 0272): one CVE/GHSA id looked up live
 // (only if the installation allows online lookups), an OSV record file, or a
 // hand-entered package with its affected range - matched against the inventory.
+export interface VulnerabilityDatabase {
+  ecosystem: string;
+  source_name: string;
+  record_count: number;
+  covered_count: number;
+  imported_at: string;
+  imported_by: string;
+  data_as_of: string | null;
+}
+
+export interface VulnerabilityImport {
+  id: string;
+  status: "running" | "done" | "failed";
+  source_name: string;
+  started_at: string;
+  finished_at: string | null;
+  ecosystems: Record<string, number>;
+  error: string | null;
+}
+
 export interface VulnerabilityConfig {
   online: boolean;
   source: string | null;
+  // P100-S3: scanning the whole inventory and the offline database.
+  scan_online?: boolean;
+  scan_interval_hours?: number;
+  databases?: VulnerabilityDatabase[];
+  imports?: VulnerabilityImport[];
 }
 
 export interface ManualVulnerability {
@@ -2003,6 +2028,109 @@ export interface VulnerabilityCheckResult {
   not_affected: VulnerabilityFinding[];
   checked_services: number;
   checked_at: string;
+  note?: string | null;
+}
+
+// Scanning the whole inventory (P100-S3, ADR 0272): online via an OSV batch
+// query (its own switch), offline against an imported OSV database.
+export type VulnerabilitySeverity = "critical" | "high" | "medium" | "low" | "unknown";
+
+export interface VulnerabilityInstallation {
+  service: string;
+  kind: string;
+  component: string;
+  version: string;
+  ecosystem: string;
+  fixed_in: string | null;
+}
+
+export interface VulnerabilityEntry {
+  id: string;
+  aliases: string[];
+  summary: string;
+  severity: VulnerabilitySeverity;
+  score: number | null;
+  published: string | null;
+  fixable: boolean;
+  installations: VulnerabilityInstallation[];
+}
+
+export interface VulnerabilityUncovered {
+  ecosystem: string;
+  name: string;
+  reason: string;
+  services: string[];
+}
+
+export interface VulnerabilityScanSummary {
+  vulnerabilities: number;
+  installations: number;
+  fixable: number;
+  by_severity: Record<VulnerabilitySeverity, { fixable: number; unfixed: number }>;
+}
+
+export interface VulnerabilityScan {
+  id: string;
+  status: "running" | "done" | "failed";
+  source: "online" | "offline";
+  trigger: "manual" | "schedule";
+  actor: string;
+  started_at: string;
+  finished_at: string | null;
+  error: string | null;
+  summary: VulnerabilityScanSummary | null;
+  checked_services: number;
+  vulnerabilities?: VulnerabilityEntry[];
+  uncovered?: VulnerabilityUncovered[];
+}
+
+export async function startVulnerabilityScan(
+  token: string,
+  source: "auto" | "online" | "offline" = "auto"
+): Promise<{ id: string; source: string; status: string }> {
+  const init: RequestInit = {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ source }),
+  };
+  return (await request("monitoring-service", "vulnerabilities/scan", init, token)).json();
+}
+
+export async function listVulnerabilityScans(token: string, limit = 10): Promise<VulnerabilityScan[]> {
+  return (await request("monitoring-service", `vulnerabilities/scans?limit=${limit}`, {}, token)).json();
+}
+
+// The latest finished scan with its findings; null before the first one.
+export async function getLatestVulnerabilityScan(token: string): Promise<VulnerabilityScan | null> {
+  try {
+    return (await request("monitoring-service", "vulnerabilities/scans/latest", {}, token)).json();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null;
+    throw err;
+  }
+}
+
+export async function getVulnerabilityScan(token: string, id: string): Promise<VulnerabilityScan> {
+  return (await request("monitoring-service", `vulnerabilities/scans/${encodeURIComponent(id)}`, {}, token)).json();
+}
+
+// An OSV dump (all.zip) or a JSON record list; the import runs in the background.
+export async function importVulnerabilityDatabase(
+  token: string,
+  file: Blob,
+  sourceName: string
+): Promise<{ id: string; status: string }> {
+  const init: RequestInit = {
+    method: "POST",
+    headers: { "Content-Type": "application/octet-stream" },
+    body: file,
+  };
+  const path = `vulnerabilities/database?source_name=${encodeURIComponent(sourceName)}`;
+  return (await request("monitoring-service", path, init, token)).json();
+}
+
+export async function deleteVulnerabilityDatabase(token: string, ecosystem: string): Promise<void> {
+  await request("monitoring-service", `vulnerabilities/database/${encodeURIComponent(ecosystem)}`, { method: "DELETE" }, token);
 }
 
 export async function getVulnerabilityConfig(token: string): Promise<VulnerabilityConfig> {

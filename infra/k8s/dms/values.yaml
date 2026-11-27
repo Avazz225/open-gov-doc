@@ -521,14 +521,18 @@ services:
       repository: dms/workflow-service
       tag: latest
     port: 8000 # see infra/docker-compose.yml line ~648 (host mapping 8014)
-    replicas: 1
+    # Two replicas with a PDB (P101-S1, ADR 0273): each poll tick (SLA
+    # timers, claim abandonment) and the startup seeding run in one replica at
+    # a time under a Postgres advisory lock; the other takes over the next
+    # tick if one stops. Within the connection budget (counted at maxReplicas).
+    replicas: 2
     autoscaling:
       enabled: false
-      minReplicas: 1
+      minReplicas: 2
       maxReplicas: 3
       targetCPUUtilizationPercentage: 75
     podDisruptionBudget:
-      enabled: false
+      enabled: true
       minAvailable: 1
     dependsOnServices:
       - permission-service
@@ -842,6 +846,12 @@ services:
     # installation; set HTTPS_PROXY here if egress goes through a proxy):
     #   DMS_VULNERABILITY_LOOKUP_ENABLED: "true"
     #   DMS_VULNERABILITY_LOOKUP_URL: "https://api.osv.dev"
+    # Scanning the whole inventory online (P100-S3) sends every installed
+    # package name and version to that URL - its own switch, also off:
+    #   DMS_VULNERABILITY_SCAN_ONLINE_ENABLED: "true"
+    # Without it, scans use an OSV database imported by an admin
+    # (`dms vulnerabilities database import`); daily by default:
+    #   DMS_VULNERABILITY_SCAN_INTERVAL_HOURS: "24"
     env: {}
 
   # Pure protocol translator with no own Postgres/NATS schema (3.3,

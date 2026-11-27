@@ -68,6 +68,9 @@ change in `dms-common` took 10 s per image, where P99-S2's full rebuild took abo
   security records name, e.g. `openssl` for `libssl3t64`) and `dms:distro` (`debian:13`,
   `alpine:3.21.3`). The CPython interpreter appears as `pkg:generic/cpython@<version>` (ecosystem
   `runtime`).
+- **Amended in P100-S3 (ADR 0272 Decision 8):** the frontends' full file (npm plus Alpine) is also served
+  on the internal-only port 8081, never published or routed. The inventory reads it there, so it
+  includes the frontends' OS packages.
 - **Not covered:** the base images' non-dpkg/apk content (e.g. the Python interpreter's own version
   appears via the Debian packages only partially). The `python:3.12-slim` interpreter is a source build
   outside dpkg; the CVE step should name it explicitly (P100-S2).

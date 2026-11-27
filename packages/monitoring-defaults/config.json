@@ -3,9 +3,9 @@
   "exported_at": "2026-11-21T00:00:00Z",
   "manifest": {
     "name": "Monitoring-Standardpaket",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "compatibility_range": ">=1.0",
-    "description": "Standard-Alarmregeln für die mitgelieferten Sensoren (ADR 0245/0252): Speicher, Replikation, Dienst-Replikate, Lizenz, Virenfunde, OCR, Benachrichtigungen, Aussonderung, Papierkorb, Suche, Anmeldungen und Ressourcen. Dazu ein deaktiviertes Beispiel-Wartungsfenster. Wird bewusst eingespielt, nicht automatisch.",
+    "description": "Standard-Alarmregeln für die mitgelieferten Sensoren (ADR 0245/0252): Speicher, Replikation, Dienst-Replikate, Lizenz, Virenfunde, OCR, Benachrichtigungen, Aussonderung, Papierkorb, Suche, Anmeldungen, Ressourcen, unzustellbare Ereignisse und bekannte Schwachstellen. Dazu ein deaktiviertes Beispiel-Wartungsfenster. Wird bewusst eingespielt, nicht automatisch.",
     "origin": "dms-project",
     "license": "MIT"
   },
@@ -293,6 +293,66 @@
       "error_repeat": 1,
       "enabled": true,
       "description": "Ereignisse, die ein Dienst auch nach allen Zustellversuchen nicht verarbeiten konnte (Dead Letters, ADR 0270). Sie warten auf Prüfung und erneutes Einspielen; der Dienst arbeitet mit den übrigen weiter."
+    },
+    {
+      "label_filter": {
+        "severity": "critical"
+      },
+      "aggregation": "sum",
+      "min_error": null,
+      "min_warning": null,
+      "max_warning": null,
+      "max_error": 0,
+      "warning_repeat": 1,
+      "error_repeat": 1,
+      "enabled": true,
+      "name": "Kritische Schwachstellen",
+      "sensor": "vulnerabilities.known",
+      "description": "Bekannte kritische Schwachstellen (CVSS ab 9) in installierten Komponenten, laut der letzten Schwachstellenprüfung (ADR 0272). Details unter Sicherheit → Schwachstellen."
+    },
+    {
+      "label_filter": {
+        "fixable": "true"
+      },
+      "aggregation": "sum",
+      "min_error": null,
+      "min_warning": null,
+      "max_warning": 0,
+      "max_error": null,
+      "warning_repeat": 1,
+      "error_repeat": 1,
+      "enabled": true,
+      "name": "Behebbare Schwachstellen",
+      "sensor": "vulnerabilities.known",
+      "description": "Bekannte Schwachstellen, für die es eine korrigierte Version gibt (letzte Schwachstellenprüfung, ADR 0272): Update einplanen. Ohne Prüfung bleibt die Regel 'unbekannt'."
+    },
+    {
+      "label_filter": {},
+      "aggregation": "max",
+      "min_error": null,
+      "min_warning": null,
+      "max_warning": 72,
+      "max_error": null,
+      "warning_repeat": 1,
+      "error_repeat": 1,
+      "enabled": true,
+      "name": "Schwachstellenprüfung veraltet",
+      "sensor": "vulnerabilities.scan_age_hours",
+      "description": "Die letzte vollständige Schwachstellenprüfung ist älter als drei Tage: Online-Prüfung prüfen oder eine aktuelle OSV-Datenbank einspielen (ADR 0272)."
+    },
+    {
+      "name": "Schwachstellen-Datenbank veraltet",
+      "sensor": "vulnerabilities.database_age_days",
+      "label_filter": {},
+      "aggregation": "max",
+      "min_error": null,
+      "min_warning": null,
+      "max_warning": 30,
+      "max_error": null,
+      "warning_repeat": 1,
+      "error_repeat": 1,
+      "enabled": true,
+      "description": "Der Datenstand einer eingespielten OSV-Datenbank (air-gapped) ist älter als 30 Tage: aktuelle Dumps einspielen (ADR 0272). Ohne eingespielte Datenbank bleibt die Regel 'unbekannt'."
     }
   ],
   "alert_downtime_windows": [

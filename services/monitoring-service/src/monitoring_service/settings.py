@@ -33,10 +33,12 @@ class Settings(BaseServiceSettings):
     log_level_refresh_seconds: float = 15.0
 
     # Component inventory (P100-S1, ADR 0271): the frontends are static sites
-    # that don't register; their npm components file is read from these URLs
-    # (compose service names; Helm sets its own).
+    # that don't register. Their full components file (npm plus the Alpine
+    # packages of the nginx image) is read from an internal-only port 8081 that
+    # is never published (P100-S3); port 80 serves the npm part only. Compose
+    # service names; Helm sets its own.
     frontend_component_urls: dict[str, str] = {
-        name: f"http://{name}/META-INF/components.cdx.json"
+        name: f"http://{name}:8081/META-INF/components.cdx.json"
         for name in (
             "admin-ui",
             "user-ui",
@@ -56,3 +58,17 @@ class Settings(BaseServiceSettings):
     vulnerability_lookup_enabled: bool = False
     vulnerability_lookup_url: str = "https://api.osv.dev"
     vulnerability_lookup_timeout_seconds: float = 20.0
+    # Scanning the whole inventory (P100-S3). Online it is an OSV batch query
+    # with every installed package and version - the package list leaves the
+    # installation, hence its own switch (user decision 2026-11-27), also off
+    # by default. Offline it uses an imported OSV database. The scheduler scans
+    # every `vulnerability_scan_interval_hours` (0 = only on demand) when a
+    # source is available.
+    vulnerability_scan_online_enabled: bool = False
+    vulnerability_scan_interval_hours: float = 24.0
+    vulnerability_scan_check_seconds: float = 900.0
+    vulnerability_scan_concurrency: int = 8
+    vulnerability_scan_keep: int = 20
+    # Largest database upload (a pre-filtered CLI upload is small; OSV's npm
+    # dump is over 200 MB - import that one with the CLI).
+    vulnerability_import_max_mb: int = 120

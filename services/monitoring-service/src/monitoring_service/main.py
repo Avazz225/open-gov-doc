@@ -1,10 +1,11 @@
 import asyncio
+import json
 import logging
 import re
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import httpx
 from dms_common import configure_logging
@@ -14,7 +15,7 @@ from dms_common.shutdown import bounded_shutdown_step
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
 from dms_registry_client import maybe_start_registration
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
 from monitoring_service import (
     alert_store,
     alerting,
@@ -23,6 +24,8 @@ from monitoring_service import (
     repository,
     scraper,
     vulnerabilities,
+    vulnerability_scan,
+    vulnerability_store,
 )
 from monitoring_service.clients import AuthServiceClient, PermissionServiceClient, RegistryClient
 from monitoring_service.models import Base
@@ -46,6 +49,7 @@ from monitoring_service.schemas import (
     TracingConfigIn,
     TracingConfigOut,
     VulnerabilityCheckIn,
+    VulnerabilityScanIn,
 )
 from monitoring_service.settings import Settings
 from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, Counter, generate_latest
@@ -162,6 +166,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # levels; it hands the configuration out and doesn't poll itself.
     await run_log_level_tick()
     log_level_task = asyncio.create_task(_log_level_loop())
+    # Vulnerability scans and imports (P100-S3) run in the background; the
+    # scheduler scans the inventory every `vulnerability_scan_interval_hours`.
+    app.state.background_tasks = set()
+    vulnerability_task = asyncio.create_task(_vulnerability_loop())
 
     startup_end = time.time()
     millis = round((startup_end - startup_start) * 1000, 3)
@@ -173,6 +181,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await bounded_shutdown_step("task alert_task", alert_task)
     log_level_task.cancel()
     await bounded_shutdown_step("task log_level_task", log_level_task)
+    vulnerability_task.cancel()
+    await bounded_shutdown_step("task vulnerability_task", vulnerability_task)
+    for task in list(app.state.background_tasks):
+        task.cancel()
     if registration:
         await bounded_shutdown_step("registration.stop", registration.stop())
     await bounded_shutdown_step("event_bus.close", event_bus.close())
@@ -202,6 +214,8 @@ async def _scrape_families() -> dict:
     }
     dead_letters = await _dead_letter_family()
     families[dead_letters.name] = dead_letters
+    for family in await _vulnerability_families():
+        families[family.name] = family
     return families
 
 
@@ -228,6 +242,49 @@ async def _dead_letter_family() -> GaugeMetricFamily:
         # default rule would sit at `unknown` instead of `ok`.
         family.add_metric(["-", "-"], 0)
     return family
+
+
+async def _vulnerability_families() -> list[GaugeMetricFamily]:
+    """`vulnerabilities_known{severity,fixable}` and
+    `vulnerabilities_scan_age_hours` (P100-S3, ADR 0272) from the latest
+    finished scan. Always on, outside the sensor catalog, like the dead
+    letters. No scan yet = no series, so the default rules stay `unknown`
+    instead of claiming "nothing known"."""
+    known = GaugeMetricFamily(
+        "vulnerabilities_known",
+        "Bekannte Schwachstellen in den installierten Komponenten (letzte Prüfung)",
+        labels=["severity", "fixable"],
+    )
+    age = GaugeMetricFamily(
+        "vulnerabilities_scan_age_hours", "Alter der letzten vollständigen Schwachstellenprüfung"
+    )
+    database_age = GaugeMetricFamily(
+        "vulnerabilities_database_age_days",
+        "Datenstand der eingespielten Schwachstellen-Datenbank je Ökosystem (Tage)",
+        labels=["ecosystem"],
+    )
+    families = [known, age, database_age]
+    now = datetime.now(UTC)
+    try:
+        async with app.state.session_factory() as session:
+            latest = await vulnerability_store.latest_scan(session, done_only=True)
+            imported = await vulnerability_store.databases(session)
+    except Exception:  # noqa: BLE001 - a scrape must not fail on this
+        logger.warning("vulnerability_family_failed", exc_info=True)
+        return families
+    for db in imported:
+        as_of = db.data_as_of or db.imported_at
+        database_age.add_metric([db.ecosystem], round((now - as_of).total_seconds() / 86400, 1))
+    if latest is None or not latest.summary:
+        return families
+    by_severity = latest.summary.get("by_severity") or {}
+    for level in vulnerability_scan.SEVERITIES:
+        counts = by_severity.get(level) or {}
+        known.add_metric([level, "true"], counts.get("fixable", 0))
+        known.add_metric([level, "false"], counts.get("unfixed", 0))
+    finished = latest.finished_at or latest.started_at
+    age.add_metric([], round((now - finished).total_seconds() / 3600, 2))
+    return families
 
 
 async def run_alert_tick(families: dict | None = None) -> alert_store.TickResult | None:
@@ -336,7 +393,13 @@ async def get_metrics() -> Response:
     combined_registry.register(_StaticMetricsCollector(merged))
     level_registry = CollectorRegistry()
     level_registry.register(
-        _StaticMetricsCollector([await _alert_level_family(), await _dead_letter_family()])
+        _StaticMetricsCollector(
+            [
+                await _alert_level_family(),
+                await _dead_letter_family(),
+                *await _vulnerability_families(),
+            ]
+        )
     )
     body = (
         generate_latest(combined_registry)
@@ -534,11 +597,40 @@ _VULN_ID = re.compile(r"^[A-Za-z][A-Za-z0-9]*-[A-Za-z0-9:._-]+$")
 async def vulnerability_config(x_dms_principal: str = Header(default="")) -> dict:
     """Whether ids can be looked up online, and where."""
     await _require_monitoring_permission(x_dms_principal)
+    async with app.state.session_factory() as session:
+        imported = await vulnerability_store.databases(session)
+        imports = await vulnerability_store.recent_imports(session)
     return {
         "online": settings.vulnerability_lookup_enabled,
         "source": settings.vulnerability_lookup_url
         if settings.vulnerability_lookup_enabled
         else None,
+        "scan_online": settings.vulnerability_scan_online_enabled,
+        "scan_interval_hours": settings.vulnerability_scan_interval_hours,
+        "databases": [
+            {
+                "ecosystem": db.ecosystem,
+                "source_name": db.source_name,
+                "record_count": db.record_count,
+                "covered_count": len(db.covered or []),
+                "imported_at": db.imported_at.isoformat(),
+                "imported_by": db.imported_by,
+                "data_as_of": db.data_as_of.isoformat() if db.data_as_of else None,
+            }
+            for db in imported
+        ],
+        "imports": [
+            {
+                "id": job.id,
+                "status": job.status,
+                "source_name": job.source_name,
+                "started_at": job.started_at.isoformat(),
+                "finished_at": job.finished_at.isoformat() if job.finished_at else None,
+                "ecosystems": job.ecosystems,
+                "error": job.error,
+            }
+            for job in imports
+        ],
     }
 
 
@@ -559,11 +651,30 @@ async def check_vulnerability(
         if not _VULN_ID.match(vuln_id):
             raise HTTPException(status_code=422, detail=f"Ungültige Kennung {vuln_id!r}")
         if not settings.vulnerability_lookup_enabled:
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    "Die Online-Abfrage ist ausgeschaltet (air-gapped). Den Datensatz als Datei "
-                    "einspielen oder das betroffene Paket mit Bereich eingeben."
+            # Offline (P100-S3): the imported OSV database answers, if any.
+            async with app.state.session_factory() as session:
+                imported = await vulnerability_store.databases(session)
+                records = await vulnerability_store.records_by_alias(session, vuln_id.upper())
+            if not imported:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "Die Online-Abfrage ist ausgeschaltet (air-gapped) und es ist keine "
+                        "Schwachstellen-Datenbank eingespielt. Eine OSV-Datenbank einspielen, den "
+                        "Datensatz als Datei prüfen oder das betroffene Paket mit Bereich eingeben."
+                    ),
+                )
+            return await _check_result(
+                records,
+                source="database",
+                query=vuln_id,
+                actor=x_dms_principal,
+                note=None
+                if records
+                else (
+                    f"Kein Datensatz zu {vuln_id} in der eingespielten Datenbank: Sie enthält nur "
+                    "Datensätze zu den beim Import installierten Paketen. Entweder betrifft "
+                    f"{vuln_id} keines davon, oder die Datenbank ist älter als die Meldung."
                 ),
             )
         try:
@@ -603,6 +714,12 @@ async def check_vulnerability(
         ]
         source, query = "manual", records[0]["id"]
 
+    return await _check_result(records, source=source, query=query, actor=x_dms_principal)
+
+
+async def _check_result(
+    records: list[dict], *, source: str, query: str, actor: str, note: str | None = None
+) -> dict:
     services = await _inventory()
     findings = vulnerabilities.match(records, services)
     affected = [f.__dict__ for f in findings if f.affected]
@@ -613,9 +730,9 @@ async def check_vulnerability(
             "query": query,
             "source": source,
             "affected_count": len(affected),
-            "actor": x_dms_principal,
+            "actor": actor,
         },
-        actor=x_dms_principal,
+        actor=actor,
     )
     return {
         "query": query,
@@ -625,7 +742,328 @@ async def check_vulnerability(
         "not_affected": [f.__dict__ for f in findings if not f.affected],
         "checked_services": len(services),
         "checked_at": datetime.now(UTC).isoformat(),
+        "note": note,
     }
+
+
+# --- Scanning the whole inventory (P100-S3, ADR 0272) ----------------------------
+
+_SCHEDULE_ACTOR = "system:monitoring-vulnerabilities"
+
+
+def _spawn(coro) -> None:
+    """Background work with a strong reference (asyncio keeps only weak ones)."""
+    task = asyncio.create_task(coro)
+    app.state.background_tasks.add(task)
+    task.add_done_callback(app.state.background_tasks.discard)
+
+
+async def _scan_source(requested: str) -> str | None:
+    """`online` only with its own switch; `offline` only with an imported
+    database; `auto` prefers online."""
+    async with app.state.session_factory() as session:
+        has_database = bool(await vulnerability_store.databases(session))
+    if requested == "online":
+        return "online" if settings.vulnerability_scan_online_enabled else None
+    if requested == "offline":
+        return "offline" if has_database else None
+    if settings.vulnerability_scan_online_enabled:
+        return "online"
+    return "offline" if has_database else None
+
+
+async def _claim_scan(source: str, trigger: str, actor: str) -> str | None:
+    async with app.state.session_factory() as session:
+        got_lock = await session.scalar(
+            text("SELECT pg_try_advisory_xact_lock(:key)"),
+            {"key": vulnerability_store.SCAN_LOCK_KEY},
+        )
+        if not got_lock:
+            return None
+        row = await vulnerability_store.claim_scan(
+            session, source=source, trigger=trigger, actor=actor
+        )
+        scan_id = row.id if row else None
+        await session.commit()
+    return scan_id
+
+
+async def run_vulnerability_scan(scan_id: str, source: str, trigger: str, actor: str) -> None:
+    """One scan: inventory, records (online batch or imported database),
+    matching, the stored result and an event. Online only package names and
+    versions leave the installation."""
+    try:
+        services = await _inventory(refresh=True)
+        if source == "online":
+            async with httpx.AsyncClient(
+                timeout=settings.vulnerability_lookup_timeout_seconds, trust_env=True
+            ) as client:
+                ids = await vulnerability_scan.query_batch(
+                    client,
+                    settings.vulnerability_lookup_url,
+                    vulnerability_scan.batch_queries(services),
+                )
+                records = await vulnerability_scan.fetch_many(
+                    client,
+                    settings.vulnerability_lookup_url,
+                    ids,
+                    settings.vulnerability_scan_concurrency,
+                )
+            covered = None
+        else:
+            async with app.state.session_factory() as session:
+                records, covered = await vulnerability_store.records_for(
+                    session, vulnerability_scan.wanted_packages(services)
+                )
+        # Grouping and matching hundreds of records is CPU work.
+        entries = await asyncio.to_thread(vulnerability_scan.report, records, services)
+        missing = vulnerability_scan.uncovered(services, covered)
+        async with app.state.session_factory() as session:
+            await vulnerability_store.finish_scan(
+                session,
+                scan_id,
+                entries=entries,
+                missing=missing,
+                checked_services=len(services),
+            )
+            await vulnerability_store.prune_scans(session, settings.vulnerability_scan_keep)
+            await session.commit()
+        summary = vulnerability_scan.summarise(entries)
+        await publish_event(
+            "monitoring.vulnerability.scanned",
+            subject=scan_id,
+            payload={
+                "scan_id": scan_id,
+                "source": source,
+                "trigger": trigger,
+                "vulnerabilities": summary["vulnerabilities"],
+                "fixable": summary["fixable"],
+                "critical": sum(summary["by_severity"]["critical"].values()),
+                "uncovered": len(missing),
+                "actor": actor,
+            },
+            actor=actor,
+        )
+    except Exception as exc:  # noqa: BLE001 - the result row must say what happened
+        logger.exception("vulnerability_scan_failed")
+        detail = f"{type(exc).__name__}: {exc}"[:500]
+        if isinstance(exc, httpx.HTTPError):
+            detail = f"Abfrage bei {settings.vulnerability_lookup_url} fehlgeschlagen: {detail}"
+        async with app.state.session_factory() as session:
+            await vulnerability_store.finish_scan(session, scan_id, error=detail)
+            await session.commit()
+
+
+async def run_vulnerability_schedule_tick(now: datetime | None = None) -> str | None:
+    """Starts a scan when the last one is older than the interval and a source
+    is available. Returns the scan id it ran, if any."""
+    if settings.vulnerability_scan_interval_hours <= 0:
+        return None
+    now = now or datetime.now(UTC)
+    async with app.state.session_factory() as session:
+        latest = await vulnerability_store.latest_scan(session)
+    interval = timedelta(hours=settings.vulnerability_scan_interval_hours)
+    if latest is not None and latest.started_at > now - interval:
+        return None
+    source = await _scan_source("auto")
+    if source is None:
+        return None
+    scan_id = await _claim_scan(source, "schedule", _SCHEDULE_ACTOR)
+    if scan_id:
+        await run_vulnerability_scan(scan_id, source, "schedule", _SCHEDULE_ACTOR)
+    return scan_id
+
+
+async def _vulnerability_loop() -> None:
+    while True:
+        await asyncio.sleep(settings.vulnerability_scan_check_seconds)
+        try:
+            await run_vulnerability_schedule_tick()
+        except Exception:
+            logger.exception("vulnerability_schedule_failed")
+
+
+def _scan_out(row, *, full: bool) -> dict:
+    out = {
+        "id": row.id,
+        "status": row.status,
+        "source": row.source,
+        "trigger": row.trigger,
+        "actor": row.actor,
+        "started_at": row.started_at.isoformat(),
+        "finished_at": row.finished_at.isoformat() if row.finished_at else None,
+        "error": row.error,
+        "summary": row.summary,
+        "checked_services": row.checked_services,
+    }
+    if full:
+        out["vulnerabilities"] = row.vulnerabilities or []
+        out["uncovered"] = row.uncovered or []
+    return out
+
+
+@app.post("/vulnerabilities/scan", status_code=202)
+async def start_vulnerability_scan(
+    payload: VulnerabilityScanIn, x_dms_principal: str = Header(default="")
+) -> dict:
+    """Starts a scan of the whole inventory in the background."""
+    await _require_monitoring_permission(x_dms_principal)
+    source = await _scan_source(payload.source)
+    if source is None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "online": "Die Online-Prüfung aller Komponenten ist ausgeschaltet "
+                "(DMS_VULNERABILITY_SCAN_ONLINE_ENABLED).",
+                "offline": "Es ist keine Schwachstellen-Datenbank eingespielt.",
+                "auto": "Keine Quelle: Online-Prüfung ausgeschaltet und keine Datenbank "
+                "eingespielt.",
+            }[payload.source],
+        )
+    scan_id = await _claim_scan(source, "manual", x_dms_principal)
+    if scan_id is None:
+        raise HTTPException(status_code=409, detail="Es läuft bereits eine Prüfung.")
+    _spawn(run_vulnerability_scan(scan_id, source, "manual", x_dms_principal))
+    return {"id": scan_id, "source": source, "status": "running"}
+
+
+@app.get("/vulnerabilities/scans")
+async def list_vulnerability_scans(
+    limit: int = Query(10, ge=1, le=50), x_dms_principal: str = Header(default="")
+) -> list[dict]:
+    await _require_monitoring_permission(x_dms_principal)
+    async with app.state.session_factory() as session:
+        rows = await vulnerability_store.recent_scans(session, limit)
+    return [_scan_out(row, full=False) for row in rows]
+
+
+@app.get("/vulnerabilities/scans/latest")
+async def latest_vulnerability_scan(x_dms_principal: str = Header(default="")) -> dict:
+    """The latest finished scan with its findings (404 before the first)."""
+    await _require_monitoring_permission(x_dms_principal)
+    async with app.state.session_factory() as session:
+        row = await vulnerability_store.latest_scan(session, done_only=True)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Noch keine abgeschlossene Prüfung")
+    return _scan_out(row, full=True)
+
+
+@app.get("/vulnerabilities/scans/{scan_id}")
+async def get_vulnerability_scan(scan_id: str, x_dms_principal: str = Header(default="")) -> dict:
+    await _require_monitoring_permission(x_dms_principal)
+    async with app.state.session_factory() as session:
+        row = await vulnerability_store.get_scan(session, scan_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Unbekannte Prüfung")
+    return _scan_out(row, full=True)
+
+
+# Offline database: OSV's per-ecosystem dumps, kept only for what is installed.
+
+
+@app.get("/vulnerabilities/database/wanted")
+async def wanted_vulnerability_packages(x_dms_principal: str = Header(default="")) -> dict:
+    """OSV ecosystem -> installed package names: what an import keeps. The CLI
+    filters a dump with it before uploading (the npm dump is over 200 MB)."""
+    await _require_monitoring_permission(x_dms_principal)
+    wanted = vulnerability_scan.wanted_packages(await _inventory())
+    return {eco: sorted(names) for eco, names in sorted(wanted.items())}
+
+
+async def run_vulnerability_import(
+    job_id: str, data: bytes, kind: str, source_name: str, actor: str
+) -> None:
+    try:
+        wanted = vulnerability_scan.wanted_packages(await _inventory(refresh=True))
+
+        def parse():
+            if kind == "zip":
+                return vulnerability_store.filter_dump(
+                    vulnerability_scan.iter_zip_records(data), wanted
+                )
+            body = json.loads(data)
+            if isinstance(body, list):
+                body = {"records": body}
+            records = [r for r in body.get("records") or [] if isinstance(r, dict) and r.get("id")]
+            declared = body.get("ecosystems") or []
+            if isinstance(declared, dict):
+                declared = {str(k): int(v) for k, v in declared.items()}
+            return vulnerability_store.filter_dump(records, wanted, declared=declared)
+
+        kept, ecosystems = await asyncio.to_thread(parse)
+        if not ecosystems:
+            raise ValueError(
+                "Die Datei enthält keine Datensätze für die Ökosysteme dieser Installation "
+                f"({', '.join(sorted(wanted)) or 'keine'})."
+            )
+        async with app.state.session_factory() as session:
+            counts = await vulnerability_store.replace_databases(
+                session, kept, ecosystems, wanted, source_name=source_name, actor=actor
+            )
+            await vulnerability_store.finish_import(session, job_id, ecosystems=counts)
+            await session.commit()
+        await publish_event(
+            "monitoring.vulnerability.database_imported",
+            subject=source_name[:200],
+            payload={"source_name": source_name, "ecosystems": counts, "actor": actor},
+            actor=actor,
+        )
+    except Exception as exc:  # noqa: BLE001 - the job row must say what happened
+        logger.warning("vulnerability_import_failed", exc_info=True)
+        async with app.state.session_factory() as session:
+            await vulnerability_store.finish_import(
+                session, job_id, error=f"{type(exc).__name__}: {exc}"[:500]
+            )
+            await session.commit()
+
+
+@app.post("/vulnerabilities/database", status_code=202)
+async def import_vulnerability_database(
+    request: Request,
+    source_name: str = Query(..., min_length=1, max_length=512),
+    x_dms_principal: str = Header(default=""),
+) -> dict:
+    """An OSV dump (`all.zip`) or a JSON list of records (`{"records": [...],
+    "ecosystems": [...]}`, what the CLI uploads after filtering). Replaces the
+    database of every ecosystem the file covers; runs in the background."""
+    await _require_monitoring_permission(x_dms_principal)
+    data = await request.body()
+    if len(data) > settings.vulnerability_import_max_mb * 1024 * 1024:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"Größer als {settings.vulnerability_import_max_mb} MB - große Dumps (npm) mit "
+                "`dms vulnerabilities database import` einspielen, die CLI filtert vorher."
+            ),
+        )
+    kind = "zip" if data[:4] == b"PK\x03\x04" else "json"
+    if kind == "json" and data.lstrip()[:1] not in (b"{", b"["):
+        raise HTTPException(status_code=422, detail="Weder ZIP (OSV-Dump) noch JSON")
+    async with app.state.session_factory() as session:
+        job = await vulnerability_store.start_import(session, source_name, x_dms_principal)
+        job_id = job.id
+        await session.commit()
+    _spawn(run_vulnerability_import(job_id, data, kind, source_name, x_dms_principal))
+    return {"id": job_id, "status": "running"}
+
+
+@app.delete("/vulnerabilities/database/{ecosystem}", status_code=204)
+async def delete_vulnerability_database(
+    ecosystem: str, x_dms_principal: str = Header(default="")
+) -> Response:
+    await _require_monitoring_permission(x_dms_principal)
+    async with app.state.session_factory() as session:
+        found = await vulnerability_store.delete_database(session, ecosystem)
+        await session.commit()
+    if not found:
+        raise HTTPException(status_code=404, detail=f"Keine Datenbank für {ecosystem}")
+    await publish_event(
+        "monitoring.vulnerability.database_deleted",
+        subject=ecosystem,
+        payload={"ecosystem": ecosystem, "actor": x_dms_principal},
+        actor=x_dms_principal,
+    )
+    return Response(status_code=204)
 
 
 # --- Dead letters (P99-S2, ADR 0270) ---------------------------------------------

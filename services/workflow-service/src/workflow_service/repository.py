@@ -132,6 +132,29 @@ _DMN_DEFINITION_LOCK_NAMESPACE = 2
 # blocks the other) - exactly the cross-family race ADR 0096 named as
 # out of scope for that session.
 _DMN_DECISION_ID_LOCK_NAMESPACE = 3
+# Several replicas (P101-S1, ADR 0273): a FOURTH namespace for work exactly one
+# replica may do at a time - each poll tick, and the startup seeding. Taken
+# with the transaction-scoped variant, so the lock lives exactly as long as the
+# tick's transaction and a replica that dies mid-tick releases it with its
+# connection; the next tick of any replica takes over.
+_REPLICA_LOCK_NAMESPACE = 4
+SLA_TICK_LOCK = 1
+CLAIM_EXPIRY_TICK_LOCK = 2
+STARTUP_LOCK = 3
+
+
+async def try_replica_lock(session: AsyncSession, key: int) -> bool:
+    """`True` if this replica holds the lock for the rest of the session's
+    transaction; `False` if another replica is doing that work right now."""
+    return bool(
+        await session.scalar(select(func.pg_try_advisory_xact_lock(_REPLICA_LOCK_NAMESPACE, key)))
+    )
+
+
+async def wait_replica_lock(session: AsyncSession, key: int) -> None:
+    """Waits until this replica holds the lock (startup seeding: the second
+    replica waits and then finds the work done)."""
+    await session.execute(select(func.pg_advisory_xact_lock(_REPLICA_LOCK_NAMESPACE, key)))
 
 
 async def create_process_definition(
@@ -903,7 +926,10 @@ class RouteChangeRefused(Exception):
 
 async def ensure_circulation_template(session: AsyncSession) -> ProcessDefinition:
     """Seeds the shipped "Umlauf" template once (idempotent: an existing
-    family of that name, also an edited one, is left alone)."""
+    family of that name, also an edited one, is left alone). Under the startup
+    lock (P101-S1): two replicas starting together both saw no template and
+    created versions 1 and 2 of it; now the second one waits and finds it."""
+    await wait_replica_lock(session, STARTUP_LOCK)
     existing = await list_process_definitions(session, name=CIRCULATION_TEMPLATE_NAME)
     if existing:
         return existing[0]
@@ -1489,6 +1515,9 @@ async def refresh_all_responsible(session_factory: async_sessionmaker[AsyncSessi
     running instance - rows written before the columns existed, and a
     safety net otherwise. No engine state is read; idempotent."""
     async with session_factory() as session:
+        # Replicas starting together would update the same rows in no
+        # particular order (P101-S1): one at a time.
+        await wait_replica_lock(session, STARTUP_LOCK)
         result = await session.execute(
             select(ProcessInstance)
             .where(ProcessInstance.status == "running")

@@ -21,5 +21,12 @@ spec:
       port: 8000
       targetPort: http
       protocol: TCP
+    {{- if $svc.staticFrontend }}
+    # Internal components port (P100-S3, ADR 0272); the ingress routes `http` only.
+    - name: components
+      port: 8081
+      targetPort: components
+      protocol: TCP
+    {{- end }}
 {{- end }}
 {{- end }}

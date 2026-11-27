@@ -42,3 +42,5 @@ COPY --from=build /repo/components/components-npm.cdx.json /usr/share/nginx/html
 LABEL org.opencontainers.image.title="admin-ui" \
       dms.components="/app/META-INF/components.cdx.json"
 EXPOSE 80
+# Internal components port (P100-S3): never published, see nginx.conf.
+EXPOSE 8081

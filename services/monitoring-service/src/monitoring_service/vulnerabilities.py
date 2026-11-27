@@ -162,7 +162,11 @@ COMPARATORS: dict[str, Callable[[str, str], int]] = {
 def affected_by_range(version: str, events: list[dict], compare: Callable[[str, str], int]) -> bool:
     """OSV's range semantics: walk the events in version order; `introduced`
     opens, `fixed` closes (exclusive), `last_affected` closes (inclusive).
-    `introduced: "0"` means from the very first version."""
+    `introduced: "0"` means from the very first version. `fixed: "0"` is
+    Alpine's "never affected in this release" (secfixes `0:`), so such a range
+    affects nothing - walking it in order would open it instead (P100-S3, live)."""
+    if any(event.get("fixed") == "0" for event in events):
+        return False
     ordered = [
         next(iter(event.items()))
         for event in events
@@ -252,8 +256,31 @@ class Finding:
     note: str | None = None
 
 
-def match(records: list[dict], services: dict[str, ServiceComponents]) -> list[Finding]:
+Index = dict[tuple[str, str], list[tuple[ServiceComponents, dict]]]
+
+
+def build_index(services: dict[str, ServiceComponents]) -> Index:
+    """(ecosystem, matching name) -> installations. Built once per check or
+    scan, so a scan over hundreds of records doesn't walk every component of
+    every service for each of them (P100-S3)."""
+    index: Index = {}
+    for service in services.values():
+        for component in service.components:
+            eco = ecosystem(component)
+            if eco not in COMPARATORS:
+                continue
+            index.setdefault((eco, _component_name(component, eco)), []).append(
+                (service, component)
+            )
+    return index
+
+
+def match(
+    records: list[dict], services: dict[str, ServiceComponents], index: Index | None = None
+) -> list[Finding]:
     """Every installed component a record names, affected or not."""
+    if index is None:
+        index = build_index(services)
     findings: list[Finding] = []
     for record in records:
         for entry in record.get("affected") or []:
@@ -268,46 +295,36 @@ def match(records: list[dict], services: dict[str, ServiceComponents]) -> list[F
                 r for r in entry.get("ranges") or [] if r.get("type") in ("ECOSYSTEM", "SEMVER")
             ]
             listed = set(entry.get("versions") or [])
-            for service in services.values():
-                for component in service.components:
-                    if ecosystem(component) != eco:
-                        continue
-                    if _component_name(component, eco) != wanted:
-                        continue
-                    if not _release_matches(component, eco, release):
-                        continue
-                    version = component.get("version", "")
-                    finding = Finding(
-                        service=service.service,
-                        kind=service.kind,
-                        component=component.get("name", ""),
-                        version=version,
-                        ecosystem=eco_full,
-                        record_id=record.get("id", ""),
-                        affected=False,
+            for service, component in index.get((eco, wanted), []):
+                if not _release_matches(component, eco, release):
+                    continue
+                version = component.get("version", "")
+                finding = Finding(
+                    service=service.service,
+                    kind=service.kind,
+                    component=component.get("name", ""),
+                    version=version,
+                    ecosystem=eco_full,
+                    record_id=record.get("id", ""),
+                    affected=False,
+                )
+                try:
+                    hit = version in listed or any(
+                        affected_by_range(version, r.get("events") or [], compare) for r in ranges
                     )
-                    try:
-                        hit = version in listed or any(
-                            affected_by_range(version, r.get("events") or [], compare)
-                            for r in ranges
+                    finding.affected = hit
+                    if hit:
+                        finding.fixed_in = next(
+                            (
+                                fix
+                                for r in ranges
+                                if (fix := first_fix_after(version, r.get("events") or [], compare))
+                            ),
+                            None,
                         )
-                        finding.affected = hit
-                        if hit:
-                            finding.fixed_in = next(
-                                (
-                                    fix
-                                    for r in ranges
-                                    if (
-                                        fix := first_fix_after(
-                                            version, r.get("events") or [], compare
-                                        )
-                                    )
-                                ),
-                                None,
-                            )
-                    except (InvalidVersion, ValueError) as exc:
-                        finding.note = f"Version nicht vergleichbar: {exc}"
-                    findings.append(finding)
+                except (InvalidVersion, ValueError) as exc:
+                    finding.note = f"Version nicht vergleichbar: {exc}"
+                findings.append(finding)
     # One line per (service, component, version): one vulnerability is usually
     # published under several ids (GHSA and PYSEC for the same PyPI package), and
     # an admin wants one answer per installation. Affected if any record says so;

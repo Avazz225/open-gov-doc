@@ -451,3 +451,17 @@ admin override in registry-service wins over these defaults.
 {{- end -}}
 {{- toJson $defaults -}}
 {{- end -}}
+
+{{/*
+DMS_FRONTEND_COMPONENT_URLS for monitoring-service (P100-S3, ADR 0272): every
+enabled static frontend's internal components port, as JSON.
+*/}}
+{{- define "dms.frontendComponentUrls" -}}
+{{- $urls := dict -}}
+{{- range $name, $svc := .Values.services -}}
+{{- if and $svc.enabled $svc.staticFrontend -}}
+{{- $_ := set $urls $name (printf "http://%s:8081/META-INF/components.cdx.json" (include "dms.serviceFullname" (dict "root" $ "name" $name))) -}}
+{{- end -}}
+{{- end -}}
+{{- toJson $urls -}}
+{{- end -}}

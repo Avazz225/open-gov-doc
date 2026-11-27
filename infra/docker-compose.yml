@@ -1353,6 +1353,10 @@ services:
       # at OSV.dev is off by default (air-gapped installations); on in dev. Only
       # the id leaves the installation; HTTPS_PROXY is honoured.
       DMS_VULNERABILITY_LOOKUP_ENABLED: ${DMS_VULNERABILITY_LOOKUP_ENABLED:-true}
+      # Scanning the whole inventory online (P100-S3): an OSV batch query with
+      # every installed package name and version - its own switch, off by
+      # default; on in dev. Without it, scans use an imported OSV database.
+      DMS_VULNERABILITY_SCAN_ONLINE_ENABLED: ${DMS_VULNERABILITY_SCAN_ONLINE_ENABLED:-true}
     ports:
       - "127.0.0.1:${MONITORING_SERVICE_PORT:-8026}:8000"
     depends_on:

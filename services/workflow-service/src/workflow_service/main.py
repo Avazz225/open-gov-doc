@@ -209,55 +209,72 @@ async def _sla_poll_loop(
     paused"."""
     while True:
         try:
-            if await permission_client.is_maintenance_active():
-                await asyncio.sleep(settings.sla_poll_interval_seconds)
-                continue
-            async with session_factory() as session:
-                results = await repository.advance_timers(session)
-                await session.commit()
-            for result in results:
-                for fired in result.fired:
-                    metrics.count_escalation()
-                    # A bound lane's members are notified (P93-S1, ADR 0249).
-                    binding = None
-                    members: list[str] = []
-                    if fired.lane:
-                        async with session_factory() as session:
-                            definition = await repository.get_process_definition(
-                                session, result.instance.process_definition_id
-                            )
-                            binding = (definition.lane_bindings or {}).get(fired.lane)
-                        if binding is not None:
-                            try:
-                                members = await permission_client.lane_members(binding)
-                            except Exception:  # noqa: BLE001 - escalation still goes out
-                                logger.warning("lane_members_lookup_failed", exc_info=True)
-                    await publish_event(
-                        "workflow.task.escalated",
-                        subject=result.instance.id,
-                        payload={
-                            "process_definition_id": result.instance.process_definition_id,
-                            "business_key": result.instance.business_key,
-                            "task_name": fired.name,
-                            "lane": fired.lane,
-                            "lane_binding": binding,
-                            "lane_members": members,
-                            "escalation_email": fired.data.get("escalation_email"),
-                        },
-                        actor="system:sla-poll",
-                    )
-                if result.newly_completed:
-                    await publish_event(
-                        "workflow.instance.completed",
-                        subject=result.instance.id,
-                        payload={"business_key": result.instance.business_key},
-                        actor="system:sla-poll",
-                    )
+            if not await permission_client.is_maintenance_active():
+                await run_sla_tick(session_factory, permission_client)
         except Exception:
             logger.exception(
                 "SLA-Poll-Tick fehlgeschlagen - wird beim nächsten Tick erneut versucht."
             )
         await asyncio.sleep(settings.sla_poll_interval_seconds)
+
+
+async def run_sla_tick(
+    session_factory: async_sessionmaker[AsyncSession], permission_client: PermissionServiceClient
+) -> list:
+    """One SLA tick: due boundary timers fire and their events go out. With
+    several replicas only the one holding the tick lock does the work
+    (P101-S1, ADR 0273); the others return an empty list."""
+    async with session_factory() as session:
+        # Every replica (P101-S1): another replica may have changed a
+        # business calendar; this replica's timer arithmetic, also on
+        # the request path, must not use a stale copy for long.
+        await repository.refresh_business_calendar_cache(session)
+        # One replica per tick (P101-S1, ADR 0273): the others skip,
+        # so a due timer fires - and its escalation goes out - once.
+        if await repository.try_replica_lock(session, repository.SLA_TICK_LOCK):
+            results = await repository.advance_timers(session)
+        else:
+            results = []
+        await session.commit()
+    for result in results:
+        for fired in result.fired:
+            metrics.count_escalation()
+            # A bound lane's members are notified (P93-S1, ADR 0249).
+            binding = None
+            members: list[str] = []
+            if fired.lane:
+                async with session_factory() as session:
+                    definition = await repository.get_process_definition(
+                        session, result.instance.process_definition_id
+                    )
+                    binding = (definition.lane_bindings or {}).get(fired.lane)
+                if binding is not None:
+                    try:
+                        members = await permission_client.lane_members(binding)
+                    except Exception:  # noqa: BLE001 - escalation still goes out
+                        logger.warning("lane_members_lookup_failed", exc_info=True)
+            await publish_event(
+                "workflow.task.escalated",
+                subject=result.instance.id,
+                payload={
+                    "process_definition_id": result.instance.process_definition_id,
+                    "business_key": result.instance.business_key,
+                    "task_name": fired.name,
+                    "lane": fired.lane,
+                    "lane_binding": binding,
+                    "lane_members": members,
+                    "escalation_email": fired.data.get("escalation_email"),
+                },
+                actor="system:sla-poll",
+            )
+        if result.newly_completed:
+            await publish_event(
+                "workflow.instance.completed",
+                subject=result.instance.id,
+                payload={"business_key": result.instance.business_key},
+                actor="system:sla-poll",
+            )
+    return results
 
 
 async def _task_claim_expiry_poll_loop(
@@ -274,49 +291,61 @@ async def _task_claim_expiry_poll_loop(
     share this service's "poll instead of push" architecture (ADR 0020)."""
     while True:
         try:
-            if await permission_client.is_maintenance_active():
-                await asyncio.sleep(settings.task_claim_expiry_poll_interval_seconds)
-                continue
-            due_claims = []
-            async with session_factory() as session:
-                for claim in await repository.list_claims_due_for_expiry_notice(
-                    session, threshold_hours=settings.claim_abandonment_threshold_hours
-                ):
-                    instance = await repository.get_instance(session, claim.instance_id)
-                    task_name = claim.task_id
-                    for task in await repository.indexed_ready_tasks(session, claim.instance_id):
-                        if task.id == claim.task_id:
-                            task_name = task.name
-                            break
-                    claim.expiry_notified_at = datetime.now(UTC)
-                    due_claims.append(
-                        (
-                            claim.instance_id,
-                            claim.task_id,
-                            claim.principal_id,
-                            task_name,
-                            instance.business_key,
-                        )
-                    )
-                await session.commit()
-            for instance_id, task_id, principal_id, task_name, business_key in due_claims:
-                await publish_event(
-                    "workflow.task_claim.abandoned",
-                    subject=instance_id,
-                    payload={
-                        "task_id": task_id,
-                        "task_name": task_name,
-                        "principal_id": principal_id,
-                        "business_key": business_key,
-                    },
-                    actor="system:task-claim-expiry-poll",
-                )
+            if not await permission_client.is_maintenance_active():
+                await run_claim_expiry_tick(session_factory)
         except Exception:
             logger.exception(
                 "Claim-Abandonment-Poll-Tick fehlgeschlagen - wird beim nächsten Tick erneut "
                 "versucht."
             )
         await asyncio.sleep(settings.task_claim_expiry_poll_interval_seconds)
+
+
+async def run_claim_expiry_tick(session_factory: async_sessionmaker[AsyncSession]) -> list:
+    """One claim-abandonment tick; only the replica holding the tick lock
+    notifies (P101-S1, ADR 0273). Returns the notified claims."""
+    due_claims = []
+    async with session_factory() as session:
+        # One replica per tick (P101-S1): two would both see a claim as
+        # due and notify its holder twice.
+        due = (
+            await repository.list_claims_due_for_expiry_notice(
+                session, threshold_hours=settings.claim_abandonment_threshold_hours
+            )
+            if await repository.try_replica_lock(session, repository.CLAIM_EXPIRY_TICK_LOCK)
+            else []
+        )
+        for claim in due:
+            instance = await repository.get_instance(session, claim.instance_id)
+            task_name = claim.task_id
+            for task in await repository.indexed_ready_tasks(session, claim.instance_id):
+                if task.id == claim.task_id:
+                    task_name = task.name
+                    break
+            claim.expiry_notified_at = datetime.now(UTC)
+            due_claims.append(
+                (
+                    claim.instance_id,
+                    claim.task_id,
+                    claim.principal_id,
+                    task_name,
+                    instance.business_key,
+                )
+            )
+        await session.commit()
+    for instance_id, task_id, principal_id, task_name, business_key in due_claims:
+        await publish_event(
+            "workflow.task_claim.abandoned",
+            subject=instance_id,
+            payload={
+                "task_id": task_id,
+                "task_name": task_name,
+                "principal_id": principal_id,
+                "business_key": business_key,
+            },
+            actor="system:task-claim-expiry-poll",
+        )
+    return due_claims
 
 
 async def _get_or_seed_federation_config(session: AsyncSession) -> FederationConfig:

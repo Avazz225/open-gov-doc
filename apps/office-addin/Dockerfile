@@ -38,3 +38,5 @@ LABEL org.opencontainers.image.title="office-addin" \
 COPY apps/office-addin/manifest.xml /usr/share/nginx/html/manifest.xml
 COPY apps/office-addin/assets/ /usr/share/nginx/html/assets/
 EXPOSE 80
+# Internal components port (P100-S3): never published, see nginx.conf.
+EXPOSE 8081

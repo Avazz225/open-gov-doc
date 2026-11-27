@@ -47,5 +47,8 @@ Read-only. Answer the question, and propose a fix only if asked.
   - Debian/Alpine use the source package name (`openssl`, not `libssl3t64`).
   - The answer names affected services with the fix version. "Nicht betroffen" lists the installed
     versions outside the range, so the check is visible.
-  - OG Doc ships no vulnerability data; a 409 means online lookup is switched off.
+  - OG Doc ships no vulnerability data. A 409 means online lookup is switched off and no database
+    is imported. Offline, the id is looked up in the imported OSV database.
+- **"Welche Schwachstellen haben wir?"** (P100-S3): `dms vulnerabilities report` (latest scan),
+  `dms vulnerabilities scan` (now). The full procedure is in recipe d6.
 

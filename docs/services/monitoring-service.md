@@ -160,6 +160,32 @@ OG Doc ships no vulnerability data. A check matches one vulnerability against th
 - **Audit event:** `monitoring.vulnerability.checked`.
 - **Tests:** `test_vulnerabilities.py` and 4 endpoint tests in `test_components.py`.
 
+**Scanning the whole inventory (P100-S3, ADR 0272 Decisions 5–8):**
+- `POST /vulnerabilities/scan {source: auto|online|offline}` → 202, runs in the background (one at a
+  time across replicas). `GET /vulnerabilities/scans`, `…/scans/latest` (404 before the first),
+  `…/scans/{id}`. A result lists one entry per flaw (aliases grouped; severity from GHSA or a computed
+  CVSS 3.x score; `fixable`; the affected installations with their fix) plus the packages it couldn't
+  check (`uncovered`).
+- **Online:** an OSV batch query with every installed package version. It has its own switch,
+  `DMS_VULNERABILITY_SCAN_ONLINE_ENABLED` (default off), because the package list leaves the
+  installation.
+- **Offline:**
+  - `POST /vulnerabilities/database?source_name=` takes an OSV `all.zip` or `{records, ecosystems}`
+    (≤ `DMS_VULNERABILITY_IMPORT_MAX_MB`, 120). The import runs in the background and keeps only the
+    records for installed packages.
+  - `GET /vulnerabilities/database/wanted` gives the installed names the CLI filters with.
+  - `DELETE /vulnerabilities/database/{ecosystem}`.
+  - `GET /vulnerabilities/config` also returns the databases and recent imports.
+  - With online lookup off, single-id checks are answered from the database.
+- **Scheduler:** every `DMS_VULNERABILITY_SCAN_INTERVAL_HOURS` (24; 0 = only on demand), checked every
+  15 minutes.
+- **Sensor:** `vulnerabilities_known{severity,fixable}` and `vulnerabilities_scan_age_hours` from the
+  latest finished scan. Default rules are in `packages/monitoring-defaults`.
+- **Events:** `monitoring.vulnerability.scanned`, `…database_imported`, `…database_deleted`.
+- **Frontends:** the full components file (with Alpine packages) is read from their internal port
+  8081.
+- **Tests:** `test_vulnerability_scan.py` and 3 endpoint tests in `test_components.py`.
+
 ## Dead letters (P99-S1, [ADR 0270](../adr/0270-eventbus-dead-letters.md))
 
 `eventbus_dead_letters{stream,consumer}`: events a consumer gave up on after all delivery attempts, read

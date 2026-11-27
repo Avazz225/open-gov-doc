@@ -72,6 +72,122 @@ the two UIs) ignore the log levels and report no catalog until their next image 
   - user management with the reset form checked in the browser.
 - **`graphify update .`** ran once (end of the plan).
 
+**Last completed:** P101-S1, workflow-service with several replicas
+([ADR 0273](docs/adr/0273-workflow-service-replicas.md)).
+
+**What changed:**
+- **One replica per tick:** `run_sla_tick` and `run_claim_expiry_tick` are extracted from the loops.
+  Each takes `repository.try_replica_lock` (`pg_try_advisory_xact_lock(4, 1|2)`) in its own
+  transaction, and the other replicas skip the tick. A stopped or crashed replica releases the lock with
+  its connection; the next tick of another replica takes over.
+- **Startup:** `ensure_circulation_template` and `refresh_all_responsible` wait for key 3
+  (`wait_replica_lock`). Two replicas starting together had created two „Umlauf" versions and updated
+  the same responsibility rows concurrently.
+- **Business-calendar cache:** every replica reloads it at the start of each SLA tick, whether it holds
+  the lock or not. Before, a calendar change reached only the replica that wrote it.
+- **Checked, unchanged:**
+  - the ready-task backfill (already `SKIP LOCKED`);
+  - the approval consumer (shared durable);
+  - the licence and sensor configuration caches (per process, refreshed by each replica).
+- **Helm:** workflow-service `replicas: 2`, PDB `minAvailable: 1`, autoscaling 2–3. The registry
+  expectation follows (min = max = 2); the connection budget already counted 3.
+- **Docs:** ADR 0273, ADR 0020 (gap closed), workflow-service doc.
+
+**Checks:**
+- **Tests:**
+  - workflow-service 288 (+5: `test_replicas.py`, covering the lock, a timer and a claim with two
+    replicas, the template seeding, and the calendar refresh). The claim test forces both replicas to
+    read before either commits;
+  - a control run with the lock disabled: all five fail;
+  - ruff green; Helm lint and template green.
+- **Live** (a second container via a scratchpad override, without a host port, 5-s tick):
+  - both replicas registered;
+  - a BPMN with a 25-s boundary timer: one `workflow.task.escalated` in the audit, replica 1's counter
+    at 1 and replica 2's at 0;
+  - replica 1 stopped right after the start of a second instance: replica 2 escalated it once, 30 s
+    after the start;
+  - one „Umlauf" template;
+  - afterwards the test instances were terminated (probe account with `domain-admin-workflow-instances`,
+    removed), the second container removed, and the tick back at 30 s.
+- No full regression (phase-end rule).
+
+**Next session:** P101-S2 (audit-trail retention: scoping, ADR 0274).
+
+---
+
+**Last completed:** P100-S3, scanning the whole inventory, and phase close. **Phase 100 is closed.**
+([ADR 0272](docs/adr/0272-vulnerability-checks.md) Decisions 5–8).
+
+**What changed:**
+- **Scan of every installed component** (monitoring-service, `vulnerability_scan.py`,
+  `vulnerability_store.py`):
+  - runs in the background (`POST /vulnerabilities/scan`), one at a time across replicas, stored
+    (latest 20), repeated every 24 h when a source exists;
+  - **online:** an OSV batch query with every installed package version. It has its own switch,
+    `DMS_VULNERABILITY_SCAN_ONLINE_ENABLED`, off by default, on in dev (user decision this session:
+    the package list leaves the installation);
+  - **offline:** an imported OSV database (`POST /vulnerabilities/database`, per-ecosystem `all.zip`
+    or a JSON list, in the background). Only records for packages installed at import are kept; the
+    database stores its coverage and data date. Single-id checks are answered from it when online
+    lookup is off;
+  - **report:** one entry per flaw (aliases/`upstream` grouped), severity from GHSA or a computed
+    CVSS 3.x base score, `fixable`, the affected installations with their fix, and „nicht geprüft"
+    by reason.
+- **Sensors:** `vulnerabilities.known{severity,fixable}`, `vulnerabilities.scan_age_hours`,
+  `vulnerabilities.database_age_days{ecosystem}`.
+- **Default rules** (monitoring package 1.2.0): „Kritische Schwachstellen" (error), „Behebbare
+  Schwachstellen", „Schwachstellenprüfung veraltet" (72 h), „Schwachstellen-Datenbank veraltet"
+  (30 days).
+- **Frontends:** nginx serves the full components file (npm + Alpine) on the internal port 8081.
+  - Compose doesn't publish it.
+  - Helm adds a container/Service port `components` and passes `DMS_FRONTEND_COMPONENT_URLS` to
+    monitoring-service.
+  - The Alpine gap from S2 is closed: 68 Alpine packages per UI are in the inventory.
+- **CLI:** `dms vulnerabilities scan|report|scans`, and `database import|status|delete`. The import
+  filters the dumps locally before uploading, since the npm dump is 222 MB and the gateway buffers
+  for 30 s.
+- **admin-ui:**
+  - new page „Schwachstellen" (Sicherheit) with the scan, the database and the single check (moved
+    from „Komponenten");
+  - offline, the id field looks the id up in the database.
+- **Skill:** recipe d6 („Sind wir von CVE-… betroffen?" / „Welche Schwachstellen haben wir?"), plus the
+  diagnosis reference.
+- **Docs:** ADR 0272 Decisions 5–8 and an ADR 0271 amendment; monitoring-service, cli and admin-ui
+  docs; the monitoring-defaults README.
+
+**Checks:**
+- **Phase-close regression:** 32 services, 3,413 tests.
+  - In the full run, permission-service had 2 time-dependent NATS integration tests fail
+    (`test_structure_consumer_integration`: "nicht rechtzeitig übernommen"). Alone it passed twice
+    (233); P100 didn't touch permission-service.
+  - The rest and ruff are green; the run removed its debris.
+- **Libraries and tools:** dms-common 43, dms-metrics-client 31, CLI 309, license-tool 10.
+- **monitoring-service:** 113 (+19). **admin-ui:** vitest 439 (+4); tsc and eslint green.
+- **Helm:** lint and template green.
+- **Live** (probe account with `domain-admin-monitoring`, removed afterwards):
+  - online scan in 25 s: 652 known vulnerabilities, 340 fixable, 38 critical (e.g. OpenSSL in Debian
+    and Alpine, Pillow, Next.js, certifi);
+  - offline import of PyPI, npm, Debian and Alpine in 12 s (835 / 118 / 3,364 / 653 records kept),
+    scan in 2.5 s: 639;
+  - every flaw online also appears offline. The offline extras are cases where OSV's server reads a
+    Debian binNMU version as fixed, e.g. zlib `…-1+b1` against the fix `…-1+deb13u1`; the source
+    really is unfixed;
+  - the sensor delivers, and the rule preview gives error (38) / warning (340) / ok;
+  - port 8081 is not published, answers only the components file and 404 for everything else;
+  - the admin UI checked at 1400/390, the table fitting its box.
+- **Found and fixed live:**
+  1. The npm dump replaced the PyPI database through a single record that spans both ecosystems. A
+     dump now covers an ecosystem only from 10 % of its largest share; the CLI sends counts.
+  2. `Debian:13/all.zip` is a 2024 leftover in an old format, without one 2026 record. Each database
+     now shows its data date, with a sensor and rule; docs and recipe name `Debian/all.zip`.
+  3. Alpine `fixed: "0"` ("never affected in this release") was counted as affected.
+  4. Long Debian versions broke the table layout. The overview now shows package names, versions only
+     in the detail rows, and fix versions break only after `+`/`~`.
+
+**Next session:** P101-S1 (workflow-service with several replicas, ADR 0273).
+
+---
+
 **Last completed:** P100-S2, checking a vulnerability online and air-gapped
 ([ADR 0272](docs/adr/0272-vulnerability-checks.md)).
 

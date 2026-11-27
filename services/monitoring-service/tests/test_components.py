@@ -219,3 +219,178 @@ def test_online_lookup_follows_the_alias(client, monkeypatch):
     assert {r["id"] for r in result["records"]} == {"CVE-2099-0001", "GHSA-test"}
     assert [f["service"] for f in result["affected"]] == ["document-service"]
     assert client.get("/vulnerabilities/config", headers=ADMIN).json()["online"] is True
+
+
+# --- Scanning the whole inventory (P100-S3) ---------------------------------------
+
+GHSA_ALIASED = {**GHSA, "aliases": ["CVE-2099-0002"], "modified": "2026-11-01T08:00:00Z"}
+
+
+def _wait(client, check, attempts=200):
+    import time
+
+    for _ in range(attempts):
+        value = check()
+        if value:
+            return value
+        time.sleep(0.05)
+    raise AssertionError("timed out")
+
+
+def _import(client, body, content_type="application/json", name="pypi.json"):
+    started = client.post(
+        f"/vulnerabilities/database?source_name={name}",
+        content=body,
+        headers={**ADMIN, "content-type": content_type},
+    )
+    assert started.status_code == 202, started.text
+
+    def finished():
+        jobs = client.get("/vulnerabilities/config", headers=ADMIN).json()["imports"]
+        job = next(j for j in jobs if j["id"] == started.json()["id"])
+        return job if job["status"] != "running" else None
+
+    return _wait(client, finished)
+
+
+def _scan(client, source="auto"):
+    started = client.post("/vulnerabilities/scan", json={"source": source}, headers=ADMIN)
+    assert started.status_code == 202, started.text
+    scan_id = started.json()["id"]
+
+    def finished():
+        row = client.get(f"/vulnerabilities/scans/{scan_id}", headers=ADMIN).json()
+        return row if row["status"] != "running" else None
+
+    return _wait(client, finished)
+
+
+def test_offline_database_check_and_scan(client):
+    import json
+
+    assert client.post("/vulnerabilities/scan", json={}, headers=ADMIN).status_code == 409
+    assert (
+        client.post("/vulnerabilities/check", json={"id": "CVE-2099-0002"}, headers=ADMIN)
+    ).status_code == 409
+
+    other = {
+        **GHSA,
+        "id": "GHSA-other",
+        "affected": [{"package": {"ecosystem": "PyPI", "name": "django"}, "ranges": []}],
+    }
+    body = json.dumps({"records": [GHSA_ALIASED, other], "ecosystems": ["PyPI", "Go"]})
+    job = _import(client, body)
+    assert job["status"] == "done" and job["ecosystems"] == {"PyPI": 1}
+    [database] = client.get("/vulnerabilities/config", headers=ADMIN).json()["databases"]
+    assert database["ecosystem"] == "PyPI" and database["record_count"] == 1
+    assert database["covered_count"] == 2  # urllib3, dms-common
+    assert database["data_as_of"].startswith("2026-11-01")
+
+    # A single id is answered from the database while online lookup is off.
+    check = client.post(
+        "/vulnerabilities/check", json={"id": "cve-2099-0002"}, headers=ADMIN
+    ).json()
+    assert check["source"] == "database"
+    assert [f["service"] for f in check["affected"]] == ["document-service"]
+    unknown = client.post("/vulnerabilities/check", json={"id": "CVE-2000-1"}, headers=ADMIN).json()
+    assert unknown["records"] == [] and "eingespielten Datenbank" in unknown["note"]
+
+    scan = _scan(client)
+    assert scan["status"] == "done" and scan["source"] == "offline"
+    [entry] = scan["vulnerabilities"]
+    assert (entry["id"], entry["severity"], entry["fixable"]) == ("CVE-2099-0002", "high", True)
+    assert [i["service"] for i in entry["installations"]] == ["document-service"]
+    reasons = {(u["ecosystem"], u["name"]): u["reason"] for u in scan["uncovered"]}
+    assert reasons[("npm", "react")] == "keine Datenbank für npm"
+    assert reasons[("Debian", "openssl")] == "Image ohne Distribution"
+    assert client.get("/vulnerabilities/scans/latest", headers=ADMIN).json()["id"] == scan["id"]
+
+    # The sensor reads the latest scan.
+    app.state.registry_client.list_active_instances.return_value = []
+    metrics = client.get("/metrics").text
+    assert 'vulnerabilities_known{fixable="true",severity="high"} 1.0' in metrics
+    assert "vulnerabilities_scan_age_hours" in metrics
+    assert 'vulnerabilities_database_age_days{ecosystem="PyPI"}' in metrics
+
+    assert client.delete("/vulnerabilities/database/PyPI", headers=ADMIN).status_code == 204
+    assert client.get("/vulnerabilities/config", headers=ADMIN).json()["databases"] == []
+
+
+def test_zip_import_and_bad_files(client):
+    import io
+    import json
+    import zipfile
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("GHSA-test.json", json.dumps(GHSA))
+    job = _import(client, buffer.getvalue(), "application/zip", "PyPI-all.zip")
+    assert job["ecosystems"] == {"PyPI": 1}
+
+    npm_only = json.dumps({"records": [], "ecosystems": ["Go"]})
+    failed = _import(client, npm_only)
+    assert failed["status"] == "failed" and "Ökosysteme" in failed["error"]
+    garbage = client.post(
+        "/vulnerabilities/database?source_name=x", content=b"hello", headers=ADMIN
+    )
+    assert garbage.status_code == 422
+    assert client.get("/vulnerabilities/database/wanted", headers=ADMIN).json() == {
+        "PyPI": ["dms-common", "urllib3"],
+        "npm": ["react"],
+    }
+
+
+def test_online_scan_sends_package_versions_and_schedules(client, monkeypatch):
+    import json
+
+    from monitoring_service import main
+
+    assert (
+        client.post("/vulnerabilities/scan", json={"source": "online"}, headers=ADMIN).status_code
+        == 409
+    )
+    monkeypatch.setattr(main.settings, "vulnerability_scan_online_enabled", True)
+    monkeypatch.setattr(main.settings, "vulnerability_lookup_url", "https://osv.test")
+    sent: list[dict] = []
+    real_client = httpx.AsyncClient
+
+    def fake_client(*args, **kwargs):
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/v1/querybatch":
+                queries = json.loads(request.content)["queries"]
+                sent.extend(queries)
+                return httpx.Response(
+                    200,
+                    json={
+                        "results": [
+                            {"vulns": [{"id": "GHSA-test"}]}
+                            if q["package"]["name"] == "urllib3"
+                            else {}
+                            for q in queries
+                        ]
+                    },
+                )
+            return httpx.Response(200, json=GHSA)
+
+        kwargs.pop("trust_env", None)
+        return real_client(transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr(main.httpx, "AsyncClient", fake_client)
+    scan = _scan(client)
+    assert scan["source"] == "online" and scan["status"] == "done"
+    assert {(q["package"]["name"], q["version"]) for q in sent} >= {
+        ("urllib3", "2.2.1"),
+        ("urllib3", "2.3.0"),
+        ("react", "18.3.1"),
+    }
+    assert [e["id"] for e in scan["vulnerabilities"]] == ["CVE-2099-0001"]  # its alias
+    # The scheduler waits for the interval after a scan.
+    assert client.portal.call(main.run_vulnerability_schedule_tick) is None
+    monkeypatch.setattr(main.settings, "vulnerability_scan_interval_hours", 0.0001)
+    import time
+
+    time.sleep(0.5)
+    scheduled = client.portal.call(main.run_vulnerability_schedule_tick)
+    assert scheduled
+    rows = client.get("/vulnerabilities/scans", headers=ADMIN).json()
+    assert rows[0]["id"] == scheduled and rows[0]["trigger"] == "schedule"
