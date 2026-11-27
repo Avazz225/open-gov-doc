@@ -72,8 +72,50 @@ the two UIs) ignore the log levels and report no catalog until their next image 
   - user management with the reset form checked in the browser.
 - **`graphify update .`** ran once (end of the plan).
 
-**Next session:** none planned. Open choices remain under "Deliberately Not Included" in
-`IMPLEMENTATION_PLAN.md`.
+**Last completed:** P99-S1, bounded delivery and dead letters
+([ADR 0270](docs/adr/0270-eventbus-dead-letters.md)).
+
+**What changed:**
+- **`dms-eventbus-client`:**
+  - a failing handler is `nak`ed with a growing delay (1, 2, 4 … s, at most 5 min);
+  - after 12 deliveries (`DMS_EVENTBUS_MAX_DELIVER`, about 18 minutes) the message is copied to the
+    `DLQ` stream (`dlq.<stream>.<consumer>`, original payload and headers plus `Dms-Dlq-*`: subject,
+    sequence, consumer, deliveries, error, time) and acknowledged, so the consumer moves on;
+  - if even that fails, the longest `nak`: nothing is dropped;
+  - DLQ retention 90 days; `dead_letter_counts()` for the sensor.
+  - The limit is enforced client-side from `num_delivered`, so existing durables need no migration.
+- **monitoring-service:** metric `eventbus_dead_letters{stream,consumer}` from the DLQ stream (in
+  `/metrics` and alert evaluation, an explicit 0 when empty).
+- **`packages/monitoring-defaults` 1.1.0:** rule „Unzustellbare Ereignisse" (sum > 0 → warning).
+- **Docs:** ADR 0270, architecture (delivery limit), monitoring-service.
+
+**Checks:**
+- **Tests:**
+  - dms-eventbus-client 20 (+4): poison message → DLQ with headers while the next one flows,
+    transient failure recovers, concurrent path, delay series;
+  - monitoring-service 58 (+2); config-service 72 (package test with the new rule); ruff green.
+- **Live:** monitoring-service rebuilt; rule imported via `dms config import --category alert_rules`
+  (1 created, 19 unchanged); empty DLQ → `ok`/0; an artificial letter → `warning`/1 at the next
+  evaluation; removed again.
+- **Not yet:** the other services get the new library with their next image build (rebuild at the
+  start of P99-S2, where the full flow is provoked live with a failing consumer).
+
+**Next session:** P99-S2 (listing, replaying and discarding dead letters: API, CLI, admin UI, skill;
+live; phase close).
+
+---
+
+**Planned (2026-11-27): the next round, Phases 99–102** (user selection from "Deliberately Not
+Included"):
+- **99:** NATS dead letters (bounded delivery, DLQ, alert, replay).
+- **100:** workflow-service HA, audit-trail retention (scoping + build), finer cache invalidation and
+  the small open items.
+- **101:** annotations, computed attributes, form letters, storage quotas.
+- **102:** Microsoft 365 mailboxes, extended e-invoicing, ERP/archive connector scoping.
+
+`graphify update .` at the end of P102. Not chosen: AI features for end users, the native mobile
+client.
+
 
 ---
 

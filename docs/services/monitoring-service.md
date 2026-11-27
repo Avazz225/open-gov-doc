@@ -128,6 +128,16 @@ allowed), and `rule_ids` (null = all).
 
 **UI (P88-S6):** admin-ui's sensors page, see `docs/services/admin-ui.md` "Sensor Alerts". For its rule editor, `POST /alert-rules/preview` evaluates a draft against a fresh scrape (value, would-be level, matching series without `instance`; `reason` `no_samples`/`rate_needs_history`), ungated like `GET /metrics`.
 
+## Dead letters (P99-S1, [ADR 0270](../adr/0270-eventbus-dead-letters.md))
+
+`eventbus_dead_letters{stream,consumer}`: events a consumer gave up on after all delivery attempts, read
+from the NATS `DLQ` stream on every `/metrics` scrape and every alert evaluation.
+- Always on and outside the sensor catalog, like `monitoring_alert_level`.
+- An empty DLQ is a single `{stream="-",consumer="-"} 0` sample, so the default rule „Unzustellbare
+  Ereignisse" (`packages/monitoring-defaults` 1.1.0, sum > 0 → warning) reads `ok` rather than
+  `unknown`.
+- Listing and replaying the letters follows in P99-S2.
+
 ## Alarm levels for Grafana (P88-S7, [ADR 0252](../adr/0252-alert-rules-as-config-category-default-package-and-grafana.md))
 
 `GET /metrics` appends a gauge `monitoring_alert_level{rule,sensor}` per **enabled** rule: `-1` unknown

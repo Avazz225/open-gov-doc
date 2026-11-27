@@ -3,7 +3,7 @@
   "exported_at": "2026-11-21T00:00:00Z",
   "manifest": {
     "name": "Monitoring-Standardpaket",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "compatibility_range": ">=1.0",
     "description": "Standard-Alarmregeln für die mitgelieferten Sensoren (ADR 0245/0252): Speicher, Replikation, Dienst-Replikate, Lizenz, Virenfunde, OCR, Benachrichtigungen, Aussonderung, Papierkorb, Suche, Anmeldungen und Ressourcen. Dazu ein deaktiviertes Beispiel-Wartungsfenster. Wird bewusst eingespielt, nicht automatisch.",
     "origin": "dms-project",
@@ -279,6 +279,20 @@
       "error_repeat": 5,
       "enabled": true,
       "description": "Größter Arbeitsspeicher (RSS) eines Dienstprozesses; 1,5 GiB Warnung, 3 GiB Fehler."
+    },
+    {
+      "name": "Unzustellbare Ereignisse",
+      "sensor": "eventbus.dead_letters",
+      "label_filter": {},
+      "aggregation": "sum",
+      "min_error": null,
+      "min_warning": null,
+      "max_warning": 0,
+      "max_error": null,
+      "warning_repeat": 1,
+      "error_repeat": 1,
+      "enabled": true,
+      "description": "Ereignisse, die ein Dienst auch nach allen Zustellversuchen nicht verarbeiten konnte (Dead Letters, ADR 0270). Sie warten auf Prüfung und erneutes Einspielen; der Dienst arbeitet mit den übrigen weiter."
     }
   ],
   "alert_downtime_windows": [

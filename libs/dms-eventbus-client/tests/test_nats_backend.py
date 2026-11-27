@@ -335,3 +335,121 @@ async def test_a_durable_from_before_queue_groups_is_migrated_at_its_position(cl
         assert (await js.consumer_info(stream, "legacy")).config.deliver_group == "legacy"
     finally:
         await bus._js.delete_stream(stream)
+
+
+# --- Dead letters (P99-S1, ADR 0270) --------------------------------------------
+
+
+async def _dead_letters_for(bus, stream: str, consumer: str) -> list:
+    """The DLQ messages for one consumer, read with an ephemeral pull."""
+    from dms_eventbus_client.nats_backend import dead_letter_subject
+
+    js = bus._js
+    sub = await js.pull_subscribe(dead_letter_subject(stream, consumer), durable=None)
+    try:
+        return await sub.fetch(10, timeout=2)
+    except Exception:  # noqa: BLE001 - nothing there
+        return []
+    finally:
+        await sub.unsubscribe()
+
+
+def test_retry_delay_grows_and_is_capped():
+    from dms_eventbus_client.nats_backend import MAX_RETRY_DELAY_SECONDS, retry_delay
+
+    assert [retry_delay(n) for n in (1, 2, 3, 4)] == [1.0, 2.0, 4.0, 8.0]
+    assert retry_delay(30) == MAX_RETRY_DELAY_SECONDS
+
+
+async def test_a_message_that_keeps_failing_is_dead_lettered_and_the_next_flows():
+    """Until P99 a failing handler was redelivered forever and stalled its
+    consumer (Phase 51, P98-S1)."""
+    stream = f"test_{uuid.uuid4().hex[:8]}"
+    bus = NatsEventBusClient(NATS_URL, stream, max_deliver=2)
+    await bus.connect()
+    good = asyncio.Event()
+    attempts: list[bytes] = []
+
+    async def handler(payload: bytes) -> None:
+        attempts.append(payload)
+        if payload == b"poison":
+            raise ValueError("kaputt")
+        good.set()
+
+    durable = f"dlq-test-{uuid.uuid4().hex[:6]}"
+    try:
+        await bus.subscribe(f"{stream}.x", handler, durable=durable)
+        await asyncio.sleep(0.2)
+        await bus.publish(f"{stream}.x", b"poison")
+        await bus.publish(f"{stream}.x", b"fine")
+        await asyncio.wait_for(good.wait(), timeout=10)
+        # The poison message: first delivery, one retry (after 1 s), then DLQ.
+        for _ in range(40):
+            if attempts.count(b"poison") >= 2 and await bus.dead_letter_counts():
+                break
+            await asyncio.sleep(0.25)
+        assert attempts.count(b"poison") == 2
+
+        [letter] = await _dead_letters_for(bus, stream, durable)
+        assert letter.data == b"poison"
+        assert letter.headers["Dms-Dlq-Subject"] == f"{stream}.x"
+        assert letter.headers["Dms-Dlq-Consumer"] == durable
+        assert letter.headers["Dms-Dlq-Deliveries"] == "2"
+        assert letter.headers["Dms-Dlq-Error"] == "ValueError: kaputt"
+        counts = await bus.dead_letter_counts()
+        assert counts[(stream, durable)] == 1
+
+        # Acknowledged: nothing pending for the consumer any more.
+        assert await bus.consumer_pending(stream, durable) == 0
+    finally:
+        await bus._js.purge_stream("DLQ", subject=f"dlq.{stream}.>")
+        await bus.close()
+
+
+async def test_a_transient_failure_recovers_within_the_attempts():
+    stream = f"test_{uuid.uuid4().hex[:8]}"
+    bus = NatsEventBusClient(NATS_URL, stream, max_deliver=3)
+    await bus.connect()
+    done = asyncio.Event()
+    calls = 0
+
+    async def handler(payload: bytes) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise ConnectionError("Abhängigkeit startet gerade neu")
+        done.set()
+
+    durable = f"dlq-transient-{uuid.uuid4().hex[:6]}"
+    try:
+        await bus.subscribe(f"{stream}.y", handler, durable=durable)
+        await asyncio.sleep(0.2)
+        await bus.publish(f"{stream}.y", b"once")
+        await asyncio.wait_for(done.wait(), timeout=10)
+        assert calls == 2
+        assert (stream, durable) not in await bus.dead_letter_counts()
+    finally:
+        await bus.close()
+
+
+async def test_concurrent_handlers_dead_letter_too():
+    stream = f"test_{uuid.uuid4().hex[:8]}"
+    bus = NatsEventBusClient(NATS_URL, stream, max_deliver=1)
+    await bus.connect()
+
+    async def handler(payload: bytes) -> None:
+        raise RuntimeError("immer")
+
+    durable = f"dlq-concurrent-{uuid.uuid4().hex[:6]}"
+    try:
+        await bus.subscribe(f"{stream}.z", handler, durable=durable, max_concurrency=4)
+        await asyncio.sleep(0.2)
+        await bus.publish(f"{stream}.z", b"a")
+        for _ in range(40):
+            if (stream, durable) in await bus.dead_letter_counts():
+                break
+            await asyncio.sleep(0.25)
+        assert (await bus.dead_letter_counts())[(stream, durable)] == 1
+    finally:
+        await bus._js.purge_stream("DLQ", subject=f"dlq.{stream}.>")
+        await bus.close()

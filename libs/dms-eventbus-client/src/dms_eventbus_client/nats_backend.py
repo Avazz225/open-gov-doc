@@ -1,6 +1,8 @@
 import asyncio
 import logging
+import os
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 
 import nats
 from nats.js import api
@@ -18,6 +20,37 @@ logger = logging.getLogger(__name__)
 # consumer continues that trace. Uses only the OpenTelemetry API - without a
 # configured provider (tracing off) every call here is a no-op.
 _tracer = trace.get_tracer("dms_eventbus_client")
+
+
+# Dead letters (P99-S1, ADR 0270). A handler that keeps failing used to be
+# redelivered forever and stalled its consumer (Phase 51, P98-S1). Now each
+# failure is `nak`ed with a growing delay; after `max_deliver` deliveries the
+# message is copied to the DLQ stream and acknowledged, so the consumer moves
+# on. The limit is enforced here (from `num_delivered`), not by the server:
+# the server keeps redelivering, so this code always sees the last attempt -
+# and existing durables need no migration.
+DLQ_STREAM = "DLQ"
+DLQ_SUBJECT_PREFIX = "dlq"
+DEFAULT_MAX_DELIVER = int(os.environ.get("DMS_EVENTBUS_MAX_DELIVER", "12"))
+DLQ_MAX_AGE_SECONDS = int(os.environ.get("DMS_EVENTBUS_DLQ_MAX_AGE_DAYS", "90")) * 86400
+MAX_RETRY_DELAY_SECONDS = 300.0
+_ERROR_TEXT_LIMIT = 500
+
+
+def retry_delay(num_delivered: int) -> float:
+    """1, 2, 4, ... seconds, at most 5 minutes: with 12 deliveries a message
+    gets about 18 minutes to succeed (a restarting dependency, a short outage)
+    before it is dead-lettered."""
+    return min(2.0 ** max(num_delivered - 1, 0), MAX_RETRY_DELAY_SECONDS)
+
+
+def _subject_token(name: str) -> str:
+    # A subject token may not contain dots, spaces or wildcards.
+    return "".join(c if c.isalnum() or c in "-_" else "_" for c in name) or "_"
+
+
+def dead_letter_subject(stream: str, consumer: str) -> str:
+    return f"{DLQ_SUBJECT_PREFIX}.{_subject_token(stream)}.{_subject_token(consumer)}"
 
 
 def _messaging_attributes(subject: str, operation: str) -> dict[str, str]:
@@ -39,12 +72,21 @@ class NatsEventBusClient(EventBusClient):
     based on the subject (see ADR 0001).
     """
 
-    def __init__(self, url: str, stream: str | None = None, *, ensure_stream: bool = True) -> None:
+    def __init__(
+        self,
+        url: str,
+        stream: str | None = None,
+        *,
+        ensure_stream: bool = True,
+        max_deliver: int | None = None,
+    ) -> None:
         if ensure_stream and stream is None:
             raise ValueError("stream ist erforderlich, wenn ensure_stream=True")
         self._url = url
         self._stream = stream
         self._ensure_stream = ensure_stream
+        self._max_deliver = max(1, max_deliver or DEFAULT_MAX_DELIVER)
+        self._dlq_ready = False
         self._nc: nats.NATS | None = None
         self._js: JetStreamContext | None = None
 
@@ -108,17 +150,10 @@ class NatsEventBusClient(EventBusClient):
             nonlocal in_flight
             try:
                 await _handle(msg)
-            except Exception:
-                # As in the sequential path: on failure, the message is not
-                # acknowledged (redelivery by JetStream) - additionally
-                # logged here, since the exception would otherwise be lost
-                # as just a "Task exception was never retrieved" (task
-                # instead of a direct await).
-                logger.exception(
-                    "Handler-Fehler bei nebenläufiger Verarbeitung (Subject %r) - "
-                    "keine Bestätigung, Neuzustellung erwartet",
-                    subject,
-                )
+            except Exception as exc:
+                # Retry with a delay, or dead-letter after the last attempt
+                # (P99-S1) - the same as the sequential path.
+                await self._on_handler_failure(msg, exc, subject, _ack)
             else:
                 await _ack(msg)
             finally:
@@ -146,9 +181,12 @@ class NatsEventBusClient(EventBusClient):
             nonlocal in_flight
             limit = await _resolve_limit()
             if limit <= 1:
-                # Exactly the previous behavior (no concurrency) - unchanged
-                # for any caller that doesn't set max_concurrency.
-                await _handle(msg)
+                # Sequential (default): one message at a time, acked when done.
+                try:
+                    await _handle(msg)
+                except Exception as exc:
+                    await self._on_handler_failure(msg, exc, subject, _ack)
+                    return
                 await _ack(msg)
                 return
             async with slot_free:
@@ -179,6 +217,107 @@ class NatsEventBusClient(EventBusClient):
             raise SubjectNotFoundError(
                 f"Kein Stream deckt Subject {subject!r} ab - noch kein Producer gestartet?"
             ) from exc
+
+    async def _on_handler_failure(self, msg, exc: Exception, subject: str, ack) -> None:
+        """A failed handler: `nak` with a growing delay, or - at the last
+        attempt - copy the message to the DLQ and acknowledge it (P99-S1).
+        If even the DLQ can't take it, `nak` with the longest delay: nothing
+        is dropped."""
+        try:
+            meta = msg.metadata
+        except Exception:  # noqa: BLE001 - not a JetStream message
+            meta = None
+        deliveries = int(getattr(meta, "num_delivered", 1) or 1)
+        if deliveries < self._max_deliver:
+            delay = retry_delay(deliveries)
+            logger.warning(
+                "eventbus_handler_failed_retrying",
+                exc_info=exc,
+                extra={
+                    "subject": subject,
+                    "deliveries": deliveries,
+                    "max_deliver": self._max_deliver,
+                    "retry_in_seconds": delay,
+                },
+            )
+            await self._settle(msg.nak(delay=delay), subject)
+            return
+        try:
+            dlq_subject = await self._dead_letter(msg, exc, meta, deliveries)
+        except Exception:
+            logger.exception("eventbus_dead_letter_failed", extra={"subject": subject})
+            await self._settle(msg.nak(delay=MAX_RETRY_DELAY_SECONDS), subject)
+            return
+        logger.error(
+            "eventbus_message_dead_lettered",
+            exc_info=exc,
+            extra={
+                "subject": subject,
+                "deliveries": deliveries,
+                "dead_letter_subject": dlq_subject,
+            },
+        )
+        await ack(msg)
+
+    async def _settle(self, awaitable, subject: str) -> None:
+        try:
+            await awaitable
+        except Exception:  # noqa: BLE001 - redelivery happens anyway after ack_wait
+            logger.warning("eventbus_nak_failed", extra={"subject": subject}, exc_info=True)
+
+    async def _ensure_dlq(self) -> None:
+        if self._dlq_ready:
+            return
+        try:
+            await self._js.stream_info(DLQ_STREAM)
+        except NotFoundError:
+            try:
+                await self._js.add_stream(
+                    name=DLQ_STREAM,
+                    subjects=[f"{DLQ_SUBJECT_PREFIX}.>"],
+                    max_age=DLQ_MAX_AGE_SECONDS,
+                )
+            except Exception:  # noqa: BLE001 - another instance created it first
+                await self._js.stream_info(DLQ_STREAM)
+        self._dlq_ready = True
+
+    async def _dead_letter(self, msg, exc: Exception, meta, deliveries: int) -> str:
+        """Copies the message to `dlq.<stream>.<consumer>`: the original
+        payload and headers, plus where it came from and why it failed."""
+        await self._ensure_dlq()
+        stream = getattr(meta, "stream", None) or "unknown"
+        consumer = getattr(meta, "consumer", None) or "unknown"
+        sequence = getattr(getattr(meta, "sequence", None), "stream", None)
+        error = f"{type(exc).__name__}: {exc}"[:_ERROR_TEXT_LIMIT]
+        headers = dict(msg.headers or {})
+        headers.update(
+            {
+                "Dms-Dlq-Subject": msg.subject,
+                "Dms-Dlq-Stream": stream,
+                "Dms-Dlq-Stream-Seq": str(sequence or ""),
+                "Dms-Dlq-Consumer": consumer,
+                "Dms-Dlq-Deliveries": str(deliveries),
+                "Dms-Dlq-Error": error.replace("\n", " ").replace("\r", " "),
+                "Dms-Dlq-Failed-At": datetime.now(UTC).isoformat(),
+            }
+        )
+        subject = dead_letter_subject(stream, consumer)
+        await self._js.publish(subject, msg.data, headers=headers)
+        return subject
+
+    async def dead_letter_counts(self) -> dict[tuple[str, str], int]:
+        """Dead letters waiting, per (stream, consumer) - for the
+        `eventbus.dead_letters` sensor. Empty when there is no DLQ yet."""
+        try:
+            info = await self._js.stream_info(DLQ_STREAM, subjects_filter=f"{DLQ_SUBJECT_PREFIX}.>")
+        except NotFoundError:
+            return {}
+        counts: dict[tuple[str, str], int] = {}
+        for subject, count in (info.state.subjects or {}).items():
+            parts = subject.split(".", 2)
+            if len(parts) == 3:
+                counts[(parts[1], parts[2])] = int(count)
+        return counts
 
     async def _migrate_to_queue_group(self, subject: str, durable: str) -> None:
         """Recreates a durable from before P95-S2a (push, no deliver group) as

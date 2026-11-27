@@ -234,3 +234,48 @@ def test_metrics_expose_each_enabled_rules_level_for_grafana(client, published):
     )
     assert sample.labels == {"rule": "Speicher voll", "sensor": "storage.target.used_percent"}
     assert off["enabled"] is False
+
+
+def test_dead_letters_are_a_metric_and_feed_the_alert_families(client):
+    """P99-S1 (ADR 0270): `eventbus_dead_letters{stream,consumer}` read from
+    the DLQ stream - in /metrics and in what the alert tick evaluates."""
+    import uuid
+
+    from dms_eventbus_client.nats_backend import dead_letter_subject
+    from monitoring_service.main import _scrape_families
+
+    stream = f"teststream{uuid.uuid4().hex[:6]}"
+    bus = app.state.event_bus
+
+    async def put_one():
+        await bus._ensure_dlq()
+        await bus._js.publish(dead_letter_subject(stream, "probe-consumer"), b"{}")
+
+    async def purge():
+        await bus._js.purge_stream("DLQ", subject=f"dlq.{stream}.>")
+
+    client.portal.call(put_one)
+    try:
+        body = client.get("/metrics").text
+        family = next(
+            f for f in text_string_to_metric_families(body) if f.name == "eventbus_dead_letters"
+        )
+        samples = {(s.labels["stream"], s.labels["consumer"]): s.value for s in family.samples}
+        assert samples[(stream, "probe-consumer")] == 1
+
+        families = client.portal.call(_scrape_families)
+        assert "eventbus_dead_letters" in families
+    finally:
+        client.portal.call(purge)
+
+
+def test_an_empty_dead_letter_queue_reads_as_zero(client, monkeypatch):
+    """No dead letters is `0`, so the default rule evaluates to `ok`, not `unknown`."""
+    from unittest.mock import AsyncMock as _AsyncMock
+
+    monkeypatch.setattr(app.state.event_bus, "dead_letter_counts", _AsyncMock(return_value={}))
+    body = client.get("/metrics").text
+    family = next(
+        f for f in text_string_to_metric_families(body) if f.name == "eventbus_dead_letters"
+    )
+    assert [(s.labels["stream"], s.value) for s in family.samples] == [("-", 0.0)]

@@ -181,7 +181,37 @@ async def _scrape_families() -> dict:
         on_failure=app.state.scrape_failures_counter.inc,
     )
     service_types = {i.instance_id: i.service_type for i in instances}
-    return {family.name: family for family in scraper.merge_metric_families(bodies, service_types)}
+    families = {
+        family.name: family for family in scraper.merge_metric_families(bodies, service_types)
+    }
+    dead_letters = await _dead_letter_family()
+    families[dead_letters.name] = dead_letters
+    return families
+
+
+async def _dead_letter_family() -> GaugeMetricFamily:
+    """`eventbus_dead_letters{stream,consumer}` (P99-S1, ADR 0270): events a
+    consumer gave up on after every delivery attempt, waiting in the DLQ
+    stream. Read from NATS on every scrape and evaluation, like
+    `monitoring_alert_level` always on and outside the sensor catalog; the
+    default rule „Unzustellbare Ereignisse" warns from the first one."""
+    family = GaugeMetricFamily(
+        "eventbus_dead_letters",
+        "Unzustellbare Ereignisse je Stream und Consumer (Dead Letters)",
+        labels=["stream", "consumer"],
+    )
+    try:
+        counts = await app.state.event_bus.dead_letter_counts()
+    except Exception:  # noqa: BLE001 - a scrape must not fail on NATS
+        logger.warning("dead_letter_count_failed", exc_info=True)
+        return family
+    for (stream, consumer), count in sorted(counts.items()):
+        family.add_metric([stream, consumer], count)
+    if not counts:
+        # An empty DLQ is a real zero, not "no data": without a series the
+        # default rule would sit at `unknown` instead of `ok`.
+        family.add_metric(["-", "-"], 0)
+    return family
 
 
 async def run_alert_tick(families: dict | None = None) -> alert_store.TickResult | None:
@@ -289,7 +319,9 @@ async def get_metrics() -> Response:
     combined_registry = CollectorRegistry()
     combined_registry.register(_StaticMetricsCollector(merged))
     level_registry = CollectorRegistry()
-    level_registry.register(_StaticMetricsCollector([await _alert_level_family()]))
+    level_registry.register(
+        _StaticMetricsCollector([await _alert_level_family(), await _dead_letter_family()])
+    )
     body = (
         generate_latest(combined_registry)
         + generate_latest(app.state.own_registry)

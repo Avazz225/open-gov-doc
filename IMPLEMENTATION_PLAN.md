@@ -3444,7 +3444,8 @@ ADR 0239**.
 4. Then compliance completions, the new collaboration features, and operations/hygiene last.
 
 `graphify update .` runs once, at the end of this whole plan: P96-S3 originally, then P97-S3 (Phase 97
-added 2026-11-26), now P98-S3 (Phase 98 added 2026-11-27). Phases 91–96
+added 2026-11-26), then P98-S3 (Phase 98 added 2026-11-27). The next round (Phases 99–102) has its own: at the end of
+P102. Phases 91–96
 were added or reordered on 2026-11-21/22/23 and renumbered so they run in numerical order. The full backend
 regression runs at each phase close.
 
@@ -5501,6 +5502,151 @@ P98-S3 (the end of the plan again).
       10 new test approval requests on its own.
     - **`graphify update .`** ran once.
 
+## Next Round: Phases 99–102 (user selection 2026-11-27)
+
+Selected from "Deliberately Not Included" below. The user chose:
+- **robustness:** NATS dead letters, workflow-service HA, audit-trail retention, finer cache
+  invalidation;
+- **features:** annotations, form letters, computed attributes, storage quotas;
+- **integrations:** Microsoft 365 mailboxes, extended e-invoicing, an ERP or archive connector.
+
+Not chosen: AI features for end users.
+
+**Order:** robustness first (every round's principle), then data growth, then features, then
+integrations. Feature work starts with a scoping session wherever the shape isn't settled. Full
+regression at each phase close; `graphify update .` once, at the end of P102.
+
+**Numbering:** Phase 99 / ADR 0270 onwards.
+
+## Phase 99 — Event Bus: Dead Letters
+
+**Today:** consumers run with an unlimited `max_deliver`. A message whose handler keeps failing is
+redelivered forever and stalls everything behind it. That happened in Phase 51 (`resource_node` FK) and
+in P98-S1 (`role_assignment` FK, over 4,500 failures in 5 minutes, new folders refused with 403). Each
+time the consumer was blind until a person read the logs.
+
+- **P99-S1 — Bounded delivery and a dead-letter store (ADR 0270).**
+  - **`dms-eventbus-client`:**
+    - a bounded `max_deliver` (default e.g. 10) with growing `nak` delays instead of immediate
+      redelivery;
+    - after the last attempt the message is acknowledged and copied to a dead-letter stream (`DLQ`,
+      subject `dlq.<stream>.<durable>`) with its headers, the consumer, the attempt count and the last
+      error (type and message, no payload copy beyond the original);
+    - existing durables are migrated once, like ADR 0264's queue-group migration.
+  - **Sensor** `eventbus.dead_letters` (by stream and consumer), and a default alert rule in
+    `packages/monitoring-defaults`.
+  - **Tests:** a handler that always fails ends in the DLQ after N attempts and the next message
+    still flows; a transient failure recovers within the attempts; the migration keeps the position.
+  - **Result** ([ADR 0270](docs/adr/0270-eventbus-dead-letters.md)):
+    - **Library:** a `nak` with a growing delay (1 s … 5 min), 12 deliveries by default, then the `DLQ`
+      stream (`dlq.<stream>.<consumer>`, original plus `Dms-Dlq-*` headers) and an ack. Sequential and
+      concurrent paths.
+    - **No migration needed:** the limit is enforced client-side from `num_delivered`, so the server
+      keeps `max_deliver = -1` and the client always sees the last attempt.
+    - **monitoring-service:** `eventbus_dead_letters{stream,consumer}` from the DLQ stream (in
+      `/metrics` and alert evaluation), an explicit 0 when empty. Default rule „Unzustellbare
+      Ereignisse" (package 1.1.0, warning from the first letter).
+    - **Tests:** eventbus 20 (+4), monitoring 58 (+2), config-service package test green.
+    - **Live:** rule imported; `ok`/0 when empty, `warning`/1 with an artificial letter.
+- **P99-S2 — Seeing and replaying dead letters.**
+  - monitoring-service (or a small new endpoint set) lists dead letters, shows one, replays it to its
+    consumer, or discards it; audited, `admin.monitoring`;
+  - CLI `dms events dead-letters list|show|replay|discard`;
+  - an admin UI section on the monitoring page;
+  - an admin skill recipe;
+  - live: provoke a failing handler on the dev stack, see the alert, fix, replay.
+  - **Phase close:** regression.
+
+## Phase 100 — High Availability and Data Growth
+
+- **P100-S1 — workflow-service with several replicas (ADR 0271).**
+  - ADR 0020's documented gap: the SLA/timer poll and the instance-start reconcile would run in every
+    replica and fire boundary events twice;
+  - a Postgres advisory-lock leader per tick (the pattern monitoring-service's alert tick uses,
+    ADR 0245);
+  - check every other loop of the service for the same issue;
+  - Helm `replicas` > 1 allowed with a PDB;
+  - live with two replicas: one timer fires exactly once, and a stopped replica's work is taken over.
+- **P100-S2 — Audit-trail retention: scoping (ADR 0272).** The dev stack holds 1.75 M events / 1.07 GB
+  and grows with every run. To decide:
+  - a retention period per event family (legal minimums for records management);
+  - offloading closed periods as signed, hash-chained segments to object storage instead of deleting;
+  - how `verify` spans live table plus segments;
+  - how the forensic trace and the query console read offloaded periods;
+  - what may never leave the live table.
+- **P100-S3 — Audit-trail retention: build.**
+  - segment export, verify across segments, the retention job (leader-locked);
+  - CLI and admin UI („Audit-Tiefe" or a new section);
+  - live: offload a period of the dev stack, verify the chain end to end.
+- **P100-S4 — Finer permission-cache invalidation, plus the small open items.**
+  - **Measure first:** today a role-definition, "everyone" or structure change clears the whole cache
+    (ADR 0263). Narrow it to the affected subtree or principals only where the load test shows it
+    pays.
+  - **Small open items from Phases 97/98:**
+    - documents under legal hold whose folder was purged (ADR 0268): keep the folder node or re-home
+      the document;
+    - each instance reports the log levels it runs (heartbeat field), shown in `dms logging show`;
+    - friendly area names for loggers where the catalog shows a need.
+  - **Phase close:** regression.
+
+## Phase 101 — Document Features
+
+- **P101-S1 — Annotations: scoping (ADR 0273).** Comments and markings on document pages without
+  changing the original. To decide:
+  - the storage form (W3C Web Annotation-like JSON per document version);
+  - permissions: see with read, annotate with write or its own permission?
+  - visibility: private, team or everyone;
+  - whether annotations follow a new version;
+  - export (burned into the PDF export as an option, never into the archive copy);
+  - search and audit.
+- **P101-S2 — Annotations: backend** (document-service or a new small service, per S1), events, audit,
+  tests.
+- **P101-S3 — Annotations: user UI** (highlights and notes in the preview, a side list, filters), and
+  the PDF export option.
+- **P101-S4 — Computed attributes (ADR 0274).**
+  - Attributes whose value follows from others, e.g. a deadline = received date + 14 days, or a
+    reference composed of fields.
+  - A small, safe expression language (no code execution) in the object-type schema, evaluated
+    server-side on save.
+  - Read-only in forms; recomputed when inputs change; config-package category support.
+- **P101-S5 — Form letters: scoping and backend (ADR 0275).** Letters from templates with fields from a
+  case, folder or document; distinct from the existing folder-structure templates („Vorlagen").
+  - **Template format:** DOCX/ODT with fields, rendered by the existing LibreOffice in
+    rendering-service.
+  - Field sources and a preview.
+  - The result is filed as a new document (with origin), single or serial.
+  - Permissions.
+- **P101-S6 — Form letters: admin UI** (manage templates) **and user UI** (create from a case or
+  folder), CLI, skill recipe.
+- **P101-S7 — Storage quotas (ADR 0276).**
+  - Limits per filing area or team space (today only the licence's global storage limit exists).
+  - A warning at a threshold, blocking uploads beyond the limit.
+  - Usage from storage-service; admin UI and CLI; monitoring sensor and alert.
+  - **Phase close:** regression.
+
+## Phase 102 — Integrations
+
+- **P102-S1 — Microsoft 365 mailboxes: build.** ADR 0161 scoped a Graph backend for mail-connector as
+  a fourth backend next to POP3/IMAP/…:
+  - OAuth client credentials;
+  - delta queries instead of polling everything;
+  - sending through Graph;
+  - the mailbox test, CLI and admin UI fields.
+
+  Tested against a Graph mock, since there's no real tenant here (environment-blocked for live).
+- **P102-S2 — Extended e-invoicing.**
+  - Pure XRechnung/UBL invoices without a PDF: render the structured data as a readable document
+    (ADR 0207's missing capability) and file both.
+  - Barcode separator sheets in batch scanning (ADR 0209 deferred them; blank-page separation exists).
+- **P102-S3 — ERP or archive connector: scoping (ADR 0277).** Choose one of:
+  - ERP (document exchange with a finance system);
+  - SAP ArchiveLink;
+  - TR-ESOR long-term preservation.
+
+  Decide by what the deployment target needs; define the interface on the existing connector/plugin
+  pattern; plan the build sessions (likely a Phase 103).
+  - **Close of the round:** regression, then `graphify update .` once.
+
 ## Deliberately Not Included in This Plan
 
 - **SurrealDB as a second or replacement database (user question 2026-11-22, checked).**
@@ -5520,26 +5666,21 @@ P98-S3 (the end of the plan again).
   - **Verdict:** not a phase. Revisit only with a concrete workload where Postgres is measured to be the
     limit, for example graph-heavy relation queries.
 
-- **Phase 76's three candidates (ERP connector, native mobile client, AI features).** Still unbuilt and
-  still the user's open choice. This round's feature slots went to the comparison findings above.
-- **The remaining comparison findings.** An annotation layer, computed attributes, form letters from
-  templates, storage quotas, audit-log retention/offloading, an SAP archive connector, mobile-specific
-  form layouts, and a long-term-preservation archive connector (TR-ESOR-style). They are real but either
-  lower value or large. They are candidates for a later round.
+- **Phase 76's candidates:** a native mobile client and AI features for end users remain open (not
+  chosen on 2026-11-27). The ERP connector moved into P102-S3's choice.
+- **The remaining comparison findings:** mobile-specific form layouts. Annotations, computed attributes,
+  form letters, storage quotas, audit-log retention and the SAP/TR-ESOR archive connectors were taken
+  into Phases 100–102 on 2026-11-27.
 - **Archival key rotation/KMS.** `EnvKeyStore` stays single and static. This is an open design choice
   without a trigger yet. Revisit with a real deployment.
 - **"everyone" grants** (`ocr.read`/`ocr.write`, `users.lookup`). They stay open by policy, which is a
   documented decision.
 - **Re-confirmed deferrals** (premises verified against code this round):
-  - workflow-service multi-replica timer lock (still `replicas: 1`);
   - Azure WORM;
   - HSM/QES/OCSP;
   - SAML, XAdES/CAdES creation;
-  - the mail-connector Graph backend (ADR 0161);
-  - ZUGFeRD and batch-scan splitting (ADR 0207/0209);
   - PaddleOCR;
   - the registry's unpolled `health_endpoint` (partly superseded by Phase 87);
-  - coarse cache invalidation (P84-S1 fixes the race, not the granularity);
   - the CMIS 1.1 scope;
   - CheckMK (declined);
   - the DMS-to-DMS automatic xdomea handoff (ADR 0147).
