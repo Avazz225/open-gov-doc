@@ -22,8 +22,9 @@ Read-only. Answer the question, and propose a fix only if asked.
     - the resource isn't registered (a new object whose registration failed).
   - A note that the cached state differs points to a stale cache. Report it as a defect.
 - **"Was ist fehlgeschlagen?"**
-  - `dms failures list [--kind rendition|ocr|notification]`; retry with `dms failures retry <kind> <id>`
-    after the admin agrees.
+  - `dms failures list [--kind rendition|ocr|notification] [--status failed|failed_permanent]
+    [--since 24h|7d|<date>] [--limit N] [--group]`, newest first with the time of the last attempt;
+    retry with `dms failures retry <kind> <id>` after the admin agrees.
   - Archival transfers: `dms archival transfers list --status failed`.
   - A source you can't read is named with the missing role.
 - **"Welche Alarme sind aktiv?"** `dms monitoring alerts` (only warning/error; `--all` for everything),

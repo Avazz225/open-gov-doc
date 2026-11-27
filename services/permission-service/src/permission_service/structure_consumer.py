@@ -51,7 +51,18 @@ def make_handler(
             elif event.event_type.endswith(".resource.deleted"):
                 node = await session.get(ResourceNode, event.payload["resource_id"])
                 if node is not None:
-                    await session.delete(node)
+                    # P98-S1 (ADR 0268): role assignments and scope locks on
+                    # the node or any descendant have no ON DELETE CASCADE.
+                    # Deleting the node alone failed with
+                    # role_assignment_resource_id_fkey, and JetStream
+                    # redelivered the event forever - blocking every later
+                    # structure event (new folders stayed unregistered).
+                    removed = await repository.delete_resource_subtree(session, node.resource_id)
+                    if removed["role_assignments"] or removed["scope_locks"]:
+                        logger.info(
+                            "resource_deleted_with_dependents",
+                            extra={"resource_id": node.resource_id, **removed},
+                        )
             else:
                 return
 

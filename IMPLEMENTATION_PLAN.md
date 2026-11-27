@@ -3443,8 +3443,8 @@ ADR 0239**.
 3. Then the three user-requested UI/fleet/admin initiatives.
 4. Then compliance completions, the new collaboration features, and operations/hygiene last.
 
-`graphify update .` runs once, at the end of this whole plan: P96-S3 originally, now P97-S3 (Phase 97
-added 2026-11-26). Phases 91–96
+`graphify update .` runs once, at the end of this whole plan: P96-S3 originally, then P97-S3 (Phase 97
+added 2026-11-26), now P98-S3 (Phase 98 added 2026-11-27). Phases 91–96
 were added or reordered on 2026-11-21/22/23 and renumbered so they run in numerical order. The full backend
 regression runs at each phase close.
 
@@ -5393,6 +5393,84 @@ the end of this phase (P97-S3).
       setup (1200 s timeout) and passed alone in 20 s (103). Libraries and tools are green as well:
       dms-common 36, dms-metrics-client 31, dms-registry-client 11, CLI 266, license-tool 10.
     - **`graphify update .`** ran once.
+
+## Phase 98 — Open Points from Phases 95–97 (user request 2026-11-27)
+
+The findings that sessions 95–97 left open, checked against the code before planning:
+
+| Finding | Where it came from | What the code says |
+|---|---|---|
+| folder-service retention deletes a folder with subfolders → FK violation | P95-S2a | real defect in the retention tick (`folder.folder` → `folder.folder`) |
+| `dms failures list` has no time and no filter | P96-S3 (D2) | rendering and OCR records have `created_at`/`updated_at`; only the CLI drops them |
+| `query events` maybe not newest first | P96-S3 (D4) | audit-service sorts `id desc`; query-service filters, likely keeps the order: check, then correct the skill |
+| 529 pending approval requests from test runs | P96-S3 (T8) | `cleanup-test-debris.py` cleans approval *configs*, not pending *requests* |
+| deletion reasons differ between document- and folder-service; no way to remove one | P96-S2/S3 (T10) | two catalogues (ADR 0233); `dms retention set` can only add |
+| no CLI password reset for a user | P97-S2 (lost eval password) | auth-service has no reset endpoint |
+| license-service signing tests need a key that exists only locally | ADR 0266 | `license_factory.py` reads the git-ignored `dev_private_key.pem` |
+| case-service hung once in the phase-close run, and its log was overwritten | P97-S3 | `run-tests.sh` writes one log per service and overwrites it |
+| most dev-stack containers predate the P97 libraries | P97-S3 | rebuild |
+
+**Order:** after Phase 97. Phase-close regression at P98-S3. `graphify update .` once at the end of
+P98-S3 (the end of the plan again).
+
+- **P98-S1 — Correctness: retention and the read paths.**
+  - **Stack rebuild first** (all images; the P97 libraries in every service).
+  - **folder-service retention with subfolders:** reproduce in a test (a folder with a subfolder past
+    its retention), then fix.
+    - Decision in the session, recorded in an ADR: children first, bottom-up in one transaction; or
+      skip the parent until its children are due, if a child has its own longer retention or a legal
+      hold. The likely answer is "a parent is only due when every child is", so no child is lost with
+      its parent.
+  - **Failures with time:**
+    - `dms failures list` shows `updated_at`, gets `--since`, `--status` and `--limit`, newest first;
+    - the notification-service failure list is checked for a timestamp too;
+    - skill recipe d2 and `references/diagnosis.md` drop the "no time" caveat.
+  - **Audit order:** verify that `GET /query/events` keeps audit-service's newest-first order through
+    the permission filter. Add a test, then correct skill recipe d4, which currently says "not
+    guaranteed".
+  - **Result** ([ADR 0268](docs/adr/0268-trash-purge-bottom-up.md)):
+    - **Stack:** all images rebuilt.
+    - **Retention:** the defect sat in the trash expiry, not the retention action. `purge_expired_trash`
+      goes deepest first; a parent waits while a subfolder row remains (a held child); each entry
+      commits alone, a failing one is skipped. Live: 497 stuck folders purged in the first tick.
+    - **Follow-on defect fixed:** permission-service's structure consumer failed on role assignments
+      and scope locks of a deleted resource and redelivered the event forever, blocking new folder
+      registrations. `delete_resource_subtree` removes them first.
+    - **Failures:** `dms failures list` shows `when` (newest first), `--since 24h|7d|<date>`, `--status`,
+      `--limit`, `--group`; checked live.
+    - **Audit order:** confirmed newest first (audit-service `id desc`, the query filter keeps the
+      order); tests in both; skill recipes d2, d4 and 14, diagnosis and cli references corrected.
+    - **Tests:** folder 198 (+3), permission 233 (+2), audit 39 (+1), query 57 (+1), CLI 268 (+2,
+      skill check 151).
+- **P98-S2 — Test hygiene.**
+  - **Approval requests from tests:**
+    - find which tests create them against the live stack (initiators alice, tester, admin,
+      workflow-test-config-admin, …);
+    - make those tests clean up after themselves, or route them to the test database;
+    - extend `cleanup-test-debris.py` with pending requests from known test principals. Removing
+      instead of rejecting, so no notifications go out, which needs a decision on a delete path;
+    - clear the 529 in the dev stack once.
+  - **license-service tests without a local key:** generate a throwaway RSA key per test session
+    (fixture) and point license-service's settings at its public half. `license_factory.py` no longer
+    needs `dev_private_key.pem`; the dev-stack key stays for `og-license --dev`. ADR 0266's open point
+    closes.
+  - **`run-tests.sh` keeps failure evidence:** a failed or timed-out service log is kept with a
+    timestamp (`.test-results/<service>-<time>.log`) before a rerun can overwrite it. Then repeat
+    case-service runs (e.g. 20 in a row) to try to reproduce the hang; fix it if it reproduces,
+    otherwise record the result.
+- **P98-S3 — Admin gaps, then phase close.**
+  - **Deletion reasons:**
+    - `dms retention set --remove-reason` (both services);
+    - the admin UI's „Aufbewahrung & Papierkorb" shows a difference between the two catalogues and
+      offers to align them;
+    - whether the two copies should become one source is decided in the session (ADR 0233 follow-up).
+  - **Password reset:**
+    - `POST /users/{id}/password` in auth-service (`admin.user_management`; Keycloak
+      `temporary=true`, so the user must change it at the next login; audited);
+    - `dms user reset-password <id>` (prompt, or `--password` for scripts);
+    - the admin UI's user management;
+    - the skill recipe 01 note.
+  - **Close:** phase-close regression, then `graphify update .` once.
 
 ## Deliberately Not Included in This Plan
 

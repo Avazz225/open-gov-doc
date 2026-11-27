@@ -292,6 +292,98 @@ def test_failures_list_collects_every_kind(cli_home, runner, logged_in, mock_tra
     assert kinds == {"rendition", "notification"}
 
 
+def _failures_routes(now):
+    from datetime import timedelta
+
+    def at(hours):
+        return (now - timedelta(hours=hours)).isoformat()
+
+    return {
+        "GET /api/rendering-service/renditions": (
+            200,
+            [
+                {
+                    "id": "old",
+                    "status": "failed_permanent",
+                    "document_id": "d1",
+                    "error_message": "Stream has ended",
+                    "attempts": 5,
+                    "updated_at": at(72),
+                },
+                {
+                    "id": "new",
+                    "status": "failed_permanent",
+                    "document_id": "d2",
+                    "error_message": "Stream has ended",
+                    "attempts": 5,
+                    "updated_at": at(1),
+                },
+            ],
+        ),
+        "GET /api/ocr-service/ocr-results": (
+            200,
+            [
+                {
+                    "id": "o1",
+                    "status": "failed",
+                    "document_id": "d3",
+                    "error_message": "PDF nicht lesbar",
+                    "attempts": 1,
+                    "updated_at": at(5),
+                }
+            ],
+        ),
+        "GET /api/notification-service/notifications": (200, []),
+    }
+
+
+def test_failures_list_is_newest_first_with_time_and_filters(
+    cli_home, runner, logged_in, mock_transport_factory
+):
+    """P98-S1: the time of the last attempt, newest first, --since/--status/
+    --limit, and --group counting by cause."""
+    from datetime import UTC, datetime
+
+    recorder = Recorder(_failures_routes(datetime.now(UTC)))
+    mock_transport_factory(recorder)
+
+    rows = json.loads(_invoke(runner, ["-o", "json", "failures", "list"]).output)
+    # Each status is asked separately, so the mock answers twice per kind.
+    ids = [row["id"] for row in rows]
+    assert ids[0] == "new" and ids[-1] == "old"
+    assert all(row["when"] for row in rows)
+
+    recent = json.loads(
+        _invoke(runner, ["-o", "json", "failures", "list", "--since", "24h"]).output
+    )
+    assert "old" not in {row["id"] for row in recent}
+
+    before = len(recorder.calls)
+    permanent = json.loads(
+        _invoke(
+            runner,
+            ["-o", "json", "failures", "list", "--status", "failed_permanent", "--limit", "1"],
+        ).output
+    )
+    assert [row["id"] for row in permanent] == ["new"]
+    # Notifications have no permanent state, so only renditions and OCR are asked.
+    statuses = {call[2].get("status") for call in recorder.calls[before:]}
+    assert statuses == {"failed_permanent"}
+
+    grouped = json.loads(
+        _invoke(runner, ["-o", "json", "failures", "list", "--kind", "rendition", "--group"]).output
+    )
+    top = grouped[0]
+    assert top["kind"] == "rendition" and top["error"] == "Stream has ended"
+    assert top["count"] >= 2
+
+
+def test_failures_since_rejects_nonsense(cli_home, runner, logged_in, mock_transport_factory):
+    mock_transport_factory(Recorder({}))
+    result = _invoke(runner, ["failures", "list", "--since", "gestern"])
+    assert result.exit_code == 2
+
+
 def test_workflow_upload_is_multipart_and_terminate_needs_a_reason(
     cli_home, runner, logged_in, mock_transport_factory, tmp_path
 ):

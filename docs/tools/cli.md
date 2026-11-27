@@ -107,7 +107,7 @@ not yet connected to the CLI until now — this gap was closed directly in the s
 | Four-eyes requests (since **P96-S2**) | `dms approvals list [--status] [--action-type]\|show <id>\|approve <id>\|reject <id> --reason`, every action type (`dms query approvals` stays the query console's view) |
 | Mailboxes (since **P96-S2**) | `dms mailbox list\|test <file>\|create <file>\|update <id> <file>\|delete <id>`; passwords are write-only |
 | Retention (since **P96-S2**) | `dms retention show`, `dms retention set [--trash-days] [--reason-required/--no-reason-required] [--reminder-lead-days] [--add-reason]...`, on document- and folder-service |
-| Failed processing (since **P96-S2**) | `dms failures list [--kind rendition\|ocr\|notification]`, `dms failures retry <kind> <id>`; a source the session can't read is named, not fatal |
+| Failed processing (since **P96-S2**) | `dms failures list [--kind rendition\|ocr\|notification] [--status failed\|failed_permanent] [--since 24h\|7d\|<date>] [--limit N] [--group]` — newest first with `when` (last attempt; notifications: creation time), `--group` counts by kind/status/message (P98-S1); `dms failures retry <kind> <id>`; a source the session can't read is named, not fatal |
 | Workflow operations (since **P96-S2**) | `dms workflow definitions upload <file> --name`, `dms workflow instances skip\|send-back\|migration-preview\|migrate\|terminate ... --reason [--expected-version]` |
 | Deletion-register (10.4, since **P67-S2**) | `dms deletion-register list [--kind document\|folder] [--id]`, `dms deletion-register reconcile <id> --original-entry-id <id> [--kind document\|folder] [--reason]` |
 

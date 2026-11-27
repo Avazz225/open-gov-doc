@@ -772,6 +772,27 @@ async def list_due_for_retention_action(session: AsyncSession) -> list[Folder]:
     return [f for f in candidates if not await has_active_hold(session, f.id)]
 
 
+async def folder_depth(session: AsyncSession, folder: Folder) -> int:
+    """Number of ancestors up to the root (cycle-safe)."""
+    depth = 0
+    seen = {folder.id}
+    parent_id = folder.parent_id
+    while parent_id and parent_id not in seen:
+        seen.add(parent_id)
+        parent = await session.get(Folder, parent_id)
+        if parent is None:
+            break
+        depth += 1
+        parent_id = parent.parent_id
+    return depth
+
+
+async def order_deepest_first(session: AsyncSession, folders: list[Folder]) -> list[Folder]:
+    """Children before their parents (P98-S1), for bottom-up removal."""
+    depths = {folder.id: await folder_depth(session, folder) for folder in folders}
+    return sorted(folders, key=lambda folder: (-depths[folder.id], folder.id))
+
+
 async def list_expired_trash(session: AsyncSession, *, restore_period_days: int) -> list[Folder]:
     deadline = datetime.now(UTC) - timedelta(days=restore_period_days)
     result = await session.execute(

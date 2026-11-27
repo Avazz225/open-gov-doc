@@ -93,3 +93,16 @@ async def test_duplicate_document_subjects_deduplicated_in_check_batch_call():
 
     assert result == events
     assert permission_client.calls[0][3] == ("doc-1",)
+
+
+async def test_filtering_keeps_the_newest_first_order():
+    """P98-S1: audit-service returns newest first; the permission filter must
+    not reorder, or "zuletzt geändert" would show the wrong event."""
+    events = [_document_event(f"doc-{i}") for i in (3, 2, 1)]
+    permission_client = FakePermissionClient(allowed_resource_ids={"doc-3", "doc-1"})
+
+    result = await filter_events_by_permission(
+        events, principal_id="alice", permission_client=permission_client, is_superuser=False
+    )
+
+    assert [e["subject"] for e in result] == ["doc-3", "doc-1"]

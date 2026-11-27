@@ -31,8 +31,56 @@ stopped and removed; no log-level settings left.
 **Not rebuilt:** containers built before P97 (all except registry, monitoring, workflow, permission and
 the two UIs) ignore the log levels and report no catalog until their next image build.
 
-**Next session:** none planned. Open choices remain under "Deliberately Not Included" in
-`IMPLEMENTATION_PLAN.md`.
+**Last completed:** P98-S1, correctness: trash expiry, failures with time, audit order
+([ADR 0268](docs/adr/0268-trash-purge-bottom-up.md)).
+
+**What changed:**
+- **Stack:** all images rebuilt (P97 libraries in every service).
+- **folder-service trash expiry:**
+  - **Cause:** the defect was in trash expiry, not in the retention action. A trashed subtree shares one
+    `deleted_at`; parent and children expired together in arbitrary order; a parent first violated
+    `folder_parent_id_fkey` and aborted the whole tick, every hour.
+  - **Fix:** `retention_actions.purge_expired_trash` goes deepest first. A folder that still has a
+    subfolder row (a child under legal hold, or one trashed later) is deferred
+    (`trash_purge_deferred`). Each entry commits alone; a failing one is rolled back and skipped
+    (`trash_purge_failed`).
+- **permission-service (follow-on defect, surfaced by the fix):**
+  - deleting a resource node failed on its role assignments (`role_assignment_resource_id_fkey`, no
+    cascade), and JetStream redelivered the event forever (over 4,500 failures in 5 min);
+  - that blocked later structure events, so new folders were refused with 403;
+  - `repository.delete_resource_subtree` removes assignments and scope locks of the subtree first and
+    logs them.
+- **`dms failures list`:** `when` (last attempt; notifications: creation time), newest first,
+  `--since 24h|7d|<date>`, `--status`, `--limit`, `--group` (counts by kind/status/message).
+- **Audit order:** audit-service returns newest first (`id desc`) and query-service's permission filter
+  keeps the order, now covered by tests. Skill recipes d2/d4/14 and the diagnosis/cli references are
+  corrected (no more "no time" or "not guaranteed newest first").
+
+**Checks:**
+- **Tests:** folder-service 198 (+3), permission-service 233 (+2), audit-service 39 (+1),
+  query-service 57 (+1), CLI 268 (+2; skill check 151), ruff green.
+- **Live:**
+  - the first trash tick purged 497 stuck folders (497 `trash_expiry` entries in the deletion register),
+    with no tick error;
+  - after the permission-service rollout the backlog cleared (0 FK errors; 454 deletions with
+    assignments removed);
+  - `dms failures list --group` / `--since 7d --limit 3` against real data; the missing notification
+    role is named, not fatal.
+- **Noticed along the way:** `run-tests.sh` runs `docker compose up -d` and so rolled out the freshly
+  built images in the middle of test runs; the first folder-service failures (403) came from services
+  restarting. Worth knowing for P98-S2 (test hygiene).
+
+**Next session:** P98-S2 (approval requests left by tests, license tests without a local key, keeping
+failed test logs / case-service hang).
+
+---
+
+**Planned (2026-11-27): Phase 98, open points from Phases 95–97.**
+- S1: retention with subfolders, failures with time, audit order (plus the stack rebuild).
+- S2: approval requests left by tests, license tests without a local key, keeping failed test logs
+  (case-service hang).
+- S3: deletion reasons (remove, align), password reset; phase close.
+
 
 ---
 

@@ -247,12 +247,12 @@ async def _retention_poll_loop(session_factory) -> None:
 
             async with session_factory() as session:
                 trash_config = await repository.get_trash_config(session)
-                for folder in await repository.list_expired_trash(
+                # P98-S1 (ADR 0268): bottom-up, a parent only once its
+                # subfolders are gone; each entry commits on its own.
+                purge = await retention_actions.purge_expired_trash(
                     session, restore_period_days=trash_config.restore_period_days
-                ):
-                    folder_id = folder.id
-                    await retention_actions.purge_expired_trash_entry(session, folder_id)
-                    await session.commit()
+                )
+                for folder_id in purge.purged:
                     await publish_event(
                         "folder.trash_purged",
                         folder_id,

@@ -325,3 +325,87 @@ async def test_list_expired_trash_excludes_hold_and_not_yet_expired(session):
     ids = {f.id for f in result}
     assert expired.id in ids
     assert recent.id not in ids
+
+
+# --- Trash purge bottom-up (P98-S1, ADR 0268) --------------------------------
+
+
+async def _trash_subtree(session, root, *, days_ago=40):
+    """Trashes `root` (cascading to its subtree) and backdates the whole
+    cascade, as the restore period would have run out."""
+    from folder_service import retention_actions  # noqa: F401  (import check)
+
+    await repository.soft_delete_folder(
+        session, root.id, deleted_by="alice", document_client=_fake_document_client()
+    )
+    for folder in await repository.list_deleted_folders(session):
+        if folder.id == root.id or folder.deleted_via_folder_id == root.id:
+            folder.deleted_at = datetime.now(UTC) - timedelta(days=days_ago)
+    await session.flush()
+
+
+async def test_purge_removes_an_expired_subtree_bottom_up(session):
+    """Until P98 the parent could come first and hit folder_parent_id_fkey,
+    which aborted the whole tick every hour."""
+    from folder_service import retention_actions
+
+    parent = await _make_folder(session, name="Akte")
+    child = await _make_folder(session, name="Unterakte", parent_id=parent.id)
+    grandchild = await _make_folder(session, name="Vorgang", parent_id=child.id)
+    await _trash_subtree(session, parent)
+    await session.commit()
+
+    result = await retention_actions.purge_expired_trash(session, restore_period_days=30)
+
+    assert set(result.purged) >= {parent.id, child.id, grandchild.id}
+    assert result.purged.index(grandchild.id) < result.purged.index(child.id)
+    assert result.purged.index(child.id) < result.purged.index(parent.id)
+    assert result.deferred == [] and result.failed == []
+    for folder_id in (parent.id, child.id, grandchild.id):
+        assert await session.get(Folder, folder_id) is None
+
+
+async def test_purge_defers_a_parent_while_a_held_child_remains(session):
+    """A subfolder under legal hold stays; its parent waits for it instead of
+    failing - a parent is only due when every child is."""
+    from folder_service import retention_actions
+
+    parent = await _make_folder(session, name="Akte mit Sperre")
+    held = await _make_folder(session, name="Gesperrt", parent_id=parent.id)
+    free = await _make_folder(session, name="Frei", parent_id=parent.id)
+    await _trash_subtree(session, parent)
+    await repository.create_legal_hold(session, held.id, set_by="alice", reason="Verfahren")
+    await session.commit()
+
+    result = await retention_actions.purge_expired_trash(session, restore_period_days=30)
+
+    assert free.id in result.purged
+    assert parent.id in result.deferred
+    assert held.id not in result.purged
+    assert await session.get(Folder, parent.id) is not None
+    assert await session.get(Folder, held.id) is not None
+
+
+async def test_purge_goes_on_after_a_failing_entry(session, monkeypatch):
+    from folder_service import retention_actions
+
+    first = await _make_folder(session, name="Kaputt")
+    second = await _make_folder(session, name="Heil")
+    await _trash_subtree(session, first)
+    await _trash_subtree(session, second)
+    # Plain ids: the rollback after the failure expires the ORM objects.
+    first_id, second_id = first.id, second.id
+    await session.commit()
+    original = retention_actions.purge_expired_trash_entry
+
+    async def flaky(session_, folder_id, **kwargs):
+        if folder_id == first_id:
+            raise RuntimeError("boom")
+        await original(session_, folder_id, **kwargs)
+
+    monkeypatch.setattr(retention_actions, "purge_expired_trash_entry", flaky)
+
+    result = await retention_actions.purge_expired_trash(session, restore_period_days=30)
+
+    assert first_id in result.failed
+    assert second_id in result.purged

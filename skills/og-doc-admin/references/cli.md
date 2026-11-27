@@ -13,8 +13,9 @@
   maintenance mode, licence and four-eyes exactly as for the admin UI.
 - **Results, not exit codes:** a check like `dms mailbox test` exits 0 even when the test fails. Read
   the result (`ok`, `error`).
-- **Large lists** (approvals, failures): fetch them with `-o json` into a file and summarise with `jq`
-  (count by type, newest first) instead of reading the table.
+- **Large lists:** for failures use `dms failures list --group` / `--since` / `--limit`; for approvals
+  fetch `-o json` into a file and summarise with `jq` (count by type, newest first) instead of reading
+  the table.
 
 ## Errors
 

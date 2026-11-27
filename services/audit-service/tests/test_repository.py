@@ -120,6 +120,17 @@ async def test_list_events_respects_limit(session):
     assert len(events) == 2
 
 
+async def test_list_events_is_newest_first(session):
+    """P98-S1: "who changed it last" relies on this order (the admin skill's
+    recipe d4 and the query console show the first entries)."""
+    for i in range(3):
+        await repository.append_event(session, make_event(subject=f"order-{i}"))
+
+    events = await repository.list_events(session, limit=3)
+
+    assert [e.subject for e in events] == ["order-2", "order-1", "order-0"]
+
+
 async def test_append_event_stores_actor(session):
     entry = await repository.append_event(session, make_event(actor="alice"))
 

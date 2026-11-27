@@ -2389,3 +2389,41 @@ async def lane_members(
         )
         principals.update(members.scalars())
     return sorted(principals)[:limit]
+
+
+async def delete_resource_subtree(session: AsyncSession, resource_id: str) -> dict:
+    """Removes a resource node with its descendants and everything that points
+    at them (P98-S1, ADR 0268).
+
+    The descendants' nodes go with `parent_id`'s ON DELETE CASCADE, but role
+    assignments and scope locks reference `resource_node` without one, so they
+    are removed first for the whole subtree. Returns what was removed (for the
+    log: assignments name who had access there)."""
+    subtree = [resource_id]
+    frontier = [resource_id]
+    while frontier:
+        result = await session.execute(
+            select(ResourceNode.resource_id).where(ResourceNode.parent_id.in_(frontier))
+        )
+        frontier = [row[0] for row in result.all() if row[0] not in subtree]
+        subtree.extend(frontier)
+
+    assignments = await session.execute(
+        delete(RoleAssignment)
+        .where(RoleAssignment.resource_id.in_(subtree))
+        .returning(RoleAssignment.id, RoleAssignment.principal_id, RoleAssignment.resource_id)
+    )
+    removed_assignments = [
+        {"id": row[0], "principal_id": row[1], "resource_id": row[2]} for row in assignments.all()
+    ]
+    locks = await session.execute(
+        delete(ScopeLock).where(ScopeLock.resource_id.in_(subtree)).returning(ScopeLock.id)
+    )
+    removed_locks = [row[0] for row in locks.all()]
+    await session.execute(delete(ResourceNode).where(ResourceNode.resource_id == resource_id))
+    await session.flush()
+    return {
+        "subtree_size": len(subtree),
+        "role_assignments": removed_assignments,
+        "scope_locks": removed_locks,
+    }
