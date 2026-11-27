@@ -29,6 +29,7 @@ import {
 import { BoundedList } from "@/components/BoundedList";
 import { usePrincipalName } from "@/components/PrincipalName";
 import { LogLevelSettings } from "@/components/LogLevelSettings";
+import { DeadLetters } from "@/components/DeadLetters";
 
 // Monitoring sensors (P88-S2, ADR 0243, concept 10.1): the global base
 // setting ("monitor everything"/"nothing"), switches per cost class and per
@@ -245,6 +246,7 @@ export function SensorSettings() {
 
       <TracingSection canManage={canManage} />
       <LogLevelSettings canManage={canManage} />
+      <DeadLetters canManage={canManage} />
 
       <section className={card} aria-labelledby="sensors-list-heading">
         <h2 id="sensors-list-heading">{t("sensors.list.heading")}</h2>

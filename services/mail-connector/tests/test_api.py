@@ -1277,16 +1277,37 @@ async def test_assign_files_a_detached_signature_as_derived_from_its_file(client
 # --- Paging (P95-S1c) --------------------------------------------------------
 
 
-def _count_statements(client, path: str, params: dict) -> tuple[list[dict], int]:
+def _flat_values(parameters) -> set[str]:
+    if isinstance(parameters, dict):
+        parameters = parameters.values()
+    values: set[str] = set()
+    for value in parameters or ():
+        if isinstance(value, (list, tuple, set, dict)):
+            values |= _flat_values(value)
+        else:
+            values.add(str(value))
+    return values
+
+
+def _count_statements(
+    client, path: str, params: dict, marks: set[str] | None = None
+) -> tuple[list[dict], int]:
     from sqlalchemy import event
 
     statements = []
 
-    def on_execute(conn, cursor, statement, *_args):
-        # Only the listing's own reads: the mailbox poll loop runs on the
-        # same engine and can slip a statement into the window (P95-S2c).
-        if any(t in statement for t in ("inbound_message", "inbound_attachment", "routing_log")):
-            statements.append(1)
+    def on_execute(conn, cursor, statement, parameters, *_args):
+        # Only the listing's own reads: the mailbox poll loop and the event
+        # consumers run on the same engine and can slip a statement into the
+        # window (P95-S2c, P99-S2). With `marks`, a statement counts only if
+        # its parameters name this test's mailbox or messages.
+        if not any(
+            t in statement for t in ("inbound_message", "inbound_attachment", "routing_log")
+        ):
+            return
+        if marks is not None and not (_flat_values(parameters) & marks):
+            return
+        statements.append(" ".join(statement.split())[:160])
 
     sync_engine = app.state.engine.sync_engine
     event.listen(sync_engine, "before_cursor_execute", on_execute)
@@ -1295,10 +1316,20 @@ def _count_statements(client, path: str, params: dict) -> tuple[list[dict], int]
     finally:
         event.remove(sync_engine, "before_cursor_execute", on_execute)
     assert response.status_code == 200, response.text
+    _count_statements.last = statements
     return response.json(), len(statements)
 
 
-async def test_inbound_pages_are_disjoint_and_cost_the_same(client, session):
+async def test_inbound_pages_are_disjoint_and_cost_the_same(client, session, monkeypatch):
+    # No POP3 polling during the count (P99-S2): the poll loop writes to the
+    # same tables on the same engine, and one of its statements in the window
+    # made a page cost 4 instead of 3 in the P99 phase-close run.
+    from mail_connector import main as main_module
+
+    async def no_poll(_session_factory) -> None:
+        return None
+
+    monkeypatch.setattr(main_module, "_poll_tick", no_poll)
     tag = uuid.uuid4().hex[:6]
     # A mailbox of its own (P98-S3): the test app's POP3 poll keeps adding
     # real mails to "central", and one arriving between the pages and the
@@ -1308,23 +1339,38 @@ async def test_inbound_pages_are_disjoint_and_cost_the_same(client, session):
         await _ingest(
             session, uid=f"uid-page-{tag}-{n}", subject=f"Seite {tag} {n}", mailbox_id=mailbox
         )
+    from mail_connector.models import InboundMessage
+    from sqlalchemy import select as _select
+
+    ids = (
+        (
+            await session.execute(
+                _select(InboundMessage.id).where(InboundMessage.mailbox_id == mailbox)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    marks = {mailbox, *map(str, ids)}
     seen: list[str] = []
     counts = []
+    texts: list[list[str]] = []
     for offset in (0, 3, 6):
         page, statements = _count_statements(
-            client, "/inbound", {"limit": 3, "offset": offset, "mailbox_id": mailbox}
+            client, "/inbound", {"limit": 3, "offset": offset, "mailbox_id": mailbox}, marks
         )
         seen += [m["id"] for m in page]
         counts.append(statements)
+        texts.append(list(_count_statements.last))
     everything, all_statements = _count_statements(
-        client, "/inbound", {"limit": 500, "mailbox_id": mailbox}
+        client, "/inbound", {"limit": 500, "mailbox_id": mailbox}, marks
     )
     assert len(everything) == 7
     assert seen == [m["id"] for m in everything]
     assert len(set(seen)) == len(seen)
     # Attachments and routing log come with the page in one query each, so
     # a page of 3 costs as many statements as the whole inbox.
-    assert counts[0] == counts[1] == all_statements
+    assert counts[0] == counts[1] == all_statements, (texts, _count_statements.last)
 
 
 def test_page_limits_are_bounded(client):

@@ -826,6 +826,12 @@ activation config:
   - read-only without `admin.monitoring`;
   - tests: `log-level-settings.test.tsx` (5);
   - browser-checked at 1400/390: set and remove, the outline jump to the section, no horizontal scroll.
+- **Unzustellbare Ereignisse** (P99-S2, [ADR 0270](../adr/0270-eventbus-dead-letters.md), `DeadLetters.tsx`):
+  - dead letters newest first: consumer, subject, error, time, attempts, „erneut gescheitert";
+  - „Anzeigen" shows the event;
+  - „Erneut zustellen" and „Verwerfen", each with a required reason;
+  - nothing loads without `admin.monitoring`;
+  - tests: `dead-letters.test.tsx` (4).
 
 Every switch is Übernehmen/An/Aus: Übernehmen clears the override (`enabled: null`), so the next less
 specific level applies. Without `admin.monitoring` everything is disabled and a read-only hint is shown.

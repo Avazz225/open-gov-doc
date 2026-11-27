@@ -1,6 +1,6 @@
 # 0270 — Bounded delivery and dead letters on the event bus
 
-**Status:** accepted (P99-S1; listing and replay follow in P99-S2)
+**Status:** accepted (P99-S1 delivery limit and DLQ; P99-S2 listing, replay, discard)
 **Context:** a consumer whose handler raises didn't ack. JetStream redelivered after `ack_wait`, and with
 the servers' unlimited `max_deliver` it did so forever. A message that can never succeed (a
 foreign-key violation, a malformed payload, a bug) stalled the consumer behind it:
@@ -42,6 +42,27 @@ Rejected:
 - Per-service DLQ tables: every service would need its own store and UI. One stream fits the bus that
   already exists.
 
+## Decision 5 — Replay goes to the one consumer that failed (P99-S2)
+
+Re-publishing a letter on its original subject would hand it to every consumer of that subject again,
+including those that processed it long ago. Most handlers aren't idempotent.
+
+So every durable subscription also gets a replay channel:
+- subject `replay.<stream>.<consumer>`, durable `<consumer>-replay`, the same handler;
+- in the `REPLAY` stream: work-queue retention, so a replayed message is gone once acked; 7 days;
+- best effort: a service still starts if the channel can't be set up;
+- a replay that fails again is filed under the original stream and consumer (not `…-replay`), with its
+  original subject and sequence and `Dms-Replay-Of`. It shows up where it was, marked.
+
+**Operations** (monitoring-service, `admin.monitoring`, since payloads can hold personal data):
+- `GET /dead-letters` (newest first) and `GET /dead-letters/{seq}` (the event, cut at 64 KB);
+- `POST /dead-letters/{seq}/replay` with a reason;
+- `DELETE /dead-letters/{seq}?reason=` (final).
+
+Both actions are audited (`monitoring.dead_letter.replayed`/`.discarded`). The original event stays
+findable in the audit trail by subject and sequence. CLI `dms events dead-letters …`, admin UI section
+„Unzustellbare Ereignisse", skill recipe d5.
+
 ## Consequences
 
 - Same behaviour for sequential and concurrent (`max_concurrency > 1`) handlers.
@@ -52,5 +73,14 @@ Rejected:
   - dms-eventbus-client: a poison message dead-lettered with its headers while the next message flows;
     a transient failure recovering; the concurrent path; the delay series;
   - monitoring-service: the metric with a letter, and the zero.
-- **Live:** with the default rule imported, an artificial letter turned it to `warning` (value 1) at the
-  next evaluation; with the DLQ empty it reads `ok` (0).
+- **Live (P99-S1):** with the default rule imported, an artificial letter turned it to `warning`
+  (value 1) at the next evaluation; with the DLQ empty it reads `ok` (0).
+- **Live (P99-S2)**, on the rebuilt stack with permission-service at `DMS_EVENTBUS_MAX_DELIVER=3`:
+  - a `folder.resource.moved` to a parent that doesn't exist failed at 12:59:44, retried after 1 s and
+    2 s, and was dead-lettered at 12:59:47 (`dlq.folder.permission-service`);
+  - the rule went to `warning`;
+  - `dms events dead-letters show` named the missing parent;
+  - after creating the parent, `replay` reached permission-service only, the node moved, the DLQ was
+    empty, the rule went back to `ok`, and the audit trail holds the replay with its reason.
+- **Test hygiene:** the library tests now remove their `test_*` streams and replay consumers
+  (conftest). 67 leftover test streams were removed from the dev stack.

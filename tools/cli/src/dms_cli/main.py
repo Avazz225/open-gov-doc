@@ -14,6 +14,7 @@ from dms_cli.commands import (
     auth,
     config,
     deletion_register,
+    events,
     failures,
     group,
     log_levels,
@@ -71,6 +72,7 @@ permission.register(app)
 group.register(app)
 monitoring.register(app)
 log_levels.register(app)
+events.register(app)
 approvals.register(app)
 mailbox.register(app)
 retention.register(app)

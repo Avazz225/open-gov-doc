@@ -359,8 +359,8 @@ async def _poll_loop(session_factory) -> None:
     document-service's `_retention_poll_loop` (ADR 0020), here at a
     considerably shorter cadence (mail room operation, see settings.py).
     Since Post-Roadmap Phase 31 Session 12a, one tick polls every configured
-    mailbox in turn (`app.state.backends`, `dict[mailbox_id,
-    MailboxBackend]`) - a failure fetching/ingesting one mailbox does not
+    mailbox in turn (since P88-S4a read from the table on every tick, see
+    `_poll_tick`) - a failure fetching/ingesting one mailbox does not
     prevent the others from being polled in the same tick (each mailbox's
     `try` is independent, not the whole loop's). Since Post-Roadmap Phase
     44 Session 3 (4.8, ADR 0164): skips the whole tick while maintenance

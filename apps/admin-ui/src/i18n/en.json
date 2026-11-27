@@ -92,6 +92,24 @@
     "groupUpgrade": "With a licence extension",
     "workflowInstances": "Process instances"
   },
+  "deadLetters": {
+    "heading": "Undeliverable events",
+    "hint": "Events a service couldn't process even after every delivery attempt. The service went on with the rest; these wait here. Once the cause is fixed, replay (to the affected service only) or discard with a reason – both are audited.",
+    "needsRole": "Visible only with the monitoring/sensor configuration role – the contents can hold personal data.",
+    "none": "No undeliverable events.",
+    "meta": "{when} · {deliveries} delivery attempts",
+    "again": "failed again after a replay",
+    "show": "Show",
+    "replay": "Replay",
+    "discard": "Discard",
+    "replayReason": "Why it should work now",
+    "discardReason": "Why the event is discarded",
+    "replayConfirm": "Replay",
+    "discardConfirm": "Discard for good",
+    "cancel": "Cancel",
+    "replayed": "Replayed to {consumer}. If it fails again it shows up here again.",
+    "discarded": "Discarded."
+  },
   "outline": {
     "label": "On this page"
   },

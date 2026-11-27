@@ -5502,7 +5502,7 @@ P98-S3 (the end of the plan again).
       10 new test approval requests on its own.
     - **`graphify update .`** ran once.
 
-## Next Round: Phases 99–102 (user selection 2026-11-27)
+## Next Round: Phases 99–103 (user selection 2026-11-27)
 
 Selected from "Deliberately Not Included" below. The user chose:
 - **robustness:** NATS dead letters, workflow-service HA, audit-trail retention, finer cache
@@ -5512,9 +5512,9 @@ Selected from "Deliberately Not Included" below. The user chose:
 
 Not chosen: AI features for end users.
 
-**Order:** robustness first (every round's principle), then data growth, then features, then
-integrations. Feature work starts with a scoping session wherever the shape isn't settled. Full
-regression at each phase close; `graphify update .` once, at the end of P102.
+**Order:** robustness first (every round's principle), then component and vulnerability visibility
+(added 2026-11-27), then data growth, then features, then integrations. Feature work starts with a scoping session wherever the shape isn't settled. Full
+regression at each phase close; `graphify update .` once, at the end of P103.
 
 **Numbering:** Phase 99 / ADR 0270 onwards.
 
@@ -5556,10 +5556,76 @@ time the consumer was blind until a person read the logs.
   - an admin skill recipe;
   - live: provoke a failing handler on the dev stack, see the alert, fix, replay.
   - **Phase close:** regression.
+  - **Result** ([ADR 0270](docs/adr/0270-eventbus-dead-letters.md) Decision 5):
+    - **Targeted replay:** every durable also subscribes `replay.<stream>.<consumer>` (`REPLAY`, a work
+      queue). A replay reaches only the consumer that failed; failing again files it under the
+      original name.
+    - **monitoring-service:** list, show, replay and discard (with a reason), all `admin.monitoring`
+      and audited.
+    - **Elsewhere:** CLI `dms events dead-letters …`, admin UI „Unzustellbare Ereignisse", skill recipe
+      d5.
+    - **Tests:** eventbus 22 (+2), monitoring 62 (+4), CLI 290, admin-ui 428 (+4).
+    - **Live:** the full flow with permission-service (3 attempts → DLQ → alert → fix → replay → `ok`).
+      67 leftover test streams cleaned up; the library tests now clean up after themselves.
+    - **Phase-close regression:** 32 services, 3,362 tests green after two fixes.
+      - cmis-connector: a read timeout on the root listing; green alone.
+      - mail-connector's statement-count test: its count now only includes statements whose
+        parameters name the test's own mailbox or messages; 10/10 green afterwards.
 
-## Phase 100 — High Availability and Data Growth
+## Phase 100 — Software Components and Vulnerabilities (user request 2026-11-27)
 
-- **P100-S1 — workflow-service with several replicas (ADR 0271).**
+The user's idea: admins without an external scanner should see which libraries run where, and check a
+CVE against the installation, online and air-gapped alike.
+
+**Today:** `scripts/sbom.sh` (P94-S3) writes one CycloneDX 1.6 file per deployable unit at build time:
+Python from the uv lock, Node from the package-lock. Nothing of that reaches the running system or the
+admin UI, there is no vulnerability matching, and the base images' OS packages (OpenSSL & co.) aren't
+covered at all.
+
+- **P100-S1 — Inventory: what actually runs (ADR 0271).**
+  - **A components file in every image** (user suggestion): a CycloneDX document written at build
+    time to a fixed place, e.g. `/app/META-INF/components.cdx.json`, plus an OCI label pointing to it.
+    - It covers Python distributions, Debian packages and, for frontends, npm production
+      dependencies.
+    - It can be read from the image without running the service (registry, `docker run --entrypoint
+      cat …`, external scanners) and is frozen with the image, so it can be signed and archived with
+      it.
+  - **Each Python service also reports its installed components at runtime,** as a cross-check that
+    what runs matches the file:
+    - Python distributions from `importlib.metadata`, the truth of the image rather than the lock;
+    - Debian packages from the image's dpkg status;
+    - via the registry registration (like the logger catalog) or a `/components` endpoint, whichever
+      ADR 0271 picks.
+  - **Frontends:** their npm part of the components file is also served as a static file.
+  - **Dockerfiles:** dependencies installed before the workspace libraries, so a library change no
+    longer invalidates every image's dependency layer (P99-S2's 15-minute rebuild).
+  - **An inventory view:** components per service, a search across services ("who runs `urllib3`, in
+    which version?"), CycloneDX export per service and merged (for Dependency-Track, Trivy, Greenbone);
+    API, CLI `dms components …`, admin UI page „Komponenten".
+- **P100-S2 — Checking a CVE, online and air-gapped.**
+  - **Matching:** OSV ranges (introduced/fixed events) against the inventory, with per-ecosystem
+    version rules (PEP 440 for PyPI, semver for npm, Debian versions).
+  - **Online (off by default, proxy-capable):** enter a CVE or GHSA id → fetch the record live from
+    OSV.dev (or a configured mirror) → affected services, installed version, fixed version.
+    **OG Doc ships no vulnerability data** (user decision 2026-11-27): it would be stale on delivery.
+    What's built in is the inventory; the knowledge comes live from the third party, or from a file the
+    admin brings in an air-gapped setup.
+  - **Air-gapped:**
+    - import the record as a file (OSV JSON, or an offline OSV export for PyPI/npm/Debian);
+    - or enter package plus affected range by hand;
+    - the matching is the same.
+  - CLI and admin UI („Schwachstelle prüfen"), audited lookups.
+- **P100-S3 — Checking the whole inventory, and phase close.**
+  - "Scan everything": OSV batch online, or against an imported offline database;
+  - a result list with severity and fixed versions;
+  - a sensor and a default alert rule for known vulnerabilities;
+  - an admin skill recipe („Sind wir von CVE-… betroffen?");
+  - docs;
+  - **phase close:** regression.
+
+## Phase 101 — High Availability and Data Growth
+
+- **P101-S1 — workflow-service with several replicas (ADR 0272).**
   - ADR 0020's documented gap: the SLA/timer poll and the instance-start reconcile would run in every
     replica and fire boundary events twice;
   - a Postgres advisory-lock leader per tick (the pattern monitoring-service's alert tick uses,
@@ -5567,18 +5633,18 @@ time the consumer was blind until a person read the logs.
   - check every other loop of the service for the same issue;
   - Helm `replicas` > 1 allowed with a PDB;
   - live with two replicas: one timer fires exactly once, and a stopped replica's work is taken over.
-- **P100-S2 — Audit-trail retention: scoping (ADR 0272).** The dev stack holds 1.75 M events / 1.07 GB
+- **P101-S2 — Audit-trail retention: scoping (ADR 0273).** The dev stack holds 1.75 M events / 1.07 GB
   and grows with every run. To decide:
   - a retention period per event family (legal minimums for records management);
   - offloading closed periods as signed, hash-chained segments to object storage instead of deleting;
   - how `verify` spans live table plus segments;
   - how the forensic trace and the query console read offloaded periods;
   - what may never leave the live table.
-- **P100-S3 — Audit-trail retention: build.**
+- **P101-S3 — Audit-trail retention: build.**
   - segment export, verify across segments, the retention job (leader-locked);
   - CLI and admin UI („Audit-Tiefe" or a new section);
   - live: offload a period of the dev stack, verify the chain end to end.
-- **P100-S4 — Finer permission-cache invalidation, plus the small open items.**
+- **P101-S4 — Finer permission-cache invalidation, plus the small open items.**
   - **Measure first:** today a role-definition, "everyone" or structure change clears the whole cache
     (ADR 0263). Narrow it to the affected subtree or principals only where the load test shows it
     pays.
@@ -5589,9 +5655,9 @@ time the consumer was blind until a person read the logs.
     - friendly area names for loggers where the catalog shows a need.
   - **Phase close:** regression.
 
-## Phase 101 — Document Features
+## Phase 102 — Document Features
 
-- **P101-S1 — Annotations: scoping (ADR 0273).** Comments and markings on document pages without
+- **P102-S1 — Annotations: scoping (ADR 0274).** Comments and markings on document pages without
   changing the original. To decide:
   - the storage form (W3C Web Annotation-like JSON per document version);
   - permissions: see with read, annotate with write or its own permission?
@@ -5599,34 +5665,34 @@ time the consumer was blind until a person read the logs.
   - whether annotations follow a new version;
   - export (burned into the PDF export as an option, never into the archive copy);
   - search and audit.
-- **P101-S2 — Annotations: backend** (document-service or a new small service, per S1), events, audit,
+- **P102-S2 — Annotations: backend** (document-service or a new small service, per S1), events, audit,
   tests.
-- **P101-S3 — Annotations: user UI** (highlights and notes in the preview, a side list, filters), and
+- **P102-S3 — Annotations: user UI** (highlights and notes in the preview, a side list, filters), and
   the PDF export option.
-- **P101-S4 — Computed attributes (ADR 0274).**
+- **P102-S4 — Computed attributes (ADR 0275).**
   - Attributes whose value follows from others, e.g. a deadline = received date + 14 days, or a
     reference composed of fields.
   - A small, safe expression language (no code execution) in the object-type schema, evaluated
     server-side on save.
   - Read-only in forms; recomputed when inputs change; config-package category support.
-- **P101-S5 — Form letters: scoping and backend (ADR 0275).** Letters from templates with fields from a
+- **P102-S5 — Form letters: scoping and backend (ADR 0276).** Letters from templates with fields from a
   case, folder or document; distinct from the existing folder-structure templates („Vorlagen").
   - **Template format:** DOCX/ODT with fields, rendered by the existing LibreOffice in
     rendering-service.
   - Field sources and a preview.
   - The result is filed as a new document (with origin), single or serial.
   - Permissions.
-- **P101-S6 — Form letters: admin UI** (manage templates) **and user UI** (create from a case or
+- **P102-S6 — Form letters: admin UI** (manage templates) **and user UI** (create from a case or
   folder), CLI, skill recipe.
-- **P101-S7 — Storage quotas (ADR 0276).**
+- **P102-S7 — Storage quotas (ADR 0277).**
   - Limits per filing area or team space (today only the licence's global storage limit exists).
   - A warning at a threshold, blocking uploads beyond the limit.
   - Usage from storage-service; admin UI and CLI; monitoring sensor and alert.
   - **Phase close:** regression.
 
-## Phase 102 — Integrations
+## Phase 103 — Integrations
 
-- **P102-S1 — Microsoft 365 mailboxes: build.** ADR 0161 scoped a Graph backend for mail-connector as
+- **P103-S1 — Microsoft 365 mailboxes: build.** ADR 0161 scoped a Graph backend for mail-connector as
   a fourth backend next to POP3/IMAP/…:
   - OAuth client credentials;
   - delta queries instead of polling everything;
@@ -5634,17 +5700,17 @@ time the consumer was blind until a person read the logs.
   - the mailbox test, CLI and admin UI fields.
 
   Tested against a Graph mock, since there's no real tenant here (environment-blocked for live).
-- **P102-S2 — Extended e-invoicing.**
+- **P103-S2 — Extended e-invoicing.**
   - Pure XRechnung/UBL invoices without a PDF: render the structured data as a readable document
     (ADR 0207's missing capability) and file both.
   - Barcode separator sheets in batch scanning (ADR 0209 deferred them; blank-page separation exists).
-- **P102-S3 — ERP or archive connector: scoping (ADR 0277).** Choose one of:
+- **P103-S3 — ERP or archive connector: scoping (ADR 0278).** Choose one of:
   - ERP (document exchange with a finance system);
   - SAP ArchiveLink;
   - TR-ESOR long-term preservation.
 
   Decide by what the deployment target needs; define the interface on the existing connector/plugin
-  pattern; plan the build sessions (likely a Phase 103).
+  pattern; plan the build sessions (likely a Phase 104).
   - **Close of the round:** regression, then `graphify update .` once.
 
 ## Deliberately Not Included in This Plan
@@ -5667,10 +5733,10 @@ time the consumer was blind until a person read the logs.
     limit, for example graph-heavy relation queries.
 
 - **Phase 76's candidates:** a native mobile client and AI features for end users remain open (not
-  chosen on 2026-11-27). The ERP connector moved into P102-S3's choice.
+  chosen on 2026-11-27). The ERP connector moved into P103-S3's choice.
 - **The remaining comparison findings:** mobile-specific form layouts. Annotations, computed attributes,
   form letters, storage quotas, audit-log retention and the SAP/TR-ESOR archive connectors were taken
-  into Phases 100–102 on 2026-11-27.
+  into Phases 101–103 on 2026-11-27.
 - **Archival key rotation/KMS.** `EnvKeyStore` stays single and static. This is an open design choice
   without a trigger yet. Revisit with a real deployment.
 - **"everyone" grants** (`ocr.read`/`ocr.write`, `users.lookup`). They stay open by policy, which is a

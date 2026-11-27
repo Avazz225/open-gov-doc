@@ -72,6 +72,50 @@ the two UIs) ignore the log levels and report no catalog until their next image 
   - user management with the reset form checked in the browser.
 - **`graphify update .`** ran once (end of the plan).
 
+**Last completed:** P99-S2, seeing and replaying dead letters. **Phase 99 is closed.**
+([ADR 0270](docs/adr/0270-eventbus-dead-letters.md) Decision 5).
+
+**What changed:**
+- **`dms-eventbus-client`:**
+  - **Targeted replay:** every durable also subscribes `replay.<stream>.<consumer>` (stream `REPLAY`,
+    work queue, 7 days), with the same handler. Best effort: a service still starts if it can't.
+  - **Repeated failure:** a replay that fails again lands under the original stream/consumer with
+    subject, sequence and `Dms-Replay-Of`.
+  - **Tools:** `list_dead_letters`, `get_dead_letter`, `replay_dead_letter`, `discard_dead_letter`.
+- **monitoring-service:** `GET /dead-letters`, `GET /dead-letters/{seq}` (the event, cut at 64 KB),
+  `POST …/replay {reason}`, `DELETE …?reason=`. All need `admin.monitoring`; events
+  `monitoring.dead_letter.replayed`/`.discarded`.
+- **CLI:** `dms events dead-letters list|show|replay|discard` (long errors shortened in the table).
+- **admin-ui:** section „Unzustellbare Ereignisse" on the monitoring page: list, show, replay and
+  discard, each with a required reason.
+- **Skill:** recipe d5, the monitoring and cli references.
+- **Test hygiene:** the eventbus library tests remove their `test_*` streams and replay consumers
+  (conftest); 67 leftover test streams were removed from the dev stack.
+- **mail-connector test:** the statement count only includes statements whose parameters name the
+  test's own mailbox or messages (event consumers on the same engine had slipped one in). The poll tick
+  is paused for the test.
+
+**Checks:**
+- **Stack:** completely rebuilt and rolled out. 55 → 44 replay consumers after removing the test
+  leftovers; no `eventbus_replay_subscription_failed`.
+- **Live**, permission-service at 3 attempts:
+  - a move to a missing parent failed at 12:59:44, retried after 1 s and 2 s, and was dead-lettered at
+    12:59:47;
+  - the rule went to `warning`;
+  - `show` named the missing parent;
+  - after creating the parent, `replay` reached only permission-service, the node moved, the DLQ was
+    empty, the rule went back to `ok`, and the replay is in the audit trail with its reason;
+  - cleaned up: permission-service back at 12, test nodes and the probe account removed.
+- **Phase-close regression:** 32 services, 3,362 tests green after two fixes.
+  - cmis-connector: a root-listing timeout, green alone.
+  - mail-connector: the count test fixed, 10/10.
+- **Libraries and tools:** eventbus 22, CLI 290, admin-ui vitest 428 (+4), tsc and eslint green.
+
+**Next session:** P100-S1 (software components: a components file in every image, the runtime report,
+inventory and export, faster Docker layers; ADR 0271).
+
+---
+
 **Last completed:** P99-S1, bounded delivery and dead letters
 ([ADR 0270](docs/adr/0270-eventbus-dead-letters.md)).
 
@@ -100,20 +144,24 @@ the two UIs) ignore the log levels and report no catalog until their next image 
 - **Not yet:** the other services get the new library with their next image build (rebuild at the
   start of P99-S2, where the full flow is provoked live with a failing consumer).
 
-**Next session:** P99-S2 (listing, replaying and discarding dead letters: API, CLI, admin UI, skill;
-live; phase close).
 
 ---
 
-**Planned (2026-11-27): the next round, Phases 99–102** (user selection from "Deliberately Not
+**Planned (2026-11-27): the next round, Phases 99–103** (user selection from "Deliberately Not
 Included"):
 - **99:** NATS dead letters (bounded delivery, DLQ, alert, replay).
-- **100:** workflow-service HA, audit-trail retention (scoping + build), finer cache invalidation and
+- **100 (added 2026-11-27):** software components and vulnerabilities:
+  - a components file (CycloneDX) in every image plus the runtime report;
+  - an inventory and export;
+  - CVE checks online via OSV and air-gapped via import;
+  - a full scan with an alert;
+  - faster Docker layers.
+- **101:** workflow-service HA, audit-trail retention (scoping + build), finer cache invalidation and
   the small open items.
-- **101:** annotations, computed attributes, form letters, storage quotas.
-- **102:** Microsoft 365 mailboxes, extended e-invoicing, ERP/archive connector scoping.
+- **102:** annotations, computed attributes, form letters, storage quotas.
+- **103:** Microsoft 365 mailboxes, extended e-invoicing, ERP/archive connector scoping.
 
-`graphify update .` at the end of P102. Not chosen: AI features for end users, the native mobile
+`graphify update .` at the end of P103. Not chosen: AI features for end users, the native mobile
 client.
 
 

@@ -92,6 +92,24 @@
     "groupUpgrade": "Mit Lizenzerweiterung",
     "workflowInstances": "Prozessinstanzen"
   },
+  "deadLetters": {
+    "heading": "Unzustellbare Ereignisse",
+    "hint": "Ereignisse, die ein Dienst auch nach allen Zustellversuchen nicht verarbeiten konnte. Der Dienst arbeitet mit den übrigen weiter; diese warten hier. Nach Behebung der Ursache erneut zustellen (nur an den betroffenen Dienst) oder mit Begründung verwerfen – beides wird protokolliert.",
+    "needsRole": "Nur mit der Rolle Monitoring-/Sensor-Konfiguration sichtbar – die Inhalte können personenbezogene Daten enthalten.",
+    "none": "Keine unzustellbaren Ereignisse.",
+    "meta": "{when} · {deliveries} Zustellversuche",
+    "again": "erneut gescheitert nach erneuter Zustellung",
+    "show": "Anzeigen",
+    "replay": "Erneut zustellen",
+    "discard": "Verwerfen",
+    "replayReason": "Warum es jetzt klappen sollte",
+    "discardReason": "Warum das Ereignis verworfen wird",
+    "replayConfirm": "Zustellen",
+    "discardConfirm": "Endgültig verwerfen",
+    "cancel": "Abbrechen",
+    "replayed": "An {consumer} erneut zugestellt. Scheitert es wieder, erscheint es erneut hier.",
+    "discarded": "Verworfen."
+  },
   "outline": {
     "label": "Auf dieser Seite"
   },

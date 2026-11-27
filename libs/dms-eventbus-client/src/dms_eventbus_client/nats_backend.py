@@ -31,6 +31,13 @@ _tracer = trace.get_tracer("dms_eventbus_client")
 # and existing durables need no migration.
 DLQ_STREAM = "DLQ"
 DLQ_SUBJECT_PREFIX = "dlq"
+# Replays (P99-S2): a dead letter is replayed to exactly the consumer that
+# gave up on it, not to every consumer of its subject. Each durable also
+# subscribes `replay.<stream>.<consumer>` in a work-queue stream (a replayed
+# message is gone once acked).
+REPLAY_STREAM = "REPLAY"
+REPLAY_SUBJECT_PREFIX = "replay"
+REPLAY_MAX_AGE_SECONDS = 7 * 86400
 DEFAULT_MAX_DELIVER = int(os.environ.get("DMS_EVENTBUS_MAX_DELIVER", "12"))
 DLQ_MAX_AGE_SECONDS = int(os.environ.get("DMS_EVENTBUS_DLQ_MAX_AGE_DAYS", "90")) * 86400
 MAX_RETRY_DELAY_SECONDS = 300.0
@@ -51,6 +58,10 @@ def _subject_token(name: str) -> str:
 
 def dead_letter_subject(stream: str, consumer: str) -> str:
     return f"{DLQ_SUBJECT_PREFIX}.{_subject_token(stream)}.{_subject_token(consumer)}"
+
+
+def replay_subject(stream: str, consumer: str) -> str:
+    return f"{REPLAY_SUBJECT_PREFIX}.{_subject_token(stream)}.{_subject_token(consumer)}"
 
 
 def _messaging_attributes(subject: str, operation: str) -> dict[str, str]:
@@ -146,21 +157,6 @@ class NatsEventBusClient(EventBusClient):
             ):
                 await handler(msg.data)
 
-        async def _run(msg) -> None:
-            nonlocal in_flight
-            try:
-                await _handle(msg)
-            except Exception as exc:
-                # Retry with a delay, or dead-letter after the last attempt
-                # (P99-S1) - the same as the sequential path.
-                await self._on_handler_failure(msg, exc, subject, _ack)
-            else:
-                await _ack(msg)
-            finally:
-                async with slot_free:
-                    in_flight -= 1
-                    slot_free.notify_all()
-
         async def _ack(msg) -> None:
             # `msg.ack()` itself can raise (e.g. `MsgAlreadyAckdError` on a
             # redelivery race) - unguarded, that exception would surface
@@ -177,23 +173,48 @@ class NatsEventBusClient(EventBusClient):
                     subject,
                 )
 
-        async def _callback(msg) -> None:
-            nonlocal in_flight
-            limit = await _resolve_limit()
-            if limit <= 1:
-                # Sequential (default): one message at a time, acked when done.
+        def _make_callback(dlq_target: tuple[str, str] | None):
+            """`dlq_target` names the (stream, consumer) a failure is filed
+            under; None means "where the message came from". The replay
+            subscription files under the original durable, so a replayed
+            message that fails again lands where it was before."""
+
+            async def _run(msg) -> None:
+                nonlocal in_flight
                 try:
                     await _handle(msg)
                 except Exception as exc:
-                    await self._on_handler_failure(msg, exc, subject, _ack)
+                    # Retry with a delay, or dead-letter after the last attempt
+                    # (P99-S1) - the same as the sequential path.
+                    await self._on_handler_failure(msg, exc, subject, _ack, dlq_target)
+                else:
+                    await _ack(msg)
+                finally:
+                    async with slot_free:
+                        in_flight -= 1
+                        slot_free.notify_all()
+
+            async def _callback(msg) -> None:
+                nonlocal in_flight
+                limit = await _resolve_limit()
+                if limit <= 1:
+                    # Sequential (default): one message at a time, acked when done.
+                    try:
+                        await _handle(msg)
+                    except Exception as exc:
+                        await self._on_handler_failure(msg, exc, subject, _ack, dlq_target)
+                        return
+                    await _ack(msg)
                     return
-                await _ack(msg)
-                return
-            async with slot_free:
-                while in_flight >= limit:
-                    await slot_free.wait()
-                in_flight += 1
-            asyncio.create_task(_run(msg))
+                async with slot_free:
+                    while in_flight >= limit:
+                        await slot_free.wait()
+                    in_flight += 1
+                asyncio.create_task(_run(msg))
+
+            return _callback
+
+        _callback = _make_callback(None)
 
         deliver_policy = api.DeliverPolicy.NEW if deliver_new else None
         try:
@@ -217,8 +238,47 @@ class NatsEventBusClient(EventBusClient):
             raise SubjectNotFoundError(
                 f"Kein Stream deckt Subject {subject!r} ab - noch kein Producer gestartet?"
             ) from exc
+        if durable is not None:
+            await self._subscribe_replays(subject, durable, _make_callback)
 
-    async def _on_handler_failure(self, msg, exc: Exception, subject: str, ack) -> None:
+    async def _subscribe_replays(self, subject: str, durable: str, make_callback) -> None:
+        """The durable's replay channel (P99-S2). Best effort: a service must
+        still start when the replay stream can't be set up - it only can't
+        receive replays then, which is logged."""
+        try:
+            stream = await self._js.find_stream_name_by_subject(subject)
+            await self._ensure_replay_stream()
+            replay_durable = f"{durable}-replay"
+            await self._js.subscribe(
+                replay_subject(stream, durable),
+                queue=replay_durable,
+                durable=replay_durable,
+                cb=make_callback((stream, durable)),
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "eventbus_replay_subscription_failed",
+                extra={"subject": subject, "durable": durable},
+                exc_info=True,
+            )
+
+    async def _ensure_replay_stream(self) -> None:
+        try:
+            await self._js.stream_info(REPLAY_STREAM)
+        except NotFoundError:
+            try:
+                await self._js.add_stream(
+                    name=REPLAY_STREAM,
+                    subjects=[f"{REPLAY_SUBJECT_PREFIX}.>"],
+                    retention=api.RetentionPolicy.WORK_QUEUE,
+                    max_age=REPLAY_MAX_AGE_SECONDS,
+                )
+            except Exception:  # noqa: BLE001 - another instance created it first
+                await self._js.stream_info(REPLAY_STREAM)
+
+    async def _on_handler_failure(
+        self, msg, exc: Exception, subject: str, ack, dlq_target: tuple[str, str] | None = None
+    ) -> None:
         """A failed handler: `nak` with a growing delay, or - at the last
         attempt - copy the message to the DLQ and acknowledge it (P99-S1).
         If even the DLQ can't take it, `nak` with the longest delay: nothing
@@ -243,7 +303,7 @@ class NatsEventBusClient(EventBusClient):
             await self._settle(msg.nak(delay=delay), subject)
             return
         try:
-            dlq_subject = await self._dead_letter(msg, exc, meta, deliveries)
+            dlq_subject = await self._dead_letter(msg, exc, meta, deliveries, dlq_target)
         except Exception:
             logger.exception("eventbus_dead_letter_failed", extra={"subject": subject})
             await self._settle(msg.nak(delay=MAX_RETRY_DELAY_SECONDS), subject)
@@ -281,18 +341,27 @@ class NatsEventBusClient(EventBusClient):
                 await self._js.stream_info(DLQ_STREAM)
         self._dlq_ready = True
 
-    async def _dead_letter(self, msg, exc: Exception, meta, deliveries: int) -> str:
+    async def _dead_letter(
+        self, msg, exc: Exception, meta, deliveries: int, dlq_target: tuple[str, str] | None
+    ) -> str:
         """Copies the message to `dlq.<stream>.<consumer>`: the original
-        payload and headers, plus where it came from and why it failed."""
+        payload and headers, plus where it came from and why it failed. A
+        replayed message keeps its original subject and sequence."""
         await self._ensure_dlq()
-        stream = getattr(meta, "stream", None) or "unknown"
-        consumer = getattr(meta, "consumer", None) or "unknown"
-        sequence = getattr(getattr(meta, "sequence", None), "stream", None)
+        if dlq_target is not None:
+            stream, consumer = dlq_target
+        else:
+            stream = getattr(meta, "stream", None) or "unknown"
+            consumer = getattr(meta, "consumer", None) or "unknown"
+        headers_in = dict(msg.headers or {})
+        sequence = headers_in.get("Dms-Dlq-Stream-Seq") if dlq_target else None
+        sequence = sequence or getattr(getattr(meta, "sequence", None), "stream", None)
         error = f"{type(exc).__name__}: {exc}"[:_ERROR_TEXT_LIMIT]
-        headers = dict(msg.headers or {})
+        headers = headers_in
+        original_subject = headers_in.get("Dms-Dlq-Subject") if dlq_target else None
         headers.update(
             {
-                "Dms-Dlq-Subject": msg.subject,
+                "Dms-Dlq-Subject": original_subject or msg.subject,
                 "Dms-Dlq-Stream": stream,
                 "Dms-Dlq-Stream-Seq": str(sequence or ""),
                 "Dms-Dlq-Consumer": consumer,
@@ -318,6 +387,82 @@ class NatsEventBusClient(EventBusClient):
             if len(parts) == 3:
                 counts[(parts[1], parts[2])] = int(count)
         return counts
+
+    # --- Working with dead letters (P99-S2) ---------------------------------
+
+    @staticmethod
+    def _letter(seq: int, raw) -> dict:
+        headers = dict(raw.headers or {})
+        return {
+            "seq": seq,
+            "stream": headers.get("Dms-Dlq-Stream", ""),
+            "consumer": headers.get("Dms-Dlq-Consumer", ""),
+            "subject": headers.get("Dms-Dlq-Subject", ""),
+            "stream_seq": headers.get("Dms-Dlq-Stream-Seq", ""),
+            "deliveries": int(headers.get("Dms-Dlq-Deliveries") or 0),
+            "error": headers.get("Dms-Dlq-Error", ""),
+            "failed_at": headers.get("Dms-Dlq-Failed-At", ""),
+            "replayed_from": headers.get("Dms-Replay-Of"),
+            "size": len(raw.data or b""),
+        }
+
+    async def list_dead_letters(self, limit: int = 200) -> list[dict]:
+        """Newest first, at most `limit`. Payloads are left out (see
+        `get_dead_letter`)."""
+        try:
+            info = await self._js.stream_info(DLQ_STREAM)
+        except NotFoundError:
+            return []
+        letters: list[dict] = []
+        seq = int(info.state.last_seq or 0)
+        first = int(info.state.first_seq or 0)
+        while seq >= first and seq > 0 and len(letters) < limit:
+            try:
+                raw = await self._js.get_msg(DLQ_STREAM, seq)
+            except NotFoundError:
+                seq -= 1
+                continue  # deleted (replayed or discarded)
+            letters.append(self._letter(seq, raw))
+            seq -= 1
+        return letters
+
+    async def get_dead_letter(self, seq: int) -> tuple[dict, bytes] | None:
+        try:
+            raw = await self._js.get_msg(DLQ_STREAM, seq)
+        except NotFoundError:
+            return None
+        return self._letter(seq, raw), raw.data or b""
+
+    async def replay_dead_letter(self, seq: int) -> dict | None:
+        """Sends the letter to exactly the consumer that gave up on it (its
+        `replay.<stream>.<consumer>` channel), then removes it from the DLQ.
+        If it fails there again it comes back as a new letter."""
+        try:
+            raw = await self._js.get_msg(DLQ_STREAM, seq)
+        except NotFoundError:
+            return None
+        letter = self._letter(seq, raw)
+        headers = {
+            k: v
+            for k, v in dict(raw.headers or {}).items()
+            if k in ("Dms-Dlq-Subject", "Dms-Dlq-Stream-Seq") or not k.startswith("Dms-Dlq-")
+        }
+        headers["Dms-Replay-Of"] = str(seq)
+        await self._ensure_replay_stream()
+        await self._js.publish(
+            replay_subject(letter["stream"], letter["consumer"]), raw.data or b"", headers=headers
+        )
+        await self._js.delete_msg(DLQ_STREAM, seq)
+        return letter
+
+    async def discard_dead_letter(self, seq: int) -> dict | None:
+        try:
+            raw = await self._js.get_msg(DLQ_STREAM, seq)
+        except NotFoundError:
+            return None
+        letter = self._letter(seq, raw)
+        await self._js.delete_msg(DLQ_STREAM, seq)
+        return letter
 
     async def _migrate_to_queue_group(self, subject: str, durable: str) -> None:
         """Recreates a durable from before P95-S2a (push, no deliver group) as

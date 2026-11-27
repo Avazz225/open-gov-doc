@@ -33,6 +33,7 @@ const mocks = vi.hoisted(() => ({
   setTracingSamplingRatio: vi.fn(),
   // P97-S2: the log-level section on the same page; not under test here.
   getLogLevels: vi.fn(),
+  listDeadLetters: vi.fn(),
   setLogLevel: vi.fn(),
   resetLogLevel: vi.fn(),
   permissions: ["admin.monitoring"] as string[],
@@ -127,6 +128,7 @@ describe("alerting UI", () => {
     });
     mocks.listAlertRules.mockResolvedValue([rule()]);
     mocks.listDowntimeWindows.mockResolvedValue([]);
+    mocks.listDeadLetters.mockResolvedValue([]);
     mocks.getLogLevels.mockResolvedValue({
       settings: [],
       effective: {},

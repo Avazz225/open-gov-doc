@@ -26,6 +26,8 @@ vi.mock("@/lib/api", () => ({
   listAlertRules: async () => [],
   listDowntimeWindows: async () => [],
   // P97-S2: the log-level section has its own test file.
+  // P99-S2: the dead-letter section has its own test file.
+  listDeadLetters: async () => [],
   getLogLevels: async () => ({ settings: [], effective: {}, catalog: {}, debug_default_minutes: 60, debug_max_minutes: 1440 }),
   ApiError: class ApiError extends Error {
     status: number;

@@ -136,7 +136,13 @@ from the NATS `DLQ` stream on every `/metrics` scrape and every alert evaluation
 - An empty DLQ is a single `{stream="-",consumer="-"} 0` sample, so the default rule „Unzustellbare
   Ereignisse" (`packages/monitoring-defaults` 1.1.0, sum > 0 → warning) reads `ok` rather than
   `unknown`.
-- Listing and replaying the letters follows in P99-S2.
+- **Since P99-S2:** `GET /dead-letters`, `GET /dead-letters/{seq}`, `POST /dead-letters/{seq}/replay`
+  `{reason}`, `DELETE /dead-letters/{seq}?reason=`.
+  - All need `admin.monitoring`.
+  - Replay goes to exactly the consumer that failed, through its `replay.<stream>.<consumer>`
+    channel.
+  - Events `monitoring.dead_letter.replayed`/`.discarded`.
+  - Tests: `test_dead_letters.py` (4).
 
 ## Alarm levels for Grafana (P88-S7, [ADR 0252](../adr/0252-alert-rules-as-config-category-default-package-and-grafana.md))
 

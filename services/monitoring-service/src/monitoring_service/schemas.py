@@ -35,6 +35,32 @@ class SensorConfigOut(BaseModel):
     log_levels: dict | None = None
 
 
+class DeadLetterOut(BaseModel):
+    """A message a consumer gave up on (P99-S2, ADR 0270)."""
+
+    seq: int
+    stream: str
+    consumer: str
+    subject: str
+    stream_seq: str
+    deliveries: int
+    error: str
+    failed_at: str
+    replayed_from: str | None = None
+    size: int
+
+
+class DeadLetterDetailOut(DeadLetterOut):
+    # The original event, as text (JSON for every event of this platform);
+    # cut at 64 KB.
+    payload: str
+    payload_truncated: bool = False
+
+
+class DeadLetterAction(BaseModel):
+    reason: str = Field(min_length=3, max_length=500)
+
+
 class LogLevelIn(BaseModel):
     """No service and no logger = global; a service = that service's root
     level; a logger with a service (or `*`, or none = `*`) = that logger."""

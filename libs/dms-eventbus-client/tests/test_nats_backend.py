@@ -453,3 +453,92 @@ async def test_concurrent_handlers_dead_letter_too():
     finally:
         await bus._js.purge_stream("DLQ", subject=f"dlq.{stream}.>")
         await bus.close()
+
+
+async def test_a_dead_letter_replays_to_its_own_consumer_only():
+    """P99-S2: the replay reaches the consumer that gave up, not every
+    consumer of the subject; once it succeeds the letter is gone."""
+    stream = f"test_{uuid.uuid4().hex[:8]}"
+    bus = NatsEventBusClient(NATS_URL, stream, max_deliver=1)
+    await bus.connect()
+    ready = False
+    failing_calls: list[bytes] = []
+    other_calls: list[bytes] = []
+    replayed = asyncio.Event()
+
+    async def failing_until_ready(payload: bytes) -> None:
+        failing_calls.append(payload)
+        if not ready:
+            raise LookupError("Eltern-Ordner fehlt noch")
+        replayed.set()
+
+    async def other(payload: bytes) -> None:
+        other_calls.append(payload)
+
+    durable = f"dlq-replay-{uuid.uuid4().hex[:6]}"
+    try:
+        await bus.subscribe(f"{stream}.r", failing_until_ready, durable=durable)
+        await bus.subscribe(f"{stream}.r", other, durable=f"{durable}-other")
+        await asyncio.sleep(0.3)
+        await bus.publish(f"{stream}.r", b"event-1")
+        for _ in range(40):
+            letters = [x for x in await bus.list_dead_letters() if x["stream"] == stream]
+            if letters:
+                break
+            await asyncio.sleep(0.25)
+        [letter] = letters
+        assert letter["consumer"] == durable and letter["subject"] == f"{stream}.r"
+        detail, payload = await bus.get_dead_letter(letter["seq"])
+        assert payload == b"event-1" and detail["error"].startswith("LookupError")
+
+        ready = True
+        assert await bus.replay_dead_letter(letter["seq"]) is not None
+        await asyncio.wait_for(replayed.wait(), timeout=10)
+        assert failing_calls == [b"event-1", b"event-1"]
+        assert other_calls == [b"event-1"]  # not delivered twice to the healthy one
+        assert not [x for x in await bus.list_dead_letters() if x["stream"] == stream]
+    finally:
+        await bus._js.purge_stream("DLQ", subject=f"dlq.{stream}.>")
+        await bus.close()
+
+
+async def test_a_replay_that_fails_again_returns_under_its_original_name_and_discard_removes_it():
+    stream = f"test_{uuid.uuid4().hex[:8]}"
+    bus = NatsEventBusClient(NATS_URL, stream, max_deliver=1)
+    await bus.connect()
+
+    async def always(payload: bytes) -> None:
+        raise ValueError("bleibt kaputt")
+
+    durable = f"dlq-again-{uuid.uuid4().hex[:6]}"
+
+    async def letters_for_stream():
+        return [x for x in await bus.list_dead_letters() if x["stream"] == stream]
+
+    try:
+        await bus.subscribe(f"{stream}.q", always, durable=durable)
+        await asyncio.sleep(0.3)
+        await bus.publish(f"{stream}.q", b"x")
+        for _ in range(40):
+            if await letters_for_stream():
+                break
+            await asyncio.sleep(0.25)
+        [first] = await letters_for_stream()
+        await bus.replay_dead_letter(first["seq"])
+        for _ in range(40):
+            again = await letters_for_stream()
+            if again and again[0]["seq"] != first["seq"]:
+                break
+            await asyncio.sleep(0.25)
+        [second] = await letters_for_stream()
+        assert second["consumer"] == durable  # not "<durable>-replay"
+        assert second["subject"] == f"{stream}.q"
+        assert second["stream_seq"] == first["stream_seq"]
+        assert second["replayed_from"] == str(first["seq"])
+
+        assert await bus.discard_dead_letter(second["seq"]) is not None
+        assert await letters_for_stream() == []
+        assert await bus.discard_dead_letter(second["seq"]) is None
+    finally:
+        await bus._js.purge_stream("DLQ", subject=f"dlq.{stream}.>")
+        await bus.close()

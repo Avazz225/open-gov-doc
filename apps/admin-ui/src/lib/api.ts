@@ -1903,6 +1903,61 @@ export async function setTracingSamplingRatio(token: string, ratio: number): Pro
   return response.json();
 }
 
+// Dead letters (P99-S2, ADR 0270): events a consumer gave up on after every
+// delivery attempt. Everything needs `admin.monitoring` (payloads can hold
+// personal data); replay and discard are audited, discard needs a reason.
+export interface DeadLetter {
+  seq: number;
+  stream: string;
+  consumer: string;
+  subject: string;
+  stream_seq: string;
+  deliveries: number;
+  error: string;
+  failed_at: string;
+  replayed_from: string | null;
+  size: number;
+}
+
+export interface DeadLetterDetail extends DeadLetter {
+  payload: string;
+  payload_truncated: boolean;
+}
+
+export async function listDeadLetters(token: string): Promise<DeadLetter[]> {
+  const response = await request("monitoring-service", "dead-letters", {}, token);
+  return response.json();
+}
+
+export async function getDeadLetter(token: string, seq: number): Promise<DeadLetterDetail> {
+  const response = await request("monitoring-service", `dead-letters/${seq}`, {}, token);
+  return response.json();
+}
+
+export async function replayDeadLetter(token: string, seq: number, reason: string): Promise<DeadLetter> {
+  const response = await request(
+    "monitoring-service",
+    `dead-letters/${seq}/replay`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export async function discardDeadLetter(token: string, seq: number, reason: string): Promise<DeadLetter> {
+  const response = await request(
+    "monitoring-service",
+    `dead-letters/${seq}?reason=${encodeURIComponent(reason)}`,
+    { method: "DELETE" },
+    token
+  );
+  return response.json();
+}
+
 // Central log levels (P97-S2, ADR 0267): global, per service, per logger.
 // Every replica applies a change with its next poll (15 s); DEBUG always
 // expires. Writes need `admin.monitoring`.

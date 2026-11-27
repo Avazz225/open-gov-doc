@@ -22,6 +22,9 @@ from monitoring_service.schemas import (
     AlertRuleIn,
     AlertRuleOut,
     AlertSeriesOut,
+    DeadLetterAction,
+    DeadLetterDetailOut,
+    DeadLetterOut,
     DowntimeWindowIn,
     DowntimeWindowOut,
     GlobalSensorConfigIn,
@@ -439,6 +442,86 @@ async def set_sensor_override(
             payload={"enabled": payload.enabled, "actor": x_dms_principal},
         )
     return result
+
+
+# --- Dead letters (P99-S2, ADR 0270) ---------------------------------------------
+
+_PAYLOAD_LIMIT = 64 * 1024
+
+
+@app.get("/dead-letters", response_model=list[DeadLetterOut])
+async def list_dead_letters(
+    limit: int = Query(default=200, ge=1, le=1000), x_dms_principal: str = Header(default="")
+) -> list[DeadLetterOut]:
+    """Events consumers gave up on, newest first. Gated: the payloads can
+    hold personal data, and even the list tells what failed where."""
+    await _require_monitoring_permission(x_dms_principal)
+    return [
+        DeadLetterOut(**letter) for letter in await app.state.event_bus.list_dead_letters(limit)
+    ]
+
+
+@app.get("/dead-letters/{seq}", response_model=DeadLetterDetailOut)
+async def get_dead_letter(
+    seq: int, x_dms_principal: str = Header(default="")
+) -> DeadLetterDetailOut:
+    await _require_monitoring_permission(x_dms_principal)
+    found = await app.state.event_bus.get_dead_letter(seq)
+    if found is None:
+        raise HTTPException(status_code=404, detail=f"Kein Dead Letter {seq}")
+    letter, payload = found
+    return DeadLetterDetailOut(
+        **letter,
+        payload=payload[:_PAYLOAD_LIMIT].decode("utf-8", errors="replace"),
+        payload_truncated=len(payload) > _PAYLOAD_LIMIT,
+    )
+
+
+@app.post("/dead-letters/{seq}/replay", response_model=DeadLetterOut, status_code=202)
+async def replay_dead_letter(
+    seq: int, payload: DeadLetterAction, x_dms_principal: str = Header(default="")
+) -> DeadLetterOut:
+    """Hands the event to exactly the consumer that gave up on it. If it
+    fails again it returns as a new dead letter."""
+    await _require_monitoring_permission(x_dms_principal)
+    letter = await app.state.event_bus.replay_dead_letter(seq)
+    if letter is None:
+        raise HTTPException(status_code=404, detail=f"Kein Dead Letter {seq}")
+    await publish_event(
+        "monitoring.dead_letter.replayed",
+        subject=f"{letter['stream']}/{letter['consumer']}",
+        payload={**_audit_fields(letter), "reason": payload.reason, "actor": x_dms_principal},
+        actor=x_dms_principal,
+    )
+    return DeadLetterOut(**letter)
+
+
+@app.delete("/dead-letters/{seq}", response_model=DeadLetterOut)
+async def discard_dead_letter(
+    seq: int,
+    reason: str = Query(min_length=3, max_length=500),
+    x_dms_principal: str = Header(default=""),
+) -> DeadLetterOut:
+    """Drops the event for good - with a reason, audited. The original
+    event stays findable in the audit trail by subject and sequence."""
+    await _require_monitoring_permission(x_dms_principal)
+    letter = await app.state.event_bus.discard_dead_letter(seq)
+    if letter is None:
+        raise HTTPException(status_code=404, detail=f"Kein Dead Letter {seq}")
+    await publish_event(
+        "monitoring.dead_letter.discarded",
+        subject=f"{letter['stream']}/{letter['consumer']}",
+        payload={**_audit_fields(letter), "reason": reason, "actor": x_dms_principal},
+        actor=x_dms_principal,
+    )
+    return DeadLetterOut(**letter)
+
+
+def _audit_fields(letter: dict) -> dict:
+    return {
+        key: letter[key]
+        for key in ("seq", "stream", "consumer", "subject", "stream_seq", "deliveries", "error")
+    }
 
 
 # --- Central log levels (P97-S1, ADR 0267) ---------------------------------------

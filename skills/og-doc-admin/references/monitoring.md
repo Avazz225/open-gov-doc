@@ -40,3 +40,9 @@
     `dms logging set <LEVEL> [--service S] [--logger L] [--for 30m|--until ISO]`,
     `dms logging reset [--service S] [--logger L]`, `dms logging loggers --service S [--filter T]`.
   - Admin UI: „Monitoring-Sensoren" → „Log-Level".
+- **Undeliverable events (dead letters, ADR 0270):** an event a service couldn't process after all
+  delivery attempts lands in a dead-letter store; the default rule „Unzustellbare Ereignisse" warns.
+  - `dms events dead-letters list`, `dms events dead-letters show <seq>`,
+    `dms events dead-letters replay <seq> --reason …`, `dms events dead-letters discard <seq> --reason …`.
+  - Replay goes to exactly the consumer that failed; discard is final. Both are audited. See recipe d5.
+
