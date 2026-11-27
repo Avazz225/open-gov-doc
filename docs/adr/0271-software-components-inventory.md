@@ -64,6 +64,10 @@ change in `dms-common` took 10 s per image, where P99-S2's full rebuild took abo
 
 - Images built before P100 answer `/component-report` with 404. The inventory shows them as „liefert
   keine Komponenten (Image vor P100)".
+- **Amended in P100-S2 (ADR 0272):** OS components carry `dms:source` (the source/origin package that
+  security records name, e.g. `openssl` for `libssl3t64`) and `dms:distro` (`debian:13`,
+  `alpine:3.21.3`). The CPython interpreter appears as `pkg:generic/cpython@<version>` (ecosystem
+  `runtime`).
 - **Not covered:** the base images' non-dpkg/apk content (e.g. the Python interpreter's own version
   appears via the Debian packages only partially). The `python:3.12-slim` interpreter is a source build
   outside dpkg; the CVE step should name it explicitly (P100-S2).

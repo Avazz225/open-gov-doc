@@ -39,4 +39,13 @@ Read-only. Answer the question, and propose a fix only if asked.
     that differ and instances that differ from their image file.
   - `dms components export -o bom.json`: CycloneDX for an external scanner.
   - Role: `domain-admin-monitoring`.
+- **"Sind wir von CVE-… betroffen?"** (P100-S2, ADR 0272)
+  - `dms vulnerabilities check CVE-2024-6345`: online, if the installation allows it
+    (`DMS_VULNERABILITY_LOOKUP_ENABLED`); only the id leaves the installation.
+  - Air-gapped: `--file record.json`, with the OSV record fetched on a connected machine, or
+    `--package openssl --ecosystem Debian --fixed 3.3.2-1`.
+  - Debian/Alpine use the source package name (`openssl`, not `libssl3t64`).
+  - The answer names affected services with the fix version. "Nicht betroffen" lists the installed
+    versions outside the range, so the check is visible.
+  - OG Doc ships no vulnerability data; a 409 means online lookup is switched off.
 

@@ -29,6 +29,7 @@ from pathlib import Path
 
 COMPONENTS_FILE = Path("/app/META-INF/components.cdx.json")
 DPKG_STATUS = Path("/var/lib/dpkg/status")
+OS_RELEASE = Path("/etc/os-release")
 SPEC_VERSION = "1.6"
 # Workspace packages of this repository (libs/*, services/*).
 _OWN_PREFIXES = ("dms-", "dms_")
@@ -63,7 +64,19 @@ def _python_components() -> list[dict]:
     return sorted(seen.values(), key=lambda c: c["name"].lower())
 
 
-def _parse_dpkg_status(text: str) -> list[dict]:
+def os_release(path: Path = OS_RELEASE) -> str | None:
+    """`debian:13`, `alpine:3.21.3` - vulnerability records are per
+    distribution release (OSV `Debian:13`), so the match needs it (P100-S2)."""
+    try:
+        fields = dict(line.split("=", 1) for line in path.read_text().splitlines() if "=" in line)
+    except OSError:
+        return None
+    distro = fields.get("ID", "").strip('"')
+    version = fields.get("VERSION_ID", "").strip('"')
+    return f"{distro}:{version}" if distro and version else None
+
+
+def _parse_dpkg_status(text: str, distro: str | None = None) -> list[dict]:
     components = []
     for block in text.split("\n\n"):
         fields: dict[str, str] = {}
@@ -77,6 +90,15 @@ def _parse_dpkg_status(text: str) -> list[dict]:
         name, version = fields["Package"], fields.get("Version", "")
         arch = fields.get("Architecture", "")
         purl = f"pkg:deb/debian/{name}@{version}" + (f"?arch={arch}" if arch else "")
+        # Security records name the source package (`openssl`), not the
+        # binaries built from it (`libssl3t64`) - P100-S2.
+        source = (fields.get("Source") or name).split(" ", 1)[0]
+        properties = [
+            {"name": "dms:ecosystem", "value": "Debian"},
+            {"name": "dms:source", "value": source},
+        ]
+        if distro:
+            properties.append({"name": "dms:distro", "value": distro})
         components.append(
             {
                 "type": "library",
@@ -84,7 +106,7 @@ def _parse_dpkg_status(text: str) -> list[dict]:
                 "version": version,
                 "purl": purl,
                 "bom-ref": purl,
-                "properties": [{"name": "dms:ecosystem", "value": "Debian"}],
+                "properties": properties,
             }
         )
     return sorted(components, key=lambda c: c["name"])
@@ -92,14 +114,33 @@ def _parse_dpkg_status(text: str) -> list[dict]:
 
 def _os_components(status_file: Path = DPKG_STATUS) -> list[dict]:
     try:
-        return _parse_dpkg_status(status_file.read_text(encoding="utf-8", errors="replace"))
+        return _parse_dpkg_status(
+            status_file.read_text(encoding="utf-8", errors="replace"), os_release()
+        )
     except OSError:
         return []  # not a Debian-based image, or run outside a container
 
 
+def _runtime_components() -> list[dict]:
+    """The Python interpreter itself: the `python:*-slim` images build it from
+    source, outside dpkg, so it would otherwise be invisible (P100-S1 note)."""
+    version = ".".join(str(part) for part in sys.version_info[:3])
+    purl = f"pkg:generic/cpython@{version}"
+    return [
+        {
+            "type": "platform",
+            "name": "cpython",
+            "version": version,
+            "purl": purl,
+            "bom-ref": purl,
+            "properties": [{"name": "dms:ecosystem", "value": "runtime"}],
+        }
+    ]
+
+
 def build_document(name: str, *, status_file: Path = DPKG_STATUS) -> dict:
     """The CycloneDX document for this process's environment."""
-    components = _python_components() + _os_components(status_file)
+    components = _python_components() + _os_components(status_file) + _runtime_components()
     return {
         "bomFormat": "CycloneDX",
         "specVersion": SPEC_VERSION,

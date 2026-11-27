@@ -1867,5 +1867,32 @@
     "terminateConfirm": "Really terminate this instance? This cannot be undone.",
     "terminate": "Terminate instance",
     "nowTerminated": "The instance is terminated."
+  },
+  "vulnerabilities": {
+    "title": "Check a vulnerability",
+    "hintOnline": "Enter an id (CVE-…, GHSA-…): the record is looked up live at {source}; only the id leaves the installation. OG Doc ships no vulnerability data itself.",
+    "hintOffline": "Online lookup is switched off (air-gapped). Import the OSV record as a file or enter the affected package with its range; it is checked against the components below.",
+    "mode": "Input",
+    "modeId": "Id (online)",
+    "modeFile": "Record file (OSV)",
+    "modeManual": "Package by hand",
+    "id": "Id",
+    "file": "OSV record (JSON)",
+    "fileInvalid": "The file is not valid JSON.",
+    "ecosystem": "Ecosystem",
+    "package": "Package (source package for Debian/Alpine)",
+    "introduced": "Affected from",
+    "fixed": "Fixed in",
+    "lastAffected": "Last affected",
+    "check": "Check",
+    "checked": "{count} services/frontends checked · source: {source}",
+    "affected": "Affected: {count} findings",
+    "notAffected": "Not affected.",
+    "installed": "Installed",
+    "fixedIn": "Fixed in",
+    "state": "State",
+    "stateAffected": "affected",
+    "stateNotAffected": "not affected",
+    "record": "Record"
   }
 }

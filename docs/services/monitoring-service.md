@@ -141,6 +141,25 @@ allowed), and `rule_ids` (null = all).
   - `GET /components/export[?service=]`: CycloneDX 1.6, every component once with `dms:services`.
 - **Tests:** `test_components.py` (4).
 
+## Vulnerability checks (P100-S2, [ADR 0272](../adr/0272-vulnerability-checks.md))
+
+OG Doc ships no vulnerability data. A check matches one vulnerability against the inventory.
+
+- `GET /vulnerabilities/config`: `{online, source}`.
+- `POST /vulnerabilities/check` takes exactly one of:
+  - `{id}`: looked up live at `DMS_VULNERABILITY_LOOKUP_URL` (default `https://api.osv.dev`),
+    following aliases to GHSA/PYSEC/DEBIAN/ALPINE records, at most 25. Needs
+    `DMS_VULNERABILITY_LOOKUP_ENABLED=true` (default off; 409 otherwise). Only the id leaves the
+    installation, and `HTTPS_PROXY` is honoured;
+  - `{record}`: an OSV record or a list of them (air-gapped, imported file);
+  - `{manual: {ecosystem, package, introduced, fixed, last_affected}}`.
+- **Answer:** the records, `affected` (with `fixed_in`) and `not_affected` installations, and
+  `checked_services`.
+- **Versions** are compared per ecosystem: PEP 440, SemVer, dpkg, apk. Debian and Alpine records are
+  matched by source package and distribution release.
+- **Audit event:** `monitoring.vulnerability.checked`.
+- **Tests:** `test_vulnerabilities.py` and 4 endpoint tests in `test_components.py`.
+
 ## Dead letters (P99-S1, [ADR 0270](../adr/0270-eventbus-dead-letters.md))
 
 `eventbus_dead_letters{stream,consumer}`: events a consumer gave up on after all delivery attempts, read

@@ -1951,6 +1951,76 @@ export async function exportComponents(token: string, service?: string): Promise
   return response.blob();
 }
 
+// Vulnerability checks (P100-S2, ADR 0272): one CVE/GHSA id looked up live
+// (only if the installation allows online lookups), an OSV record file, or a
+// hand-entered package with its affected range - matched against the inventory.
+export interface VulnerabilityConfig {
+  online: boolean;
+  source: string | null;
+}
+
+export interface ManualVulnerability {
+  ecosystem: "PyPI" | "npm" | "Debian" | "Alpine";
+  package: string;
+  introduced?: string | null;
+  fixed?: string | null;
+  last_affected?: string | null;
+  label?: string | null;
+}
+
+export type VulnerabilityCheckInput =
+  | { id: string }
+  | { record: Record<string, unknown> | Record<string, unknown>[] }
+  | { manual: ManualVulnerability };
+
+export interface VulnerabilityRecordSummary {
+  id: string;
+  aliases: string[];
+  summary: string;
+  severity: string | null;
+  cvss: string[];
+  published: string | null;
+  packages: string[];
+}
+
+export interface VulnerabilityFinding {
+  service: string;
+  kind: string;
+  component: string;
+  version: string;
+  ecosystem: string;
+  record_id: string;
+  affected: boolean;
+  fixed_in: string | null;
+  note: string | null;
+}
+
+export interface VulnerabilityCheckResult {
+  query: string;
+  source: string;
+  records: VulnerabilityRecordSummary[];
+  affected: VulnerabilityFinding[];
+  not_affected: VulnerabilityFinding[];
+  checked_services: number;
+  checked_at: string;
+}
+
+export async function getVulnerabilityConfig(token: string): Promise<VulnerabilityConfig> {
+  return (await request("monitoring-service", "vulnerabilities/config", {}, token)).json();
+}
+
+export async function checkVulnerability(
+  token: string,
+  input: VulnerabilityCheckInput
+): Promise<VulnerabilityCheckResult> {
+  const init: RequestInit = {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  };
+  return (await request("monitoring-service", "vulnerabilities/check", init, token)).json();
+}
+
 // Dead letters (P99-S2, ADR 0270): events a consumer gave up on after every
 // delivery attempt. Everything needs `admin.monitoring` (payloads can hold
 // personal data); replay and discard are audited, discard needs a reason.

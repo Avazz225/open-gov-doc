@@ -35,6 +35,24 @@ class SensorConfigOut(BaseModel):
     log_levels: dict | None = None
 
 
+class ManualVulnerability(BaseModel):
+    ecosystem: Literal["PyPI", "npm", "Debian", "Alpine"]
+    package: str = Field(min_length=1, max_length=200)
+    introduced: str | None = None
+    fixed: str | None = None
+    last_affected: str | None = None
+    label: str | None = Field(default=None, max_length=100)
+
+
+class VulnerabilityCheckIn(BaseModel):
+    """Exactly one of: an id to look up online, an OSV record (or a list of
+    them) from a file, or a hand-entered package with its affected range."""
+
+    id: str | None = Field(default=None, max_length=100)
+    record: dict | list[dict] | None = None
+    manual: ManualVulnerability | None = None
+
+
 class DeadLetterOut(BaseModel):
     """A message a consumer gave up on (P99-S2, ADR 0270)."""
 

@@ -837,6 +837,11 @@ services:
     dependsOnServices:
       - auth-service
       - permission-service
+    # Vulnerability checks (P100-S2, ADR 0272): online lookup of a CVE/GHSA id
+    # is off by default (air-gapped). To allow it (only the id leaves the
+    # installation; set HTTPS_PROXY here if egress goes through a proxy):
+    #   DMS_VULNERABILITY_LOOKUP_ENABLED: "true"
+    #   DMS_VULNERABILITY_LOOKUP_URL: "https://api.osv.dev"
     env: {}
 
   # Pure protocol translator with no own Postgres/NATS schema (3.3,

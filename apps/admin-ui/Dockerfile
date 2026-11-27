@@ -31,7 +31,8 @@ RUN npm run build --prefix apps/admin-ui
 # scanners; the npm part alone is also served (it ships to browsers anyway).
 COPY scripts/frontend-components.mjs scripts/
 COPY --from=nginx:1.27-alpine /lib/apk/db/installed /tmp/runtime-apk-installed
-RUN node scripts/frontend-components.mjs admin-ui apps/admin-ui/package-lock.json /repo/components /tmp/runtime-apk-installed
+COPY --from=nginx:1.27-alpine /etc/os-release /tmp/runtime-os-release
+RUN node scripts/frontend-components.mjs admin-ui apps/admin-ui/package-lock.json /repo/components /tmp/runtime-apk-installed /tmp/runtime-os-release
 
 FROM nginx:1.27-alpine
 COPY apps/admin-ui/nginx.conf /etc/nginx/conf.d/default.conf

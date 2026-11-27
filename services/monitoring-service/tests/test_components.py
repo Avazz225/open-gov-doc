@@ -130,3 +130,92 @@ def test_needs_the_monitoring_role(client):
     app.state.permission_client.has_permission.return_value = False
     for path in ("/components", "/components/search?q=ab", "/components/export", "/components/x"):
         assert client.get(path, headers=ADMIN).status_code == 403
+
+
+# --- Vulnerability checks (P100-S2, ADR 0272) -------------------------------------
+
+GHSA = {
+    "id": "GHSA-test",
+    "aliases": ["CVE-2099-0001"],
+    "summary": "urllib3 leaks headers",
+    "database_specific": {"severity": "HIGH"},
+    "affected": [
+        {
+            "package": {"ecosystem": "PyPI", "name": "urllib3"},
+            "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "2.3.0"}]}],
+        }
+    ],
+}
+
+
+def test_check_a_record_from_a_file(client):
+    client.get("/components?refresh=true", headers=ADMIN)
+    result = client.post("/vulnerabilities/check", json={"record": GHSA}, headers=ADMIN).json()
+    assert result["source"] == "file"
+    assert [(f["service"], f["version"], f["fixed_in"]) for f in result["affected"]] == [
+        ("document-service", "2.2.1", "2.3.0")
+    ]
+    assert [f["service"] for f in result["not_affected"]] == ["permission-service"]
+    assert result["records"][0]["severity"] == "HIGH"
+
+
+def test_check_a_hand_entered_range(client):
+    client.get("/components?refresh=true", headers=ADMIN)
+    result = client.post(
+        "/vulnerabilities/check",
+        json={"manual": {"ecosystem": "PyPI", "package": "urllib3", "fixed": "2.2.0"}},
+        headers=ADMIN,
+    ).json()
+    assert result["affected"] == []  # 2.2.1 and 2.3.0 are both past 2.2.0
+
+
+def test_online_lookup_is_off_by_default_and_input_is_checked(client):
+    off = client.post("/vulnerabilities/check", json={"id": "CVE-2099-0001"}, headers=ADMIN)
+    assert off.status_code == 409 and "Datei" in off.json()["detail"]
+    both = client.post(
+        "/vulnerabilities/check", json={"id": "CVE-1", "record": GHSA}, headers=ADMIN
+    )
+    assert both.status_code == 422
+    bad = client.post("/vulnerabilities/check", json={"record": {"x": 1}}, headers=ADMIN)
+    assert bad.status_code == 422
+    app.state.permission_client.has_permission.return_value = False
+    assert (
+        client.post("/vulnerabilities/check", json={"record": GHSA}, headers=ADMIN).status_code
+        == 403
+    )
+
+
+def test_online_lookup_follows_the_alias(client, monkeypatch):
+    from monitoring_service import main
+
+    monkeypatch.setattr(main.settings, "vulnerability_lookup_enabled", True)
+    monkeypatch.setattr(main.settings, "vulnerability_lookup_url", "https://osv.test")
+    cve = {"id": "CVE-2099-0001", "aliases": ["GHSA-test"], "affected": []}
+
+    real_client = httpx.AsyncClient
+
+    def fake_client(*args, **kwargs):
+        def handler(request: httpx.Request) -> httpx.Response:
+            vid = request.url.path.rsplit("/", 1)[1]
+            return (
+                httpx.Response(200, json={"CVE-2099-0001": cve, "GHSA-test": GHSA}[vid])
+                if vid
+                in (
+                    "CVE-2099-0001",
+                    "GHSA-test",
+                )
+                else httpx.Response(404)
+            )
+
+        kwargs.pop("trust_env", None)
+        return real_client(transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr(main.httpx, "AsyncClient", fake_client)
+    client.get("/components?refresh=true", headers=ADMIN)
+    result = client.post(
+        "/vulnerabilities/check", json={"id": "CVE-2099-0001"}, headers=ADMIN
+    ).json()
+    assert result["source"] == "https://osv.test"
+    assert {r["id"] for r in result["records"]} == {"CVE-2099-0001", "GHSA-test"}
+    assert [f["service"] for f in result["affected"]] == ["document-service"]
+    assert client.get("/vulnerabilities/config", headers=ADMIN).json()["online"] is True

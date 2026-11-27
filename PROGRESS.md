@@ -72,6 +72,57 @@ the two UIs) ignore the log levels and report no catalog until their next image 
   - user management with the reset form checked in the browser.
 - **`graphify update .`** ran once (end of the plan).
 
+**Last completed:** P100-S2, checking a vulnerability online and air-gapped
+([ADR 0272](docs/adr/0272-vulnerability-checks.md)).
+
+**What changed:**
+- **monitoring-service** (`vulnerabilities.py`):
+  - `POST /vulnerabilities/check` takes exactly one input:
+    - an id, looked up live at OSV.dev or a mirror, following aliases/related to
+      GHSA/PYSEC/DEBIAN/ALPINE records (at most 25);
+    - an OSV record file;
+    - a hand-entered package with its range.
+  - `GET /vulnerabilities/config`.
+  - Online lookup is off by default (`DMS_VULNERABILITY_LOOKUP_ENABLED`; 409 with a hint), proxy-capable,
+    and only the id leaves the installation. OG Doc ships no vulnerability data.
+  - **Versions per ecosystem:** PEP 440 (`packaging`, new dependency), SemVer, dpkg, apk.
+  - **Matching:** Debian/Alpine by source package and distribution release. One line per installation
+    across aliases.
+  - Audit event `monitoring.vulnerability.checked`.
+- **Components file (dms-common, frontend generator):** OS packages now carry `dms:source`/`dms:distro`;
+  the CPython interpreter is listed as a runtime component (ADR 0271 amended).
+- **CLI:** `dms vulnerabilities check <ID> | --file | --package --ecosystem [--introduced] [--fixed]
+  [--last-affected]`.
+- **admin-ui:** section „Schwachstelle prüfen" on „Komponenten" (`VulnerabilityCheck`): id (disabled
+  when offline), OSV file, or a package by hand; affected installations first, with „Behoben in".
+- **Config:** dev compose turns online lookup on; Helm documents it as a comment (default off).
+- **Docs:** ADR 0272, ADR 0271 amendment, monitoring-service, cli, admin-ui, skill reference
+  `diagnosis.md` („Sind wir von CVE-… betroffen?"). ADR numbers in the plan from Phase 101 on moved
+  up by one (P101-S1 is now ADR 0273).
+
+**Checks:**
+- **Tests:** monitoring-service 94 (+28), dms-common 43 (+2), CLI 297, admin-ui vitest 435 (+4); tsc,
+  eslint and ruff green.
+- **Docker:** all images rebuilt (generator changed).
+- **Live:**
+  - with a probe account holding `domain-admin-monitoring`, removed afterwards:
+    - CVE-2024-6345: setuptools isn't installed, so not affected;
+    - CVE-2024-37891: urllib3 2.7.0 in 30 services, not affected;
+    - CVE-2024-5535: Debian 13 openssl 3.5.5, not affected;
+    - the same GHSA record as a file gives the same result;
+    - "openssl fixed 3.5.6-1" by hand gives 90 affected findings;
+  - the audit records each check with the actor;
+  - the admin UI checked at 1400/390, no horizontal scroll.
+- **Found and fixed live:** every urllib3 installation appeared twice (GHSA plus PYSEC); findings are
+  now merged per installation. Multi-line distribution summaries are shortened in the CLI and the UI.
+- **Open (P100-S3):** the frontends' Alpine packages don't reach the live inventory (only the served
+  npm list does), so Alpine records match nothing live yet.
+
+**Next session:** P100-S3 (scan the whole inventory: OSV batch online or an imported offline database;
+the frontends' Alpine packages in the inventory; alert rule; skill recipe; phase-close regression).
+
+---
+
 **Last completed:** P100-S1, software components
 ([ADR 0271](docs/adr/0271-software-components-inventory.md)).
 

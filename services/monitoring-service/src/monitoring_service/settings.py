@@ -47,3 +47,12 @@ class Settings(BaseServiceSettings):
         )
     }
     component_inventory_cache_seconds: float = 60.0
+
+    # Vulnerability checks (P100-S2, ADR 0272). OG Doc ships no vulnerability
+    # data; online, a record is fetched live from OSV (or a mirror) - off by
+    # default, since many installations are air-gapped. Proxies come from the
+    # usual HTTPS_PROXY/NO_PROXY variables. Only the vulnerability id leaves the
+    # installation, never the inventory.
+    vulnerability_lookup_enabled: bool = False
+    vulnerability_lookup_url: str = "https://api.osv.dev"
+    vulnerability_lookup_timeout_seconds: float = 20.0

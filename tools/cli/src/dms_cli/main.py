@@ -30,6 +30,7 @@ from dms_cli.commands import (
     retention,
     role,
     user,
+    vulnerabilities,
     workflow,
 )
 from dms_cli.commands import (
@@ -75,6 +76,7 @@ monitoring.register(app)
 log_levels.register(app)
 events.register(app)
 components.register(app)
+vulnerabilities.register(app)
 approvals.register(app)
 mailbox.register(app)
 retention.register(app)

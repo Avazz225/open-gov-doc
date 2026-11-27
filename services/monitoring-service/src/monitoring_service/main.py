@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -21,6 +22,7 @@ from monitoring_service import (
     log_levels,
     repository,
     scraper,
+    vulnerabilities,
 )
 from monitoring_service.clients import AuthServiceClient, PermissionServiceClient, RegistryClient
 from monitoring_service.models import Base
@@ -43,6 +45,7 @@ from monitoring_service.schemas import (
     SensorOverrideIn,
     TracingConfigIn,
     TracingConfigOut,
+    VulnerabilityCheckIn,
 )
 from monitoring_service.settings import Settings
 from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, Counter, generate_latest
@@ -519,6 +522,109 @@ async def service_components(service: str, x_dms_principal: str = Header(default
             }
             for c in entry.components
         ],
+    }
+
+
+# --- Vulnerability checks (P100-S2, ADR 0272) ------------------------------------
+
+_VULN_ID = re.compile(r"^[A-Za-z][A-Za-z0-9]*-[A-Za-z0-9:._-]+$")
+
+
+@app.get("/vulnerabilities/config")
+async def vulnerability_config(x_dms_principal: str = Header(default="")) -> dict:
+    """Whether ids can be looked up online, and where."""
+    await _require_monitoring_permission(x_dms_principal)
+    return {
+        "online": settings.vulnerability_lookup_enabled,
+        "source": settings.vulnerability_lookup_url
+        if settings.vulnerability_lookup_enabled
+        else None,
+    }
+
+
+@app.post("/vulnerabilities/check")
+async def check_vulnerability(
+    payload: VulnerabilityCheckIn, x_dms_principal: str = Header(default="")
+) -> dict:
+    """Is this installation affected? Matches the record(s) against what
+    actually runs. Online only the id leaves the installation."""
+    await _require_monitoring_permission(x_dms_principal)
+    given = [x for x in (payload.id, payload.record, payload.manual) if x]
+    if len(given) != 1:
+        raise HTTPException(
+            status_code=422, detail="Genau eines angeben: Kennung, Datensatz oder Paket mit Bereich"
+        )
+    if payload.id:
+        vuln_id = payload.id.strip()
+        if not _VULN_ID.match(vuln_id):
+            raise HTTPException(status_code=422, detail=f"Ungültige Kennung {vuln_id!r}")
+        if not settings.vulnerability_lookup_enabled:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Die Online-Abfrage ist ausgeschaltet (air-gapped). Den Datensatz als Datei "
+                    "einspielen oder das betroffene Paket mit Bereich eingeben."
+                ),
+            )
+        try:
+            async with httpx.AsyncClient(
+                timeout=settings.vulnerability_lookup_timeout_seconds, trust_env=True
+            ) as client:
+                records = await vulnerabilities.fetch_records(
+                    client, settings.vulnerability_lookup_url, vuln_id
+                )
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    f"Abfrage bei {settings.vulnerability_lookup_url} fehlgeschlagen: "
+                    f"{type(exc).__name__}"
+                ),
+            ) from exc
+        if not records:
+            raise HTTPException(status_code=404, detail=f"Kein Datensatz zu {vuln_id}")
+        source, query = settings.vulnerability_lookup_url, vuln_id
+    elif payload.record:
+        records = payload.record if isinstance(payload.record, list) else [payload.record]
+        if not all(isinstance(r, dict) and r.get("id") for r in records):
+            raise HTTPException(status_code=422, detail="Kein OSV-Datensatz (Feld 'id' fehlt)")
+        source, query = "file", ", ".join(r["id"] for r in records)
+    else:
+        manual = payload.manual
+        records = [
+            vulnerabilities.manual_record(
+                manual.ecosystem,
+                manual.package,
+                introduced=manual.introduced,
+                fixed=manual.fixed,
+                last_affected=manual.last_affected,
+                label=manual.label,
+            )
+        ]
+        source, query = "manual", records[0]["id"]
+
+    services = await _inventory()
+    findings = vulnerabilities.match(records, services)
+    affected = [f.__dict__ for f in findings if f.affected]
+    await publish_event(
+        "monitoring.vulnerability.checked",
+        subject=query[:200],
+        payload={
+            "query": query,
+            "source": source,
+            "affected_count": len(affected),
+            "actor": x_dms_principal,
+        },
+        actor=x_dms_principal,
+    )
+    return {
+        "query": query,
+        "source": source,
+        "records": [vulnerabilities.record_summary(r) for r in records],
+        "affected": affected,
+        "not_affected": [f.__dict__ for f in findings if not f.affected],
+        "checked_services": len(services),
+        "checked_at": datetime.now(UTC).isoformat(),
     }
 
 

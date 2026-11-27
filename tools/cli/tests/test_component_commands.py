@@ -94,3 +94,61 @@ def test_list_search_show_export(cli_home, runner, logged_in, mock_transport_fac
     exported = runner.invoke(app, ["components", "export", "-o", str(out)])
     assert exported.exit_code == 0
     assert json.loads(out.read_text())["bomFormat"] == "CycloneDX"
+
+
+RESULT = {
+    "query": "CVE-2099-0001",
+    "source": "https://api.osv.dev",
+    "records": [{"id": "GHSA-test", "summary": "urllib3 leaks", "severity": "HIGH"}],
+    "affected": [
+        {
+            "service": "document-service",
+            "component": "urllib3",
+            "version": "2.2.1",
+            "fixed_in": "2.3.0",
+            "ecosystem": "PyPI",
+            "record_id": "GHSA-test",
+            "note": None,
+        }
+    ],
+    "not_affected": [],
+    "checked_services": 35,
+}
+
+
+def test_vulnerability_check_by_id_file_and_hand(
+    cli_home, runner, logged_in, mock_transport_factory, tmp_path
+):
+    sent: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(json.loads(request.content))
+        return httpx.Response(200, json=RESULT)
+
+    mock_transport_factory(handler)
+    by_id = runner.invoke(app, ["vulnerabilities", "check", "CVE-2099-0001"])
+    assert by_id.exit_code == 0, by_id.output
+    assert "BETROFFEN" in by_id.output and "2.3.0" in by_id.output
+
+    record = tmp_path / "osv.json"
+    record.write_text(json.dumps({"id": "GHSA-test", "affected": []}))
+    runner.invoke(app, ["vulnerabilities", "check", "--file", str(record)])
+    runner.invoke(
+        app,
+        [
+            "vulnerabilities",
+            "check",
+            "--package",
+            "openssl",
+            "--ecosystem",
+            "Debian",
+            "--fixed",
+            "3.3.2-1",
+        ],
+    )
+    assert sent[0] == {"id": "CVE-2099-0001"}
+    assert sent[1]["record"]["id"] == "GHSA-test"
+    assert sent[2]["manual"]["package"] == "openssl" and sent[2]["manual"]["fixed"] == "3.3.2-1"
+
+    both = runner.invoke(app, ["vulnerabilities", "check", "CVE-1", "--package", "x"])
+    assert both.exit_code == 2

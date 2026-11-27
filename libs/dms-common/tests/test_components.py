@@ -34,6 +34,28 @@ def test_dpkg_status_lists_installed_packages_only():
     assert parsed[1]["purl"] == "pkg:deb/debian/openssl@3.0.15-1~deb12u1?arch=amd64"
 
 
+def test_debian_components_carry_source_package_and_distro():
+    """P100-S2: records name the source package and the Debian release."""
+    text = """Package: libssl3t64
+Status: install ok installed
+Source: openssl (3.5.5-1~deb13u1)
+Version: 3.5.5-1~deb13u1
+"""
+    [component] = components._parse_dpkg_status(text, "debian:13")
+    props = {p["name"]: p["value"] for p in component["properties"]}
+    assert props["dms:source"] == "openssl"
+    assert props["dms:distro"] == "debian:13"
+
+
+def test_os_release_and_interpreter(tmp_path):
+    release = tmp_path / "os-release"
+    release.write_text('PRETTY_NAME="Debian"\nID=debian\nVERSION_ID="13"\n')
+    assert components.os_release(release) == "debian:13"
+    assert components.os_release(tmp_path / "missing") is None
+    [runtime] = components._runtime_components()
+    assert runtime["name"] == "cpython" and runtime["purl"].startswith("pkg:generic/cpython@3.")
+
+
 def test_document_holds_python_and_os_components(tmp_path):
     status = tmp_path / "status"
     status.write_text(DPKG)

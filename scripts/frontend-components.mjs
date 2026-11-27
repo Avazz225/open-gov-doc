@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Components file of a frontend image (P100-S1, ADR 0271), CycloneDX 1.6.
 //
-//   node scripts/frontend-components.mjs <app-name> <package-lock.json> <out-dir> [apk-installed]
+//   node scripts/frontend-components.mjs <app-name> <package-lock.json> <out-dir> [apk-installed] [os-release]
 //
 // Writes two files into <out-dir>:
 // - components.cdx.json: the npm production dependencies plus the Alpine packages of
@@ -15,7 +15,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-const [appName, lockPath, outDir, apkPath] = process.argv.slice(2);
+const [appName, lockPath, outDir, apkPath, osReleasePath] = process.argv.slice(2);
 if (!appName || !lockPath || !outDir) {
   console.error("usage: frontend-components.mjs <app> <package-lock.json> <out-dir> [apk-installed]");
   process.exit(2);
@@ -43,7 +43,18 @@ function npmComponents(lock) {
   return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function apkComponents(text) {
+// `alpine:3.21.3` - vulnerability records are per distribution release (P100-S2).
+function distroOf(text) {
+  const fields = Object.fromEntries(
+    text
+      .split("\n")
+      .filter((line) => line.includes("="))
+      .map((line) => [line.slice(0, line.indexOf("=")), line.slice(line.indexOf("=") + 1).replace(/"/g, "")])
+  );
+  return fields.ID && fields.VERSION_ID ? `${fields.ID}:${fields.VERSION_ID}` : null;
+}
+
+function apkComponents(text, distro) {
   const components = [];
   for (const block of text.split("\n\n")) {
     const fields = {};
@@ -53,13 +64,19 @@ function apkComponents(text) {
     if (!fields.P || !fields.V) continue;
     const arch = fields.A ? `?arch=${fields.A}` : "";
     const purl = `pkg:apk/alpine/${fields.P}@${fields.V}${arch}`;
+    // Security records name the origin (source) package, e.g. `openssl` for `libssl3`.
+    const properties = [
+      { name: "dms:ecosystem", value: "Alpine" },
+      { name: "dms:source", value: fields.o || fields.P },
+    ];
+    if (distro) properties.push({ name: "dms:distro", value: distro });
     components.push({
       type: "library",
       name: fields.P,
       version: fields.V,
       purl,
       "bom-ref": purl,
-      properties: [{ name: "dms:ecosystem", value: "Alpine" }],
+      properties,
     });
   }
   return components.sort((a, b) => a.name.localeCompare(b.name));
@@ -84,7 +101,13 @@ const npm = npmComponents(JSON.parse(readFileSync(lockPath, "utf8")));
 let os = [];
 if (apkPath) {
   try {
-    os = apkComponents(readFileSync(apkPath, "utf8"));
+    let distro = null;
+    try {
+      distro = osReleasePath ? distroOf(readFileSync(osReleasePath, "utf8")) : null;
+    } catch {
+      distro = null;
+    }
+    os = apkComponents(readFileSync(apkPath, "utf8"), distro);
   } catch {
     os = [];
   }

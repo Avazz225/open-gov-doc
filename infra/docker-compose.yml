@@ -1349,6 +1349,10 @@ services:
       DMS_SELF_ADDRESS: http://monitoring-service:8000
       DMS_AUTH_SERVICE_BASE_URL: http://auth-service:8000
       DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
+      # Vulnerability checks (P100-S2, ADR 0272): looking a CVE/GHSA id up live
+      # at OSV.dev is off by default (air-gapped installations); on in dev. Only
+      # the id leaves the installation; HTTPS_PROXY is honoured.
+      DMS_VULNERABILITY_LOOKUP_ENABLED: ${DMS_VULNERABILITY_LOOKUP_ENABLED:-true}
     ports:
       - "127.0.0.1:${MONITORING_SERVICE_PORT:-8026}:8000"
     depends_on:

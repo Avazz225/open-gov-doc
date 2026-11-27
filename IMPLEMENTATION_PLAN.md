@@ -5635,8 +5635,32 @@ covered at all.
     - or enter package plus affected range by hand;
     - the matching is the same.
   - CLI and admin UI („Schwachstelle prüfen"), audited lookups.
+  - **Result** ([ADR 0272](docs/adr/0272-vulnerability-checks.md)):
+    - **monitoring-service:** `POST /vulnerabilities/check` takes an id (OSV.dev live, following
+      aliases to GHSA/PYSEC/DEBIAN/ALPINE records), an OSV record file, or a hand-entered range.
+      `GET /vulnerabilities/config` reports whether online lookup is allowed. Online lookup is off by
+      default (409 with a hint) and only the id leaves the installation. Event
+      `monitoring.vulnerability.checked`.
+    - **Versions per ecosystem:** PEP 440, SemVer, dpkg, apk. Debian/Alpine are matched by source
+      package and release, so the components file gained `dms:source`, `dms:distro` and the CPython
+      interpreter. One line per installation across aliases.
+    - **CLI:** `dms vulnerabilities check`. **Admin UI:** „Schwachstelle prüfen" on „Komponenten".
+    - **Config:** on in dev compose, a commented Helm entry.
+    - **Tests:** monitoring 94 (+28), dms-common 43 (+2), CLI 297, admin-ui 435 (+4).
+    - **Live:**
+      - CVE-2024-6345: setuptools isn't installed, so not affected;
+      - CVE-2024-37891: urllib3 2.7.0 in 30 services, not affected (fixed in 2.2.2);
+      - CVE-2024-5535: openssl 3.5.5 on Debian 13, not affected;
+      - the GHSA file gives the same result;
+      - a hand-entered range "openssl fixed 3.5.6-1" gives 90 affected findings (3 binaries × 30);
+      - the audit shows the actor;
+      - UI at 1400/390.
+    - **Open for S3:** the frontends' Alpine packages aren't in the live inventory (only npm is
+      served).
 - **P100-S3 — Checking the whole inventory, and phase close.**
   - "Scan everything": OSV batch online, or against an imported offline database;
+  - the frontends' Alpine packages in the inventory (from S2: today only the served npm list
+    arrives), e.g. the full file over an internal-only path;
   - a result list with severity and fixed versions;
   - a sensor and a default alert rule for known vulnerabilities;
   - an admin skill recipe („Sind wir von CVE-… betroffen?");
@@ -5645,7 +5669,7 @@ covered at all.
 
 ## Phase 101 — High Availability and Data Growth
 
-- **P101-S1 — workflow-service with several replicas (ADR 0272).**
+- **P101-S1 — workflow-service with several replicas (ADR 0273).**
   - ADR 0020's documented gap: the SLA/timer poll and the instance-start reconcile would run in every
     replica and fire boundary events twice;
   - a Postgres advisory-lock leader per tick (the pattern monitoring-service's alert tick uses,
@@ -5653,7 +5677,7 @@ covered at all.
   - check every other loop of the service for the same issue;
   - Helm `replicas` > 1 allowed with a PDB;
   - live with two replicas: one timer fires exactly once, and a stopped replica's work is taken over.
-- **P101-S2 — Audit-trail retention: scoping (ADR 0273).** The dev stack holds 1.75 M events / 1.07 GB
+- **P101-S2 — Audit-trail retention: scoping (ADR 0274).** The dev stack holds 1.75 M events / 1.07 GB
   and grows with every run. To decide:
   - a retention period per event family (legal minimums for records management);
   - offloading closed periods as signed, hash-chained segments to object storage instead of deleting;
@@ -5677,7 +5701,7 @@ covered at all.
 
 ## Phase 102 — Document Features
 
-- **P102-S1 — Annotations: scoping (ADR 0274).** Comments and markings on document pages without
+- **P102-S1 — Annotations: scoping (ADR 0275).** Comments and markings on document pages without
   changing the original. To decide:
   - the storage form (W3C Web Annotation-like JSON per document version);
   - permissions: see with read, annotate with write or its own permission?
@@ -5689,13 +5713,13 @@ covered at all.
   tests.
 - **P102-S3 — Annotations: user UI** (highlights and notes in the preview, a side list, filters), and
   the PDF export option.
-- **P102-S4 — Computed attributes (ADR 0275).**
+- **P102-S4 — Computed attributes (ADR 0276).**
   - Attributes whose value follows from others, e.g. a deadline = received date + 14 days, or a
     reference composed of fields.
   - A small, safe expression language (no code execution) in the object-type schema, evaluated
     server-side on save.
   - Read-only in forms; recomputed when inputs change; config-package category support.
-- **P102-S5 — Form letters: scoping and backend (ADR 0276).** Letters from templates with fields from a
+- **P102-S5 — Form letters: scoping and backend (ADR 0277).** Letters from templates with fields from a
   case, folder or document; distinct from the existing folder-structure templates („Vorlagen").
   - **Template format:** DOCX/ODT with fields, rendered by the existing LibreOffice in
     rendering-service.
@@ -5704,7 +5728,7 @@ covered at all.
   - Permissions.
 - **P102-S6 — Form letters: admin UI** (manage templates) **and user UI** (create from a case or
   folder), CLI, skill recipe.
-- **P102-S7 — Storage quotas (ADR 0277).**
+- **P102-S7 — Storage quotas (ADR 0278).**
   - Limits per filing area or team space (today only the licence's global storage limit exists).
   - A warning at a threshold, blocking uploads beyond the limit.
   - Usage from storage-service; admin UI and CLI; monitoring sensor and alert.
@@ -5724,7 +5748,7 @@ covered at all.
   - Pure XRechnung/UBL invoices without a PDF: render the structured data as a readable document
     (ADR 0207's missing capability) and file both.
   - Barcode separator sheets in batch scanning (ADR 0209 deferred them; blank-page separation exists).
-- **P103-S3 — ERP or archive connector: scoping (ADR 0278).** Choose one of:
+- **P103-S3 — ERP or archive connector: scoping (ADR 0279).** Choose one of:
   - ERP (document exchange with a finance system);
   - SAP ArchiveLink;
   - TR-ESOR long-term preservation.
