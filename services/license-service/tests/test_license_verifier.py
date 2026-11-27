@@ -120,3 +120,16 @@ def test_decode_without_previous_key_configured_behaves_as_before():
     decoded = decode(token, public_key_pem=_PUBLIC_KEY_PEM, previous_public_key_pem=None)
 
     assert decoded["max_users"] == 3
+
+
+def test_tests_sign_with_a_throwaway_key_not_the_development_key():
+    """P98-S2: the suite must not depend on `fixtures/dev_private_key.pem`,
+    which exists only on developer machines. conftest.py generates a key per
+    session and points the settings at its public half."""
+    from license_service.settings import _DEV_PUBLIC_KEY_PEM
+
+    assert _PUBLIC_KEY_PEM.strip() != _DEV_PUBLIC_KEY_PEM.strip()
+    claims = decode(make_license_token(max_users=2), public_key_pem=_PUBLIC_KEY_PEM)
+    assert claims["max_users"] == 2
+    with pytest.raises(InvalidLicenseError):
+        decode(make_license_token(), public_key_pem=_DEV_PUBLIC_KEY_PEM)

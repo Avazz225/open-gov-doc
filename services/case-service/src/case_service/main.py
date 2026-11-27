@@ -194,6 +194,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
 
     reconcile_task.cancel()
+    # P98-S2: wait for the cancellation to land before the engine goes. The
+    # reconcile runs once right at startup; cancelled mid-transaction and not
+    # awaited, its connection stayed open in Postgres with a lock on
+    # "case".cases, and the next test's TRUNCATE waited forever (the
+    # intermittent case-service hang of P97-S3, about one run in three).
+    await bounded_shutdown_step("task reconcile_task", reconcile_task)
     sensor_config_proxy.unbind()
     await bounded_shutdown_step(
         "app.state.sensor_config_client.stop", app.state.sensor_config_client.stop()

@@ -532,3 +532,12 @@ P32-S1 itself said was missing at the time.
   unconfigured one.
 - Used by `scripts/cleanup-test-debris.py`. Tests: `test_delete_role_removes_it_with_its_assignments`,
   `test_seeded_roles_cannot_be_deleted`, `test_delete_approval_config`.
+- **Pending requests left by test suites (P98-S2):**
+  - The suites' apps call this live service, so every run added requests: 600+ by P98, nearly all from
+    test principals.
+  - `cleanup-test-debris.py`'s `approval_requests` step withdraws them through
+    `POST /approval-requests/{id}/reject` as their own initiator (an initiator may always withdraw).
+    No delete path was added, and the audit trail keeps every request.
+  - Rules: initiator plus action type for the fixed test principals. A tracking opt-in
+    (`auth.user_tracking_config.update`) counts only if its principal is no real user; with an
+    unreadable user list it is left alone.

@@ -49,6 +49,12 @@ Like every other service, via `dms-registry-client` (3.2a) — independent of th
 
 ## Tests
 
+**Since P98-S2** the suite signs with a throwaway RSA key that `tests/conftest.py` generates per session
+and sets as `DMS_LICENSE_PUBLIC_KEY_PEM`. It no longer reads the git-ignored
+`fixtures/dev_private_key.pem`, so a fresh clone can run it.
+`test_tests_sign_with_a_throwaway_key_not_the_development_key` guards that. The development key stays
+for the dev stack and `og-license --dev` (ADR 0266).
+
 `services/license-service/tests/` — 37 tests, unchanged since **Post-Roadmap Phase 42 Session 2**
 (the new blocking checks live entirely in `document-service`/`auth-service`'s own test suites, see
 `docs/services/document-service.md`/`docs/services/auth-service.md` — this service's own `GET

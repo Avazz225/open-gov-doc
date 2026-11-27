@@ -57,6 +57,6 @@ with `helm template`.
   offline: losing it means a key rotation for every installation.
 - Should licences ever need more than these claims (for example feature flags), the tool, license-service
   and this ADR change together.
-- **Open:** the development private key exists only on developer machines. A fresh clone can't run
-  license-service's tests that sign tokens (`license_factory.py`). That is unchanged by this ADR.
-  Generating a throwaway key per test run would fix it. Not done here.
+- ~~**Open:** the development private key exists only on developer machines; a fresh clone couldn't
+  run license-service's tests that sign tokens.~~ **Closed in P98-S2:** the suite generates a throwaway
+  key per session (`tests/conftest.py`).

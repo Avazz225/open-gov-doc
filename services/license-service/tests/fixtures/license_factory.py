@@ -1,14 +1,14 @@
-"""Test-only Hilfsfunktion, um signierte Lizenz-JWTs zu bauen - der private
-Schluessel hier ist ein Wegwerf-Entwicklungsschluessel (siehe
-dev_private_key.pem), niemals der echte Lizenzgeber-Schluessel (ADR 0032).
-Kein Bestandteil eines Lizenzausstellungswerkzeugs, nur fuer Tests."""
+"""Test-only helper that builds signed licence JWTs (ADR 0032). Signs with the
+throwaway key `conftest.py` generates per test session (P98-S2), never with
+the licensor's key. The issuing tool is `tools/license-tool` (ADR 0266)."""
 
+import os
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 
 from jose import jwt
 
-_PRIVATE_KEY_PEM = (Path(__file__).parent / "dev_private_key.pem").read_text(encoding="utf-8")
+# Set by conftest.py at import time, before any test module imports this.
+_PRIVATE_KEY_PEM = os.environ["TEST_LICENSE_PRIVATE_KEY_PEM"]
 
 
 def make_license_token(

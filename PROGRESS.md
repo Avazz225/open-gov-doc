@@ -31,6 +31,49 @@ stopped and removed; no log-level settings left.
 **Not rebuilt:** containers built before P97 (all except registry, monitoring, workflow, permission and
 the two UIs) ignore the log levels and report no catalog until their next image build.
 
+**Last completed:** P98-S2, test hygiene.
+
+**What changed:**
+- **Pending approval requests from tests:**
+  - **Source:** seven suites whose apps call the live permission-service (document-, workflow-, auth-,
+    folder-, migration- and config-service).
+  - **`scripts/cleanup-test-debris.py`, new step `approval_requests`:**
+    - withdraws them through `reject` as their own initiator (an initiator may always withdraw), so
+      there is no new delete path and the audit trail stays complete;
+    - rules are initiator plus action type for the fixed test principals;
+    - tracking opt-ins count only if the principal is no Keycloak user; with an unreadable user list
+      nothing is guessed;
+    - it runs after every `run-tests.sh` (`--since`).
+  - **notification-service:** no in-app notification when `rejected_by == initiated_by` (withdrawal).
+  - **Dev stack:** 552 withdrawn once; 0 notifications, 552 audit entries. 3 remain on purpose (the eGov
+    import by user 3, two role assignments by real user ids).
+- **license-service tests:** `conftest.py` generates a throwaway RSA key per session and sets it as
+  `DMS_LICENSE_PUBLIC_KEY_PEM`; `license_factory` signs with it. A test guards that it isn't the
+  development key. ADR 0266's open point is closed.
+- **`scripts/run-tests.sh`:**
+  - a FAIL/TIMEOUT log is also kept as `.test-results/<service>-<UTC>-<STATUS>.log`;
+  - without `--build` only missing containers start (`up -d --no-recreate`), so freshly built images
+    are no longer rolled out in the middle of a run (P98-S1's 403s).
+- **case-service hang (found):**
+  - `lifespan` cancelled `reconcile_task` without awaiting it. The reconcile runs once at startup;
+    cancelled mid-transaction, its connection stayed open with a lock on `"case".cases`, and the next
+    test's `TRUNCATE` (`_clean_tables`) waited forever;
+  - now awaited (`bounded_shutdown_step`);
+  - signature-service's `background_tasks` had the same pattern and got the same fix.
+
+**Checks:**
+- **case-service, 15 runs in a row** (limit 180 s): runs 1–7 with the old code had 2 timeouts, both at
+  the 14th test. Runs 8–15 with the fix had 0. The kept log proved itself
+  (`case-service-20261127T102810Z-TIMEOUT.log`). A py-spy capture wasn't caught: the watcher started
+  after the second hang.
+- **Tests:** license-service 41 (+1, also green with `dev_private_key.pem` moved away),
+  notification-service 124 (+1), case-service 103, signature-service 108, ruff green.
+- **Live:** notification-, case- and signature-service rebuilt; the one-off cleanup is as above.
+
+**Next session:** P98-S3 (deletion reasons: remove and align; password reset; phase close).
+
+---
+
 **Last completed:** P98-S1, correctness: trash expiry, failures with time, audit order
 ([ADR 0268](docs/adr/0268-trash-purge-bottom-up.md)).
 
@@ -70,8 +113,6 @@ the two UIs) ignore the log levels and report no catalog until their next image 
   built images in the middle of test runs; the first folder-service failures (403) came from services
   restarting. Worth knowing for P98-S2 (test hygiene).
 
-**Next session:** P98-S2 (approval requests left by tests, license tests without a local key, keeping
-failed test logs / case-service hang).
 
 ---
 

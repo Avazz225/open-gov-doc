@@ -1456,6 +1456,11 @@ async def _handle_approval_rejected(
     rejected_by = data.get("rejected_by", "?")
     reason = data.get("reason")
     request_id = data.get("request_id", "?")
+    if rejected_by == initiated_by:
+        # P98-S2: the initiator withdrew their own request - telling them they
+        # rejected it themselves is noise (and the test-debris cleanup
+        # withdraws hundreds of test requests this way).
+        return
     fallback_subject = "Genehmigungsanfrage abgelehnt"
     fallback_body = f"Ihre Genehmigungsanfrage ({action_type}) wurde von {rejected_by!r} abgelehnt."
     if reason:

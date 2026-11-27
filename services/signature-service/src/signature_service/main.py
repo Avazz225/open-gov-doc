@@ -268,6 +268,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await bounded_shutdown_step("trusted_list_task", app.state.trusted_list_task)
     for task in list(app.state.background_tasks):
         task.cancel()
+    # P98-S2: await them too (see case-service's reconcile task): a task
+    # cancelled mid-transaction and never awaited can leave its connection
+    # open with its locks after the engine is disposed.
+    for task in list(app.state.background_tasks):
+        await bounded_shutdown_step("background task", task)
     await bounded_shutdown_step("incoming.stop_backfill", incoming.stop_backfill())
     await bounded_shutdown_step("consumer_bus.close", consumer_bus.close())
     await bounded_shutdown_step("incoming.worker.stop", incoming.worker.stop())

@@ -176,6 +176,14 @@ None yet — follows in Phase 11.
 
 ## Tests
 
+**Intermittent hang fixed (P98-S2):** `lifespan` cancelled `reconcile_task` but never awaited it.
+- The reconcile runs once right at startup. Cancelled mid-transaction, its connection stayed open in
+  Postgres after `engine.dispose()`, holding a lock on `"case".cases`.
+- The next test's `_clean_tables` (`TRUNCATE`) then waited forever. Seen in the P97-S3 regression and
+  reproduced in P98-S2: 2 hangs in 7 runs at the same test, the 14th.
+- The task is now awaited (`bounded_shutdown_step`), as in the other services. signature-service had
+  the same pattern for its background tasks and got the same fix.
+
 `uv run pytest services/case-service/tests` (**87 tests since Phase 58 Session 1**, +14: new
 `test_attribute_pseudonymization.py` — RBAC/eligibility/round-trip/409 for the manual pseudonymize/
 reveal/list endpoints, mirroring `document-service`'s/`folder-service`'s own test files).

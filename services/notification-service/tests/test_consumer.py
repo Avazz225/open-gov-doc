@@ -1502,6 +1502,31 @@ async def test_approval_rejected_notifies_the_initiator_with_reason(engine, sett
     assert "Unzureichend begründet" in notifications[0].body
 
 
+async def test_withdrawing_ones_own_request_notifies_nobody(engine, settings, rate_limiter):
+    """P98-S2: rejected_by == initiated_by is a withdrawal, not news."""
+
+    async def fake_publish(event_type, subject, payload, actor=None):
+        pass
+
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish, rate_limiter)
+    event = Event(
+        event_type="permission.approval.rejected",
+        service_name="permission-service",
+        payload={
+            "request_id": "req-4",
+            "action_type": "document.delete",
+            "initiated_by": "alice",
+            "rejected_by": "alice",
+            "reason": "Doch nicht",
+        },
+    )
+
+    await handler(event.to_bytes())
+
+    async with _session_factory(engine)() as session:
+        assert await repository.list_notifications(session) == []
+
+
 # --- Storage-service alerting (3.6, P71-S1) ----------------------------------
 
 

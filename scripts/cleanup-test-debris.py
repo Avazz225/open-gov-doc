@@ -101,6 +101,28 @@ REALM_ROLE_RULES = [
 ]
 
 
+# Pending four-eyes requests that test suites leave in the live
+# permission-service (P98-S2): (initiator, action type pattern). The suites'
+# apps call the live service, so every run added some - 600+ by P98. Each is
+# withdrawn as its own initiator (an initiator may always withdraw), which
+# keeps the audit trail; notification-service sends nothing for a withdrawal.
+APPROVAL_REQUEST_RULES = [
+    ("document-service-test-declassification-admin", r"^document\.classification\.declassify$"),
+    ("workflow-test-config-admin", r"^workflow\.process_definition\.import$"),
+    ("admin", r"^document\.force_unlock$"),
+    ("alice", r"^(document|folder)\.delete$"),
+    ("2", r"^auth\.ad_group_(role_mapping|role_composite_rule|mapping)\."),
+    ("tester", r"^migration\.transfer\.start$"),
+    ("config-service-import-tests", r"^(config\.import|permission\.role_assignment\.create)$"),
+]
+# A user's own tracking opt-in (`auth.user_tracking_config.update`, initiator =
+# the principal itself): debris only if that principal is no real user - the
+# auth suite opts in random ids.
+TRACKING_OPT_IN = "auth.user_tracking_config.update"
+DEBRIS_ADMIN_USERNAME = os.environ.get("DEBRIS_ADMIN_USERNAME", "users-admin")
+DEBRIS_ADMIN_PASSWORD = os.environ.get("DEBRIS_ADMIN_PASSWORD", "users-admin")
+
+
 def matches(name: str, rules) -> bool:
     return any(re.search(rule, name) for rule in rules)
 
@@ -238,6 +260,57 @@ class Cleaner:
             APPROVAL_RULES,
         )
 
+    def _known_user_ids(self) -> set[str] | None:
+        """Every Keycloak user id, or None if that can't be read (then the
+        tracking opt-ins are left alone)."""
+        try:
+            login = self.http.post(
+                f"{AUTH}/login",
+                json={"username": DEBRIS_ADMIN_USERNAME, "password": DEBRIS_ADMIN_PASSWORD},
+            )
+            login.raise_for_status()
+            users = self.http.get(
+                f"{AUTH}/users",
+                headers={"Authorization": f"Bearer {login.json()['access_token']}"},
+            )
+            users.raise_for_status()
+        except (httpx.HTTPError, KeyError, ValueError):
+            print("  skipped tracking opt-ins: user list not readable", file=sys.stderr)
+            return None
+        return {user["id"] for user in users.json()}
+
+    def approval_requests(self) -> None:
+        """Pending four-eyes requests created by test suites, withdrawn by
+        their own initiator (P98-S2)."""
+        response = self.http.get(f"{PERMISSION}/approval-requests", params={"status": "pending"})
+        response.raise_for_status()
+        pending = [r for r in response.json() if self.recent(r.get("created_at"))]
+        known_users: set[str] | None = None
+        users_loaded = False
+        for request in pending:
+            initiator, action = request["initiated_by"], request["action_type"]
+            debris = any(
+                initiator == who and re.search(rule, action) for who, rule in APPROVAL_REQUEST_RULES
+            )
+            if not debris and action == TRACKING_OPT_IN and re.fullmatch(UUID, initiator):
+                if not users_loaded:
+                    known_users = self._known_user_ids()
+                    users_loaded = True
+                # Unreadable or empty user list: never guess, leave it.
+                debris = bool(known_users) and initiator not in known_users
+            if not debris:
+                continue
+            ok = True
+            if self.apply:
+                result = self.http.post(
+                    f"{PERMISSION}/approval-requests/{request['id']}/reject",
+                    headers={"X-DMS-Principal": initiator},
+                    json={"reason": "Testrest zurückgezogen (scripts/cleanup-test-debris.py)"},
+                )
+                # 409: decided meanwhile - nothing left to do.
+                ok = result.is_success or result.status_code == 409
+            self.note("approval-request", f"{action} by {initiator}", ok)
+
     def realm_roles(self) -> None:
         self._delete_matching(
             "realm-role",
@@ -327,6 +400,7 @@ STEPS = (
     "roles",
     "groups",
     "approval_configs",
+    "approval_requests",
     "realm_roles",
     "instances",
 )
@@ -338,7 +412,8 @@ def main() -> int:
     )
     parser.add_argument("--apply", action="store_true", help="act instead of listing")
     parser.add_argument(
-        "--since", help="folders, instances: only those created at or after this ISO time"
+        "--since",
+        help="folders, instances, approval requests: only those created at or after this ISO time",
     )
     parser.add_argument("--only", help=f"comma-separated subset of: {', '.join(STEPS)}")
     parser.add_argument("--quiet", action="store_true", help="summary only")

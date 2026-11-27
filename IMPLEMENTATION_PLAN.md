@@ -5458,6 +5458,22 @@ P98-S3 (the end of the plan again).
     timestamp (`.test-results/<service>-<time>.log`) before a rerun can overwrite it. Then repeat
     case-service runs (e.g. 20 in a row) to try to reproduce the hang; fix it if it reproduces,
     otherwise record the result.
+  - **Result:**
+    - **Approval requests:** they come from seven suites whose apps call the live permission-service.
+      `cleanup-test-debris.py` gains `approval_requests`: it withdraws them as their own initiator (an
+      initiator may always withdraw), so no delete path and a complete audit trail. Tracking opt-ins
+      count only for principals that aren't real users. notification-service sends nothing for a
+      withdrawal. The dev stack's 552 were withdrawn once: 0 notifications, 552 audit entries; 3
+      unclear ones stay.
+    - **License tests:** a throwaway key per session (`conftest.py`); 41 tests also green without
+      `dev_private_key.pem`. ADR 0266's open point is closed.
+    - **`run-tests.sh`:** a failed or timed-out log is kept with a timestamp; without `--build` only
+      missing containers start (`--no-recreate`), so new images are no longer rolled out mid-run.
+    - **case-service hang found and fixed:** the reconcile task was cancelled but never awaited, so its
+      connection could stay open with a lock on `"case".cases` and the next `TRUNCATE` waited forever.
+      2 hangs in 7 runs before, 0 in 8 after. signature-service's background tasks had the same pattern
+      and got the same fix.
+    - **Tests:** license 41 (+1), notification 124 (+1), case 103, signature 108.
 - **P98-S3 — Admin gaps, then phase close.**
   - **Deletion reasons:**
     - `dms retention set --remove-reason` (both services);

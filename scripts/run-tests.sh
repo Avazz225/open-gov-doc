@@ -26,6 +26,10 @@
 #   scripts/run-tests.sh --no-cleanup        # Testreste nicht wegräumen (siehe unten)
 #   SERVICE_TEST_TIMEOUT=1800 scripts/run-tests.sh   # per-service limit in seconds
 #
+# A failed or timed-out service's log is also kept as
+# .test-results/<service>-<UTC time>-<FAIL|TIMEOUT>.log (P98-S2), so a rerun
+# can't overwrite it.
+#
 # Per-service limit (P91-S6): a service's suite is stopped after
 # SERVICE_TEST_TIMEOUT seconds (default 1200) and counted as failed, so one
 # hanging test can no longer block the whole regression. pytest's
@@ -152,7 +156,11 @@ echo "==> Docker-Stack sicherstellen (postgres, nats, alle Services für Cross-S
 if [ "$BUILD" -eq 1 ]; then
   docker compose -f "$COMPOSE_FILE" up -d --build
 else
-  docker compose -f "$COMPOSE_FILE" up -d
+  # P98-S2: only start what isn't running. A plain `up -d` also recreates
+  # every container whose image was rebuilt meanwhile - in P98-S1 that rolled
+  # out a fresh stack in the middle of a test run, and services restarting
+  # under the tests answered 403. Rolling out new images is `--build`'s job.
+  docker compose -f "$COMPOSE_FILE" up -d --no-recreate
 fi
 
 echo "==> Warte auf Postgres-Healthcheck"
@@ -240,6 +248,12 @@ for service in "${SERVICES[@]}"; do
   fi
   END_TS=$(date +%s)
   RESULT_DURATION[$service]=$((END_TS - START_TS))
+  if [ "$STATUS" != "OK" ]; then
+    # P98-S2: keep the evidence. A rerun of the same service overwrites
+    # <service>.log - in P97-S3 that erased the only stack dump of a hang.
+    KEPT_LOG="$LOG_DIR/${service}-$(date -u +%Y%m%dT%H%M%SZ)-${STATUS}.log"
+    cp "$LOG_FILE" "$KEPT_LOG"
+  fi
 
   SUMMARY_LINE=$(grep -E "^[0-9]+ (passed|failed|error)|passed|failed|error" "$LOG_FILE" | tail -1)
   [ "$STATUS" = "TIMEOUT" ] && SUMMARY_LINE="Zeitlimit ${SERVICE_TEST_TIMEOUT:-1200}s überschritten"
