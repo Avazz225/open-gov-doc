@@ -22,3 +22,8 @@
    unasked.
 
 **Note:** If the assignment returns `pending_approval`, report the request id: the user exists, but the access follows after approval.
+
+**Password reset** ("Frau Müller hat ihr Passwort vergessen"): `dms user list` for the id, plan, then
+after a yes `dms user reset-password <id> --password …` (temporary: she sets her own at the next login).
+A `403` means the account has more rights than this session; name them and stop
+(`references/users-roles-groups.md`).

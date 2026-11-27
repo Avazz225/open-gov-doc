@@ -21,6 +21,7 @@ import {
   deleteRoleAssignment,
   deleteSupervisorAssignment,
   deleteUser,
+  resetUserPassword,
   getSupervisorChain,
   listGroupMembers,
   listGroups,
@@ -81,6 +82,12 @@ export function UserManagement() {
     lastName: "",
   });
   const [newRole, setNewRole] = useState({ name: "", description: "", permissions: "" });
+  // Password reset (P98-S3): which account's form is open, its fields, the outcome.
+  const [resetFor, setResetFor] = useState<string | null>(null);
+  const [resetPassword, setResetPassword] = useState("");
+  const [resetPermanent, setResetPermanent] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
+  const [resetDone, setResetDone] = useState<string | null>(null);
   const [newAssignment, setNewAssignment] = useState({
     principalType: "user" as "user" | "group",
     principalId: "",
@@ -125,6 +132,21 @@ export function UserManagement() {
       await reload();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("users.createError"));
+    }
+  }
+
+  async function handleResetPassword(event: FormEvent, userId: string) {
+    event.preventDefault();
+    if (!accessToken) return;
+    setResetError(null);
+    try {
+      await resetUserPassword(accessToken, userId, resetPassword, !resetPermanent);
+      setResetDone(resetPermanent ? t("users.resetDonePermanent") : t("users.resetDoneTemporary"));
+      setResetFor(null);
+      setResetPassword("");
+      setResetPermanent(false);
+    } catch (err) {
+      setResetError(err instanceof ApiError ? err.message : t("common.actionError"));
     }
   }
 
@@ -414,21 +436,87 @@ export function UserManagement() {
             </thead>
             <tbody>
               {userFilter.filtered.map((u) => (
-                <tr key={u.id}>
-                  <td>{u.username}</td>
-                  <td>{u.email}</td>
-                  <td>{u.enabled ? t("users.enabledYes") : t("users.enabledNo")}</td>
-                  <td>
-                    <button type="button" onClick={() => handleDeleteUser(u.id)} className={secondaryBtn}>
-                      {t("common.delete")}
-                    </button>
-                  </td>
-                </tr>
+                <Fragment key={u.id}>
+                  <tr>
+                    <td>{u.username}</td>
+                    <td>{u.email}</td>
+                    <td>{u.enabled ? t("users.enabledYes") : t("users.enabledNo")}</td>
+                    <td className="whitespace-nowrap">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setResetFor(resetFor === u.id ? null : u.id);
+                          setResetPassword("");
+                          setResetPermanent(false);
+                          setResetError(null);
+                          setResetDone(null);
+                        }}
+                        className={`${secondaryBtn} mr-2`}
+                        aria-expanded={resetFor === u.id}
+                        aria-label={t("users.resetLabel", { username: u.username })}
+                      >
+                        {t("users.reset")}
+                      </button>
+                      <button type="button" onClick={() => handleDeleteUser(u.id)} className={secondaryBtn}>
+                        {t("common.delete")}
+                      </button>
+                    </td>
+                  </tr>
+                  {resetFor === u.id && (
+                    <tr>
+                      <td colSpan={4}>
+                        <form
+                          className="flex flex-wrap items-end gap-3 py-2"
+                          onSubmit={(event) => handleResetPassword(event, u.id)}
+                        >
+                          <label className="flex flex-col gap-1 text-sm">
+                            {t("users.newPassword")}
+                            <input
+                              type="password"
+                              autoComplete="new-password"
+                              minLength={8}
+                              required
+                              value={resetPassword}
+                              onChange={(e) => setResetPassword(e.target.value)}
+                              className={fieldInput}
+                            />
+                          </label>
+                          <label className="flex items-center gap-2 text-sm">
+                            <input
+                              type="checkbox"
+                              className={checkbox}
+                              checked={resetPermanent}
+                              onChange={(e) => setResetPermanent(e.target.checked)}
+                            />
+                            {t("users.resetPermanent")}
+                          </label>
+                          <button type="submit" className={primaryBtn}>
+                            {t("users.resetSubmit")}
+                          </button>
+                          <button type="button" className={secondaryBtn} onClick={() => setResetFor(null)}>
+                            {t("users.resetCancel")}
+                          </button>
+                        </form>
+                        <p className="m-0 text-xs opacity-70">{t("users.resetHint")}</p>
+                        {resetError && (
+                          <p className="text-danger" role="alert">
+                            {resetError}
+                          </p>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               ))}
             </tbody>
           </table>
         </BoundedList>
         {users.length === 0 && <p className="italic opacity-70">{t("users.empty")}</p>}
+        {resetDone && (
+          <p role="status" className="text-sm">
+            {resetDone}
+          </p>
+        )}
       </section>
 
       {/* P88-S4b: Keycloak realm roles (app-level access), next to the

@@ -222,6 +222,44 @@ def test_approvals_list_and_reject(cli_home, runner, logged_in, mock_transport_f
     assert recorder.calls[-1][3] == {"reason": "falsches Paket"}
 
 
+def _retention_routes(documents: list[str], folders: list[str]) -> dict:
+    routes = {}
+    for owner, catalog in (("document-service", documents), ("folder-service", folders)):
+        current = {
+            "deletion_reason_required": False,
+            "reminder_lead_days": None,
+            "deletion_reason_catalog": catalog,
+        }
+        routes[f"GET /api/{owner}/retention-config"] = (200, current)
+        routes[f"GET /api/{owner}/trash-config"] = (200, {"restore_period_days": 30})
+        routes[f"PUT /api/{owner}/retention-config"] = (200, current)
+    return routes
+
+
+def test_retention_align_and_remove_reasons(cli_home, runner, logged_in, mock_transport_factory):
+    """P98-S3: --align-reasons writes the union to both, --remove-reason takes
+    a reason out of both; show names the difference."""
+    recorder = Recorder(_retention_routes(["Fehlablage"], ["Dublette", "Fehlablage"]))
+    mock_transport_factory(recorder)
+
+    shown = _invoke(runner, ["retention", "show"])
+    assert "nur bei Ordnern:    Dublette" in shown.output
+
+    result = _invoke(
+        runner, ["retention", "set", "--align-reasons", "--remove-reason", "Fehlablage"]
+    )
+    assert result.exit_code == 0, result.output
+    catalogs = {
+        path: body["deletion_reason_catalog"]
+        for method, path, _, body in recorder.calls
+        if method == "PUT"
+    }
+    assert catalogs == {
+        "/api/document-service/retention-config": ["Dublette"],
+        "/api/folder-service/retention-config": ["Dublette"],
+    }
+
+
 def test_retention_set_writes_both_owners_and_keeps_other_values(
     cli_home, runner, logged_in, mock_transport_factory
 ):

@@ -85,7 +85,7 @@ only if the admin wants one, then follow the workflow above.
 
 | Request | Recipe |
 |---|---|
-| Create a user and give them a role somewhere | `recipes/01-user-and-role.md` |
+| Create a user and give them a role somewhere; reset a password | `recipes/01-user-and-role.md` |
 | Add or remove group members | `recipes/02-group-membership.md` |
 | Set up a department (org unit with a role) | `recipes/03-org-unit.md` |
 | Apply a configuration package (eGov, monitoring defaults) / "what would change" | `recipes/04-package.md` |

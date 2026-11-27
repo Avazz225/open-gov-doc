@@ -150,3 +150,34 @@ def test_role_assignment_delete(cli_home, runner, logged_in, mock_transport_fact
 
     assert result.exit_code == 0, result.output
     assert "entfernt" in result.output
+
+
+def test_user_reset_password_is_temporary_by_default(
+    cli_home, runner, logged_in, mock_transport_factory
+):
+    """P98-S3."""
+    import json as _json
+
+    import httpx as _httpx
+    from dms_cli.main import app as _app
+
+    sent: list[tuple[str, dict]] = []
+
+    def handler(request: _httpx.Request) -> _httpx.Response:
+        sent.append((request.url.path, _json.loads(request.content)))
+        return _httpx.Response(204)
+
+    mock_transport_factory(handler)
+    result = runner.invoke(_app, ["user", "reset-password", "u-7", "--password", "Neu-2026-pw"])
+    assert result.exit_code == 0, result.output
+    assert sent == [
+        ("/api/auth-service/users/u-7/password", {"password": "Neu-2026-pw", "temporary": True})
+    ]
+    assert "Temporäres Passwort" in result.output
+
+    sent.clear()
+    permanent = runner.invoke(
+        _app, ["user", "reset-password", "u-7", "--password", "Neu-2026-pw", "--permanent"]
+    )
+    assert permanent.exit_code == 0
+    assert sent[0][1]["temporary"] is False

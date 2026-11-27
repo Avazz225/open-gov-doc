@@ -1,5 +1,10 @@
 from keycloak import KeycloakAdmin
-from keycloak.exceptions import KeycloakDeleteError, KeycloakGetError, KeycloakPostError
+from keycloak.exceptions import (
+    KeycloakDeleteError,
+    KeycloakGetError,
+    KeycloakPostError,
+    KeycloakPutError,
+)
 
 from auth_service.settings import Settings
 
@@ -184,6 +189,20 @@ def create_user(
             raise UserAlreadyExistsError(f"Benutzername {username!r} existiert bereits") from exc
         raise
     return _to_user_dict(admin.get_user(user_id))
+
+
+def reset_password(
+    admin: KeycloakAdmin, user_id: str, password: str, *, temporary: bool = True
+) -> None:
+    """Sets a new password (P98-S3). `temporary=True` (the default) makes
+    Keycloak ask the user for a new one at the next login, so the admin who
+    set it doesn't keep knowing the account's password."""
+    try:
+        admin.set_user_password(user_id, password, temporary=temporary)
+    except KeycloakPutError as exc:
+        if exc.response_code == 404:
+            raise UserNotFoundError(f"user_id {user_id!r} unbekannt") from exc
+        raise
 
 
 def delete_user(admin: KeycloakAdmin, user_id: str) -> None:

@@ -361,6 +361,27 @@ export async function createUser(
   return response.json();
 }
 
+// Password reset by an admin (P98-S3). Temporary by default: the user must
+// choose their own at the next login. auth-service refuses (403) an account
+// that holds rights the acting admin lacks, and one's own account (409).
+export async function resetUserPassword(
+  token: string,
+  userId: string,
+  password: string,
+  temporary: boolean
+): Promise<void> {
+  await request(
+    "auth-service",
+    `users/${encodeURIComponent(userId)}/password`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password, temporary }),
+    },
+    token
+  );
+}
+
 export async function deleteUser(token: string, userId: string): Promise<void> {
   await request("auth-service", `users/${encodeURIComponent(userId)}`, { method: "DELETE" }, token);
 }

@@ -113,7 +113,16 @@
     "enabledYes": "yes",
     "enabledNo": "no",
     "empty": "No accounts.",
-    "createError": "Failed to create account"
+    "createError": "Failed to create account",
+    "reset": "Reset password",
+    "resetLabel": "Reset password of {username}",
+    "newPassword": "New password (at least 8 characters)",
+    "resetPermanent": "Permanent (no change required at next login)",
+    "resetSubmit": "Set",
+    "resetCancel": "Cancel",
+    "resetHint": "By default the password is temporary: the account must choose its own at the next login. You can't reset accounts that hold rights you don't have.",
+    "resetDoneTemporary": "Temporary password set – a new one must be chosen at the next login.",
+    "resetDonePermanent": "Password set."
   },
   "roles": {
     "sectionTitle": "Roles",
@@ -825,7 +834,13 @@
     "documentsHeading": "Documents",
     "foldersHeading": "Folders",
     "foldersHint": "Own, independently configurable base settings for folders - an installation operator may need different rules for folders than for documents.",
-    "foldersUnreachable": "Folder service not reachable."
+    "foldersUnreachable": "Folder service not reachable.",
+    "catalogDiffHeading": "The deletion-reason catalogues differ",
+    "catalogOnlyDocuments": "Documents only: {reasons}",
+    "catalogOnlyFolders": "Folders only: {reasons}",
+    "catalogDiffHint": "Documents and folders have separate settings, so whoever deletes sees different reasons depending on the object. Aligning sets both catalogues to their union – no reason is lost.",
+    "catalogAlign": "Align both",
+    "catalogAligned": "The deletion-reason catalogues are aligned."
   },
   "deletionRegister": {
     "pageTitle": "Deletion register",

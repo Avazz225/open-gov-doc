@@ -1,10 +1,17 @@
 # Users, roles, groups
 
-- **Users** live in Keycloak, managed through auth-service: `dms user list|create|delete`.
+- **Users** live in Keycloak, managed through auth-service: `dms user list|create|delete|reset-password`.
   - `create` needs `--username --email --first-name --last-name`, and asks for a password if
     `--password` isn't given. The prompt doesn't work from your shell: pass `--password` with the start
     password the admin gives you for the new user (ask for it in the plan), or hand the admin the
     command to run. Never repeat it afterwards.
+  - `reset-password <id> --password …` sets a **temporary** password by default: the user must choose
+    their own at the next login. `--permanent` skips that, so use it only when the admin asks.
+    - Refused (`403`) when the account holds rights the session lacks; the message names them. Say so,
+      and don't look for another way.
+    - Refused for one's own account (`409`).
+    - Audited as `auth.user.password_reset`, never with the password.
+    - The password-at-prompt rule from `create` applies.
   - Role needed: `domain-admin-users`.
 - **Roles** are permission bundles in permission-service (`dms role list`). Domain-admin roles
   (`domain-admin-*`) grant administrative capabilities; the rest grant content permissions

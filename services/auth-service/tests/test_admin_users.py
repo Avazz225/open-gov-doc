@@ -173,3 +173,115 @@ def test_delete_user_removes_teamspace_memberships(client, domain_admin_auth_hea
     finally:
         with httpx.Client(base_url=TEAMSPACE_SERVICE_URL, timeout=30.0) as tc:
             tc.delete(f"/teamspaces/{teamspace_id}", headers={"X-DMS-Principal": cleanup_principal})
+
+
+# --- Password reset (P98-S3) ---------------------------------------------------
+
+
+def _grant_root_role(user_id: str, role_name: str) -> None:
+    with httpx.Client(base_url=PERMISSION_SERVICE_URL, timeout=10.0) as pc:
+        role_id = next(r["id"] for r in pc.get("/roles").json() if r["name"] == role_name)
+        pc.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": user_id,
+                "role_id": role_id,
+                "resource_id": "root",
+            },
+        ).raise_for_status()
+
+
+def test_reset_password_permanent_replaces_the_old_one(client, domain_admin_auth_headers):
+    payload = _user_payload()
+    created = client.post("/users", json=payload, headers=domain_admin_auth_headers).json()
+
+    response = client.post(
+        f"/users/{created['id']}/password",
+        json={"password": "Neu-Passwort-2026", "temporary": False},
+        headers=domain_admin_auth_headers,
+    )
+
+    assert response.status_code == 204, response.text
+    old = client.post("/login", json={"username": payload["username"], "password": "testpass123"})
+    new = client.post(
+        "/login", json={"username": payload["username"], "password": "Neu-Passwort-2026"}
+    )
+    assert old.status_code != 200
+    assert new.status_code == 200
+    client.delete(f"/users/{created['id']}", headers=domain_admin_auth_headers)
+
+
+def test_reset_password_is_temporary_by_default(client, domain_admin_auth_headers):
+    """Keycloak then requires a new password first, so a direct login with
+    the admin-set password doesn't yield a token."""
+    payload = _user_payload()
+    created = client.post("/users", json=payload, headers=domain_admin_auth_headers).json()
+
+    response = client.post(
+        f"/users/{created['id']}/password",
+        json={"password": "Start-Passwort-2026"},
+        headers=domain_admin_auth_headers,
+    )
+
+    assert response.status_code == 204, response.text
+    login = client.post(
+        "/login", json={"username": payload["username"], "password": "Start-Passwort-2026"}
+    )
+    assert login.status_code != 200
+    client.delete(f"/users/{created['id']}", headers=domain_admin_auth_headers)
+
+
+def test_reset_password_refuses_an_account_with_more_rights(client, domain_admin_auth_headers):
+    """A user admin must not take over e.g. a monitoring admin's account."""
+    payload = _user_payload()
+    created = client.post("/users", json=payload, headers=domain_admin_auth_headers).json()
+    _grant_root_role(created["id"], "domain-admin-monitoring")
+
+    response = client.post(
+        f"/users/{created['id']}/password",
+        json={"password": "Uebernahme-2026"},
+        headers=domain_admin_auth_headers,
+    )
+
+    assert response.status_code == 403
+    assert "admin.monitoring" in response.json()["detail"]
+    client.delete(f"/users/{created['id']}", headers=domain_admin_auth_headers)
+
+
+def test_reset_password_guards(client, domain_admin_auth_headers):
+    payload = _user_payload()
+    created = client.post("/users", json=payload, headers=domain_admin_auth_headers).json()
+    # Too short.
+    short = client.post(
+        f"/users/{created['id']}/password",
+        json={"password": "kurz"},
+        headers=domain_admin_auth_headers,
+    )
+    assert short.status_code == 422
+    # Without user management.
+    login = client.post(
+        "/login", json={"username": payload["username"], "password": payload["password"]}
+    ).json()
+    forbidden = client.post(
+        f"/users/{created['id']}/password",
+        json={"password": "Irgendwas-2026"},
+        headers={"Authorization": f"Bearer {login['access_token']}"},
+    )
+    assert forbidden.status_code == 403
+    # Unknown account.
+    unknown = client.post(
+        "/users/does-not-exist/password",
+        json={"password": "Irgendwas-2026"},
+        headers=domain_admin_auth_headers,
+    )
+    assert unknown.status_code == 404
+    # Not for one's own account (that's the account page's job).
+    own_id = client.get("/me", headers=domain_admin_auth_headers).json()["sub"]
+    own = client.post(
+        f"/users/{own_id}/password",
+        json={"password": "Irgendwas-2026"},
+        headers=domain_admin_auth_headers,
+    )
+    assert own.status_code == 409
+    client.delete(f"/users/{created['id']}", headers=domain_admin_auth_headers)

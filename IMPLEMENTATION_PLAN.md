@@ -5487,6 +5487,19 @@ P98-S3 (the end of the plan again).
     - the admin UI's user management;
     - the skill recipe 01 note.
   - **Close:** phase-close regression, then `graphify update .` once.
+  - **Result** ([ADR 0269](docs/adr/0269-password-reset-and-deletion-reason-catalogues.md)):
+    - **Password reset:** `POST /users/{id}/password` (temporary by default; `403` when the target holds
+      root permissions the admin lacks; `409` for one's own account; audited without the password),
+      `dms user reset-password`, a row action in user management. Live: permanent and temporary
+      checked; a reset of the evaluation account by `users-admin` was refused with the missing rights.
+    - **Deletion reasons:** two catalogues stay (ADR 0233). `dms retention set --remove-reason` and
+      `--align-reasons` (union), `show` names a difference, and the admin UI shows a notice with
+      „Beide angleichen". The dev stack's difference is shown, not aligned (the admin's call).
+    - **Skill:** recipe 01 (password reset), recipe 10, users and retention references.
+    - **Regression:** 32 services, 3,356 tests green. One flaky mail-connector test (the test app's POP3
+      poll adding mail between pages) was given its own mailbox. The debris cleanup withdrew the run's
+      10 new test approval requests on its own.
+    - **`graphify update .`** ran once.
 
 ## Deliberately Not Included in This Plan
 

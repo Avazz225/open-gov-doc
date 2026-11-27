@@ -76,6 +76,7 @@ from auth_service.schemas import (
     LogoutRequest,
     OidcAuthorizeOut,
     OidcCallbackRequest,
+    PasswordReset,
     PreferencesUpdate,
     RealmRoleAssignmentIn,
     RealmRoleOut,
@@ -1108,6 +1109,49 @@ async def get_user(
     if match is None:
         raise HTTPException(status_code=404, detail=f"Person {user_id!r} unbekannt")
     return match
+
+
+@app.post("/users/{user_id}/password", status_code=status.HTTP_204_NO_CONTENT)
+async def reset_user_password(
+    user_id: str, payload: PasswordReset, user: dict = Depends(get_current_user)
+) -> None:
+    """Password reset by an admin (P98-S3, `admin.user_management`).
+
+    - Refused (`403`) when the target account holds rights at the root that
+      the acting admin lacks: otherwise a user admin could reset a config
+      admin's password and log in with it.
+    - Temporary by default: Keycloak asks for a new password at the next login.
+    - Audited as `auth.user.password_reset` (who, for whom, temporary - never
+      the password)."""
+    await _require_user_management(user)
+    if user_id == user["sub"]:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Das eigene Passwort bitte über die Kontoverwaltung ändern",
+        )
+    target_rights = await app.state.permission_client.root_permissions(user_id)
+    own_rights = await app.state.permission_client.root_permissions(user["sub"])
+    beyond = sorted(target_rights - own_rights)
+    if beyond:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Das Zielkonto hat Rechte, die Sie nicht haben "
+                f"({', '.join(beyond[:5])}{' …' if len(beyond) > 5 else ''}) - "
+                "das Passwort kann nur jemand mit mindestens diesen Rechten zurücksetzen"
+            ),
+        )
+    try:
+        admin_users.reset_password(
+            app.state.keycloak_admin, user_id, payload.password, temporary=payload.temporary
+        )
+    except UserNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    await publish_event(
+        "auth.user.password_reset",
+        {"user_id": user_id, "temporary": payload.temporary, "reset_by": user["sub"]},
+        actor=user["sub"],
+    )
 
 
 @app.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)

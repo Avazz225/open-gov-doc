@@ -279,3 +279,68 @@ describe("RetentionSettings", () => {
     );
   });
 });
+
+describe("Deletion-reason catalogue comparison (P98-S3)", () => {
+  const config = (catalog: string[]) => ({
+    deletion_reason_required: false,
+    reminder_lead_days: null,
+    deletion_reason_catalog: catalog,
+    updated_at: "2026-01-01T00:00:00Z",
+  });
+
+  beforeEach(() => {
+    for (const mock of [
+      getRetentionConfigMock,
+      updateRetentionConfigMock,
+      getTrashConfigMock,
+      getFolderRetentionConfigMock,
+      updateFolderRetentionConfigMock,
+      getFolderTrashConfigMock,
+    ]) {
+      mock.mockReset();
+    }
+    getTrashConfigMock.mockResolvedValue({ restore_period_days: 30, updated_at: "2026-01-01T00:00:00Z" });
+    getFolderTrashConfigMock.mockResolvedValue({ restore_period_days: 30, updated_at: "2026-01-01T00:00:00Z" });
+  });
+
+  it("names the difference and aligns both to the union", async () => {
+    getRetentionConfigMock.mockResolvedValue(config(["Fehlablage"]));
+    getFolderRetentionConfigMock.mockResolvedValue(config(["Dublette", "Fehlablage"]));
+    updateRetentionConfigMock.mockResolvedValue(config(["Fehlablage", "Dublette"]));
+    updateFolderRetentionConfigMock.mockResolvedValue(config(["Fehlablage", "Dublette"]));
+    renderRetentionSettings();
+
+    const region = await screen.findByRole("region", {
+      name: "Die Löschgrund-Kataloge unterscheiden sich",
+    });
+    expect(within(region).getByText("Nur bei Ordnern: Dublette")).toBeInTheDocument();
+
+    getRetentionConfigMock.mockResolvedValue(config(["Fehlablage", "Dublette"]));
+    getFolderRetentionConfigMock.mockResolvedValue(config(["Fehlablage", "Dublette"]));
+    fireEvent.click(within(region).getByRole("button", { name: "Beide angleichen" }));
+
+    await waitFor(() =>
+      expect(updateRetentionConfigMock).toHaveBeenCalledWith("token-123", {
+        deletionReasonRequired: false,
+        reminderLeadDays: null,
+        deletionReasonCatalog: ["Fehlablage", "Dublette"],
+      })
+    );
+    expect(updateFolderRetentionConfigMock).toHaveBeenCalledWith("token-123", {
+      deletionReasonRequired: false,
+      reminderLeadDays: null,
+      deletionReasonCatalog: ["Fehlablage", "Dublette"],
+    });
+    expect(await screen.findByText("Die Löschgrund-Kataloge sind angeglichen.")).toBeInTheDocument();
+  });
+
+  it("shows nothing when both catalogues match", async () => {
+    getRetentionConfigMock.mockResolvedValue(config(["Fehlablage"]));
+    getFolderRetentionConfigMock.mockResolvedValue(config(["Fehlablage"]));
+    renderRetentionSettings();
+    await screen.findAllByText("Fehlablage");
+    expect(
+      screen.queryByRole("region", { name: "Die Löschgrund-Kataloge unterscheiden sich" })
+    ).not.toBeInTheDocument();
+  });
+});

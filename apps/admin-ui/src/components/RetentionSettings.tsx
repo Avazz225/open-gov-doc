@@ -59,10 +59,12 @@ function RetentionSection({
   unreachableLabel,
   get,
   update,
+  onSaved,
 }: {
   heading: string;
   hint?: string;
   unreachableLabel: string;
+  onSaved?: () => void;
   get: () => Promise<{ retention: RetentionConfig; trash: TrashConfig }>;
   update: (payload: {
     deletionReasonRequired: boolean;
@@ -123,6 +125,7 @@ function RetentionSection({
         savedAt: Date.now(),
         isSaving: false,
       }));
+      onSaved?.();
     } catch (err) {
       setState((prev) => ({
         ...prev,
@@ -269,16 +272,141 @@ function RetentionSection({
   );
 }
 
+// The two deletion-reason catalogues (P98-S3): document- and folder-service
+// keep separate retention settings on purpose (ADR 0233), but a difference in
+// the catalogue is usually unintended - in the dev stack documents had none
+// while folders had four. Shown here with an offer to align both to their
+// union, so nothing is lost.
+function ReasonCatalogComparison({
+  token,
+  refreshKey,
+  onAligned,
+}: {
+  token: string;
+  refreshKey: number;
+  onAligned: () => void;
+}) {
+  const { t } = useI18n();
+  const [documents, setDocuments] = useState<RetentionConfig | null>(null);
+  const [folders, setFolders] = useState<RetentionConfig | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [aligned, setAligned] = useState(false);
+
+  useEffect(() => {
+    Promise.all([getRetentionConfig(token), getFolderRetentionConfig(token)])
+      .then(([documentConfig, folderConfig]) => {
+        setDocuments(documentConfig);
+        setFolders(folderConfig);
+      })
+      .catch(() => {
+        // A section that can't load says so itself.
+        setDocuments(null);
+        setFolders(null);
+      });
+  }, [token, refreshKey]);
+
+  if (!documents || !folders) return null;
+  const onlyDocuments = documents.deletion_reason_catalog.filter(
+    (r) => !folders.deletion_reason_catalog.includes(r)
+  );
+  const onlyFolders = folders.deletion_reason_catalog.filter(
+    (r) => !documents.deletion_reason_catalog.includes(r)
+  );
+  if (onlyDocuments.length === 0 && onlyFolders.length === 0) {
+    return aligned ? (
+      <p role="status" className="text-sm">
+        {t("retentionSettings.catalogAligned")}
+      </p>
+    ) : null;
+  }
+
+  async function align() {
+    if (!documents || !folders) return;
+    setBusy(true);
+    setError(null);
+    const union = [...documents.deletion_reason_catalog, ...onlyFolders];
+    try {
+      await Promise.all([
+        updateRetentionConfig(token, {
+          deletionReasonRequired: documents.deletion_reason_required,
+          reminderLeadDays: documents.reminder_lead_days,
+          deletionReasonCatalog: union,
+        }),
+        updateFolderRetentionConfig(token, {
+          deletionReasonRequired: folders.deletion_reason_required,
+          reminderLeadDays: folders.reminder_lead_days,
+          deletionReasonCatalog: union,
+        }),
+      ]);
+      setAligned(true);
+      onAligned();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t("common.actionError"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div
+      className="mb-6 rounded-lg border border-border bg-hover-bg p-4"
+      role="region"
+      aria-label={t("retentionSettings.catalogDiffHeading")}
+    >
+      <p className="m-0 font-semibold">{t("retentionSettings.catalogDiffHeading")}</p>
+      {onlyDocuments.length > 0 && (
+        <p className="mb-0 text-sm">
+          {t("retentionSettings.catalogOnlyDocuments", { reasons: onlyDocuments.join(", ") })}
+        </p>
+      )}
+      {onlyFolders.length > 0 && (
+        <p className="mb-0 text-sm">
+          {t("retentionSettings.catalogOnlyFolders", { reasons: onlyFolders.join(", ") })}
+        </p>
+      )}
+      <p className="text-sm opacity-80">{t("retentionSettings.catalogDiffHint")}</p>
+      <button
+        type="button"
+        onClick={align}
+        disabled={busy}
+        className="rounded-md border-0 bg-accent px-3 py-1.5 text-sm text-accent-fg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap"
+      >
+        {t("retentionSettings.catalogAlign")}
+      </button>
+      {error && (
+        <p className="text-danger" role="alert">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function RetentionSettings() {
   const { accessToken } = useAuth();
   const { t } = useI18n();
+  // Bumped after a section saves (the comparison reloads) and after aligning
+  // (both sections reload with the new catalogue).
+  const [comparisonKey, setComparisonKey] = useState(0);
+  const [sectionsKey, setSectionsKey] = useState(0);
 
   if (!accessToken) return null;
 
   return (
     <>
       <p className="text-sm opacity-80">{t("retentionSettings.hint")}</p>
+      <ReasonCatalogComparison
+        token={accessToken}
+        refreshKey={comparisonKey}
+        onAligned={() => {
+          setSectionsKey((k) => k + 1);
+          setComparisonKey((k) => k + 1);
+        }}
+      />
       <RetentionSection
+        key={`documents-${sectionsKey}`}
+        onSaved={() => setComparisonKey((k) => k + 1)}
         heading={t("retentionSettings.documentsHeading")}
         unreachableLabel={t("retentionSettings.unreachable")}
         get={async () => {
@@ -301,6 +429,8 @@ export function RetentionSettings() {
         }}
       />
       <RetentionSection
+        key={`folders-${sectionsKey}`}
+        onSaved={() => setComparisonKey((k) => k + 1)}
         heading={t("retentionSettings.foldersHeading")}
         hint={t("retentionSettings.foldersHint")}
         unreachableLabel={t("retentionSettings.foldersUnreachable")}

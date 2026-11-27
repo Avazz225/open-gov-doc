@@ -35,6 +35,16 @@ class PermissionServiceClient(_BasePermissionServiceClient):
     `get_role_id`/`ensure_role_assignment`/`has_permission`/`close` now come
     from the shared base unchanged; `ROOT_RESOURCE_ID` likewise."""
 
+    async def root_permissions(self, principal_id: str) -> set[str]:
+        """Everything a principal may do at the root (P98-S3): compared
+        before a password reset, so nobody takes over an account that holds
+        more rights than they do."""
+        response = await self._client.get(
+            f"/effective-permissions/{principal_id}/{self.ROOT_RESOURCE_ID}"
+        )
+        response.raise_for_status()
+        return set(response.json()["permissions"])
+
     async def requires_approval(self, action_type: str) -> bool:
         """Post-Roadmap Phase 39 Session 3 (ADR 0153) - `auth-service`'s
         first REMOTE check of `permission-service`'s approval-config, as

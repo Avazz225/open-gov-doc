@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 ThemeName = Literal["light", "dark", "high-contrast", "auto"]
 # UI display language (8, Phase 47 Session 1 - ADR 0007's "a second language
@@ -113,6 +113,14 @@ class UserCreate(BaseModel):
     password: str
     first_name: str
     last_name: str
+
+
+class PasswordReset(BaseModel):
+    """P98-S3: a new password for another account. Temporary by default -
+    the user must choose their own at the next login."""
+
+    password: str = Field(min_length=8, max_length=256)
+    temporary: bool = True
 
 
 class UserOut(BaseModel):

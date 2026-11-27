@@ -57,3 +57,38 @@ def delete_cmd(ctx: typer.Context, user_id: str) -> None:
     client = get_client()
     client.delete("auth-service", f"users/{user_id}")
     typer.echo(f"Nutzer {user_id} geloescht.")
+
+
+@user_app.command("reset-password")
+def reset_password_cmd(
+    user_id: str = typer.Argument(..., help="Keycloak-ID des Kontos (dms user list)."),
+    password: str | None = typer.Option(
+        None, "--password", help="Ohne Angabe wird interaktiv gefragt (zweimal)."
+    ),
+    permanent: bool = typer.Option(
+        False,
+        "--permanent",
+        help="Nicht temporär: kein Zwang, es beim nächsten Login zu ändern.",
+    ),
+) -> None:
+    """Passwort eines anderen Kontos zurücksetzen (P98-S3).
+
+    Standard: temporär - das Konto muss beim nächsten Login ein eigenes setzen.
+    Abgelehnt, wenn das Zielkonto Rechte hat, die Sie nicht haben."""
+    if password is None:
+        password = getpass.getpass("Neues Passwort: ")
+        if getpass.getpass("Wiederholen: ") != password:
+            typer.echo("Die Eingaben stimmen nicht überein.", err=True)
+            raise typer.Exit(code=1)
+    get_client().post(
+        "auth-service",
+        f"users/{user_id}/password",
+        json_body={"password": password, "temporary": not permanent},
+    )
+    if permanent:
+        typer.echo(f"Passwort für {user_id} gesetzt.")
+    else:
+        typer.echo(
+            f"Temporäres Passwort für {user_id} gesetzt - beim nächsten Login muss ein eigenes "
+            "gewählt werden."
+        )

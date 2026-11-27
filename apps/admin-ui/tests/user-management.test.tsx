@@ -16,6 +16,7 @@ const listRolesMock = vi.fn();
 const listRoleAssignmentsMock = vi.fn();
 const createUserMock = vi.fn();
 const deleteUserMock = vi.fn();
+const resetUserPasswordMock = vi.fn();
 const createRoleMock = vi.fn();
 const createRoleAssignmentMock = vi.fn();
 const deleteRoleAssignmentMock = vi.fn();
@@ -42,6 +43,7 @@ vi.mock("@/lib/api", () => ({
   listRoleAssignments: (...args: unknown[]) => listRoleAssignmentsMock(...args),
   createUser: (...args: unknown[]) => createUserMock(...args),
   deleteUser: (...args: unknown[]) => deleteUserMock(...args),
+  resetUserPassword: (...args: unknown[]) => resetUserPasswordMock(...args),
   createRole: (...args: unknown[]) => createRoleMock(...args),
   createRoleAssignment: (...args: unknown[]) => createRoleAssignmentMock(...args),
   deleteRoleAssignment: (...args: unknown[]) => deleteRoleAssignmentMock(...args),
@@ -87,6 +89,7 @@ describe("UserManagement", () => {
     listRoleAssignmentsMock.mockReset();
     createUserMock.mockReset();
     deleteUserMock.mockReset();
+    resetUserPasswordMock.mockReset();
     createRoleMock.mockReset();
     createRoleAssignmentMock.mockReset();
     deleteRoleAssignmentMock.mockReset();
@@ -170,6 +173,43 @@ describe("UserManagement", () => {
     fireEvent.click(screen.getByText("Löschen"));
 
     await waitFor(() => expect(deleteUserMock).toHaveBeenCalledWith("token-123", "u1"));
+  });
+
+  it("resets a user's password, temporary by default (P98-S3)", async () => {
+    resetUserPasswordMock.mockResolvedValue(undefined);
+    renderUserManagement();
+    await screen.findByText("alice");
+
+    fireEvent.click(screen.getByRole("button", { name: "Passwort von alice zurücksetzen" }));
+    fireEvent.change(screen.getByLabelText("Neues Passwort (mind. 8 Zeichen)"), {
+      target: { value: "Neu-2026-pw" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Setzen" }));
+
+    await waitFor(() =>
+      expect(resetUserPasswordMock).toHaveBeenCalledWith("token-123", "u1", "Neu-2026-pw", true)
+    );
+    expect(await screen.findByRole("status")).toHaveTextContent("Temporäres Passwort gesetzt");
+    expect(screen.queryByLabelText("Neues Passwort (mind. 8 Zeichen)")).not.toBeInTheDocument();
+  });
+
+  it("shows the server's refusal at the account (P98-S3)", async () => {
+    const { ApiError } = await import("@/lib/api");
+    resetUserPasswordMock.mockRejectedValue(
+      new ApiError(403, "Das Zielkonto hat Rechte, die Sie nicht haben (admin.monitoring)")
+    );
+    renderUserManagement();
+    await screen.findByText("alice");
+
+    fireEvent.click(screen.getByRole("button", { name: "Passwort von alice zurücksetzen" }));
+    fireEvent.change(screen.getByLabelText("Neues Passwort (mind. 8 Zeichen)"), {
+      target: { value: "Neu-2026-pw" },
+    });
+    fireEvent.click(screen.getByLabelText("Dauerhaft (muss beim nächsten Login nicht geändert werden)"));
+    fireEvent.click(screen.getByRole("button", { name: "Setzen" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("admin.monitoring");
+    expect(resetUserPasswordMock).toHaveBeenCalledWith("token-123", "u1", "Neu-2026-pw", false);
   });
 
   it("removes a role assignment", async () => {

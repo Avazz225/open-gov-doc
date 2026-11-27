@@ -113,7 +113,16 @@
     "enabledYes": "ja",
     "enabledNo": "nein",
     "empty": "Keine Konten.",
-    "createError": "Konto anlegen fehlgeschlagen"
+    "createError": "Konto anlegen fehlgeschlagen",
+    "reset": "Passwort zurücksetzen",
+    "resetLabel": "Passwort von {username} zurücksetzen",
+    "newPassword": "Neues Passwort (mind. 8 Zeichen)",
+    "resetPermanent": "Dauerhaft (muss beim nächsten Login nicht geändert werden)",
+    "resetSubmit": "Setzen",
+    "resetCancel": "Abbrechen",
+    "resetHint": "Standard ist ein temporäres Passwort: Das Konto muss beim nächsten Login ein eigenes wählen. Konten mit Rechten, die Sie nicht haben, können Sie nicht zurücksetzen.",
+    "resetDoneTemporary": "Temporäres Passwort gesetzt – beim nächsten Login muss ein eigenes gewählt werden.",
+    "resetDonePermanent": "Passwort gesetzt."
   },
   "roles": {
     "sectionTitle": "Rollen",
@@ -825,7 +834,13 @@
     "documentsHeading": "Dokumente",
     "foldersHeading": "Ordner",
     "foldersHint": "Eigene, unabhängig konfigurierbare Grundeinstellungen für Ordner - ein Installationsbetreiber kann für Ordner andere Vorgaben brauchen als für Dokumente.",
-    "foldersUnreachable": "Folder Service nicht erreichbar."
+    "foldersUnreachable": "Folder Service nicht erreichbar.",
+    "catalogDiffHeading": "Die Löschgrund-Kataloge unterscheiden sich",
+    "catalogOnlyDocuments": "Nur bei Dokumenten: {reasons}",
+    "catalogOnlyFolders": "Nur bei Ordnern: {reasons}",
+    "catalogDiffHint": "Dokumente und Ordner haben getrennte Einstellungen. Wer löscht, sieht je nach Objekt andere Gründe. Angleichen setzt beide Kataloge auf die Vereinigung – es geht kein Grund verloren.",
+    "catalogAlign": "Beide angleichen",
+    "catalogAligned": "Die Löschgrund-Kataloge sind angeglichen."
   },
   "deletionRegister": {
     "pageTitle": "Löschregister",

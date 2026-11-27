@@ -31,6 +31,52 @@ stopped and removed; no log-level settings left.
 **Not rebuilt:** containers built before P97 (all except registry, monitoring, workflow, permission and
 the two UIs) ignore the log levels and report no catalog until their next image build.
 
+**Last completed:** P98-S3, admin gaps and phase close. **Phase 98 is closed, and with it the plan.**
+([ADR 0269](docs/adr/0269-password-reset-and-deletion-reason-catalogues.md)).
+
+**What changed:**
+- **Password reset:**
+  - **auth-service:** `POST /users/{id}/password` (`admin.user_management`).
+    - Temporary by default: Keycloak requires a new password at the next login.
+    - `403` when the target holds root permissions the admin lacks (named), so there's no takeover of
+      higher-privileged accounts.
+    - `409` for one's own account; `422` for fewer than 8 characters.
+    - Event `auth.user.password_reset`, without the password.
+  - **CLI:** `dms user reset-password <id> [--password] [--permanent]`; prompts twice without
+    `--password`.
+  - **admin-ui:** „Passwort zurücksetzen" per user, as an inline form with a „Dauerhaft" checkbox; a
+    refusal shows at the row.
+- **Deletion reasons:** the two catalogues stay separate (ADR 0233); differences are surfaced.
+  - **CLI:** `dms retention set --remove-reason …` and `--align-reasons` (union into both); `show`
+    lists a difference.
+  - **admin-ui:** a notice above both sections on „Aufbewahrung & Papierkorb" with „Beide angleichen";
+    the sections reload, and the notice follows every save.
+- **Skill:** recipe 01 (password reset), recipe 10 (remove, align), `users-roles-groups.md`,
+  `retention.md`.
+- **mail-connector test:** `test_inbound_pages_are_disjoint_and_cost_the_same` uses its own mailbox.
+  The test app's POP3 poll added mail to "central" between the pages and the full read.
+- **Docs:** ADR 0269, auth-service, cli, admin-ui.
+
+**Checks:**
+- **Phase-close regression:** 32 services, 3,356 tests green after the mail-connector fix. It failed
+  once in the full run and then passed 3× alone plus the full suite (97). ruff green.
+- **Debris:** the cleanup withdrew the run's 10 new test approval requests on its own (P98-S2 rule).
+- **Libraries and tools:** dms-common 36, dms-metrics-client 31, CLI 276, license-tool 10.
+- **admin-ui:** vitest 424 (+4), tsc and eslint green.
+- **Live:**
+  - **password reset:** permanent → login 200, temporary → direct login refused; a reset of
+    `og-skill-admin` by `users-admin` was refused with the missing rights named; audit entries without
+    passwords. The probe accounts are deleted again;
+  - **deletion reasons:** the dev stack's difference is shown in the CLI and the admin UI (1400/390,
+    no horizontal scroll) but not aligned, since that is the admin's decision;
+  - user management with the reset form checked in the browser.
+- **`graphify update .`** ran once (end of the plan).
+
+**Next session:** none planned. Open choices remain under "Deliberately Not Included" in
+`IMPLEMENTATION_PLAN.md`.
+
+---
+
 **Last completed:** P98-S2, test hygiene.
 
 **What changed:**
@@ -70,7 +116,6 @@ the two UIs) ignore the log levels and report no catalog until their next image 
   notification-service 124 (+1), case-service 103, signature-service 108, ruff green.
 - **Live:** notification-, case- and signature-service rebuilt; the one-off cleanup is as above.
 
-**Next session:** P98-S3 (deletion reasons: remove and align; password reset; phase close).
 
 ---
 

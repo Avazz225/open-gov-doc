@@ -1300,20 +1300,27 @@ def _count_statements(client, path: str, params: dict) -> tuple[list[dict], int]
 
 async def test_inbound_pages_are_disjoint_and_cost_the_same(client, session):
     tag = uuid.uuid4().hex[:6]
+    # A mailbox of its own (P98-S3): the test app's POP3 poll keeps adding
+    # real mails to "central", and one arriving between the pages and the
+    # full read shifted every index (seen in the P98 phase-close run).
+    mailbox = f"page-test-{tag}"
     for n in range(7):
-        await _ingest(session, uid=f"uid-page-{tag}-{n}", subject=f"Seite {tag} {n}")
+        await _ingest(
+            session, uid=f"uid-page-{tag}-{n}", subject=f"Seite {tag} {n}", mailbox_id=mailbox
+        )
     seen: list[str] = []
     counts = []
     for offset in (0, 3, 6):
         page, statements = _count_statements(
-            client, "/inbound", {"limit": 3, "offset": offset, "mailbox_id": "central"}
+            client, "/inbound", {"limit": 3, "offset": offset, "mailbox_id": mailbox}
         )
         seen += [m["id"] for m in page]
         counts.append(statements)
     everything, all_statements = _count_statements(
-        client, "/inbound", {"limit": 500, "mailbox_id": "central"}
+        client, "/inbound", {"limit": 500, "mailbox_id": mailbox}
     )
-    assert seen == [m["id"] for m in everything][:9]
+    assert len(everything) == 7
+    assert seen == [m["id"] for m in everything]
     assert len(set(seen)) == len(seen)
     # Attachments and routing log come with the page in one query each, so
     # a page of 3 costs as many statements as the whole inbox.
